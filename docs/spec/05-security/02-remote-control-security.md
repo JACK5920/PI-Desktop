@@ -237,6 +237,11 @@ endpoint. Local host-core first applies its existing permissions and admission;
 Main then sends the admitted tool request to the selected paired Host. The Host
 canonicalizes the root and reuses its pure tool runner with external paths denied.
 A disconnected or unsupported Host cannot redirect execution onto Desktop.
+Desktop-side permission classification treats remote paths as POSIX strings,
+independent of the Desktop OS. A low-risk read inside the selected remote
+workspace follows the normal local permission policy; an outside-workspace path
+does not become permitted merely because local approval is granted, since the
+remote Host still enforces its canonical workspace boundary.
 
 Device/session namespace isolation prevents cross-device cancellation and tool
 identity collisions. Connection disposal aborts active calls; invalid or late

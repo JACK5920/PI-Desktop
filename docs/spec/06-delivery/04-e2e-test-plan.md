@@ -15887,7 +15887,11 @@ browser milestones are scheduled.
   cannot replace the current host selection. Project metadata and sessions are
   local and stable after reload, including name/memory/instructions and ordinary
   sidebar/archive operations. Model requests and provider secrets never appear
-  in remote transport. Only locally admitted workspace tools execute on Host.
+  in remote transport. An in-root low-risk Read follows the normal local
+  permission policy and is relayed without a prompt; an outside-workspace path
+  follows the configured local approval policy but remains subject to the
+  remote Host's canonical boundary. POSIX path classification is independent of
+  the Desktop OS. Only locally admitted workspace tools execute on Host.
   Equal paths on two hosts or on Desktop never collide. Failed calls never
   execute locally or replay automatically. Existing remote histories remain readable.
 - **Specs**: `02-architecture/05-remote-agent-control.md`, `04-ux/01-ui-ia.md`,
