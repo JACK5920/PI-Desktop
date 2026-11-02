@@ -27,6 +27,16 @@ rewrite transcripts at startup. Downgrading to an old application requires a
 complete compatible backup, not merely swapping the SQLite file. No external
 blob directory, new file cleanup lifecycle or lossy image transform is added.
 
+Before the first mutation of a transcript or revisions file generation, Host
+validates its existing encoded rows and caches a process-local proof. Later
+mutations may reuse that proof only with a reliable file identity and change
+token: Unix uses the inode change time; Windows uses the file's USN when the
+filesystem exposes one, because Windows change time can alias across rapid
+writes. If Windows USN is unavailable, Host does not cache the proof and scans
+the file before each mutation. Invalid encoded rows block the mutation and
+remain byte-for-byte unchanged; a successful Host-owned append records the new
+verified generation.
+
 
 ## 0. Ownership decision
 
