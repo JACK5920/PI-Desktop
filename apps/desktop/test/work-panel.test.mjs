@@ -97,6 +97,24 @@ test("work panel code is preloaded on demand behind an accessible dock fallback"
   );
 });
 
+test("Branch Review is a distinct work-panel tool and does not replace message Review", async () => {
+  const branchReviewSource = await readFile(
+    new URL("../src/components/workpanel/BranchReviewTab.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(panelSource, /toolWorkPanelTab\("branch-review"\)/);
+  assert.match(panelSource, /activeTab\?\.kind === "branch-review"/);
+  assert.match(panelSource, /<BranchReviewTab \/>/);
+  assert.match(branchReviewSource, /api\.workspaceDiff\([\s\S]*includeBases: true/);
+  assert.match(branchReviewSource, /addBranchReviewFeedback/);
+  assert.match(branchReviewSource, /composerDraftBridge\.appendTextForSession/);
+  assert.doesNotMatch(branchReviewSource, /\.send\(|agentPrompt\(/);
+  assert.match(
+    await readFile(new URL("../src/components/workpanel/ReviewTab.tsx", import.meta.url), "utf8"),
+    /reviewChangesFromMessages/,
+  );
+});
+
 test("a viewport-fixed toggle is the sole pointer collapse control", () => {
   assert.match(appSource, /className="app-work-panel-toggle no-drag"/);
   assert.match(appSource, /aria-pressed=\{workPanelOpen \|\| presentedWorkPanelOpen\}/);

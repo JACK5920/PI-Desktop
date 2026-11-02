@@ -18658,6 +18658,11 @@ the latest destination. These assertions measure work counts, not device FPS.
 - **Scenario:** Workspace identity.
 - **Expected:** Stored workspace bindings use the existing project canonicalization contract on both write and read. On Windows, slash direction, case, trailing separators and extended path prefixes do not hide a task from its own project's conversation. The distinction between missing legacy bindings and explicit null remains unchanged. Foreign-project tools cannot list or mutate bound tasks.
 - **Automation:** `node --experimental-strip-types scripts/e2e-scheduled-paths.mjs` uses an isolated real Host and SQLite profile. Inference is not sent to a live provider.
+### E2E-SCHEDULED-cancelled-quit-keeps-runner
+
+- **Scenario:** Cancelled quit and automatic runs (issue #2048, D363).
+- **Expected:** An explicit quit that the user cancels in the quit confirmation leaves the app running with no `app shutdown` lifecycle entry and no scheduled-runner stop. A task that becomes due afterwards still runs automatically, and its `nextRunAt` advances. A later quit prompts again; Confirm runs the ordered shutdown, the process exits with code 0, and the runtime log records `scheduled runner stopped` exactly once. Only the shutdown handler listens to `before-quit`; services that must survive a cancelled quit stop through `onConfirmedQuit`.
+- **Automation:** `pnpm test:e2e:scheduled-quit-cancel` (`scripts/e2e-scheduled-quit-cancel.mjs`) drives the built desktop, preload, real Host SQLite and agent sidecar over CDP in an isolated profile, clicking the in-app confirmation with real pointer input. Only the model is a local SSE fixture; the due instant is set through `configJson.nextRunAt` instead of waiting for the wall clock. Requires `apps/desktop/out` and a host-core debug binary.
 
 ### E2E-MARKDOWN-table-actions
 
@@ -19489,3 +19494,33 @@ their separate platform acceptance.
   `apps/desktop/test/plugin-projects.test.mjs` covers pin-independent ordering,
   group lookup failure, missing project providers, failed/malformed lookup,
   rename identity, and stale results after Host replacement.
+
+#### E2E-268: Review a local branch without changing message-owned Review
+
+- **Preconditions:** A local Git repository has a committed `main`, a feature
+  branch with a committed change, one uncommitted edit, one untracked text file,
+  and an Agent conversation with an existing Composer draft.
+- **Steps:** Open Work Panel → Branch Review, select the locally available
+  `main` base, and inspect the branch diff. Change one displayed file, then use
+  its former line-feedback action. Refresh, select a current line, and add
+  feedback while text is selected in the Composer. Inspect the Composer draft
+  and transcript; then open the separate Review tab.
+- **Expected:** The diff uses the base/head merge base and includes committed,
+  working-tree and untracked changes, with old/new line numbers. No automatic
+  fetch occurs. The stale action inserts nothing and asks the user to choose
+  again. The current action appends feedback after existing draft text without
+  replacing its selection or submitting a turn. The transcript remains
+  unchanged until the user sends; the ordinary Review tab still shows only
+  message-owned review records.
+- **Coverage:** Host Runtime `workspace-diff.test.ts`; RACP
+  `racp.test.ts` and `apps/pi-host/src/host-operations.test.ts` cover the
+  remote Host contract. Renderer `branch-review-feedback.test.mjs`,
+  `composer-plugin-draft.test.mjs`, `work-panel-tabs.test.mjs`,
+  `work-panel.test.mjs`, and `remote-session-user-path.test.mjs` cover the
+  draft handoff, work-panel registration, and remote parameter forwarding.
+  `node scripts/e2e-work-panel-launcher-overflow.mjs` exercises the rendered
+  Branch Review flow in isolated Electron with a deterministic diff fixture.
+- **Specs:** ADR 0339, `03-runtime/01-ipc-protocol.md`,
+  `04-ux/08-component-spec.md`.
+- **Status:** Automated offline; live GitHub access and external PR comments
+  are not part of this feature.

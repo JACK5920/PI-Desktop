@@ -1,14 +1,17 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import type {
   DiffFile,
   DiffFileStatus,
   DiffHunk,
   DiffLine,
   WorkspaceDiff,
+  WorkspaceDiffBaseOption,
+  WorkspaceDiffRequestOptions,
 } from "@pi-desktop/shared";
 
 /**
- * Working-tree diff collection for the work panel review tab (D098).
+ * Working-tree diff collection for Branch Review and legacy diagnostics.
  *
  * Everything textual is parsed by the pure functions below so they stay
  * unit-testable without a git checkout; only `collectWorkspaceDiff` talks
@@ -17,6 +20,8 @@ import type {
 
 export const MAX_DIFF_FILES = 100;
 export const MAX_PATCH_BYTES = 200 * 1024;
+
+export type WorkspaceDiffOptions = WorkspaceDiffRequestOptions;
 
 type RunResult = { code: number; stdout: string; stderr: string };
 
@@ -150,6 +155,8 @@ export function parseFilePatch(
   let additions = 0;
   let deletions = 0;
   let current: DiffHunk | null = null;
+  let oldLine = 0;
+  let newLine = 0;
 
   for (const line of lines) {
     if (line.startsWith("--- ")) {
@@ -186,20 +193,29 @@ export function parseFilePatch(
     if (line.startsWith("@@")) {
       current = { header: line, lines: [] };
       hunks.push(current);
+      const match = line.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+      oldLine = Number(match?.[1] ?? 0);
+      newLine = Number(match?.[2] ?? 0);
       continue;
     }
     if (!current) continue;
     if (line.startsWith("+")) {
       additions += 1;
-      current.lines.push({ type: "add", text: line.slice(1) } satisfies DiffLine);
+      current.lines.push({ type: "add", text: line.slice(1), newLine } satisfies DiffLine);
+      newLine += 1;
     } else if (line.startsWith("-")) {
       deletions += 1;
-      current.lines.push({ type: "del", text: line.slice(1) } satisfies DiffLine);
-    } else if (line.startsWith(" ") || line === "") {
+      current.lines.push({ type: "del", text: line.slice(1), oldLine } satisfies DiffLine);
+      oldLine += 1;
+    } else if (line.startsWith(" ")) {
       current.lines.push({
         type: "context",
         text: line.slice(1),
+        oldLine,
+        newLine,
       } satisfies DiffLine);
+      oldLine += 1;
+      newLine += 1;
     }
     // "\ No newline at end of file" markers are dropped.
   }
@@ -230,7 +246,192 @@ export function parseFilePatch(
   };
 }
 
-export async function collectWorkspaceDiff(cwd: string): Promise<WorkspaceDiff> {
+function branchName(ref: string): string {
+  return ref.startsWith("refs/remotes/")
+    ? ref.slice("refs/remotes/".length)
+    : ref.startsWith("refs/heads/")
+      ? ref.slice("refs/heads/".length)
+      : ref;
+}
+
+function orderBaseOptions(
+  options: WorkspaceDiffBaseOption[],
+  currentRef: string | null,
+): WorkspaceDiffBaseOption[] {
+  const score = (option: WorkspaceDiffBaseOption) =>
+    option.ref === currentRef ? 0
+      : option.ref === "refs/remotes/origin/main" ? 1
+        : option.ref === "refs/heads/main" ? 2
+          : 3;
+  return [...options].sort((left, right) =>
+    score(left) - score(right) || left.name.localeCompare(right.name),
+  );
+}
+
+function defaultBase(options: WorkspaceDiffBaseOption[]): WorkspaceDiffBaseOption | undefined {
+  return options.find((option) => option.ref === "refs/remotes/origin/main")
+    ?? options.find((option) => option.ref === "refs/heads/main")
+    ?? options[0];
+}
+
+async function collectBranchWorkspaceDiff(
+  cwd: string,
+  options: WorkspaceDiffOptions,
+): Promise<WorkspaceDiff> {
+  const probe = await runGit(cwd, ["rev-parse", "--is-inside-work-tree"]);
+  if (probe.code !== 0 || probe.stdout.trim() !== "true") {
+    return { repo: false, clean: true, files: [] };
+  }
+
+  const [headResult, branchResult, refsResult, status] = await Promise.all([
+    runGit(cwd, ["rev-parse", "--verify", "HEAD"]),
+    runGit(cwd, ["symbolic-ref", "--quiet", "--short", "HEAD"]),
+    runGit(cwd, ["for-each-ref", "--format=%(refname)%09%(objectname)", "refs/heads", "refs/remotes"]),
+    runGit(cwd, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]),
+  ]);
+  if (status.code !== 0) return { repo: false, clean: true, files: [] };
+
+  const headCommit = headResult.code === 0 ? headResult.stdout.trim() : "";
+  const currentBranch = branchResult.code === 0 ? branchResult.stdout.trim() : "detached";
+  const currentRef = branchResult.code === 0
+    ? `refs/heads/${branchResult.stdout.trim()}`
+    : null;
+  const refs = refsResult.stdout.split(/\r?\n/).flatMap((line) => {
+    const separator = line.indexOf("\t");
+    if (separator <= 0) return [];
+    const ref = line.slice(0, separator);
+    const commit = line.slice(separator + 1).trim();
+    if (!headCommit && !commit) return [];
+    if (ref.endsWith("/HEAD")) return [];
+    return [{ ref, name: branchName(ref), commit }];
+  });
+  const baseOptions = orderBaseOptions(refs, currentRef);
+  const requestedBase = options.baseRef
+    ? baseOptions.find((option) => option.ref === options.baseRef)
+    : defaultBase(baseOptions);
+  const baseFields = {
+    currentBranch,
+    ...(options.includeBases ? { baseOptions } : {}),
+  };
+  if (!headCommit) {
+    return {
+      repo: true,
+      clean: true,
+      files: [],
+      ...baseFields,
+      baseError: "no_head",
+    };
+  }
+  if (options.baseRef && !requestedBase) {
+    return {
+      repo: true,
+      clean: true,
+      files: [],
+      ...baseFields,
+      baseError: "invalid_base",
+    };
+  }
+  if (!requestedBase) {
+    return { repo: true, clean: true, files: [], ...baseFields };
+  }
+
+  const mergeBase = await runGit(cwd, ["merge-base", requestedBase.commit, headCommit]);
+  if (mergeBase.code !== 0 || !mergeBase.stdout.trim()) {
+    return {
+      repo: true,
+      clean: true,
+      files: [],
+      ...baseFields,
+      baseError: "no_merge_base",
+    };
+  }
+  const mergeBaseCommit = mergeBase.stdout.trim();
+  const entries = parseStatusZ(status.stdout);
+  const untrackedEntries = entries.filter((entry) => entry.untracked);
+  const truncated = untrackedEntries.length > MAX_DIFF_FILES;
+  const untracked = new Set(untrackedEntries.map((entry) => entry.path));
+  const tracked = await runGit(cwd, [
+    "diff",
+    mergeBaseCommit,
+    "--no-color",
+    "--no-ext-diff",
+    "--no-textconv",
+    "-M",
+    "--unified=3",
+  ]);
+  const trackedChunks = splitUnifiedDiff(tracked.stdout);
+  const files: DiffFile[] = [];
+  const anchor = (file: DiffFile, patch: string) => {
+    file.anchorRevision = createHash("sha256")
+      .update(JSON.stringify([
+        requestedBase.ref,
+        requestedBase.commit,
+        mergeBaseCommit,
+        headCommit,
+        file.path,
+        patch,
+      ]))
+      .digest("hex");
+    return file;
+  };
+  if (tracked.code === 0 || tracked.stdout) {
+    for (const chunk of trackedChunks) {
+      const file = parseFilePatch(chunk);
+      if (file && !untracked.has(file.path)) files.push(anchor(file, chunk));
+    }
+  }
+
+  for (const entry of untrackedEntries.slice(0, MAX_DIFF_FILES)) {
+    const result = await runGit(cwd, [
+      "diff",
+      "--no-color",
+      "--no-ext-diff",
+      "--no-textconv",
+      "--unified=3",
+      "--no-index",
+      "--",
+      "/dev/null",
+      entry.path,
+    ]);
+    const chunk = splitUnifiedDiff(result.stdout)[0];
+    const file = chunk ? parseFilePatch(chunk, "untracked") : null;
+    if (file) {
+      files.push(anchor(file, chunk));
+    } else {
+      files.push(anchor({
+        path: entry.path,
+        status: "untracked",
+        additions: 0,
+        deletions: 0,
+        hunks: [],
+      }, `${entry.path}\0unreadable`));
+    }
+  }
+
+  files.sort((left, right) => left.path.localeCompare(right.path));
+  const wasTruncated = truncated || files.length > MAX_DIFF_FILES;
+  return {
+    repo: true,
+    clean: files.length === 0,
+    files: files.slice(0, MAX_DIFF_FILES),
+    truncated: wasTruncated || undefined,
+    ...baseFields,
+    branchReview: {
+      baseRef: requestedBase.ref,
+      baseCommit: requestedBase.commit,
+      mergeBaseCommit,
+      headCommit,
+    },
+  };
+}
+
+export async function collectWorkspaceDiff(
+  cwd: string,
+  options: WorkspaceDiffOptions = {},
+): Promise<WorkspaceDiff> {
+  if (options.baseRef !== undefined || options.includeBases) {
+    return collectBranchWorkspaceDiff(cwd, options);
+  }
   const probe = await runGit(cwd, ["rev-parse", "--is-inside-work-tree"]);
   if (probe.code !== 0 || probe.stdout.trim() !== "true") {
     return { repo: false, clean: true, files: [] };

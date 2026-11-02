@@ -40,6 +40,7 @@ import { TooltipButton } from "../ui";
 import type { IconProps } from "../icons";
 import {
   IconBot,
+  IconBranch,
   IconClose,
   IconDiff,
   IconFileText,
@@ -49,6 +50,7 @@ import {
   IconPlus,
 } from "../icons";
 import { ReviewTab } from "./ReviewTab";
+import { BranchReviewTab } from "./BranchReviewTab";
 import { FilesTab } from "./FilesTab";
 import { PluginViewTab } from "./PluginViewTab";
 import { SubagentTranscriptTab } from "./SubagentTranscriptTab";
@@ -66,6 +68,7 @@ import {
 const TAB_ICONS = {
   new: IconPlus,
   review: IconDiff,
+  "branch-review": IconBranch,
   file: IconFileText,
   plugin: IconPlug,
   subagent: IconBot,
@@ -123,6 +126,7 @@ function tabLabel(
   }
   if (tab.kind === "new") return t("panel.new.title");
   if (tab.kind === "subagent") return tab.label ?? t("panel.tabs.subagent");
+  if (tab.kind === "branch-review") return t("panel.tabs.branchReview");
   if (tab.kind !== "file") return t(`panel.tabs.${tab.kind}`);
   const path = tab.resource ?? "";
   return path.split("/").filter(Boolean).pop() || t("panel.tabs.file");
@@ -132,14 +136,20 @@ function workPanelTools(
   t: (key: string) => string,
   pluginViews: PluginViewMeta[],
 ): WorkPanelTool[] {
-  // Review is the only host-owned launcher. Files, Browser, and every future
-  // tool are plugin-contributed views, so their list stays data-driven.
+  // Review and Branch Review are host-owned tools. Files, Browser, and every
+  // future extension surface remain plugin-contributed and data-driven.
   return [
     {
       id: "review",
       tab: toolWorkPanelTab("review"),
       label: t("panel.tabs.review"),
       icon: IconDiff,
+    },
+    {
+      id: "branch-review",
+      tab: toolWorkPanelTab("branch-review"),
+      label: t("panel.tabs.branchReview"),
+      icon: IconBranch,
     },
     ...pluginViews.map((view) => {
       const Icon = pluginViewIcon(view.icon);
@@ -1105,6 +1115,16 @@ function LocalWorkPanel({
               aria-labelledby={`work-panel-tab-${activeTab.id}`}
             >
               <ReviewTab />
+            </div>
+          )}
+          {activeTab?.kind === "branch-review" && (
+            <div
+              id={`work-panel-surface-${activeTab.id}`}
+              className="work-panel-tabpane"
+              role="tabpanel"
+              aria-labelledby={`work-panel-tab-${activeTab.id}`}
+            >
+              <BranchReviewTab />
             </div>
           )}
           {activeTab?.kind === "file" && (

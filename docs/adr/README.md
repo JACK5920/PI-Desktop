@@ -396,5 +396,6 @@ Each ADR includes:
 | gen-ui-inline-visualization | [Inline generative UI visualizations](gen-ui-inline-visualization.md) | Accepted (D671) |
 | 0337 | [Keep the request prefix stable across delegation settlements](0337-stable-prompt-prefix-across-delegation.md) | Accepted (supersedes ADR 0279 §9) |
 | 0338 | [Persist a bounded, manually resumable Goal lifecycle](0338-persist-bounded-goal-lifecycle.md) | Accepted for implementation (D679; preserves ADR 0053 no-replay recovery) |
+| 0339 | [Add an independent local Branch Review surface](0339-independent-local-branch-review.md) | Accepted |
 
 | model-reasoning-effort-override | [Model reasoning effort override](model-reasoning-effort-override.md) | Proposed |

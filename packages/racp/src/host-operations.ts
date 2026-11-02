@@ -47,6 +47,11 @@ export interface RacpSessionCatalog {
 
 export type ProjectBrowseEntry = { name: string; path: string };
 
+export type RacpWorkspaceDiffOptions = {
+  baseRef?: string;
+  includeBases?: boolean;
+};
+
 export interface RacpProjectCatalog {
   list(): Promise<RacpProjectSummary[]>;
   /** Canonicalize and validate a Host directory, register it, return its id. */
@@ -58,7 +63,7 @@ export interface RacpProjectCatalog {
 export interface RacpWorkspaceAccess {
   list(sessionId: string, path: string): Promise<{ entries: FsEntry[] }>;
   read(sessionId: string, path: string): Promise<FsReadResult>;
-  diff(sessionId: string): Promise<WorkspaceDiff>;
+  diff(sessionId: string, options?: RacpWorkspaceDiffOptions): Promise<WorkspaceDiff>;
 }
 
 export type TerminalOpenResult = {

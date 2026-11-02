@@ -257,14 +257,25 @@ export function createRemoteBackend(options: RemoteBackendOptions): RemoteBacken
       case IPC.invoke.fsList:
       case IPC.invoke.fsRead:
       case IPC.invoke.workspaceDiff: {
-        const input = args[0] as { path?: unknown };
+        const input = args[0] as { path?: unknown; baseRef?: unknown; includeBases?: unknown };
         const path = input.path ?? "";
         if (typeof path !== "string" || path.length > 4096 || path.includes("\0")) {
           throw Object.assign(new Error("invalid remote path"), { errorCode: ErrorCodes.INVALID_ARGUMENT });
         }
+        if (input.baseRef !== undefined && (typeof input.baseRef !== "string" || input.baseRef.length > 512 || input.baseRef.includes("\0"))) {
+          throw Object.assign(new Error("invalid diff base ref"), { errorCode: ErrorCodes.INVALID_ARGUMENT });
+        }
+        if (input.includeBases !== undefined && typeof input.includeBases !== "boolean") {
+          throw Object.assign(new Error("includeBases must be a boolean"), { errorCode: ErrorCodes.INVALID_ARGUMENT });
+        }
         const method = channel === IPC.invoke.fsList ? "workspace/list"
           : channel === IPC.invoke.fsRead ? "workspace/read" : "workspace/diff";
-        return client.request(method, { sessionId: hostIdFor(args), ...(method !== "workspace/diff" ? { path } : {}) });
+        return client.request(method, {
+          sessionId: hostIdFor(args),
+          ...(method !== "workspace/diff" ? { path } : {}),
+          ...(method === "workspace/diff" && typeof input.baseRef === "string" ? { baseRef: input.baseRef } : {}),
+          ...(method === "workspace/diff" && input.includeBases === true ? { includeBases: true } : {}),
+        });
       }
       case IPC.invoke.sessionConfigure: {
         const remoteSessionId = remoteIdFor(args);

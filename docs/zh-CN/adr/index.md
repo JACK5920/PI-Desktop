@@ -315,6 +315,7 @@ ADR 记录那些不应被静默改变的架构选择。中文入口与英文索�
 | 0310 | [保持本地权限批准一直待解决](/adr/0310-local-permission-approvals-without-deadline) | 已接受实施 |
 | 0311 | [在 Host 受理时重新核验 Live Work 工作空间身份](/adr/0311-live-work-workspace-admission-guard) | 已实现候选 |
 | 0312 | [会话级 Todo 清单](/adr/0312-session-scoped-todo-checklist) | 已接受实施 |
+| 0339 | [新增独立的本地分支审查界面](/adr/0339-independent-local-branch-review) | 已接受 |
 | registry-header-variable-spelling | [Remote header variables accept the registry's `{name}` spelling](/adr/registry-header-variable-spelling) | Proposed |
 
 ## 什么时候看 ADR

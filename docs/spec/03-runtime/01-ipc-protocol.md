@@ -1871,11 +1871,16 @@ entry or local-page navigation, which follow its existing local-file policy.
 
 ### workspace
 
-- `workspace/diff()` → `WorkspaceDiff { repo, clean, files: DiffFile[], truncated? }`.
-  This legacy diagnostics channel may inspect the current working tree, but it
-  is not the Review source of truth. The Review UI reads message-owned review
-  records from transcript tool results instead, so a commit cannot erase a
-  recorded change.
+- `workspace/diff({sessionId?, baseRef?, includeBases?})` → `WorkspaceDiff`.
+  Calls without branch options retain the legacy `HEAD`-to-working-tree
+  diagnostics. `includeBases` lists locally available local and
+  remote-tracking refs and returns the default base comparison; `baseRef`
+  selects one exact advertised ref. Branch comparisons use its merge base and
+  include committed branch changes and untracked files. No ref is fetched.
+  Per-file `anchorRevision` binds feedback to the selected ref, merge base,
+  current HEAD, path and patch. This channel is not the Review source of truth:
+  the Review UI still reads only message-owned review records, so a commit
+  cannot erase a recorded change.
 - `workspace/review/rollback({sessionId, snapshotId})` →
   `ReviewRollbackResult`. The host verifies the current post-tool hash before
   restoring the snapshot; it returns `rolledBack`, `alreadyRolledBack`,

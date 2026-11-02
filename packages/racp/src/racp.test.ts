@@ -398,6 +398,20 @@ describe("RACP-WS remote-host profile", () => {
     await expect(client.request("workspace/read", { sessionId: "s1" })).rejects.toMatchObject({ code: "INVALID_ARGUMENT" });
     const diff = await client.request<{ repo: boolean }>("workspace/diff", { sessionId: "s1" });
     expect(diff.repo).toBe(true);
+    const branchDiff = await client.request<{
+      baseOptions: Array<{ ref: string }>;
+      branchReview: { baseRef: string };
+    }>("workspace/diff", {
+      sessionId: "s1",
+      baseRef: "refs/heads/main",
+      includeBases: true,
+    });
+    expect(branchDiff.baseOptions[0]?.ref).toBe("refs/heads/main");
+    expect(branchDiff.branchReview.baseRef).toBe("refs/heads/main");
+    await expect(client.request("workspace/diff", {
+      sessionId: "s1",
+      baseRef: "x".repeat(513),
+    })).rejects.toMatchObject({ code: "INVALID_ARGUMENT" });
     await expect(client.request("terminal/open", { sessionId: "s1" })).rejects.toMatchObject({ code: "CAPABILITY_UNAVAILABLE" });
     await expect(client.request("attachment/create", {})).rejects.toMatchObject({ code: "CAPABILITY_UNAVAILABLE" });
   });

@@ -138,6 +138,26 @@ export class ComposerDraftBridge {
   }
 
   /**
+   * Append a user-requested note to the named session's composer without
+   * replacing its selection or submitting the turn.
+   */
+  appendTextForSession(sessionId: string, text: string): void {
+    if (!sessionId || !text.trim()) throw new Error("A session and non-empty text are required");
+    const live = this.require();
+    if (live.draft.sessionId !== sessionId) {
+      throw new Error("The active composer belongs to another session");
+    }
+    if (holdsDraftChip(live.draft, text)) {
+      refuse("PLUGIN_ACTION_INVALID_PAYLOAD", "the text holds a chip token of the draft");
+    }
+    const separator = live.draft.text.length === 0
+      ? ""
+      : live.draft.text.endsWith("\n") ? "\n" : "\n\n";
+    const next = `${live.draft.text}${separator}${text}`;
+    this.commit(live, next, [...live.draft.references], next.length, true);
+  }
+
+  /**
    * Replace the whole draft. The gates run in this order and a refusal
    * writes nothing: a composer takes input, the call runs in a user's input
    * event, the input does not have focus, the generation is current, the

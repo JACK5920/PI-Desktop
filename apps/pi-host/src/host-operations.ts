@@ -15,7 +15,13 @@ import {
   type HostSessionRecord,
   type RuntimeService,
 } from "@pi-desktop/host-runtime";
-import type { RacpHostOperations, RacpProjectCatalog, RacpSessionCatalog, RacpWorkspaceAccess } from "@pi-desktop/racp";
+import type {
+  RacpHostOperations,
+  RacpProjectCatalog,
+  RacpSessionCatalog,
+  RacpWorkspaceAccess,
+  RacpWorkspaceDiffOptions,
+} from "@pi-desktop/racp";
 import type { RacpProjectSummary } from "@pi-desktop/shared";
 
 /** A project row as host-core lists it. */
@@ -246,8 +252,8 @@ export function createWorkspaceAccess(deps: HostOperationsDeps): RacpWorkspaceAc
       const root = await sessionRoot(sessionId);
       return readWorkspaceFile(root, path).catch(forbidden);
     },
-    async diff(sessionId) {
-      return collectWorkspaceDiff(await sessionRoot(sessionId));
+    async diff(sessionId, options?: RacpWorkspaceDiffOptions) {
+      return collectWorkspaceDiff(await sessionRoot(sessionId), options);
     },
   };
 }

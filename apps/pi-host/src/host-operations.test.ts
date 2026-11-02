@@ -1,6 +1,8 @@
-import { mkdir, mkdtemp, realpath, rm, symlink } from "node:fs/promises";
+import { execFile as execFileCallback } from "node:child_process";
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { RacpError } from "@pi-desktop/agent-host";
@@ -8,6 +10,7 @@ import { RacpError } from "@pi-desktop/agent-host";
 import { createHostOperations } from "./host-operations.js";
 
 const dirs: string[] = [];
+const execFile = promisify(execFileCallback);
 afterEach(async () => {
   for (const dir of dirs.splice(0)) await rm(dir, { recursive: true, force: true });
 });
@@ -130,5 +133,40 @@ describe("pi-host operations over host-core", () => {
     await expect(operations.workspace.list("s9", "")).rejects.toBeInstanceOf(RacpError);
     const diff = await operations.workspace.diff("s1");
     expect(diff.repo).toBe(false);
+  });
+
+  it("forwards selected Branch Review bases through the Host workspace contract", async () => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), "pi-host-branch-review-")));
+    dirs.push(root);
+    const runGit = async (args: string[]) => {
+      await execFile("git", args, { cwd: root, encoding: "utf8" });
+    };
+    await runGit(["init", "--quiet", "--initial-branch=main"]);
+    await runGit(["config", "user.name", "pi-host test"]);
+    await runGit(["config", "user.email", "pi-host-test@example.invalid"]);
+    await writeFile(join(root, "source.txt"), "base\n", "utf8");
+    await runGit(["add", "source.txt"]);
+    await runGit(["commit", "--quiet", "-m", "base"]);
+    await runGit(["switch", "--quiet", "-c", "feature"]);
+    await writeFile(join(root, "source.txt"), "feature\n", "utf8");
+    await runGit(["add", "source.txt"]);
+    await runGit(["commit", "--quiet", "-m", "feature"]);
+
+    const operations = createHostOperations({
+      getHost: () => fakeHost([], root),
+      runtime: { compact: async () => ({ accepted: true }), isBusy: () => false },
+    });
+    const diff = await operations.workspace.diff("s1", {
+      baseRef: "refs/heads/main",
+      includeBases: true,
+    });
+
+    expect(diff.branchReview).toMatchObject({ baseRef: "refs/heads/main" });
+    expect(diff.baseOptions?.map((base) => base.ref)).toContain("refs/heads/main");
+    expect(diff.files.find((file) => file.path === "source.txt")?.hunks.flatMap((hunk) => hunk.lines))
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({ type: "del", text: "base" }),
+        expect.objectContaining({ type: "add", text: "feature" }),
+      ]));
   });
 });

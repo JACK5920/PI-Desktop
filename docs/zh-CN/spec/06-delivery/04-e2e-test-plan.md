@@ -10164,3 +10164,12 @@ PluginPack 产物的解包目录，仅用于开发验证。验收 #1711 前需�
   event/result agreement, batch rejection and delegate restoration.
 - **Status**: Automated offline; native UI clicking and live providers are
   outside this fixture's coverage.
+
+#### E2E-268：审查本地分支但不改变消息级 Review
+
+- **前置条件：** 本地 Git 仓库包含已提交的 `main`、带有提交改动的功能分支、一个未提交编辑、一个未跟踪文本文件，以及含有现有输入草稿的 Agent 对话。
+- **步骤：** 打开工作面板 → 分支审查，选择本地已有的 `main` 基准并查看差异。修改一个已显示文件后，点击旧行的反馈操作。刷新后选择当前行；在输入框有选中文本时添加反馈。检查输入框和转录本，然后打开独立的 Review 选项卡。
+- **预期：** 差异以基准与当前 HEAD 的共同祖先为起点，并包含已提交、工作树和未跟踪改动，且显示 old/new 行号。不自动 fetch。过期行操作不会插入内容，并要求用户重新选择。当前行操作会把反馈追加到已有草稿之后，不替换选区，也不发送回合。用户主动发送前转录本不变；普通 Review 仍只显示消息拥有的审核记录。
+- **覆盖：** Host Runtime `workspace-diff.test.ts`；RACP `racp.test.ts` 与 `apps/pi-host/src/host-operations.test.ts` 覆盖远程 Host 契约。渲染器 `branch-review-feedback.test.mjs`、`composer-plugin-draft.test.mjs`、`work-panel-tabs.test.mjs`、`work-panel.test.mjs` 和 `remote-session-user-path.test.mjs` 覆盖草稿交接、工作面板注册和远程参数转发。`node scripts/e2e-work-panel-launcher-overflow.mjs` 在隔离 Electron 中用确定性差异样例覆盖渲染后的分支审查流程。
+- **规格：** ADR 0339、`03-runtime/01-ipc-protocol.md`、`04-ux/08-component-spec.md`。
+- **状态：** 离线自动化；不包含 GitHub 联网或外部 PR 评论。

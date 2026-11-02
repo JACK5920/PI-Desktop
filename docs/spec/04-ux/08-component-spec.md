@@ -1048,7 +1048,7 @@ pending action cards remain reachable outside a hidden process. See
 ### 5.1 Purpose
 
 Docked right work column for inspecting and steering the agent's workspace.
-Launchable surfaces are the host-owned Review row and plugin views (ADR 0104),
+Launchable surfaces are the host-owned Review and Branch Review rows and plugin views (ADR 0104),
 including the vendored file manager `pi.file-manager` (project browsing and
 editing) and bundled `pi.browser`
 (work-panel browser chrome; the guest page stays host-owned, ADR 0170). File
@@ -1081,7 +1081,7 @@ Review, file, or plugin view is one tab with an icon, an ellipsized label, and a
 close button shown on hover, focus, or the active tab. Middle-click closes a
 tab. The `+` button sits outside the scroller and remains visible when tabs
 overflow. Clicking it creates and activates a unique New launcher tab. The
-launcher body contains host-owned Review followed by every in-scope
+launcher body contains host-owned Review and Branch Review followed by every in-scope
 `contributes.views` entry as buttons; Files and Browser are not hardcoded in
 the renderer (ADR 0104). The header reserves a tokenized 44px right-side safe
 lane for the viewport-fixed work-panel toggle: the 28px control, its 12px
@@ -1119,6 +1119,18 @@ a stable scrollbar gutter and shows a quiet, theme-aware thumb whenever it
 overflows, even before hover; short lists have no scrollbar. Long labels stay
 ellipsized without horizontal scrolling, and wheel input at either end does
 not chain into the surrounding shell.
+
+### 5.2.3 Local Branch Review
+
+Branch Review is a distinct host-owned tool and tab; the existing Review tab
+continues to show only chronological message-owned `ReviewChange` records
+(ADR 0043). Branch Review compares a selected local or remote-tracking base
+with the current working tree from their merge base, including committed branch
+changes and untracked files. It offers only refs already present locally and
+never fetches them. Each line action refreshes the selected diff and is allowed
+only when its file anchor still matches the displayed anchor. Feedback is
+appended to the active session's Composer draft without replacing selected text;
+the draft remains editable and no turn or external comment is sent.
 
 ### 5.2.1 Light-theme surface
 
@@ -1261,7 +1273,7 @@ entirely inside the plugin's isolated page:
 | No workspace | Each tab renders its own "open a project" empty state |
 | Open with no resource | `Cmd/Ctrl + J` reveals the panel without creating a tab, so the body renders the New launcher. Clicking `+` creates an explicit, closable New tab with the same launcher rows. Activating a row from that tab replaces it with or selects the singleton view. Closing the final tab leaves the panel open in the no-resource state. |
 | Constrained work area | The panel is capped by the shared three-column budget inside the existing client area; MainChat never drops below its 450px floor and the expanded sidebar yields at the threshold |
-| New launcher active | The body hosts concise Review and plugin-view buttons. Each row replaces the launcher tab with its destination or activates the existing singleton; the page is independently closeable. |
+| New launcher active | The body hosts concise Review, Branch Review and plugin-view buttons. Each row replaces the launcher tab with its destination or activates the existing singleton; the page is independently closeable. |
 | Plugin view active | The body hosts the plugin's own isolated page as a native `WebContentsView`, positioned from the measured surface rect. It remains visible at its full rect while the divider is being resized or a New launcher tab is created; creating a page never pushes the plugin body down or changes its bounds. Embedded plugin documents start with zero root/body margin and border and a transparent background, so the host panel and plugin theme own the visible surface edge. It is hidden whenever the tab is inactive, the panel is animating, or a panel-wide blocking overlay is open. While any plugin view is active, a tab context menu uses a native popup above the `WebContentsView`; this platform styling is required by native-view z-order, while labels, ordering, and enabled actions match the renderer menu. The menu anchor follows the pointer at the current app zoom. A full main-frame navigation of the host renderer, including reload, detaches the visible native view without closing its cached page; opening the tab again reattaches the same page. Same-document and child-frame navigations keep it attached. A view whose plugin is disabled, uninstalled, reloaded, or crashed is destroyed; the tab stays and re-opens the page on the next lifecycle event (ADR 0104) |
 | Plugin out of scope | A view contributed by a plugin that is not active in the current project disappears from the New launcher when the project changes. Unlike contributed themes, which are one global setting and stay unfiltered, a view is scoped work |
 

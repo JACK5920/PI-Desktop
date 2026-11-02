@@ -665,17 +665,48 @@ export function registerWorkspaceIpc({
   );
 
   const remoteFileWorkspace = (sessionId?: string) => remoteWorkspaceForFiles(getHost, sessionId);
-  const readRemoteFiles = (remote: RemoteWorkspace, operation: WorkspaceFilesRequest["operation"], ref?: string, mimeType?: string) => {
+  const readRemoteFiles = (
+    remote: RemoteWorkspace,
+    operation: WorkspaceFilesRequest["operation"],
+    ref?: string,
+    mimeType?: string,
+    diffOptions?: { baseRef?: string; includeBases?: boolean },
+  ) => {
     const boot = getActiveRemoteHostsBoot();
     if (!boot) throw new Error("remote hosts unavailable");
-    return boot.workspaceFiles(remote.hostKey, { path: remote.path, operation, ...(ref ? { ref } : {}), ...(mimeType ? { mimeType } : {}) });
+    return boot.workspaceFiles(remote.hostKey, {
+      path: remote.path,
+      operation,
+      ...(operation !== "diff" && ref ? { ref } : {}),
+      ...(mimeType ? { mimeType } : {}),
+      ...(operation === "diff" ? diffOptions : {}),
+    });
   };
   const localFileStores = [join(dataDir, "scratch"), join(dataDir, "attachments")];
   const isLocalStoredFile = async (ref: string) => isAttachmentBlobRef(ref) || !!(await resolveRealOpenablePath(ref, null, localFileStores));
 
-  handle(IPC.invoke.workspaceDiff, async (input: { sessionId?: string } = {}) => {
+  handle(IPC.invoke.workspaceDiff, async (input: {
+    sessionId?: string;
+    baseRef?: string;
+    includeBases?: boolean;
+  } = {}) => {
+    if (input.baseRef !== undefined && (typeof input.baseRef !== "string" || !input.baseRef.trim() || input.baseRef.length > 512 || input.baseRef.includes("\0"))) {
+      throw Object.assign(new Error("invalid diff base ref"), {
+        errorCode: ErrorCodes.INVALID_ARGUMENT,
+      });
+    }
+    if (input.includeBases !== undefined && typeof input.includeBases !== "boolean") {
+      throw Object.assign(new Error("includeBases must be a boolean"), {
+        errorCode: ErrorCodes.INVALID_ARGUMENT,
+      });
+    }
     const remote = await remoteFileWorkspace(input.sessionId);
-    if (remote) return readRemoteFiles(remote, "diff");
+    if (remote) {
+      return readRemoteFiles(remote, "diff", undefined, undefined, {
+        ...(input.baseRef ? { baseRef: input.baseRef } : {}),
+        ...(input.includeBases ? { includeBases: true } : {}),
+      });
+    }
     if (!host) throw new Error("host unavailable");
     const res = (await host.call("workspace.get")) as {
       workspace: { path: string } | null;
@@ -684,7 +715,10 @@ export function registerWorkspaceIpc({
     if (!cwd) {
       return { repo: false, clean: true, files: [] };
     }
-    return collectWorkspaceDiff(cwd);
+    return collectWorkspaceDiff(cwd, {
+      ...(input.baseRef ? { baseRef: input.baseRef } : {}),
+      ...(input.includeBases ? { includeBases: true } : {}),
+    });
   });
   handle(
     IPC.invoke.workspaceReviewRollback,
