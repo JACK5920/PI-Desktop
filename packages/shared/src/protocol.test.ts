@@ -38,11 +38,12 @@ describe("Browser recovery IPC", () => {
 });
 
 describe("Plan protocol contracts", () => {
-  it("uses protocol v11/schema v16 and exposes the plan, schedule, and shell channels", () => {
+  it("uses protocol v11/schema v28 and exposes the Plan, Goal, schedule, and shell channels", () => {
     expect(PROTOCOL_VERSION).toBe(11);
-    expect(SCHEMA_VERSION).toBe(16);
+    expect(SCHEMA_VERSION).toBe(28);
     expect(IPC_WHITELIST.has(IPC.invoke.plansPending)).toBe(true);
     expect(IPC_WHITELIST.has(IPC.invoke.plansResolve)).toBe(true);
+    expect(IPC_WHITELIST.has(IPC.invoke.goalControl)).toBe(true);
     expect(IPC_WHITELIST.has(IPC.event.plansChanged)).toBe(true);
     expect(IPC.invoke.commandShellList).toBe("pi-desktop/commandShell/list");
     expect(IPC_WHITELIST.has(IPC.invoke.commandShellList)).toBe(true);

@@ -5,11 +5,22 @@ import type { LaunchResolver } from "./launch-resolver.js";
 import { executionFromResponse, executionListFromResponse, planExecutionFromUnknown } from "./plan-execution.js";
 import type { RuntimeLogger, RuntimeService, RuntimeSidecarLink } from "./runtime-service.js";
 
+/** Admit an automatic Goal round only after interactive work has yielded. */
+export async function goalContinuationIsAdmissible(input: {
+  hasQueuedInput: () => boolean;
+  hasPendingApproval: () => Promise<boolean>;
+}): Promise<boolean> {
+  if (input.hasQueuedInput()) return false;
+  return !(await input.hasPendingApproval());
+}
+
 export type PlanExecutionDispatcherOptions = {
   getHost: () => HostRpc | null;
   getSidecar: () => RuntimeSidecarLink | null;
   launch: LaunchResolver;
   runtime: Pick<RuntimeService, "withSessionOperation" | "beginTurn" | "finishTurn" | "activeTurnId" | "onTurnEnded">;
+  /** Do not let a background Goal continuation jump ahead of interactive input. */
+  hasQueuedInput: (sessionId: string) => boolean;
   log: RuntimeLogger;
   sleep?: (ms: number) => Promise<void>;
 };
@@ -23,7 +34,12 @@ export type PlanExecutionDispatcherOptions = {
  */
 export class PlanExecutionDispatcher {
   private readonly approvedExecutionIdsBySession = new Map<string, string>();
-  private readonly executionTurns = new Map<string, { sessionId: string; turnId: string }>();
+  private readonly executionTurns = new Map<string, {
+    sessionId: string;
+    turnId: string;
+    proposalId: string;
+    kind: PlanExecution["kind"];
+  }>();
   private readonly started = new Set<string>();
   private readonly finished = new Set<string>();
   private readonly dispatching = new Set<string>();
@@ -83,6 +99,17 @@ export class PlanExecutionDispatcher {
         this.approvedExecutionIdsBySession.delete(turn.sessionId);
       }
       this.executionTurns.delete(executionId);
+      if (pending.status === "completed" && turn?.kind === "goal") {
+        const response = await host.call("plans.queuedExecutions");
+        const next = executionListFromResponse(response).find(
+          (candidate) =>
+            candidate.kind === "goal" &&
+            candidate.sessionId === turn.sessionId &&
+            candidate.proposalId === turn.proposalId &&
+            candidate.state === "queued",
+        );
+        if (next) await this.dispatchApprovedPlan(next, true);
+      }
     } catch (error) {
       this.options.log("warn", "approved plan execution finalization failed", { executionId, error: String(error) });
     } finally {
@@ -90,7 +117,7 @@ export class PlanExecutionDispatcher {
     }
   }
 
-  async dispatchApprovedPlan(rawExecution: unknown): Promise<void> {
+  async dispatchApprovedPlan(rawExecution: unknown, goalContinuation = false): Promise<void> {
     const initial = planExecutionFromUnknown(rawExecution);
     if (!initial) {
       this.options.log("warn", "approved plan execution descriptor was invalid");
@@ -110,9 +137,43 @@ export class PlanExecutionDispatcher {
       if (!host || !sidecar) return;
       if (this.options.runtime.activeTurnId(initial.sessionId)) {
         // The submitting turn is still finalizing; look again shortly.
-        const timer = setTimeout(() => void this.dispatchApprovedPlan(initial), 250);
+        const timer = setTimeout(
+          () => void this.dispatchApprovedPlan(initial, goalContinuation),
+          250,
+        );
         timer.unref?.();
         return;
+      }
+      if (goalContinuation) {
+        const retry = () => {
+          const timer = setTimeout(() => void this.dispatchApprovedPlan(initial, true), 250);
+          timer.unref?.();
+        };
+        let admitted = false;
+        try {
+          admitted = await goalContinuationIsAdmissible({
+            hasQueuedInput: () => this.options.hasQueuedInput(initial.sessionId),
+            hasPendingApproval: async () => {
+              const pending = await host.call<{ plans?: unknown[] }>("plans.pending", {
+                sessionId: initial.sessionId,
+              });
+              return (pending.plans?.length ?? 0) > 0;
+            },
+          });
+        } catch (error) {
+          // A failed admission read is not permission to jump ahead of user work.
+          this.options.log("warn", "Goal continuation admission check failed; retrying", {
+            sessionId: initial.sessionId,
+            executionId: initial.id,
+            error: String(error),
+          });
+          retry();
+          return;
+        }
+        if (!admitted) {
+          retry();
+          return;
+        }
       }
       this.dispatching.add(initial.id);
       let claimed = false;
@@ -138,7 +199,12 @@ export class PlanExecutionDispatcher {
         });
         turnId = await this.options.runtime.beginTurn(execution.sessionId, launch.providerId, launch.modelId);
         this.approvedExecutionIdsBySession.set(execution.sessionId, execution.id);
-        this.executionTurns.set(execution.id, { sessionId: execution.sessionId, turnId });
+        this.executionTurns.set(execution.id, {
+          sessionId: execution.sessionId,
+          turnId,
+          proposalId: execution.proposalId,
+          kind: execution.kind,
+        });
         this.started.add(execution.id);
         sidecar.setProjectInstructionRoot(execution.sessionId, launch.projectPath);
         const accepted = await sidecar.call<{ accepted: boolean }>("agent.executeApprovedPlan", {

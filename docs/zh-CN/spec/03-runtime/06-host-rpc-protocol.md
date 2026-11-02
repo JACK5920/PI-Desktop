@@ -819,7 +819,43 @@ type PlansPendingResult = {
   // The contract being negotiated: the pending row's kind, else the session's
   // own contract mode. Absent when nothing is being negotiated.
   kind?: ProposalKind;
+  goal?: GoalLifecycle | null;
+  goals?: GoalLifecycle[];
 };
+
+type GoalLifecycleStatus =
+  | "active" | "paused" | "completed" | "blocked" | "interrupted" | "cleared";
+
+type GoalCriterionReport = {
+  criterion: string;
+  status: "met" | "unmet";
+  evidence: string[];
+};
+
+type GoalProgressReport = {
+  outcome: "continue" | "complete" | "blocked";
+  summary: string;
+  criteria: GoalCriterionReport[];
+};
+
+type GoalLifecycle = {
+  proposalId: string;
+  sessionId: string;
+  title: string;
+  status: GoalLifecycleStatus;
+  currentExecutionId?: string;
+  cycle: number;
+  roundInCycle: number;
+  runCount: number;
+  maxRounds: number;
+  stopReason?: string;
+  latestReport?: GoalProgressReport;
+  updatedAt: string;
+  version: number;
+};
+
+type GoalControlAction = "pause" | "resume" | "clear";
+type GoalControlResult = { goal: GoalLifecycle; execution?: PlanExecution };
 
 type PlanResolveIdentity = {
   proposalId: string;
@@ -843,6 +879,7 @@ type PlanResolutionResult = {
   action?: PlanApprovalAction;
   targetPermissionMode?: GlobalPermissionMode;
   execution?: PlanExecution;
+  goal?: GoalLifecycle | null;
 };
 ```
 
@@ -859,6 +896,7 @@ params: {
   action?: PlanApprovalAction
   targetPermissionMode?: GlobalPermissionMode | null
   execution?: PlanExecution | null
+  goal?: GoalLifecycle | null
 }
 
 type ToolsOutputParams = {
@@ -881,6 +919,20 @@ params: ToolsOutputParams
 当没有值时，主机发出 `targetPermissionMode` 和 `execution` 作为 JSON `null`
 存在。 Electron 通过以下方式转发此通知：
 共享 `IPC.event.plansChanged` 渲染器通道。
+
+Goal 生命周期是协议 v11 的增量能力，并使用 schema v28。按会话调用
+`plans.pending` 时，`goal` 返回该会话当前未清除的生命周期；全局查询时，`goals`
+返回每个会话最新的未清除生命周期。`goals.report` 接受
+`{ sessionId, proposalId, executionId, turnId, report }`，仅允许当前获批 Goal 的运行中轮次
+保存一次；过期的 turn、execution 或 lifecycle 会被拒绝。`goals.control({ sessionId, proposalId, action })`
+要求提供当前 Goal 提案标识，并支持 `pause`、`resume` 和 `clear`；过期提案标识会被拒绝且不会更改当前生命周期。
+恢复会返回具有新 ID 的排队执行；暂停与清除不返回执行描述符。
+清除会从当前跟踪中移除 Goal，但保留历史报告、执行记录及不可变工件。Goal 证据是 Agent 撰写的主张；
+Host 校验其结构与作用域，但不验证证据真实性。只有前一轮结束后，`continue` 才能自动排入下一轮，
+每个 cycle 最多八个执行轮次（含首次获批轮次），并受每 cycle 250,000 个已报告 token 与 60 分钟墙钟时间上限约束。
+预算在当前轮次结束后检查；不会终止正在运行的轮次，但达到任一上限后不会再排入自动轮次。
+手动 Resume 会创建新 cycle 并重置两个计数器。如果会话有排队交互输入或待处理 Plan/Goal 审批，
+派发会等待，不会抢在这些用户工作之前执行。重启会标记当前 run 为 interrupted，必须显式 `resume`，绝不自动重排。
 
 `plans.resolve` 仅接受经过身份验证、仍待处理的请求，其
 提案、会话、轮次、工具调用和版本匹配。 `approve` 需要
@@ -999,7 +1051,7 @@ JSON-RPC 错误携带一个数字 `code` 以及 `data.errorCode`，后者是来�
 | 1013 | PLUGIN_PERMISSION_DENIED | 插件缺少该调用所需的权限 |
 | 1014 | PLUGIN_NETWORK | 市场 download/catalog 拉取失败 |
 | 1015 | MCP_INVALID | 用户 MCP 服务器定义校验失败 |
-| 1015 | PLAN_* | 所有 Plan/Goal 检查点失败（`PLAN_APPROVAL_TIMEOUT`、`PLAN_APPROVAL_STALE`、`PLAN_APPROVAL_INTERRUPTED`、`PLAN_SESSION_NOT_FOUND`、`PLAN_WORKSPACE_REQUIRED`……）共用此槽位；由字符串码区分 |
+| 1015 | PLAN_* / GOAL_* | Plan 和 Goal 生命周期错误共用此槽位；由字符串错误码区分 |
 | 1016 | SKILL_INVALID | 用户技能文档校验失败 |
 | 1017 | SUBAGENT_INVALID | 用户子代理文档校验失败 |
 | 1018 | CAPABILITY_INVALID | Agent 能力 root/scope 设置校验失败 |

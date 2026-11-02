@@ -6,7 +6,7 @@
  * configure a provider, call a provider, or require network access.
  */
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { setTimeout as delay } from "node:timers/promises";
@@ -147,6 +147,12 @@ function delayedMarkerCommand(dialect, startedPath, latePath, delaySeconds, hold
   if (dialect === "powershell") return script;
   if (dialect === "cmd") return encodedPowerShellCommand(script);
   throw new Error(`unsupported shell dialect ${dialect}`);
+}
+
+async function waitPastDelayedMarker(startedPath, delaySeconds, graceMs = 1_000) {
+  const { mtimeMs } = await stat(startedPath);
+  const remainingMs = mtimeMs + delaySeconds * 1_000 + graceMs - Date.now();
+  if (remainingMs > 0) await delay(remainingMs);
 }
 
 function abortPowerShellScript(startedPath, latePath) {
@@ -348,6 +354,86 @@ async function scenario106(binary, tempRoot) {
     });
     await endTurn(ctx.host, secondTurn);
     return `first=${proposal1.id.slice(0, 8)} second=${proposal2.id.slice(0, 8)} missingMode=${missingModeCode} approval=ask`;
+  }, binary, tempRoot);
+}
+
+async function scenarioGoalLifecycle(binary, tempRoot) {
+  return withScenario("E2E-GOAL-lifecycle", async (ctx) => {
+    const session = await createSession(ctx.host, ctx.workspace, "Persistent Goal", "goal");
+    const turnId = await beginTurn(ctx.host, session.id);
+    const markdown = "# Persistent Goal\n\n## Acceptance criteria\n- verification passes\n";
+    const submitted = await ctx.host.call("plans.submit", {
+      sessionId: session.id,
+      turnId,
+      toolCallId: "e2e-goal-submit",
+      kind: "goal",
+      title: "Persistent Goal",
+      markdown,
+      question: "Approve the Goal?",
+    });
+    assert(submitted.proposal?.kind === "goal", shortJson(submitted));
+    const approved = await resolvePlan(ctx.host, submitted.proposal, "approve", "ask");
+    assert(approved.goal?.status === "active", shortJson(approved));
+    const first = approved.execution;
+    const firstClaim = await ctx.host.call("plans.claimExecution", { executionId: first.id });
+    const report = {
+      outcome: "continue",
+      summary: "Verification remains, so one more bounded round is required.",
+      criteria: [{
+        criterion: "verification passes",
+        status: "unmet",
+        evidence: ["The required verification command has not passed yet."],
+      }],
+    };
+    const recorded = await ctx.host.call("goals.report", {
+      sessionId: session.id,
+      proposalId: submitted.proposal.id,
+      executionId: firstClaim.execution.id,
+      turnId,
+      report,
+    });
+    assert(recorded.goal?.latestReport?.criteria?.[0]?.evidence?.length === 1, shortJson(recorded));
+    const finished = await ctx.host.call("plans.finishExecution", {
+      executionId: firstClaim.execution.id,
+      status: "completed",
+    });
+    assert(finished.goal?.status === "active", shortJson(finished));
+    assert(finished.goal?.roundInCycle === 2, shortJson(finished));
+    assert(finished.execution?.id !== first.id, shortJson(finished));
+    assert(finished.execution?.state === "queued", shortJson(finished));
+
+    const snapshot = await ctx.host.call("plans.pending", { sessionId: session.id });
+    assert(snapshot.goal?.proposalId === submitted.proposal.id, shortJson(snapshot));
+    assert(snapshot.goal?.latestReport?.criteria?.[0]?.status === "unmet", shortJson(snapshot));
+    const second = await ctx.host.call("plans.claimExecution", {
+      executionId: finished.execution.id,
+    });
+    const paused = await ctx.host.call("goals.control", {
+      sessionId: session.id,
+      proposalId: submitted.proposal.id,
+      action: "pause",
+    });
+    assert(paused.goal?.status === "paused", shortJson(paused));
+    assert(paused.execution === undefined, shortJson(paused));
+
+    const resumed = await ctx.host.call("goals.control", {
+      sessionId: session.id,
+      proposalId: submitted.proposal.id,
+      action: "resume",
+    });
+    assert(resumed.goal?.status === "active", shortJson(resumed));
+    assert(resumed.execution?.id !== second.execution.id, shortJson(resumed));
+    assert(resumed.execution?.state === "queued", shortJson(resumed));
+    const cleared = await ctx.host.call("goals.control", {
+      sessionId: session.id,
+      proposalId: submitted.proposal.id,
+      action: "clear",
+    });
+    assert(cleared.goal?.status === "cleared", shortJson(cleared));
+    const queue = await ctx.host.call("plans.queuedExecutions", { sessionId: session.id });
+    assert(queue.executions?.every((execution) => execution.id !== resumed.execution.id), shortJson(queue));
+    await endTurn(ctx.host, turnId);
+    return "report persisted; continuation created a distinct round; pause/resume/clear never replayed an execution";
   }, binary, tempRoot);
 }
 
@@ -865,15 +951,15 @@ async function scenario115(binary, tempRoot) {
         session.id,
         "e2e115-short",
         shell,
-        delayedMarkerCommand(shell.dialect, shortStarted, shortLate, 3),
-        { timeoutMs: 1_200 },
+        delayedMarkerCommand(shell.dialect, shortStarted, shortLate, 20),
+        { timeoutMs: 10_000 },
       ),
     );
     const shortElapsed = Date.now() - shortStart;
     assertToolFailure(shortResult, "TOOL_TIMEOUT");
     assert(existsSync(shortStarted), "short timeout command never started");
+    await waitPastDelayedMarker(shortStarted, 20);
     assert(!existsSync(shortLate), "short timeout left a delayed marker");
-    await delay(1_800);
     assert(!existsSync(shortLate), "short timeout descendant wrote after timeout");
 
     let longDetail = "";
@@ -998,6 +1084,7 @@ async function main() {
     await runScenario("E2E-PLAN-WORKSPACE", () => scenarioWorkspaceRequired(binary, tempRoot));
     await runScenario("E2E-105", () => scenario105(binary, tempRoot));
     await runScenario("E2E-106", () => scenario106(binary, tempRoot));
+    await runScenario("E2E-GOAL-lifecycle", () => scenarioGoalLifecycle(binary, tempRoot));
     await runScenario("E2E-PLAN-005", () => scenarioPlanSafePlugin(binary, tempRoot));
     await runScenario("E2E-107", () => scenario107(binary, tempRoot));
     await runScenario("E2E-108", () => scenario108(binary, tempRoot));

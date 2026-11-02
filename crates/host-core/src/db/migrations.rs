@@ -122,6 +122,23 @@ impl Database {
             execution_state,
         } in plan_work
         {
+            if let Some(execution_id) = execution_id.as_deref() {
+                if matches!(execution_state.as_deref(), Some("queued") | Some("running")) {
+                    tx.execute(
+                        "UPDATE goal_runs
+                         SET status = 'interrupted', updated_at = ?1
+                         WHERE execution_id = ?2 AND status IN ('queued', 'running')",
+                        params![now, execution_id],
+                    )?;
+                    tx.execute(
+                        "UPDATE goal_lifecycles
+                         SET status = 'interrupted', stop_reason = 'host_restart',
+                             updated_at = ?1, version = version + 1
+                         WHERE current_execution_id = ?2 AND status = 'active'",
+                        params![now, execution_id],
+                    )?;
+                }
+            }
             if status == "pending" {
                 crate::audit::append_tx(
                     &tx,

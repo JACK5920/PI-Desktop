@@ -93,6 +93,7 @@ import type {
   MessageAttachment,
   SessionMessageOrigin,
   PlanExecution,
+  GoalProgressReport,
   PlanProposal,
   PlanningState,
   Risk,
@@ -119,6 +120,7 @@ import {
   isToolsOutputParams,
   MAX_ASK_TOOL_QUESTION_CHARS,
   MAX_SUBAGENT_CONCURRENCY,
+  GOAL_MAX_ROUNDS_PER_CYCLE,
   normalizeAskToolOption,
   normalizeSubagentName,
   proposalKindForMode,
@@ -795,6 +797,7 @@ const SUBMIT_TOOL_NAMES: Record<ProposalKind, string> = {
   plan: "SubmitPlan",
   goal: "SubmitGoal",
 };
+const GOAL_REPORT_TOOL_NAME = "GoalReport";
 /**
  * Every mode transition must be the only call in its assistant message, so the
  * host commits one durable mode change per tool-call batch.
@@ -802,6 +805,7 @@ const SUBMIT_TOOL_NAMES: Record<ProposalKind, string> = {
 const MODE_TRANSITION_TOOL_NAMES = new Set([
   ...Object.values(ENTER_TOOL_NAMES),
   ...Object.values(SUBMIT_TOOL_NAMES),
+  GOAL_REPORT_TOOL_NAME,
 ]);
 
 function enterToolKind(name: string): ProposalKind | undefined {
@@ -1157,6 +1161,44 @@ function boundedText(value: string, maxChars: number): string {
   const headChars = Math.ceil(available / 2);
   const tailChars = Math.floor(available / 2);
   return `${text.slice(0, headChars)}${marker}${text.slice(-tailChars)}`;
+}
+
+function goalProgressReportFromUnknown(value: unknown): GoalProgressReport | null {
+  if (!isRecord(value)) return null;
+  const outcome = value.outcome;
+  const summary = value.summary;
+  const rawCriteria = value.criteria;
+  if (
+    (outcome !== "continue" && outcome !== "complete" && outcome !== "blocked") ||
+    typeof summary !== "string" || !summary.trim() || summary.length > 4_000 ||
+    !Array.isArray(rawCriteria) || rawCriteria.length === 0 || rawCriteria.length > 50
+  ) {
+    return null;
+  }
+  const criteria: GoalProgressReport["criteria"] = [];
+  for (const candidate of rawCriteria) {
+    if (!isRecord(candidate)) return null;
+    const criterion = candidate.criterion;
+    const status = candidate.status;
+    const evidence = candidate.evidence;
+    if (
+      typeof criterion !== "string" || !criterion.trim() || criterion.length > 1_000 ||
+      (status !== "met" && status !== "unmet") ||
+      !Array.isArray(evidence) || evidence.length === 0 || evidence.length > 10 ||
+      evidence.some((item) => typeof item !== "string" || !item.trim() || item.length > 2_000)
+    ) {
+      return null;
+    }
+    criteria.push({
+      criterion: criterion.trim(),
+      status,
+      evidence: evidence as string[],
+    });
+  }
+  if ((outcome === "complete") !== criteria.every((item) => item.status === "met")) {
+    return null;
+  }
+  return { outcome, summary: summary.trim(), criteria };
 }
 
 type CheckpointPersistResult = "persisted" | "oversized" | "failed";
@@ -1949,6 +1991,8 @@ export class DesktopAgentRuntime {
   private suppressSilentTurnRunEnd = false;
   /** Autonomous plan/goal execution: one progress-only continue (#43). */
   private autonomousExecution = false;
+  /** Set only during one host-approved Goal execution round. */
+  private activeGoalExecution?: PlanExecution;
   private pendingProgressTurnRerun = false;
   private progressTurnRerunAttempted = false;
   private progressTurnRerunInProgress = false;
@@ -2627,6 +2671,15 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
       (block) => block.type === "toolCall",
     );
     const transition = MODE_TRANSITION_TOOL_NAMES.has(context.toolCall.name);
+    if (
+      context.toolCall.name === GOAL_REPORT_TOOL_NAME &&
+      this.activeGoalExecution?.kind !== "goal"
+    ) {
+      return {
+        block: true,
+        reason: "GoalReport is available only during an approved Goal execution round.",
+      };
+    }
     const transitionInBatch = toolCalls.some((block) =>
       MODE_TRANSITION_TOOL_NAMES.has((block as { name?: string }).name ?? ""),
     );
@@ -4067,6 +4120,10 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
       this.mode === "agent"
         ? [this.buildEnterModeTool("plan"), this.buildEnterModeTool("goal")]
         : [this.buildSubmitTool(this.mode)];
+    const goalTools =
+      this.activeGoalExecution?.kind === "goal"
+        ? [this.buildGoalReportTool()]
+        : [];
     // Keep configured delegation declarations stable across mode changes.
     // Contract modes reject execution before handlers can spawn/control a
     // delegate; publishing a schema never grants delegation permission.
@@ -4093,6 +4150,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
       ...pluginTools,
       ...skillTools,
       ...modeTools,
+      ...goalTools,
       ...subagentTools,
       ...contextTools,
       ...extensionTools,
@@ -6052,6 +6110,100 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
         }
       }
     }
+  }
+
+  private buildGoalReportTool(): AgentTool {
+    return {
+      name: GOAL_REPORT_TOOL_NAME,
+      label: "Report goal progress",
+      description:
+        "Record one durable checkpoint for the currently approved Goal. Call this only after the work and verification for this execution round are finished. Mark a criterion met only with concrete evidence; choose complete only when every criterion is met, continue when verified work remains, or blocked when a contract boundary or external dependency prevents progress. This call ends the current round; the Host may schedule the next bounded round.",
+      parameters: Type.Object({
+        outcome: Type.Union([
+          Type.Literal("continue"),
+          Type.Literal("complete"),
+          Type.Literal("blocked"),
+        ]),
+        summary: Type.String({
+          minLength: 1,
+          maxLength: 4_000,
+          description: "Concise progress summary or the reason work is blocked.",
+        }),
+        criteria: Type.Array(
+          Type.Object({
+            criterion: Type.String({
+              minLength: 1,
+              maxLength: 1_000,
+              description: "One acceptance criterion from the approved Goal.",
+            }),
+            status: Type.Union([Type.Literal("met"), Type.Literal("unmet")]),
+            evidence: Type.Array(
+              Type.String({
+                minLength: 1,
+                maxLength: 2_000,
+                description: "Observed command output, test result, or artifact/path that supports this status.",
+              }),
+              { minItems: 1, maxItems: 10 },
+            ),
+          }),
+          { minItems: 1, maxItems: 50 },
+        ),
+      }),
+      executionMode: "sequential",
+      execute: async (_toolCallId, params) => {
+        const execution = this.activeGoalExecution;
+        const report = goalProgressReportFromUnknown(params);
+        if (!execution || execution.kind !== "goal") {
+          return {
+            content: [{ type: "text", text: "No approved Goal execution is active." }],
+            details: { errorCode: "GOAL_EXECUTION_STALE" },
+            isError: true,
+            terminate: true,
+          };
+        }
+        if (!report) {
+          return {
+            content: [{ type: "text", text: "The Goal progress report is invalid; every acceptance criterion needs a status and completed criteria need evidence." }],
+            details: { errorCode: "GOAL_REPORT_INVALID" },
+            isError: true,
+            terminate: true,
+          };
+        }
+        try {
+          await this.host.call("goals.report", {
+            sessionId: this.sessionId,
+            proposalId: execution.proposalId,
+            executionId: execution.id,
+            turnId: this.turnId,
+            report,
+          });
+        } catch (error) {
+          const errorCode =
+            (error as { data?: { errorCode?: string } })?.data?.errorCode ??
+            "GOAL_REPORT_STALE";
+          return {
+            content: [{ type: "text", text: `The Goal checkpoint was not saved (${errorCode}); this round will stop for review.` }],
+            details: { errorCode },
+            isError: true,
+            terminate: true,
+          };
+        }
+        const criteria = report.criteria
+          .map((item) => {
+            const proof = item.evidence.map((entry) => `  - ${entry}`).join("\n");
+            return `- [${item.status}] ${item.criterion}${proof ? `\n${proof}` : ""}`;
+          })
+          .join("\n");
+        return {
+          content: [{
+            type: "text",
+            text: `Goal checkpoint saved (${report.outcome}). ${report.summary}\n${criteria}`,
+          }],
+          details: { goalReport: report },
+          terminate: true,
+        };
+      },
+    };
   }
 
   private buildSubmitTool(kind: ProposalKind): AgentTool {
@@ -9011,9 +9163,18 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
         errorCode: "TURN_NOT_FOUND",
       });
     }
-    return this.trackTurnOperation(durableTurnId, () =>
-      this.executeApprovedPlanTurn(execution, durableTurnId),
-    );
+    return this.trackTurnOperation(durableTurnId, async () => {
+      this.activeGoalExecution = execution.kind === "goal" ? execution : undefined;
+      this.rebuildToolCatalog();
+      this.setAgentTools(this.activeTools());
+      try {
+        return await this.executeApprovedPlanTurn(execution, durableTurnId);
+      } finally {
+        this.activeGoalExecution = undefined;
+        this.rebuildToolCatalog();
+        this.setAgentTools(this.activeTools());
+      }
+    });
   }
 
   private async executeApprovedPlanTurn(
@@ -9038,6 +9199,10 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
     this.currentAssistant = undefined;
     this.requestStartedAt = Date.now();
     this.setMode("agent");
+    // `setMode` is a no-op when the reused runtime is already in Agent mode;
+    // refresh because the round-scoped GoalReport tool was installed above.
+    this.rebuildToolCatalog();
+    this.setAgentTools(this.activeTools());
     this.autonomousExecution = true;
 
     const kind = execution.kind === "goal" ? "goal" : "plan";
@@ -9054,7 +9219,8 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
             "</approved-goal-markdown>",
             "Choose your own approach with the normal Agent tools. Then verify every acceptance criterion yourself, running the checks the contract names rather than assuming they pass.",
             "Keep working while a criterion is still unmet and you have an untried approach. Stop early only if a boundary in the contract blocks you or a criterion cannot be verified; say which one and why.",
-            "Finish with a report that walks the acceptance criteria one by one, each marked met or unmet with the evidence you observed.",
+            `This is one bounded execution round (up to ${GOAL_MAX_ROUNDS_PER_CYCLE} rounds per cycle, including this one). At the end of this round, call GoalReport exactly once with every acceptance criterion, its met/unmet status, and concrete observed evidence.`,
+            "Choose complete only when every criterion is met and supported by evidence; choose continue when work remains; choose blocked only when a contract boundary or external dependency prevents progress. The Host records each report and automatically starts the next round only after this turn finishes.",
           ].join("\n")
         : [
             "Execute the approved implementation plan now.",

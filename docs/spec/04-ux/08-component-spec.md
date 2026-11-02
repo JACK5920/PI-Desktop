@@ -2975,6 +2975,36 @@ present the interrupted terminal snapshot after restart.
 - Resolution does not navigate to another session or take focus from a
   different session.
 
+## 10B. GoalLifecycleBar
+
+### 10B.1 Purpose and content
+
+The Composer shows one session-scoped `GoalLifecycleBar` for each non-cleared
+Goal. It presents the contract title, active/paused/completed/blocked/
+interrupted status, cycle and bounded-round progress, and an expandable latest
+  Agent progress report. It also shows tokens and elapsed time used against
+  the current cycle limits (250,000 tokens and 60 minutes by default). Each criterion shows its reported status and cited
+evidence as text. The UI labels the report as Agent-reported; it does not imply
+that Host independently ran or certified the cited checks.
+
+### 10B.2 Actions
+
+| Lifecycle | Actions |
+|---|---|
+| Active | Pause, Clear |
+| Paused / Blocked / Interrupted | Resume, Clear |
+| Completed | Clear |
+| Cleared | No bar |
+
+Pause and clear stop an active execution before the UI accepts the resulting
+state. Resume asks Host to create a new execution ID; it never resubmits an old
+one. Clear requires confirmation and removes the Goal from active tracking while
+retaining reports, run history, contract, and artifact. All labels, confirmation
+copy, status, and evidence-status text are localized. The bar is a named
+`region`; actions are shared buttons, and expanded evidence remains ordinary
+escaped text. An active round may finish beyond a cycle budget; reaching a
+budget prevents another automatic round rather than killing current work.
+
 ---
 
 ## 11. Composer

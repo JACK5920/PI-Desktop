@@ -9,6 +9,7 @@ const localOnly = new Set<string>([
   IPC.invoke.sessionGetScratchPath, IPC.invoke.sessionOpenScratchPath,
   IPC.invoke.agentSteer, IPC.invoke.agentQueuePush, IPC.invoke.agentQueueList,
   IPC.invoke.agentStopSubagents, IPC.invoke.workspaceReviewRollback,
+  IPC.invoke.goalControl,
   IPC.invoke.extensionsCommandRun, IPC.invoke.browserNavigate,
   IPC.invoke.fsResolveRef,
 ]);

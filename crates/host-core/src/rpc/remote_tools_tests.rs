@@ -138,13 +138,23 @@ async fn remote_read_dispatch_is_local_approval_then_relay_never_local_runner() 
     let pending = tokio::spawn(async move {
         handle_request(pending_state,"tools.execute",json!({"sessionId":pending_id,"toolCallId":"read-a","toolName":"Read","args":{"path":"README.md"},"mode":"agent"}),pending_tx).await
     });
-    let request: Value = serde_json::from_str(
+    let permission: Value = serde_json::from_str(
         &tokio::time::timeout(Duration::from_secs(2), rx.recv())
             .await
             .unwrap()
             .unwrap(),
     )
     .unwrap();
+    assert_eq!(permission["method"], "permissions.request");
+    handle_request(
+        state.clone(),
+        "permissions.resolve",
+        json!({"requestId":permission["params"]["requestId"],"decision":"allow-once"}),
+        tx.clone(),
+    )
+    .await
+    .unwrap();
+    let request: Value = serde_json::from_str(&rx.recv().await.unwrap()).unwrap();
     assert_eq!(request["method"], "tools.remoteExecute");
     assert_eq!(request["params"]["remoteWorkspace"]["path"], "/srv/work");
     handle_request(state.clone(),"tools.remoteComplete",json!({"requestId":request["params"]["requestId"],"result":{"ok":true,"content":{"text":"Remote content"}}}),tx.clone()).await.unwrap();
@@ -186,13 +196,23 @@ async fn denied_remote_write_and_cancelled_read_never_run_locally() {
     let read = tokio::spawn(async move {
         handle_request(pending_state,"tools.execute",json!({"sessionId":pending_id,"toolCallId":"read-b","toolName":"Read","args":{"path":"a.txt"},"mode":"agent"}),pending_tx).await
     });
-    let request: Value = serde_json::from_str(
+    let permission: Value = serde_json::from_str(
         &tokio::time::timeout(Duration::from_secs(2), rx.recv())
             .await
             .unwrap()
             .unwrap(),
     )
     .unwrap();
+    assert_eq!(permission["method"], "permissions.request");
+    handle_request(
+        state.clone(),
+        "permissions.resolve",
+        json!({"requestId":permission["params"]["requestId"],"decision":"allow-once"}),
+        tx.clone(),
+    )
+    .await
+    .unwrap();
+    let request: Value = serde_json::from_str(&rx.recv().await.unwrap()).unwrap();
     assert_eq!(request["method"], "tools.remoteExecute");
     handle_request(
         state.clone(),

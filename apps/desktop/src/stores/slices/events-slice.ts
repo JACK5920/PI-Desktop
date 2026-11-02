@@ -40,6 +40,7 @@ import {
   isPendingPlan,
   mergePlanCheckpoint,
 } from "../../lib/plan-mode-state";
+import { newerGoalLifecycle } from "../../lib/goal-lifecycle-state";
 import { formatToolValue } from "../../lib/tool-display";
 import type { AppState } from "../app-state";
 import type { SessionRuntime } from "../runtime/session-runtime";
@@ -186,6 +187,17 @@ export function createEventsSlice({
           planCheckpoints: checkpoint
             ? { ...state.planCheckpoints, [event.sessionId]: checkpoint }
             : state.planCheckpoints,
+          ...(event.goal
+            ? {
+                goalLifecycles: {
+                  ...state.goalLifecycles,
+                  [event.sessionId]: newerGoalLifecycle(
+                    state.goalLifecycles[event.sessionId],
+                    event.goal,
+                  ),
+                },
+              }
+            : {}),
           pendingPlans,
           runningSessions: planExecutionRunChanged
             ? { ...state.runningSessions, [event.sessionId]: executionActive }

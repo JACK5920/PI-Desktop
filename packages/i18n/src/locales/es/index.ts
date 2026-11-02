@@ -794,6 +794,23 @@ export const es = {
     "untitled": "Objetivo sin título",
     "openArtifact": "Objetivo abierto",
     "openArtifactLabel": "Artefacto de objetivo abierto {{path}}",
+    "lifecycle": {
+      "region": "Progreso del objetivo",
+      "status": { "active": "En curso", "paused": "En pausa", "completed": "Completado", "blocked": "Bloqueado", "interrupted": "Interrumpido", "cleared": "Borrado" },
+      "round": "Ciclo {{cycle}} · ronda automática {{round}}/{{max}}",
+      "roundLimit": "En pausa tras {{max}} rondas de este ciclo. Reanuda para iniciar otro ciclo.",
+      "budget": "Presupuesto del ciclo: {{tokens}} / {{maxTokens}} tokens · {{elapsed}} / {{maxDuration}}",
+      "budgetLimit": "En pausa al alcanzar el presupuesto de tiempo o tokens de este ciclo. Reanuda para iniciar otro ciclo.",
+      "pausedByUser": "Pausado por ti.",
+      "restartInterrupted": "Interrumpido al reiniciarse el Host. Reanuda manualmente para continuar.",
+      "interrupted": "La ejecución se detuvo sin informar que terminó. Revisa el estado y reanuda manualmente.",
+      "blockedFallback": "El progreso está bloqueado.",
+      "latestReport": "Último informe de progreso del agente",
+      "criteria": { "met": "El agente informa que se cumple", "unmet": "Aún no cumplido" },
+      "pause": "Pausar", "pausing": "Pausando…", "resume": "Reanudar", "resuming": "Reanudando…",
+      "clear": "Borrar", "clearing": "Borrando…",
+      "clearConfirm": "¿Quitar este objetivo del seguimiento activo y detener cualquier ejecución activa? Se conservarán los informes guardados, el contrato inmutable y el artefacto."
+    },
   },
   "onboarding": {
     "title": "Comenzar",

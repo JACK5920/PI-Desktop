@@ -27,7 +27,19 @@ Agent / queued
   -- dispatcher starts --> Agent / running
 Agent / running
   -- complete | fail | abort --> Agent / inactive
+
+Goal 生命周期（Host 所有，与操作模式及审批分开）：
+  approved --> active / queued --> active / running
+  active + GoalReport(continue) --> 下一有界轮次（每 cycle 最多 8 轮）
+  active + GoalReport(complete) --> completed
+  active + GoalReport(blocked) | 缺少报告 --> blocked
+  active -- 用户暂停 --> paused
+  paused | blocked | interrupted -- 用户恢复 --> active（新 execution ID）
+  active -- Host 重启 --> interrupted（绝不自动重放）
+  active | paused | blocked | interrupted | completed -- 用户清除 --> cleared
 ```
+
+若会话存在排队交互输入或待处理的 Plan/Goal 审批，自动续轮的派发必须等待，不能抢在用户工作之前执行。
 
 两种合约模式都保留了权限模式选择器。他们的 `Bash` 政策是
 `ask` 或
@@ -214,6 +226,8 @@ accept_prompt
 11.到期使用`PLAN_APPROVAL_TIMEOUT`；启动中断、shell故障、
     进程恢复失败关闭，并且重新启动不会重放挂起，
     排队或正在运行的工作
-12. Goal 执行在结束前报告每个接受标准的结果
-    转牌圈，并且 scheduled/unattended Goal 跑路被拒绝
-    `PLAN_REQUIRES_INTERACTIVE_SESSION` 与 Plan 完全相同
+12. Goal 通过 `GoalReport` 在结束前逐条报告每个验收标准；证据由 Agent 报告，并非 Host 认证。
+    只有 `continue` 会自动续跑，每 cycle 最多八个执行轮次（含首次获批轮次）。暂停、阻塞或重启中断后的 Goal
+    必须由用户 Resume，并创建新的 execution ID；启动时绝不重放。清除会隐藏当前跟踪，
+    但保留历史报告和不可变合约。scheduled/unattended Goal 仍与 Plan 一样以
+    `PLAN_REQUIRES_INTERACTIVE_SESSION` 拒绝。

@@ -37,7 +37,8 @@ pub(super) fn terminate_tree(root_pid: u32) -> Result<(), String> {
     let snapshot = Snapshot::capture()?;
 
     let mut errors: Vec<String> = Vec::new();
-    for pid in snapshot.descendants_deepest_first(root_pid) {
+    let descendants = snapshot.descendants_deepest_first(root_pid);
+    for pid in descendants {
         if let Err(error) = terminate_member(pid, &watermark) {
             errors.push(error);
         }
@@ -223,14 +224,16 @@ impl ProcessTimes {
         })
     }
 
-    /// Current wall clock in the same FILETIME units as process creation times.
+    /// High-resolution current wall clock in the same FILETIME units as
+    /// process creation times. The coarse API can lag process creation times
+    /// by a few milliseconds and incorrectly fence a live descendant.
     fn now() -> Self {
         let mut now = FILETIME {
             dwLowDateTime: 0,
             dwHighDateTime: 0,
         };
         unsafe {
-            windows_sys::Win32::System::SystemInformation::GetSystemTimeAsFileTime(&mut now);
+            windows_sys::Win32::System::SystemInformation::GetSystemTimePreciseAsFileTime(&mut now);
         }
         Self {
             created: (u64::from(now.dwHighDateTime) << 32) | u64::from(now.dwLowDateTime),

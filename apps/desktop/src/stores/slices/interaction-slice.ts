@@ -1,6 +1,7 @@
 import i18n from "i18next";
 import type {
   AskToolResolution,
+  GoalControlAction,
   PlanResolveRequest,
 } from "@pi-desktop/shared";
 import { api } from "../../lib/api";
@@ -49,10 +50,15 @@ export function createInteractionSlice({
   | "setAskDraft"
   | "dropAskDraft"
   | "resolvePlan"
+  | "controlGoal"
   | "showToast"
   | "dismissToast"
   | "dismissAssistantErrorMessage"
 > {
+  const goalControlRequests = new Map<
+    string,
+    { action: GoalControlAction; promise: Promise<void> }
+  >();
   return {
     dismissAssistantErrorMessage: (messageId) => {
       if (!messageId) return;
@@ -197,6 +203,9 @@ export function createInteractionSlice({
             proposalId: result.proposal.id,
             action: result.action,
             targetPermissionMode: result.targetPermissionMode,
+            executionId: result.execution?.id,
+            executionState: result.execution?.state,
+            goal: result.goal,
           });
           return result;
         } catch (error) {
@@ -218,6 +227,40 @@ export function createInteractionSlice({
           request
         ) {
           interactionRuntime.planResolutionRequests.delete(resolution.proposalId);
+        }
+      }
+    },
+
+    controlGoal: async (sessionId: string, proposalId: string, action: GoalControlAction) => {
+      const existing = goalControlRequests.get(sessionId);
+      if (existing?.action === action) return existing.promise;
+      if (existing) {
+        // A different user action must not be mistaken for the in-flight one.
+        // Serialize it after the current Host transition so pause → clear (or
+        // resume → clear) has an observable, deterministic order.
+        return existing.promise
+          .catch(() => undefined)
+          .then(() => get().controlGoal(sessionId, proposalId, action));
+      }
+      const request = (async () => {
+        const result = await api.controlGoal({ sessionId, proposalId, action });
+        get().handlePlansChanged({
+          sessionId,
+          state: "inactive",
+          kind: "goal",
+          proposalId: result.goal.proposalId,
+          executionId: result.execution?.id,
+          executionState: result.execution?.state,
+          goal: result.goal,
+        });
+      })();
+      const entry = { action, promise: request };
+      goalControlRequests.set(sessionId, entry);
+      try {
+        await request;
+      } finally {
+        if (goalControlRequests.get(sessionId) === entry) {
+          goalControlRequests.delete(sessionId);
         }
       }
     },

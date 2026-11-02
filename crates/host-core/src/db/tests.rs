@@ -641,6 +641,8 @@ fn fresh_open_creates_latest_schema() {
         "secrets_meta",
         "audit_log",
         "plan_approvals",
+        "goal_lifecycles",
+        "goal_runs",
         "session_import_origins",
         "session_todo",
     ] {
@@ -874,7 +876,11 @@ fn migrates_v7_chat_modes_settings_and_scheduled_values_to_plan() {
         // Simulate a real v7 file: the approval table did not exist until
         // the migration itself creates the canonical table and indexes.
         db.conn()
-            .execute_batch("DROP TABLE plan_approvals;")
+            .execute_batch(
+                "DROP TABLE goal_runs;
+                 DROP TABLE goal_lifecycles;
+                 DROP TABLE plan_approvals;",
+            )
             .unwrap();
         db.conn().pragma_update(None, "user_version", 7).unwrap();
     }
@@ -973,7 +979,11 @@ fn migrates_v8_approvals_without_expiring_new_work() {
             )
             .unwrap();
         db.conn()
-            .execute_batch("DROP TABLE plan_approvals;")
+            .execute_batch(
+                "DROP TABLE goal_runs;
+                 DROP TABLE goal_lifecycles;
+                 DROP TABLE plan_approvals;",
+            )
             .unwrap();
         db.kv_set(
             "app",

@@ -205,7 +205,6 @@ impl ProcessOwnership {
         } else {
             None
         };
-
         // When a shell is spawned on Windows, child processes created by the
         // shell (and their descendants) might escape the Job Object if they
         // were spawned before or concurrently with AssignProcessToJobObject.

@@ -162,9 +162,10 @@ fn plain_bad_rows_and_torn_utf8_remain_tolerated_before_append() {
 }
 
 #[test]
-fn owned_appends_and_tail_updates_reuse_a_single_full_scan() {
+fn mutations_reuse_only_reliable_generation_proofs() {
     let dir = tempfile::tempdir().unwrap();
     let path = seed_transcript(dir.path());
+    let cacheable = binary_integrity::can_cache_file(&path).unwrap();
     // Simulate the first mutation in a new Host process.
     binary_integrity::invalidate(&path);
     append_message(dir.path(), "s", "old", &image_record()).unwrap();
@@ -176,11 +177,18 @@ fn owned_appends_and_tail_updates_reuse_a_single_full_scan() {
         record.meta = Some(json!({"settled":true}));
         assert!(update_message(dir.path(), "s", &record).unwrap());
     }
-    assert_eq!(
-        binary_integrity::scan_count(&path),
-        1,
-        "normal mutations must not decode the growing history again"
-    );
+    let scans = binary_integrity::scan_count(&path);
+    if cacheable {
+        assert_eq!(
+            scans, 1,
+            "normal mutations must not decode the growing history again"
+        );
+    } else {
+        assert!(
+            scans > 1,
+            "a filesystem without a reliable change token must rescan before mutations"
+        );
+    }
 }
 
 #[test]

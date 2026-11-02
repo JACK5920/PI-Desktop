@@ -151,6 +151,9 @@ impl PlanManager {
         }
         let now = now_ms();
         let tx = db.conn().unchecked_transaction()?;
+        if kind == KIND_GOAL && super::goals::has_open_goal_tx(&tx, session_id)? {
+            return Err(plan_error("GOAL_ALREADY_ACTIVE"));
+        }
         let changed = tx
             .prepare_cached(
                 "UPDATE sessions SET mode = ?4, updated_at = ?1
@@ -209,6 +212,9 @@ impl PlanManager {
         };
         if markdown.len() > PLAN_MAX_MARKDOWN_BYTES {
             return Err(plan_error("PLAN_MARKDOWN_TOO_LARGE"));
+        }
+        if kind == KIND_GOAL && super::goals::has_open_goal(db, session_id)? {
+            return Err(plan_error("GOAL_ALREADY_ACTIVE"));
         }
         expire_pending_approvals(db)?;
         // Agent mode has no contract to submit; the other contract mode does,
@@ -418,6 +424,9 @@ impl PlanManager {
         let execution_id = (action == "approve").then(|| Uuid::new_v4().to_string());
         let tx = db.conn().unchecked_transaction()?;
         if action == "approve" {
+            if kind == KIND_GOAL && super::goals::has_open_goal_tx(&tx, session_id)? {
+                return Err(plan_error("GOAL_ALREADY_ACTIVE"));
+            }
             let active_execution: bool = tx.query_row(
                 "SELECT EXISTS(
                  SELECT 1 FROM plan_approvals
@@ -467,6 +476,17 @@ impl PlanManager {
             ])?;
         if changed != 1 {
             return Err(plan_error("PLAN_APPROVAL_STALE"));
+        }
+        if action == "approve" && kind == KIND_GOAL {
+            super::goals::create_goal_tx(
+                &tx,
+                proposal_id,
+                session_id,
+                execution_id
+                    .as_deref()
+                    .ok_or_else(|| plan_error("PLAN_EXECUTION_NOT_FOUND"))?,
+                now,
+            )?;
         }
         audit::append_tx(
             &tx,

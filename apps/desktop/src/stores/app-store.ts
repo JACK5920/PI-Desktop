@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type {
   AppSettings,
+  GoalLifecycle,
   ModelInfo,
   PlanningState,
 } from "@pi-desktop/shared";
@@ -10,6 +11,7 @@ import {
   PROTOCOL_VERSION,
 } from "@pi-desktop/shared";
 import { api } from "../lib/api";
+import { mergeGoalLifecycleSnapshots } from "../lib/goal-lifecycle-state";
 import { rememberProject } from "../lib/recent-projects";
 import {
   RETAINED_SESSION_PANE_LIMIT,
@@ -356,12 +358,19 @@ export const useAppStore = create<AppState>((set, get) => {
       const planningStates: Record<string, PlanningState> = Object.fromEntries(
         hydratedSessions.map((session) => [
           session.id,
-          session.mode === "plan" ? ("planning" as const) : ("inactive" as const),
+          session.mode === "plan" || session.mode === "goal"
+            ? ("planning" as const)
+            : ("inactive" as const),
         ]),
       );
       for (const proposal of activePendingPlans) {
         planningStates[proposal.sessionId] = "awaiting_approval";
       }
+      const goalLifecycles: Record<string, GoalLifecycle> = Object.fromEntries(
+        (pendingPlansResult.goals ?? [])
+          .filter((goal) => goal.status !== "cleared")
+          .map((goal) => [goal.sessionId, goal]),
+      );
       if (generation !== bootstrapGeneration) return;
       set((state) => ({
         ready: true,
@@ -384,6 +393,10 @@ export const useAppStore = create<AppState>((set, get) => {
         plugins: plugins.plugins,
         planningStates,
         pendingPlans,
+        goalLifecycles: mergeGoalLifecycleSnapshots(
+          goalLifecycles,
+          state.goalLifecycles,
+        ),
         planCheckpoints: latestPlanCheckpoints,
         notifications: notifications.notifications,
         unreadNotificationCount: notifications.unreadCount,

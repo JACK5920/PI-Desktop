@@ -1141,6 +1141,18 @@ Agent calls a permission-gated tool (including Plan/Goal Bash under Ask or Accep
    response renders a failed-closed state. A host restart interrupts pending,
    queued, and running work without replay; an already-approved interruption
    keeps the session in Agent.
+7. An approved Goal shows its durable lifecycle in the originating Composer.
+   Each completed execution round reports all criteria through `GoalReport`;
+   the Host saves the Agent-reported evidence and automatically queues another
+   round only for `continue`, up to eight execution rounds per cycle,
+   including the initial approved round, and subject to 250,000 reported tokens
+   and 60 minutes of elapsed wall-clock time per cycle. A current round may
+   exceed either budget; reaching a cap prevents further automatic continuation.
+   Pause stops the
+   current run, Resume starts a fresh execution after pause/block/restart, and
+   Clear removes active tracking while retaining the audit/history and
+   immutable artifact. After restart the bar says the run was interrupted and
+   requires a manual Resume; boot never dispatches it automatically.
 
 The approval card is session-scoped. Background sessions may retain a pending
 approval or queued/running execution state in `plan_approvals`, but opening

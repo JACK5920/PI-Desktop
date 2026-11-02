@@ -593,11 +593,13 @@ Host execution baseline:
   process survives `tools.abort` and `agent.abort`. The host owns the process
   tree, reports it through the composer's shared container, and stops it on
   request or on app shutdown. Each stream keeps its last 256KB.
-- On Windows, descendant cleanup samples the current FILETIME before the
-  process snapshot. A process created after Host startup but before that
-  snapshot remains eligible for cleanup; Host creation time is not a snapshot
-  watermark. Recycled PID, handle identity, child-first ordering and observable
-  cleanup-error safeguards remain.
+- On Windows, descendant cleanup samples the high-resolution current FILETIME
+  just before the process snapshot. A process created after Host startup but
+  before that snapshot remains eligible for cleanup; Host creation time is not
+  a snapshot watermark. The precise clock avoids excluding a process whose
+  creation time is ahead of the lower-resolution system-time sample. Recycled
+  PID, handle identity, child-first ordering and observable cleanup-error
+  safeguards remain.
 - **Background tasks belong to the session that started them.** The session id is
   fixed at spawn and never changes: switching, renaming, archiving, or restoring
   a session does not re-home its tasks. A session runs at most **10** concurrent

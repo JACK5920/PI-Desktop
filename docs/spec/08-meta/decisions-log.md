@@ -8101,3 +8101,20 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
   check `pnpm test:e2e:radial-menu`, and capture scenes `pi-radial` /
   `pi-radial-dark`. See `04-ux/09-interaction-patterns.md` §1.11 and
   E2E-CHAT-radial-background-menu.
+
+## 2026-11-02 — Persisted, bounded, manually resumable Goal lifecycle (D679)
+
+- Schema v28 adds Host-owned `goal_lifecycles` and `goal_runs`, separate from
+  the immutable Plan/Goal approval contract.
+- Each approved Goal execution records one scoped `GoalReport`, including
+  criterion-level status and Agent-reported evidence. Each cycle is capped at
+  eight rounds, 250,000 reported tokens, and 60 minutes of wall-clock time.
+  The current round is allowed to settle; reaching a cap prevents another
+  automatic round. Pause, block, missing report, restart, or any cycle cap
+  stops automatic continuation.
+- Resume always creates a new execution ID and cycle, resetting the cycle
+  budgets. Restart marks an active Goal interrupted and never replays it;
+  Clear removes it from current tracking while retaining reports, run history,
+  and artifacts.
+- Protocol remains v11 with Host `goals.report` / `goals.control`, Electron
+  IPC, and Composer lifecycle controls. See ADR 0338.

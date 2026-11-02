@@ -92,7 +92,14 @@ export async function startPiHost(config: PiHostConfig, options: { log?: HostLog
     queueStore: createHostQueueStore(getHost),
     localApprovalLifetimeMs: APPROVAL_REQUEST_TIMEOUT_MS,
   });
-  const plans = new PlanExecutionDispatcher({ getHost, getSidecar, launch, runtime, log });
+  const plans = new PlanExecutionDispatcher({
+    getHost,
+    getSidecar,
+    launch,
+    runtime,
+    hasQueuedInput: (sessionId) => agentHost.queueEntries(sessionId).length > 0,
+    log,
+  });
 
   // Every runtime event feeds the module; a settled turn closes it there too.
   const abortingSessions = new Set<string>();

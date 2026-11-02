@@ -794,6 +794,23 @@ export const fr = {
     "untitled": "Objectif sans titre",
     "openArtifact": "Objectif ouvert",
     "openArtifactLabel": "Artefact d'objectif ouvert {{path}}",
+    "lifecycle": {
+      "region": "Progression de l'objectif",
+      "status": { "active": "En cours", "paused": "En pause", "completed": "Terminé", "blocked": "Bloqué", "interrupted": "Interrompu", "cleared": "Effacé" },
+      "round": "Cycle {{cycle}} · tour automatique {{round}}/{{max}}",
+      "roundLimit": "En pause après {{max}} tours de ce cycle. Reprenez pour démarrer un nouveau cycle.",
+      "budget": "Budget du cycle : {{tokens}} / {{maxTokens}} jetons · {{elapsed}} / {{maxDuration}}",
+      "budgetLimit": "En pause après avoir atteint le budget temps ou jetons de ce cycle. Reprenez pour démarrer un nouveau cycle.",
+      "pausedByUser": "Mis en pause par vous.",
+      "restartInterrupted": "Interrompu lors du redémarrage de l'hôte. Reprenez manuellement pour continuer.",
+      "interrupted": "Cette exécution s'est arrêtée sans signaler sa fin. Vérifiez puis reprenez manuellement.",
+      "blockedFallback": "La progression est bloquée.",
+      "latestReport": "Dernier rapport de progression de l'agent",
+      "criteria": { "met": "Déclaré satisfait par l'agent", "unmet": "Pas encore satisfait" },
+      "pause": "Mettre en pause", "pausing": "Mise en pause…", "resume": "Reprendre", "resuming": "Reprise…",
+      "clear": "Effacer", "clearing": "Effacement…",
+      "clearConfirm": "Retirer cet objectif du suivi actif et arrêter toute exécution active ? Les rapports enregistrés, le contrat immuable et son artefact seront conservés."
+    },
   },
   "onboarding": {
     "title": "Commencer",
