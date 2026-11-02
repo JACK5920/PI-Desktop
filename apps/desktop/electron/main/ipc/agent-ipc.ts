@@ -1,5 +1,5 @@
 import { expandMcpInvocation } from "../composer-mcp";
-import { IPC, ErrorCodes, compactionRecordId, findSkillMentions, isGlobalPermissionMode, isRpcTimeoutError, type AgentEventEnvelope, type AgentPromptRequest, type AgentSteerRequest, type UiMessage, type AgentQueuePushRequest, type AgentStopRequest, type AgentStopSubagentsRequest, type AskToolResolution, type GlobalPermissionMode, type MessageUsage, type PendingInteractiveRequests, type PlanExecutionFinishStatus, type PlanResolutionResult, type PlanResolveRequest, type VoiceOrigin } from "@pi-desktop/shared";
+import { IPC, ErrorCodes, compactionRecordId, findSkillMentions, isGlobalPermissionMode, isRpcTimeoutError, type AgentEventEnvelope, type AgentPromptRequest, type AgentSteerRequest, type UiMessage, type AgentQueuePushRequest, type AgentStopRequest, type AgentStopSubagentsRequest, type AskToolResolution, type GlobalPermissionMode, type MessageUsage, type PendingInteractiveRequests, type PlanExecutionFinishStatus, type PlanResolutionResult, type PlanResolveRequest, type GoalControlRequest, type GoalControlResult, type VoiceOrigin } from "@pi-desktop/shared";
 import type { FinishTurn } from "../runtime/plans";
 import { expandSlashInvocation, visionFromModelConfig, type ComposerTemplate } from "@pi-desktop/agent-runtime";
 import { appendPromptFallbackPaths, durableUserMessageId, preparePromptAttachments, type PreparedPromptAttachment } from "../prompt-attachments";
@@ -877,6 +877,55 @@ export function registerAgentIpc({
       } else {
         void dispatchExecutionForProposal(proposalId);
       }
+    }
+    return result;
+  });
+
+  handle(IPC.invoke.goalControl, async (request: GoalControlRequest) => {
+    const sessionId = String(request?.sessionId ?? "").trim();
+    if (!sessionId) throw new Error("sessionId required");
+    const proposalId = String(request?.proposalId ?? "").trim();
+    if (!proposalId) throw new Error("proposalId required");
+    rejectNativeAgentOperation(sessionId);
+    if (!(["pause", "resume", "clear"] as const).includes(request?.action)) {
+      throw Object.assign(new Error("invalid goal action"), {
+        errorCode: ErrorCodes.GOAL_ACTION_INVALID,
+      });
+    }
+    if (!host) throw new Error("host unavailable");
+    const releaseSessionOperation = await acquireSessionOperation(sessionId);
+    let result: GoalControlResult;
+    try {
+      result = await host.call<GoalControlResult>("goals.control", {
+        sessionId,
+        proposalId,
+        action: request.action,
+      });
+      if (request.action !== "resume") {
+        const turnId = activeTurns.get(sessionId);
+        const executionId = approvedExecutionIdsBySession.get(sessionId);
+        if (turnId && executionId && sidecar) {
+          agentHostBridge?.markAborting(sessionId);
+          lockAbortReason(sessionId, turnId);
+          agentExtensions.cancelPrompts(sessionId);
+          cancelSessionTools(sessionId, "Goal execution was paused or cleared");
+          try {
+            await sidecar.call("agent.abort", { sessionId, turnId });
+          } finally {
+            await finishTurn(sessionId, "aborted", "TURN_ABORTED", { turnId });
+            await finishApprovedExecution(
+              executionId,
+              "interrupted",
+              "PLAN_EXECUTION_INTERRUPTED",
+            );
+          }
+        }
+      }
+    } finally {
+      releaseSessionOperation?.();
+    }
+    if (request.action === "resume" && result.execution) {
+      void dispatchApprovedPlan(result.execution);
     }
     return result;
   });

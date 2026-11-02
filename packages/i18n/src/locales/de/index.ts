@@ -794,6 +794,23 @@ export const de = {
     "untitled": "Ziel ohne Titel",
     "openArtifact": "Ziel öffnen",
     "openArtifactLabel": "Zielartefakt öffnen {{path}}",
+    "lifecycle": {
+      "region": "Zielfortschritt",
+      "status": { "active": "In Bearbeitung", "paused": "Pausiert", "completed": "Abgeschlossen", "blocked": "Blockiert", "interrupted": "Unterbrochen", "cleared": "Zurückgesetzt" },
+      "round": "Zyklus {{cycle}} · automatischer Durchlauf {{round}}/{{max}}",
+      "roundLimit": "Nach {{max}} Durchläufen in diesem Zyklus pausiert. Fortsetzen, um einen neuen Zyklus zu starten.",
+      "budget": "Zyklusbudget: {{tokens}} / {{maxTokens}} Token · {{elapsed}} / {{maxDuration}}",
+      "budgetLimit": "Nach Erreichen des Zeit- oder Tokenbudgets dieses Zyklus pausiert. Fortsetzen startet einen neuen Zyklus.",
+      "pausedByUser": "Von dir pausiert.",
+      "restartInterrupted": "Beim Neustart des Hosts unterbrochen. Zum Fortsetzen manuell erneut starten.",
+      "interrupted": "Die Ausführung endete ohne Abschlussbericht. Prüfe den Stand und setze manuell fort.",
+      "blockedFallback": "Der Fortschritt ist blockiert.",
+      "latestReport": "Letzter Fortschrittsbericht des Agents",
+      "criteria": { "met": "Laut Agent erfüllt", "unmet": "Noch nicht erfüllt" },
+      "pause": "Pausieren", "pausing": "Wird pausiert…", "resume": "Fortsetzen", "resuming": "Wird fortgesetzt…",
+      "clear": "Zurücksetzen", "clearing": "Wird zurückgesetzt…",
+      "clearConfirm": "Dieses Ziel aus der aktiven Verfolgung entfernen und eine aktive Ausführung stoppen? Gespeicherte Berichte, der unveränderliche Zielvertrag und das Artefakt bleiben erhalten."
+    },
   },
   "onboarding": {
     "title": "Erste Schritte",

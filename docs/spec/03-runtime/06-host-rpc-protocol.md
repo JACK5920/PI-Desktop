@@ -1132,7 +1132,43 @@ type PlansPendingResult = {
   // The contract being negotiated: the pending row's kind, else the session's
   // own contract mode. Absent when nothing is being negotiated.
   kind?: ProposalKind;
+  goal?: GoalLifecycle | null;
+  goals?: GoalLifecycle[];
 };
+
+type GoalLifecycleStatus =
+  | "active" | "paused" | "completed" | "blocked" | "interrupted" | "cleared";
+
+type GoalCriterionReport = {
+  criterion: string;
+  status: "met" | "unmet";
+  evidence: string[];
+};
+
+type GoalProgressReport = {
+  outcome: "continue" | "complete" | "blocked";
+  summary: string;
+  criteria: GoalCriterionReport[];
+};
+
+type GoalLifecycle = {
+  proposalId: string;
+  sessionId: string;
+  title: string;
+  status: GoalLifecycleStatus;
+  currentExecutionId?: string;
+  cycle: number;
+  roundInCycle: number;
+  runCount: number;
+  maxRounds: number;
+  stopReason?: string;
+  latestReport?: GoalProgressReport;
+  updatedAt: string;
+  version: number;
+};
+
+type GoalControlAction = "pause" | "resume" | "clear";
+type GoalControlResult = { goal: GoalLifecycle; execution?: PlanExecution };
 
 type PlanResolveIdentity = {
   proposalId: string;
@@ -1156,6 +1192,7 @@ type PlanResolutionResult = {
   action?: PlanApprovalAction;
   targetPermissionMode?: GlobalPermissionMode;
   execution?: PlanExecution;
+  goal?: GoalLifecycle | null;
 };
 ```
 
@@ -1172,6 +1209,7 @@ params: {
   action?: PlanApprovalAction
   targetPermissionMode?: GlobalPermissionMode | null
   execution?: PlanExecution | null
+  goal?: GoalLifecycle | null
 }
 
 type ToolsOutputParams = {
@@ -1194,6 +1232,30 @@ inspecting the projected state. For `plans.resolve`, the
 host emits `targetPermissionMode` and `execution` as JSON `null` when no value
 exists. Electron forwards this notification unchanged through
 the shared `IPC.event.plansChanged` renderer channel.
+
+Goal lifecycle is additive to protocol v11 and schema v28. `plans.pending` also
+returns the non-cleared lifecycle for a requested session as `goal`, or the
+latest non-cleared lifecycle per session as `goals` for a global query.
+`goals.report` accepts `{ sessionId, proposalId, executionId, turnId, report }`
+only for the currently running approved Goal round; a report is stored once per
+run and is rejected if the turn, execution, or lifecycle is stale.
+`goals.control({ sessionId, proposalId, action })` requires the current Goal proposal identity and supports `pause`, `resume`, and `clear`; stale proposal IDs are rejected without changing the current lifecycle.
+Resume returns a newly queued execution with a new ID. Pause/clear return no
+execution descriptor. Clear removes the Goal from current tracking but retains
+historical reports and immutable artifacts. Goal reports are Agent-authored
+claims; the Host validates their structure and scope, not the truth of the
+evidence they cite. Automatic `continue` rounds are queued only after the
+previous turn settles and stop after eight execution rounds per cycle,
+including the initial approved round. Each cycle also has persistent ceilings
+of 250,000 reported tokens and 60 minutes of elapsed wall-clock time. These
+ceilings are evaluated when the current round settles; an in-flight round is
+not terminated at the boundary, but no further automatic round is queued once
+either ceiling is reached. Manual resume creates a new cycle and resets both
+counters. Dispatch waits while the session has
+queued interactive input or a pending Plan/Goal approval, rather than jumping
+ahead of that work. A restart marks an
+active run interrupted and requires an explicit `resume`; it never queues a
+replay.
 
 `plans.resolve` accepts only an authenticated, still-pending request whose
 proposal, session, turn, tool-call, and version match. `approve` requires an

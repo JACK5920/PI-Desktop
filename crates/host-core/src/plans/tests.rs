@@ -43,6 +43,71 @@ fn submit(manager: &PlanManager, db: &Database, root: &Path, call: &str) -> Plan
         .unwrap()
 }
 
+fn approve_goal(
+    manager: &PlanManager,
+    db: &Database,
+    root: &Path,
+    call: &str,
+) -> (PlanProposal, PlanExecution, String) {
+    let session = sessions::create_session(
+        db,
+        Some("Goal".into()),
+        Some("goal".into()),
+        None,
+        None,
+        Some(root.to_string_lossy().into_owned()),
+    )
+    .unwrap();
+    let turn_id = live_turn(db, &session.id);
+    let proposal = manager
+        .submit(
+            db,
+            PlanSubmitParams {
+                workspace_root: root,
+                session_id: &session.id,
+                turn_id: &turn_id,
+                tool_call_id: call,
+                kind: KIND_GOAL,
+                title: "Reach the target",
+                markdown: "# Goal\n\n## Acceptance criteria\n- verification passes",
+                question: "Approve?",
+            },
+        )
+        .unwrap();
+    let resolved = manager
+        .resolve(
+            db,
+            PlanResolveParams {
+                workspace_root: Some(root),
+                proposal_id: &proposal.id,
+                session_id: &proposal.session_id,
+                turn_id: &proposal.turn_id,
+                tool_call_id: &proposal.tool_call_id,
+                version: Some(proposal.version),
+                action: "approve",
+                target_permission_mode: Some("ask"),
+            },
+        )
+        .unwrap();
+    (
+        proposal,
+        resolved.execution.expect("approved Goal has execution"),
+        turn_id,
+    )
+}
+
+fn goal_report(outcome: &str, status: &str) -> GoalProgressReport {
+    GoalProgressReport {
+        outcome: outcome.into(),
+        summary: "Ran the required verification command.".into(),
+        criteria: vec![GoalCriterionReport {
+            criterion: "verification passes".into(),
+            status: status.into(),
+            evidence: vec!["cargo test -p host-core: passed".into()],
+        }],
+    }
+}
+
 #[test]
 fn title_slug_and_filename_are_descriptive_and_local_minute_shaped() {
     let now = Local::now();
@@ -779,6 +844,13 @@ fn goal_contract_round_trips_through_its_own_kind() {
         manager.queued_executions(&db, None).unwrap()[0].kind,
         KIND_GOAL
     );
+    assert_eq!(
+        manager
+            .enter(&db, &proposal.session_id, &turn, "goal-again", KIND_GOAL)
+            .unwrap_err()
+            .to_string(),
+        "GOAL_ALREADY_ACTIVE"
+    );
 }
 
 #[test]
@@ -885,6 +957,496 @@ fn entering_goal_mode_writes_the_goal_mode_and_kind() {
             .to_string(),
         "PLAN_INVALID_ARGUMENT"
     );
+}
+
+#[test]
+fn goal_reports_are_persisted_and_complete_only_with_criterion_evidence() {
+    let (dir, db) = test_db();
+    let root = dir.path().join("workspace");
+    fs::create_dir_all(&root).unwrap();
+    let manager = PlanManager;
+    let (proposal, queued, turn_id) = approve_goal(&manager, &db, &root, "goal-report");
+    let running = manager.claim_execution(&db, &queued.id).unwrap();
+    assert_eq!(running.state, EXECUTION_RUNNING);
+
+    let report = goal_report("complete", "met");
+    assert_eq!(
+        manager
+            .report_goal(
+                &db,
+                &proposal.session_id,
+                &proposal.id,
+                &running.id,
+                "not-a-live-turn",
+                &report,
+            )
+            .unwrap_err()
+            .to_string(),
+        "GOAL_REPORT_STALE"
+    );
+    let active = manager
+        .report_goal(
+            &db,
+            &proposal.session_id,
+            &proposal.id,
+            &running.id,
+            &turn_id,
+            &report,
+        )
+        .unwrap();
+    assert_eq!(active.status, "active");
+    assert_eq!(active.latest_report, Some(report));
+
+    let finished = manager
+        .finish_execution(&db, &running.id, EXECUTION_COMPLETED, None)
+        .unwrap();
+    assert_eq!(finished.state, EXECUTION_COMPLETED);
+    let completed = manager
+        .goal_for_session(&db, &proposal.session_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(completed.status, "completed");
+    assert_eq!(completed.current_execution_id, None);
+    assert_eq!(
+        completed.latest_report.unwrap().criteria[0].evidence.len(),
+        1
+    );
+}
+
+#[test]
+fn continuing_goal_creates_a_distinct_queued_round_and_then_finishes() {
+    let (dir, db) = test_db();
+    let root = dir.path().join("workspace");
+    fs::create_dir_all(&root).unwrap();
+    let manager = PlanManager;
+    let (proposal, first, turn_id) = approve_goal(&manager, &db, &root, "goal-continue");
+    manager.claim_execution(&db, &first.id).unwrap();
+    manager
+        .report_goal(
+            &db,
+            &proposal.session_id,
+            &proposal.id,
+            &first.id,
+            &turn_id,
+            &goal_report("continue", "unmet"),
+        )
+        .unwrap();
+
+    let second = manager
+        .finish_execution(&db, &first.id, EXECUTION_COMPLETED, None)
+        .unwrap();
+    assert_ne!(second.id, first.id);
+    assert_eq!(second.state, EXECUTION_QUEUED);
+    let second_state = manager
+        .goal_for_session(&db, &proposal.session_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(second_state.status, "active");
+    assert_eq!(second_state.run_count, 2);
+    assert_eq!(second_state.cycle, 1);
+    assert_eq!(second_state.round_in_cycle, 2);
+
+    manager.claim_execution(&db, &second.id).unwrap();
+    manager
+        .report_goal(
+            &db,
+            &proposal.session_id,
+            &proposal.id,
+            &second.id,
+            &turn_id,
+            &goal_report("complete", "met"),
+        )
+        .unwrap();
+    manager
+        .finish_execution(&db, &second.id, EXECUTION_COMPLETED, None)
+        .unwrap();
+    assert_eq!(
+        manager
+            .goal_for_session(&db, &proposal.session_id)
+            .unwrap()
+            .unwrap()
+            .status,
+        "completed"
+    );
+}
+
+#[test]
+fn pause_interrupts_without_replay_and_resume_starts_a_new_cycle() {
+    let (dir, db) = test_db();
+    let root = dir.path().join("workspace");
+    fs::create_dir_all(&root).unwrap();
+    let manager = PlanManager;
+    let (proposal, first, turn_id) = approve_goal(&manager, &db, &root, "goal-pause");
+    manager.claim_execution(&db, &first.id).unwrap();
+
+    let paused = manager
+        .control_goal(&db, &proposal.session_id, &proposal.id, "pause")
+        .unwrap();
+    assert_eq!(paused.goal.status, "paused");
+    assert_eq!(paused.goal.stop_reason.as_deref(), Some("user_paused"));
+    assert_eq!(paused.execution, None);
+    let old_execution = manager
+        .finish_execution(&db, &first.id, EXECUTION_INTERRUPTED, Some("user_paused"))
+        .unwrap();
+    assert_eq!(old_execution.state, EXECUTION_INTERRUPTED);
+
+    let resumed = manager
+        .control_goal(&db, &proposal.session_id, &proposal.id, "resume")
+        .unwrap();
+    let second = resumed.execution.unwrap();
+    assert_ne!(second.id, first.id);
+    assert_eq!(second.state, EXECUTION_QUEUED);
+    assert_eq!(resumed.goal.status, "active");
+    assert_eq!(resumed.goal.cycle, 2);
+    assert_eq!(resumed.goal.round_in_cycle, 1);
+    assert_eq!(resumed.goal.run_count, 2);
+
+    manager.claim_execution(&db, &second.id).unwrap();
+    assert_eq!(
+        manager
+            .report_goal(
+                &db,
+                &proposal.session_id,
+                &proposal.id,
+                &first.id,
+                &turn_id,
+                &goal_report("continue", "unmet"),
+            )
+            .unwrap_err()
+            .to_string(),
+        "GOAL_REPORT_STALE"
+    );
+}
+
+#[test]
+fn goal_control_requires_the_current_proposal_id() {
+    let (dir, db) = test_db();
+    let root = dir.path().join("workspace");
+    fs::create_dir_all(&root).unwrap();
+    let manager = PlanManager;
+    let (proposal, execution, _) = approve_goal(&manager, &db, &root, "goal-control-identity");
+
+    let error = manager
+        .control_goal(
+            &db,
+            &proposal.session_id,
+            "stale-or-unknown-proposal",
+            "pause",
+        )
+        .unwrap_err();
+    assert_eq!(error.to_string(), "GOAL_NOT_FOUND");
+
+    let unchanged = manager
+        .goal_for_session(&db, &proposal.session_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(unchanged.proposal_id, proposal.id);
+    assert_eq!(unchanged.title, "Reach the target");
+    assert_eq!(unchanged.status, "active");
+    assert_eq!(
+        unchanged.current_execution_id.as_deref(),
+        Some(execution.id.as_str())
+    );
+    let queued = manager
+        .queued_executions(&db, Some(&proposal.session_id))
+        .unwrap();
+    assert_eq!(queued.len(), 1);
+    assert_eq!(queued[0].id, execution.id);
+    let global = manager.current_goals(&db).unwrap();
+    assert_eq!(global.len(), 1);
+    assert_eq!(global[0].title, "Reach the target");
+}
+
+#[test]
+fn a_goal_round_limit_pauses_until_explicit_resume() {
+    let (dir, db) = test_db();
+    let root = dir.path().join("workspace");
+    fs::create_dir_all(&root).unwrap();
+    let manager = PlanManager;
+    let (proposal, first, turn_id) = approve_goal(&manager, &db, &root, "goal-limit");
+    db.conn()
+        .execute(
+            "UPDATE goal_lifecycles SET max_rounds = 1 WHERE proposal_id = ?1",
+            params![proposal.id],
+        )
+        .unwrap();
+    manager.claim_execution(&db, &first.id).unwrap();
+    manager
+        .report_goal(
+            &db,
+            &proposal.session_id,
+            &proposal.id,
+            &first.id,
+            &turn_id,
+            &goal_report("continue", "unmet"),
+        )
+        .unwrap();
+    manager
+        .finish_execution(&db, &first.id, EXECUTION_COMPLETED, None)
+        .unwrap();
+    let stopped = manager
+        .goal_for_session(&db, &proposal.session_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(stopped.status, "paused");
+    assert_eq!(
+        stopped.stop_reason.as_deref(),
+        Some("GOAL_AUTO_ROUND_LIMIT")
+    );
+    assert!(manager
+        .queued_executions(&db, Some(&proposal.session_id))
+        .unwrap()
+        .is_empty());
+
+    let resumed = manager
+        .control_goal(&db, &proposal.session_id, &proposal.id, "resume")
+        .unwrap();
+    assert_eq!(resumed.goal.status, "active");
+    assert_eq!(resumed.goal.cycle, 2);
+    assert_eq!(resumed.goal.round_in_cycle, 1);
+    assert!(resumed.execution.is_some());
+}
+
+#[test]
+fn a_goal_token_budget_pauses_auto_continuation_and_resets_on_resume() {
+    let (dir, db) = test_db();
+    let root = dir.path().join("workspace");
+    fs::create_dir_all(&root).unwrap();
+    let manager = PlanManager;
+    let (proposal, execution, turn_id) = approve_goal(&manager, &db, &root, "goal-token-budget");
+    db.conn()
+        .execute(
+            "UPDATE goal_lifecycles SET max_tokens = 100 WHERE proposal_id = ?1",
+            params![proposal.id],
+        )
+        .unwrap();
+    db.conn()
+        .execute(
+            "UPDATE turns SET usage_json = ?1 WHERE id = ?2",
+            params![json!({"totalTokens": 100}).to_string(), turn_id],
+        )
+        .unwrap();
+
+    manager.claim_execution(&db, &execution.id).unwrap();
+    manager
+        .report_goal(
+            &db,
+            &proposal.session_id,
+            &proposal.id,
+            &execution.id,
+            &turn_id,
+            &goal_report("continue", "unmet"),
+        )
+        .unwrap();
+    manager
+        .finish_execution(&db, &execution.id, EXECUTION_COMPLETED, None)
+        .unwrap();
+
+    let paused = manager
+        .goal_for_session(&db, &proposal.session_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(paused.status, "paused");
+    assert_eq!(paused.stop_reason.as_deref(), Some("GOAL_BUDGET_EXHAUSTED"));
+    assert_eq!(paused.tokens_used, 100);
+    assert!(manager
+        .queued_executions(&db, Some(&proposal.session_id))
+        .unwrap()
+        .is_empty());
+
+    let resumed = manager
+        .control_goal(&db, &proposal.session_id, &proposal.id, "resume")
+        .unwrap();
+    assert_eq!(resumed.goal.cycle, 2);
+    assert_eq!(resumed.goal.tokens_used, 0);
+    assert_eq!(resumed.goal.elapsed_ms, 0);
+    assert!(resumed.execution.is_some());
+}
+
+#[test]
+fn a_goal_time_budget_pauses_auto_continuation_after_the_current_round() {
+    let (dir, db) = test_db();
+    let root = dir.path().join("workspace");
+    fs::create_dir_all(&root).unwrap();
+    let manager = PlanManager;
+    let (proposal, execution, turn_id) = approve_goal(&manager, &db, &root, "goal-time-budget");
+    let expired_at = crate::db::now_ms() - 10_000;
+    db.conn()
+        .execute(
+            "UPDATE goal_lifecycles
+             SET max_duration_ms = 5_000, cycle_started_at = ?1
+             WHERE proposal_id = ?2",
+            params![expired_at, proposal.id],
+        )
+        .unwrap();
+
+    manager.claim_execution(&db, &execution.id).unwrap();
+    manager
+        .report_goal(
+            &db,
+            &proposal.session_id,
+            &proposal.id,
+            &execution.id,
+            &turn_id,
+            &goal_report("continue", "unmet"),
+        )
+        .unwrap();
+    manager
+        .finish_execution(&db, &execution.id, EXECUTION_COMPLETED, None)
+        .unwrap();
+
+    let paused = manager
+        .goal_for_session(&db, &proposal.session_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(paused.status, "paused");
+    assert_eq!(paused.stop_reason.as_deref(), Some("GOAL_BUDGET_EXHAUSTED"));
+    assert!(paused.elapsed_ms >= 5_000);
+    assert!(manager
+        .queued_executions(&db, Some(&proposal.session_id))
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
+fn schema_v27_goal_migration_never_assumes_completion_or_replays_work() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("pi.sqlite");
+    let (session_id, old_execution_id) = {
+        let db = Database::open(&path).unwrap();
+        let root = dir.path().join("workspace");
+        fs::create_dir_all(&root).unwrap();
+        let manager = PlanManager;
+        let (proposal, _, _) = approve_goal(&manager, &db, &root, "goal-v27");
+        let latest_timestamp = crate::db::now_ms() + 60_000;
+        db.conn()
+            .execute(
+                "UPDATE plan_approvals SET execution_state = 'completed' WHERE request_id = ?1",
+                params![proposal.id],
+            )
+            .unwrap();
+        // A session may have several approved Goal contracts in its history.
+        // The schema migration should restore only the most recent lifecycle,
+        // rather than violating the one-open-Goal invariant on older data.
+        db.conn()
+            .execute(
+                "INSERT INTO plan_approvals (
+                   request_id, session_id, turn_id, tool_call_id, kind, plan_json,
+                   title, question, status, created_at, updated_at,
+                   artifact_relative_path, artifact_sha256, artifact_size_bytes,
+                   version, execution_id, execution_state, target_permission_mode
+                 ) VALUES (
+                   'legacy-latest-goal', ?1, 'legacy-turn', 'legacy-call', 'goal',
+                   '# New Goal', 'New Goal', 'Approve?', 'approved', ?2, ?2,
+                   '.pi/goal/latest.md', 'hash', 12, 1,
+                   'legacy-latest-execution', 'completed', 'ask'
+                 )",
+                params![proposal.session_id, latest_timestamp],
+            )
+            .unwrap();
+        (proposal.session_id, "legacy-latest-execution".to_owned())
+    };
+    {
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "DROP TABLE goal_runs;
+             DROP TABLE goal_lifecycles;
+             PRAGMA user_version = 27;",
+        )
+        .unwrap();
+    }
+
+    let migrated = Database::open(&path).unwrap();
+    let manager = PlanManager;
+    let lifecycle = manager
+        .goal_for_session(&migrated, &session_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(lifecycle.proposal_id, "legacy-latest-goal");
+    assert_eq!(lifecycle.title, "New Goal");
+    assert_eq!(lifecycle.status, "interrupted");
+    assert_eq!(
+        lifecycle.stop_reason.as_deref(),
+        Some("migration_requires_review")
+    );
+    assert_eq!(lifecycle.latest_report, None);
+    assert!(manager
+        .queued_executions(&migrated, Some(&session_id))
+        .unwrap()
+        .is_empty());
+    let lifecycle_count: i64 = migrated
+        .conn()
+        .query_row(
+            "SELECT COUNT(*) FROM goal_lifecycles WHERE session_id = ?1",
+            params![session_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(lifecycle_count, 1);
+
+    let resumed = manager
+        .control_goal(&migrated, &session_id, "legacy-latest-goal", "resume")
+        .unwrap();
+    let new_execution = resumed.execution.unwrap();
+    assert_ne!(new_execution.id, old_execution_id);
+    assert_ne!(new_execution.id, "legacy-latest-execution");
+    assert_eq!(new_execution.state, EXECUTION_QUEUED);
+    assert_eq!(resumed.goal.cycle, 2);
+    assert_eq!(resumed.goal.status, "active");
+    let version: i64 = migrated
+        .conn()
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(version, crate::db::SCHEMA_VERSION);
+}
+
+#[test]
+fn host_restart_interrupts_goal_and_requires_a_new_manual_resume_execution() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("pi.sqlite");
+    let (session_id, proposal_id, old_execution_id) = {
+        let db = Database::open(&path).unwrap();
+        let root = dir.path().join("workspace");
+        fs::create_dir_all(&root).unwrap();
+        let (proposal, execution, _) = approve_goal(&PlanManager, &db, &root, "goal-restart");
+        PlanManager.claim_execution(&db, &execution.id).unwrap();
+        (proposal.session_id, proposal.id, execution.id)
+    };
+
+    let db = Database::open(&path).unwrap();
+    let manager = PlanManager;
+    let interrupted = manager.goal_for_session(&db, &session_id).unwrap().unwrap();
+    assert_eq!(interrupted.status, "interrupted");
+    assert_eq!(interrupted.title, "Reach the target");
+    assert_eq!(interrupted.stop_reason.as_deref(), Some("host_restart"));
+    assert_eq!(
+        interrupted.current_execution_id.as_deref(),
+        Some(old_execution_id.as_str())
+    );
+    assert!(manager
+        .queued_executions(&db, Some(&session_id))
+        .unwrap()
+        .is_empty());
+    let old_run_status: String = db
+        .conn()
+        .query_row(
+            "SELECT status FROM goal_runs WHERE execution_id = ?1",
+            params![old_execution_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(old_run_status, "interrupted");
+
+    let resumed = manager
+        .control_goal(&db, &session_id, &proposal_id, "resume")
+        .unwrap();
+    let new_execution = resumed.execution.unwrap();
+    assert_ne!(new_execution.id, old_execution_id);
+    assert_eq!(new_execution.state, EXECUTION_QUEUED);
+    assert_eq!(resumed.goal.status, "active");
+    assert_eq!(resumed.goal.run_count, interrupted.run_count + 1);
+    assert_eq!(resumed.goal.cycle, interrupted.cycle + 1);
+    assert_eq!(resumed.goal.proposal_id, proposal_id);
 }
 
 #[path = "history_tests.rs"]

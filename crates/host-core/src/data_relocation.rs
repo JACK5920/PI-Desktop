@@ -38,11 +38,9 @@ impl Roots {
         if !path.is_absolute() || path.components().any(|part| part == Component::ParentDir) {
             return None;
         }
-        let suffix = path
-            .strip_prefix(&self.source)
-            .or_else(|_| path.strip_prefix(&self.canonical_source))
-            .or_else(|_| path.strip_prefix(&self.project_source))
-            .ok()?;
+        let suffix = [&self.source, &self.canonical_source, &self.project_source]
+            .into_iter()
+            .find_map(|root| strip_path_prefix(path, root))?;
         Some(self.destination.join(suffix).to_string_lossy().into_owned())
     }
 
@@ -110,6 +108,24 @@ impl Roots {
         }
         Ok(changed)
     }
+}
+
+fn strip_path_prefix(path: &Path, root: &Path) -> Option<PathBuf> {
+    let path_text = crate::db::normalize_project_path(&path.to_string_lossy())?;
+    let root_text = crate::db::normalize_project_path(&root.to_string_lossy())?;
+    let prefix = path_text.get(..root_text.len())?;
+    #[cfg(windows)]
+    let matches = prefix.eq_ignore_ascii_case(&root_text);
+    #[cfg(not(windows))]
+    let matches = prefix == root_text;
+    if !matches {
+        return None;
+    }
+    let remainder = &path_text[root_text.len()..];
+    if !remainder.is_empty() && !root_text.ends_with('/') && !remainder.starts_with('/') {
+        return None;
+    }
+    Some(PathBuf::from(remainder.trim_start_matches('/')))
 }
 
 fn regular_file(path: &Path) -> Result<bool> {
@@ -248,6 +264,7 @@ fn rewrite_capability_state(path: &Path, roots: &Roots) -> Result<()> {
                 .project_path
                 .as_deref()
                 .and_then(|path| roots.remap(path))
+                .and_then(|path| crate::db::normalize_project_path(&path))
             {
                 identity.project_path = Some(project);
                 changed = true;

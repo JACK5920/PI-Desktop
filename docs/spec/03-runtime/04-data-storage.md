@@ -1,4 +1,4 @@
-# 04. Data Storage (Schema v27)
+# 04. Data Storage (Schema v28)
 
 
 ### Lossless tool-image storage (#1868)
@@ -1762,6 +1762,15 @@ truncating at a guessed position.
   session `/fast` switch, defaulting to `0` for every existing session. Forks
   copy it; scheduled runs and delegated workers start at `0`. The migration
   keeps a v26 backup.
+- **Schema v28 is additive.** It adds host-owned `goal_lifecycles` and
+  `goal_runs`, keeping mutable Goal progress and per-execution reports outside
+  the immutable `plan_approvals` contract. Each cycle stores its round, token,
+  and elapsed-time ceilings and counters (8 rounds, 250,000 reported tokens,
+  and 60 minutes by default); counters reset only when the user explicitly
+  resumes into a new cycle. The v27 migration retains at most
+  the newest approved Goal lifecycle per session, marks it interrupted for
+  review, and never replays an old execution. A v27 backup precedes the
+  migration.
 - **Schema v14 is additive.** It adds nullable `sessions.deleted_at`, the
   partial deletion index, and `session_import_origins`. Existing sessions stay
   active and have no origin rows. The migration runs in the same guarded
@@ -1777,10 +1786,13 @@ destructive migration or a second settings store.
   startup,
   one transaction marks every `pending` approval and every `queued` or
   `running` execution state in `plan_approvals` as `interrupted`; associated
-  running turns are marked `aborted` before RPC service begins. Pending
-  sessions remain in their contract mode and already-approved queued/running
-  sessions remain Agent. No approval response or execution from before the
-  restart is accepted.
+  running turns are marked `aborted` before RPC service begins. Active Goal
+  lifecycles and their current run also become `interrupted` with
+  `host_restart`; the saved report and prior run identities remain available.
+  Pending sessions remain in their contract mode and already-approved
+  queued/running sessions remain Agent. No approval response or execution from
+  before the restart is accepted. The user must explicitly resume an
+  interrupted Goal, which creates a new execution ID; boot never auto-runs it.
 - The transcript file format carries its own `schema` field in the session
   header line; unknown line types are skipped, so additive file-format growth
   needs no reset.

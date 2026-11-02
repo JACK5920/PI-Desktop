@@ -152,6 +152,16 @@ stdio 与 Tokio 的动态阻塞池隔离，因此后一种情况
 | `PLAN_APPROVAL_INTERRUPTED` | 不 | 待批准在中止、崩溃或持久性失败期间关闭 |
 | `PLAN_ARTIFACT_WRITE_FAILED` | 不 | 主机无法将确切的字节写入新的 `.pi/<kind>/*.md` 工件 |
 | `PLAN_EXECUTION_INTERRUPTED` | 不 | 已批准的 queued/running Plan 或 Goal 执行已停止且不重播 |
+| `GOAL_ALREADY_ACTIVE` | 不 | 会话已有未清除的 Goal 生命周期 |
+| `GOAL_ACTION_INVALID` | 不 | Goal 控制动作不是 `pause`、`resume` 或 `clear` |
+| `GOAL_EXECUTION_STALE` | 不 | Goal run 不再是当前获批执行 |
+| `GOAL_NOT_FOUND` | 不 | 会话没有未清除的 Goal 生命周期 |
+| `GOAL_NOT_RESUMABLE` | 不 | 获批 Goal 合约不能手动恢复 |
+| `GOAL_REPORT_CRITERIA_MISMATCH` | 不 | 报告结果与标准状态不一致 |
+| `GOAL_REPORT_INVALID` | 不 | Goal 报告的格式、大小、状态或证据不合法 |
+| `GOAL_REPORT_REQUIRED` | 不 | Goal 执行结束时未保存必需报告 |
+| `GOAL_REPORT_STALE` | 不 | 报告与当前 Goal 执行或运行中的 turn 不匹配 |
+| `GOAL_STATE_CONFLICT` | 不 | 当前生命周期状态不允许该控制动作 |
 | `PLAN_REQUIRES_INTERACTIVE_SESSION` | 不 | unattended/scheduled Plan 或 Goal 运行无法请求批准 |
 | `PLAN_NOT_FOUND` | 不 | 没有审批记录与该提案 id 匹配 |
 | `PLAN_SESSION_NOT_FOUND` | 不 | Plan/Goal RPC 点名了主机没有的会话 |

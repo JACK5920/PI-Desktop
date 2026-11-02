@@ -240,6 +240,9 @@ export function createSessionSlice({
           planCheckpoints: checkpoint
             ? { ...state.planCheckpoints, [sessionId]: checkpoint }
             : state.planCheckpoints,
+          goalLifecycles: result.goal && result.goal.status !== "cleared"
+            ? { ...state.goalLifecycles, [sessionId]: result.goal }
+            : withoutRecordKey(state.goalLifecycles, sessionId),
           pendingPlans: activeProposal
             ? { ...state.pendingPlans, [sessionId]: activeProposal }
             : withoutRecordKey(state.pendingPlans, sessionId),

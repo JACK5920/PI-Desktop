@@ -2019,6 +2019,33 @@ approved/completed，或中断的终端卡；终端卡可能会保留
 
 ---
 
+## 10B. GoalLifecycleBar
+
+### 10B.1 目的与内容
+
+Composer 为每个未清除的 Goal 显示一个会话级 `GoalLifecycleBar`。它呈现合约标题、
+active/paused/completed/blocked/interrupted 状态、cycle 与有界轮次进度，以及可展开的最新
+Agent 进度报告，并展示当前 cycle 的 token/时间用量及上限（默认 250,000 个 token、60 分钟）。
+每条验收标准显示其报告状态与引用证据。界面明确标记证据由 Agent 报告，
+不暗示 Host 独立执行或认证了所引用的检查。
+
+### 10B.2 操作
+
+| 生命周期状态 | 操作 |
+|---|---|
+| Active | Pause、Clear |
+| Paused / Blocked / Interrupted | Resume、Clear |
+| Completed | Clear |
+| Cleared | 不显示栏 |
+
+Pause 和 Clear 会先停止活动执行，再向 UI 返回结果。Resume 要求 Host 创建新的 execution ID，
+不会重新提交旧执行。Clear 需要确认；它会从当前跟踪中移除 Goal，但保留报告、执行历史、合约及工件。
+所有标签、确认文案、状态和证据状态都必须本地化。该栏是具名 `region`，操作使用共享按钮，
+展开的证据以普通转义文本显示。
+当前运行轮次可能超过预算；达到上限后只停止后续自动续跑，不终止当前轮次。
+
+---
+
 ## 11. Composer
 
 ### 11.1 目的

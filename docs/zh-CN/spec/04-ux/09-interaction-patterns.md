@@ -832,6 +832,12 @@ Agent calls a permission-gated tool (including Plan/Goal Bash under Ask or Accep
    响应呈现失败关闭状态。主机重启中断挂起，
    排队、运行且无需重播的工作；已经批准的中断
    将会话保留在 Agent 中。
+7. 已获批 Goal 会在来源 Composer 中显示持久生命周期。每个执行轮次结束前通过
+   `GoalReport` 报告验收标准与 Agent 报告的证据；Host 仅在结果为 `continue` 时自动排入下一轮，
+   每个 cycle 最多八个执行轮次（含首次获批轮次），并受 250,000 个已报告 token 与 60 分钟墙钟时间限制。
+   当前轮次可能超过预算，但达到上限后不会继续自动排入下一轮。Pause 会停止当前执行；Resume 在暂停、阻塞或重启中断后
+   创建新的 execution ID；Clear 会移除当前跟踪但保留历史与不可变工件。重启后的状态显示为中断，
+   必须由用户手动 Resume，启动过程绝不会自动派发。
 
 批准卡是会话范围的。后台会话可能会保留待处理的
 `plan_approvals` 中批准或 queued/running 执行状态，但打开

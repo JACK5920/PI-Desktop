@@ -1326,7 +1326,7 @@ fn plan_rpc_err(error: impl ToString) -> JsonRpcError {
     let error_code = message
         .split_whitespace()
         .next()
-        .filter(|code| code.starts_with("PLAN_"))
+        .filter(|code| code.starts_with("PLAN_") || code.starts_with("GOAL_"))
         .unwrap_or("PLAN_INTERNAL")
         .to_string();
     rpc_err(1015, message, &error_code)
@@ -3719,7 +3719,7 @@ async fn handle_request(
         "plans.pending" => {
             let session_id = params.get("sessionId").and_then(|v| v.as_str());
             let st = state.lock().await;
-            let (pending, planning_state, kind) = {
+            let (pending, planning_state, kind, goal, goals) = {
                 let crate::state::AppState { db, plans, .. } = &*st;
                 let pending = plans
                     .pending_for_session(db, session_id)
@@ -3735,9 +3735,21 @@ async fn handle_request(
                     .transpose()
                     .map_err(plan_rpc_err)?
                     .flatten();
-                (pending, planning_state, kind)
+                let goal = session_id
+                    .map(|id| plans.goal_for_session(db, id))
+                    .transpose()
+                    .map_err(plan_rpc_err)?
+                    .flatten();
+                let goals = if session_id.is_none() {
+                    plans.current_goals(db).map_err(plan_rpc_err)?
+                } else {
+                    Vec::new()
+                };
+                (pending, planning_state, kind, goal, goals)
             };
-            Ok(json!({ "plans": pending, "state": planning_state, "kind": kind }))
+            Ok(
+                json!({ "plans": pending, "state": planning_state, "kind": kind, "goal": goal, "goals": goals }),
+            )
         }
         "plans.enter" => {
             let session_id = params
@@ -3876,7 +3888,7 @@ async fn handle_request(
             let action = params.get("action").and_then(|v| v.as_str()).unwrap_or("");
             let version = params.get("version").and_then(|v| v.as_i64());
             let target = params.get("targetPermissionMode").and_then(|v| v.as_str());
-            let resolution = {
+            let (resolution, goal) = {
                 let guard = state.lock().await;
                 let st = &*guard;
                 let workspace = if action == "approve" {
@@ -3884,7 +3896,8 @@ async fn handle_request(
                 } else {
                     None
                 };
-                st.plans
+                let resolution = st
+                    .plans
                     .resolve(
                         &st.db,
                         crate::plans::PlanResolveParams {
@@ -3898,7 +3911,15 @@ async fn handle_request(
                             target_permission_mode: target,
                         },
                     )
-                    .map_err(plan_rpc_err)?
+                    .map_err(plan_rpc_err)?;
+                let goal = if resolution.proposal.kind == plans::KIND_GOAL {
+                    st.plans
+                        .goal_for_session(&st.db, &resolution.proposal.session_id)
+                        .map_err(plan_rpc_err)?
+                } else {
+                    None
+                };
+                (resolution, goal)
             };
             let state_name = if resolution.status == plans::STATUS_APPROVED {
                 "inactive"
@@ -3916,7 +3937,8 @@ async fn handle_request(
                     "proposal": resolution.proposal,
                     "action": resolution.action,
                     "targetPermissionMode": resolution.target_permission_mode,
-                    "execution": resolution.execution
+                    "execution": resolution.execution,
+                    "goal": goal
                 }),
             )
             .await;
@@ -3926,7 +3948,8 @@ async fn handle_request(
                 "state": state_name,
                 "action": resolution.action,
                 "targetPermissionMode": resolution.target_permission_mode,
-                "execution": resolution.execution
+                "execution": resolution.execution,
+                "goal": goal
             }))
         }
         "plans.queuedExecutions" => {
@@ -3950,6 +3973,14 @@ async fn handle_request(
                     .claim_execution(&st.db, execution_id)
                     .map_err(plan_rpc_err)?
             };
+            let goal = if execution.kind == plans::KIND_GOAL {
+                let st = state.lock().await;
+                st.plans
+                    .goal_for_session(&st.db, &execution.session_id)
+                    .map_err(plan_rpc_err)?
+            } else {
+                None
+            };
             emit_notification(
                 &tx,
                 "plans.changed",
@@ -3959,10 +3990,11 @@ async fn handle_request(
                     "state": "inactive",
                     "kind": execution.kind,
                     "execution": execution,
+                    "goal": goal,
                 }),
             )
             .await;
-            Ok(json!({ "execution": execution }))
+            Ok(json!({ "execution": execution, "goal": goal }))
         }
         "plans.finishExecution" => {
             let execution_id = params
@@ -3985,6 +4017,14 @@ async fn handle_request(
                     )
                     .map_err(plan_rpc_err)?
             };
+            let goal = if execution.kind == plans::KIND_GOAL {
+                let st = state.lock().await;
+                st.plans
+                    .goal_for_session(&st.db, &execution.session_id)
+                    .map_err(plan_rpc_err)?
+            } else {
+                None
+            };
             emit_notification(
                 &tx,
                 "plans.changed",
@@ -3994,10 +4034,11 @@ async fn handle_request(
                     "state": "inactive",
                     "kind": execution.kind,
                     "execution": execution,
+                    "goal": goal,
                 }),
             )
             .await;
-            Ok(json!({ "execution": execution }))
+            Ok(json!({ "execution": execution, "goal": goal }))
         }
         "plans.abort" => {
             let session_id = params
@@ -4031,6 +4072,98 @@ async fn handle_request(
                 .await;
             }
             Ok(json!({ "ok": true, "changed": changed }))
+        }
+        "goals.report" => {
+            let session_id = params
+                .get("sessionId")
+                .and_then(|value| value.as_str())
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| rpc_err(1002, "sessionId required", "INVALID_PARAMS"))?;
+            let proposal_id = params
+                .get("proposalId")
+                .and_then(|value| value.as_str())
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| rpc_err(1002, "proposalId required", "INVALID_PARAMS"))?;
+            let execution_id = params
+                .get("executionId")
+                .and_then(|value| value.as_str())
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| rpc_err(1002, "executionId required", "INVALID_PARAMS"))?;
+            let turn_id = params
+                .get("turnId")
+                .and_then(|value| value.as_str())
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| rpc_err(1002, "turnId required", "INVALID_PARAMS"))?;
+            let report = params
+                .get("report")
+                .cloned()
+                .ok_or_else(|| rpc_err(1002, "report required", "INVALID_PARAMS"))
+                .and_then(|value| {
+                    serde_json::from_value::<plans::GoalProgressReport>(value)
+                        .map_err(|_| rpc_err(1002, "report is invalid", "INVALID_PARAMS"))
+                })?;
+            let goal = {
+                let st = state.lock().await;
+                st.plans
+                    .report_goal(
+                        &st.db,
+                        session_id,
+                        proposal_id,
+                        execution_id,
+                        turn_id,
+                        &report,
+                    )
+                    .map_err(plan_rpc_err)?
+            };
+            emit_notification(
+                &tx,
+                "plans.changed",
+                json!({
+                    "sessionId": session_id,
+                    "proposalId": proposal_id,
+                    "state": "inactive",
+                    "kind": plans::KIND_GOAL,
+                    "goal": goal,
+                }),
+            )
+            .await;
+            Ok(json!({ "goal": goal }))
+        }
+        "goals.control" => {
+            let session_id = params
+                .get("sessionId")
+                .and_then(|value| value.as_str())
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| rpc_err(1002, "sessionId required", "INVALID_PARAMS"))?;
+            let proposal_id = params
+                .get("proposalId")
+                .and_then(|value| value.as_str())
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| rpc_err(1002, "proposalId required", "INVALID_PARAMS"))?;
+            let action = params
+                .get("action")
+                .and_then(|value| value.as_str())
+                .unwrap_or("");
+            let result = {
+                let st = state.lock().await;
+                st.plans
+                    .control_goal(&st.db, session_id, proposal_id, action)
+                    .map_err(plan_rpc_err)?
+            };
+            emit_notification(
+                &tx,
+                "plans.changed",
+                json!({
+                    "sessionId": session_id,
+                    "proposalId": result.goal.proposal_id,
+                    "state": "inactive",
+                    "kind": plans::KIND_GOAL,
+                    "goal": result.goal,
+                    "execution": result.execution,
+                }),
+            )
+            .await;
+            Ok(json!(result))
         }
 
         method if method.starts_with("scheduled.") => {

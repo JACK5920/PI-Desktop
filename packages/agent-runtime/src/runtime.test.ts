@@ -5020,6 +5020,60 @@ describe("DesktopAgentRuntime plan transitions", () => {
 
     await runtime.dispose();
   });
+
+  it("offers GoalReport only during an approved Goal round and persists its evidence", async () => {
+    const host = { call: vi.fn(async () => ({ goal: {} })) };
+    const runtime = createRuntime({ host });
+    const agent = (runtime as any).agent;
+    agent.waitForIdle = vi.fn(async () => undefined);
+    const report = {
+      outcome: "complete",
+      summary: "The required test suite passed.",
+      criteria: [{
+        criterion: "The goal-specific tests pass",
+        status: "met",
+        evidence: ["cargo test -p host-core goal_lifecycle: passed"],
+      }],
+    } as const;
+    agent.continue = vi.fn(async () => {
+      const tool = runtimeTool(runtime, "GoalReport");
+      const result = await tool.execute("goal-report-call", report);
+      expect(result).toMatchObject({
+        terminate: true,
+        details: { goalReport: report },
+      });
+    });
+    const execution: PlanExecution = {
+      id: "execution-goal-report",
+      proposalId: "proposal-goal-report",
+      sessionId: "session-1",
+      kind: "goal",
+      plan: "# Goal\n\n## Acceptance criteria\n- tests pass",
+      title: "Verify Goal reports",
+      question: "Approve?",
+      artifact: {
+        relativePath: ".pi/goal/proposal-goal-report.md",
+        sha256: "def456",
+        sizeBytes: 42,
+      },
+      targetPermissionMode: "ask",
+      state: "running",
+    };
+
+    await runtime.executeApprovedPlan(execution, "execution-turn-goal-report");
+
+    expect(host.call).toHaveBeenCalledWith("goals.report", {
+      sessionId: "session-1",
+      proposalId: execution.proposalId,
+      executionId: execution.id,
+      turnId: "execution-turn-goal-report",
+      report,
+    });
+    expect(() => runtimeTool(runtime, "GoalReport")).toThrow(
+      "Runtime tool not found: GoalReport",
+    );
+    await runtime.dispose();
+  });
 });
 
 describe("DesktopAgentRuntime thinking configuration", () => {

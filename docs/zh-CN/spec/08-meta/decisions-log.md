@@ -5653,3 +5653,12 @@ Markdown 源码，不是 `text/html` 负载；对禁用行内 HTML 的外部编�
 - 由 `apps/desktop/test/radial-menu.test.mjs`、Chromium 组件检查
   `pnpm test:e2e:radial-menu`，以及截图场景 `pi-radial`、`pi-radial-dark` 覆盖。见
   `04-ux/09-interaction-patterns.md` 第 1.11 节与 E2E-CHAT-radial-background-menu。
+
+## 2026-11-02 — 持久化有界且需手动恢复的 Goal 生命周期（D679）
+
+- schema v28 新增 Host 所有的 `goal_lifecycles` 与 `goal_runs`，与不可变 Plan/Goal 审批合约分开。
+- 每个获批 Goal 执行轮次只记录一次有作用域的 `GoalReport`，含逐条验收标准及 Agent 报告的证据。
+  每个 cycle 最多八个执行轮次（含首次获批轮次）、250,000 个已报告 token 和 60 分钟墙钟时间。
+  当前轮次会完成；达到任一预算后不再排入自动轮次。暂停、阻塞、缺少报告、重启或达到预算都会停止自动续跑。
+- 恢复始终创建新的 execution ID 和 cycle，并重置该 cycle 的预算。重启把 active Goal 标记为 interrupted，绝不自动重放；清除从当前跟踪中移除 Goal，但保留报告/执行历史和工件。
+- 协议仍为 v11；新增 Host `goals.report` / `goals.control`、Electron IPC 和 Composer 生命周期控件。见 ADR 0338。

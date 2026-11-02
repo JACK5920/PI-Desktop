@@ -37,7 +37,8 @@ pub(super) fn terminate_tree(root_pid: u32) -> Result<(), String> {
     let snapshot = Snapshot::capture()?;
 
     let mut errors: Vec<String> = Vec::new();
-    for pid in snapshot.descendants_deepest_first(root_pid) {
+    let descendants = snapshot.descendants_deepest_first(root_pid);
+    for pid in descendants {
         if let Err(error) = terminate_member(pid, &watermark) {
             errors.push(error);
         }

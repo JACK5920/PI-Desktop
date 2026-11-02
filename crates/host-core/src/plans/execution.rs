@@ -81,6 +81,9 @@ impl PlanManager {
         if changed != 1 {
             return Err(plan_error("PLAN_EXECUTION_STALE"));
         }
+        if current.kind == KIND_GOAL {
+            super::goals::claim_run_tx(&tx, execution_id, now)?;
+        }
         audit::append_tx(
             &tx,
             "plan_execution_claimed",
@@ -148,6 +151,9 @@ impl PlanManager {
             ])?;
         if changed != 1 {
             return Err(plan_error("PLAN_EXECUTION_STALE"));
+        }
+        if current.kind == KIND_GOAL {
+            super::goals::finish_run_tx(&tx, &current, execution_id, status, stored_error, now)?;
         }
         audit::append_tx(
             &tx,

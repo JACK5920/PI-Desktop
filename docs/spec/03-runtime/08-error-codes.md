@@ -179,6 +179,16 @@ does not turn temporary thread pressure into a host process exit.
 | `PLAN_EXECUTION_CONFLICT` | no | the execution row changed underneath a version-guarded update |
 | `PLAN_EXECUTION_FAILED` | maybe | the approved execution ended in an error |
 | `PLAN_INTERNAL` | maybe | a Plan/Goal host failure with no finer classification |
+| `GOAL_ALREADY_ACTIVE` | no | a session already has a non-cleared Goal lifecycle |
+| `GOAL_ACTION_INVALID` | no | Goal control action is not `pause`, `resume`, or `clear` |
+| `GOAL_EXECUTION_STALE` | no | Goal run is no longer the active approved execution |
+| `GOAL_NOT_FOUND` | no | the session has no non-cleared Goal lifecycle |
+| `GOAL_NOT_RESUMABLE` | no | the approved Goal contract is not eligible for manual resume |
+| `GOAL_REPORT_CRITERIA_MISMATCH` | no | report outcome does not agree with the reported criteria statuses |
+| `GOAL_REPORT_INVALID` | no | Goal report shape, bounds, status, or evidence is invalid |
+| `GOAL_REPORT_REQUIRED` | no | a Goal execution ended without saving its required report |
+| `GOAL_REPORT_STALE` | no | report does not match the active Goal execution and running turn |
+| `GOAL_STATE_CONFLICT` | no | Goal control action is not valid in the current lifecycle state |
 | `WRITE_DISABLED_IN_CHAT` | no | historical (pre-D188 Chat profile); registered for stored transcripts, no longer emitted |
 | `BASH_DISABLED_IN_CHAT` | no | historical (pre-D188 Chat profile); registered for stored transcripts, no longer emitted |
 
@@ -469,6 +479,9 @@ absolute pending deadline;
 execution interrupted by abort or host recovery. `PLAN_KIND_MISMATCH` is a
 terminating tool error like `PLAN_NOT_ACTIVE`: the submit tool ran against the
 wrong contract, so no artifact is written and no approval row is created.
+Goal errors retain the `GOAL_` prefix and share the existing host error slot
+1015. A `GOAL_REPORT_REQUIRED` lifecycle stop is persisted as `blocked`; it is
+not an excuse to infer completion from a turn that omitted `GoalReport`.
 
 ### Local request preparation failures
 

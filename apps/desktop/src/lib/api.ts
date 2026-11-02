@@ -118,6 +118,8 @@ import type {
   NotificationListResult,
   ReviewRollbackResult,
   PlanProposal,
+  GoalControlRequest,
+  GoalControlResult,
   PlanResolveRequest,
   PlanResolutionResult,
   PlanningStateEvent,
@@ -1215,6 +1217,8 @@ export const api = {
     ).then(normalizePendingPlans),
   resolvePlan: (resolution: PlanResolveRequest) =>
     invoke<PlanResolutionResult>(IPC.invoke.plansResolve, resolution),
+  controlGoal: (request: GoalControlRequest) =>
+    invoke<GoalControlResult>(IPC.invoke.goalControl, request),
   listPlugins: () =>
     invoke<{ plugins: PluginSummary[] }>(IPC.invoke.pluginList),
   /** One renderer slot component asking its own plugin for one JSON answer. */

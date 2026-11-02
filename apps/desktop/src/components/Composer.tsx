@@ -32,6 +32,7 @@ import {
 import { ComposerAutocomplete } from "./ComposerAutocomplete";
 import { AskToolCard } from "./AskToolCard";
 import { PlanApprovalBar } from "./PlanApprovalBar";
+import { GoalLifecycleBar } from "./GoalLifecycleBar";
 import { TaskDock } from "./TaskDock";
 import {
   COMPOSER_MAX_VISIBLE_ROWS,
@@ -139,6 +140,9 @@ export function Composer({
   const clearComposerPrefill = useAppStore((s) => s.clearComposerPrefill);
   const planCheckpoint = useAppStore((s) =>
     s.activeSessionId ? s.planCheckpoints[s.activeSessionId] : undefined,
+  );
+  const goalLifecycle = useAppStore((s) =>
+    s.activeSessionId ? s.goalLifecycles[s.activeSessionId] : undefined,
   );
   const pendingAsk = useAppStore((s) =>
     headAsk(s.pendingAsks, s.activeSessionId),
@@ -539,6 +543,9 @@ export function Composer({
         {activeSessionId && localToolsAllowed ? <TaskDock sessionId={activeSessionId} /> : null}
         {planCheckpoint?.status === "pending" ? (
           <PlanApprovalBar proposal={planCheckpoint} />
+        ) : null}
+        {goalLifecycle && goalLifecycle.status !== "cleared" && localToolsAllowed && !nativeSession ? (
+          <GoalLifecycleBar goal={goalLifecycle} />
         ) : null}
         {pendingAsk ? (
           <AskToolCard key={pendingAsk.requestId} request={pendingAsk} queued={queuedAsks} />

@@ -180,6 +180,7 @@ function clearLocalSessionState(
     const planningStates = withoutRecordKey(state.planningStates, id);
     const pendingPlans = withoutRecordKey(state.pendingPlans, id);
     const planCheckpoints = withoutRecordKey(state.planCheckpoints, id);
+    const goalLifecycles = withoutRecordKey(state.goalLifecycles, id);
     const sessionCompactions = withoutRecordKey(state.sessionCompactions, id);
     const sessionHistory = withoutRecordKey(state.sessionHistory, id);
     const retainedNav = state.navStack.filter(
@@ -209,6 +210,7 @@ function clearLocalSessionState(
       planningStates,
       pendingPlans,
       planCheckpoints,
+      goalLifecycles,
       sessionCompactions,
       sessionHistory,
       navStack,

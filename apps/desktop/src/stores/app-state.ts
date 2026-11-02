@@ -10,6 +10,8 @@ import type {
   AppVersionInfo,
   AskToolResolution,
   ContextCompactionMark,
+  GoalControlAction,
+  GoalLifecycle,
   Mode,
   ModelInfo,
   OnboardingState,
@@ -191,6 +193,8 @@ export type AppState = {
   pendingPlans: Record<string, PlanProposal>;
   /** Latest immutable Plan checkpoint/execution snapshot per session. */
   planCheckpoints: Record<string, PlanProposal>;
+  /** Latest Host-owned Goal lifecycle per session (cleared goals are omitted). */
+  goalLifecycles: Record<string, GoalLifecycle>;
   /** Host-authoritative Todo snapshots keyed by session. */
   sessionTodos: Record<string, SessionTodoSnapshot>;
   applyTodosChanged: (snapshot: SessionTodoSnapshot) => void;
@@ -390,6 +394,7 @@ export type AppState = {
   /** Forget a request's draft once it is resolved or dismissed. */
   dropAskDraft: (requestId: string) => void;
   resolvePlan: (resolution: PlanResolveRequest) => Promise<PlanResolutionResult>;
+  controlGoal: (sessionId: string, proposalId: string, action: GoalControlAction) => Promise<void>;
   showToast: (message: string, options?: ToastOptions) => void;
   dismissToast: (id: number) => void;
   composerPrefill: ComposerPrefill | null;

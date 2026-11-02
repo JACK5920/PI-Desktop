@@ -123,7 +123,10 @@
 > WebSocket binding, a headless Agent Host module, and the full local
 > approval vocabulary, and D375 schedules the SSH-tunnel remote Host first
 > while Gateway and browser access stay unscheduled. None of them changes the
-> current exclusion.
+> current exclusion. D679 / ADR 0338 adds a host-owned, bounded Goal execution
+> lifecycle in schema v28 while preserving the no-replay startup fence: an
+> interrupted Goal is visible after restart and only runs again after an
+> explicit user resume with a new execution identity.
 
 ## Frozen Decisions
 

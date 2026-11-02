@@ -1,5 +1,10 @@
-import { ErrorCodes, IPC, type AgentEventEnvelope, type AppNotification, type PlanExecution, type PlanExecutionFinishStatus, type UiMessage } from "@pi-desktop/shared";
-import { executionFromResponse, executionListFromResponse, planExecutionFromUnknown } from "@pi-desktop/host-runtime";
+import { ErrorCodes, IPC, type AgentEventEnvelope, type AppNotification, type GoalLifecycle, type PlanExecution, type PlanExecutionFinishStatus, type UiMessage } from "@pi-desktop/shared";
+import {
+  executionFromResponse,
+  executionListFromResponse,
+  goalContinuationIsAdmissible,
+  planExecutionFromUnknown,
+} from "@pi-desktop/host-runtime";
 import type { RuntimeState } from "./context";
 import type {
   SessionCoordination,
@@ -347,7 +352,10 @@ async function finishApprovedExecution(
       status,
       errorCode,
     };
-    await runtimeState.host.call("plans.finishExecution", {
+    const finishResult = await runtimeState.host.call<{
+      execution?: PlanExecution;
+      goal?: GoalLifecycle | null;
+    }>("plans.finishExecution", {
       executionId,
       status: pending.status,
       ...(pending.errorCode ? { errorCode: pending.errorCode } : {}),
@@ -362,6 +370,14 @@ async function finishApprovedExecution(
     }
     approvedExecutionTurns.delete(executionId);
     claimedExecutionSessions.delete(executionId);
+    if (
+      pending.status === "completed" &&
+      finishResult.goal?.status === "active" &&
+      finishResult.execution?.kind === "goal" &&
+      finishResult.execution.state === "queued"
+    ) {
+      void dispatchApprovedPlan(finishResult.execution, true);
+    }
   } catch (error) {
     logger.app("runtime", "warn", "approved plan execution finalization failed", {
       data: { executionId, error: String(error) },
@@ -371,7 +387,10 @@ async function finishApprovedExecution(
   }
 }
 
-async function dispatchApprovedPlan(rawExecution: unknown): Promise<void> {
+async function dispatchApprovedPlan(
+  rawExecution: unknown,
+  goalContinuation = false,
+): Promise<void> {
   const initial = planExecutionFromUnknown(rawExecution);
   if (!initial) {
     logger.app("runtime", "warn", "approved plan execution descriptor was invalid");
@@ -405,10 +424,48 @@ async function dispatchApprovedPlan(rawExecution: unknown): Promise<void> {
     }
     if (activeTurns.has(initial.sessionId)) {
       const retry = setTimeout(() => {
-        void dispatchApprovedPlan(initial);
+        void dispatchApprovedPlan(initial, goalContinuation);
       }, 250);
       retry.unref();
       return;
+    }
+    if (goalContinuation) {
+      const host = runtimeState.host;
+      const retryForGoalContinuation = () => {
+        const retry = setTimeout(() => {
+          void dispatchApprovedPlan(initial, true);
+        }, 250);
+        retry.unref();
+      };
+      let admitted = false;
+      try {
+        admitted = await goalContinuationIsAdmissible({
+          hasQueuedInput: () => {
+            const queuedInputs = runtimeState.agentHostBridge?.queue.list(initial.sessionId);
+            return !queuedInputs || queuedInputs.length > 0;
+          },
+          hasPendingApproval: async () => {
+            if (!host) throw new Error("host unavailable during Goal continuation admission");
+            const pending = await host.call<{ plans?: unknown[] }>(
+              "plans.pending",
+              { sessionId: initial.sessionId },
+            );
+            return (pending.plans?.length ?? 0) > 0;
+          },
+        });
+      } catch (error) {
+        // Fail closed: retry the admission read instead of running ahead.
+        logger.app("runtime", "warn", "Goal continuation admission check failed; retrying", {
+          sessionId: initial.sessionId,
+          data: { executionId: initial.id, error: String(error) },
+        });
+        retryForGoalContinuation();
+        return;
+      }
+      if (!admitted) {
+        retryForGoalContinuation();
+        return;
+      }
     }
     const claimResponse = await runtimeState.host.call("plans.claimExecution", {
       executionId: initial.id,

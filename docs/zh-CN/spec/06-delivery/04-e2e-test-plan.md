@@ -4685,9 +4685,10 @@ eleven-tool-round desktop paths are verified by
 
 - **前提条件**：选定的 shell 可以运行超过 60 秒的命令；
   主机时钟是可观察的。
-- **步骤**：1) 在没有超时覆盖的情况下运行。 2) 观察60秒
-  截止日期。 3) 以范围内超驰运行。 4) 提交零、负数和
-  超过 21,600 秒的覆盖。
+- **步骤**：1) 运行一个带 10 秒覆盖的命令：写入开始标记，等待 20 秒，再写入延迟标记。
+  2) 超时后，只在开始标记时间戳加命令延迟和清理宽限期之后检查延迟标记。
+  3) 可选地无覆盖运行以检查 60 秒默认值。 4) 使用范围内覆盖（包括超过 300 秒的值）。
+  5) 提交零、负数和超过 21,600 秒的覆盖。
 - **预期**：缺少超时正好使用 60 秒，并在进程树关闭后返回
   `TOOL_TIMEOUT`；错误会注明实际 `timeoutMs` 预算，并建议延长预算或拆分命令。
   范围内的值在 1–21,600 秒内生效；超出范围的值校验失败且不会启动进程。
@@ -4697,7 +4698,7 @@ eleven-tool-round desktop paths are verified by
   ADR 0167
 - **验收**：E（工具）、H（诊断）、安全
 - **里程碑**：M6
-- **状态**：自动（2026-08-04 通过）：长时间超时 `test:e2e:plan`
+- **状态**：自动（待重新验证）：长时间超时 `test:e2e:plan`
   测量无覆盖超时为 60,024 毫秒，并验证在范围内
   没有延迟标记写入的无效边界
 
@@ -5967,6 +5968,7 @@ eleven-tool-round desktop paths are verified by
 | B——模型配置 | E2E-005、E2E-005G、E2E-006、E2E-007、E2E-038、E2E-050、E2E-052、E2E-055、E2E-066、E2E-080、E2E-082、E2E-151、E2E-005J、E2E-199、E2E-201、E2E-202、E2E-203、E2E-209、E2E-166 |
 | C — 对话和直播 | E2E-CHAT-running-status-survives-output-pauses、E2E-008、E2E-008d、E2E-008a、E2E-009、E2E-010、E2E-011、E2E-011a、E2E-011b、E2E-031、E2E-040、E2E-047、E2E-048、E2E-048c、E2E-048A、E2E-049、E2E-052、 E2E-053、E2E-054、E2E-055、E2E-059、E2E-059a、E2E-060c、E2E-060d、E2E-061、E2E-061a、E2E-062、E2E-064、E2E-065、E2E-068、E2E-071、 E2E-073、E2E-074、E2E-075、E2E-081、E2E-083、E2E-084、E2E-086、E2E-087、E2E-088、E2E-088b、E2E-089、E2E-090、E2E-094、E2E-095、E2E-096、 E2E-097、E2E-098、E2E-099、E2E-102、E2E-102a、E2E-102b、E2E-106、E2E-109、E2E-111、E2E-114、E2E-116、E2E-117、E2E-118、E2E-119、 E2E-120、E2E-121、E2E-代理-001、E2E-142、E2E-144、E2E-145、E2E-146、E2E-147、E2E-151、E2E-199、E2E-250、E2E-166、E2E-SUBAGENT-resume-a-settled-delegation |
 | C — 对话和直播（输入框草稿） | E2E-011c、E2E-011c-1、E2E-011c-2 |
+| C / F / 安全 / 品质 — Goal 生命周期 | E2E-GOAL-lifecycle |
 | A / C / F / Quality — Tray session navigation | E2E-TRAY-bounded-session-navigation |
 | D——工作区 | E2E-012、E2E-013、E2E-022B、E2E-024I、E2E-047、E2E-049、E2E-057、E2E-058、E2E-060、E2E-068、E2E-075、E2E-078、E2E-153 |
 | D——工作区（项目排序） | E2E-253 |
@@ -10010,6 +10012,16 @@ preload, API normalization, store events, ToolRow, and Markdown renderer.
 No provider credentials or paid model calls are required. The fixture ends at
 work-panel file-request routing; artifact bytes are verified from the real
 host-created files. The full app's file-preview viewer is covered separately.
+
+#### E2E-GOAL-lifecycle：持久化、报告、有界续跑、暂停、恢复与清除 Goal
+
+- **前置条件**：隔离的 Host profile 与绑定项目的会话；不需要真实 Provider。Host 测试通过重开同一数据库验证启动恢复。
+- **步骤**：提交并批准 Goal；认领其执行，提交逐条包含证据的 `GoalReport` 并结束 turn。确认 `continue` 只在首个执行结束后创建不同 ID 的排队执行。暂停下一轮，手动恢复并确认新的 execution ID 与 cycle。清除生命周期并确认没有 Goal 执行仍在排队。另一个进程重开场景中，保留 queued/running run，重启 Host，并在手动恢复前检查 `plans.pending`。
+- **预期**：每个执行轮次的报告均持久化并可由 `plans.pending` 读取；错误 turn、过期执行或重复报告会被拒绝。`complete` 要求所有已报告标准均为 `met`；缺少报告会将生命周期停止为 blocked；每个 cycle 最多八个执行轮次（含首次获批轮次），或在达到 250,000 个已报告 token、60 分钟墙钟时间后暂停自动续跑。当前轮次可超过预算，但不会再排入下一轮；手动 Resume 会重置两个预算。Pause/Clear 不会派发旧 ID。Host 重启后记录 `interrupted` 与 `host_restart`，保留报告历史，直到用户显式恢复并创建新执行才会派发。v27 获批 Goal 会迁移为 interrupted 供用户检查。Composer 将证据标记为 Agent 报告，而非 Host 认证。
+- **覆盖**：`pnpm test:e2e:plan` 执行无 Provider 的 Host RPC 用户流程；`cargo test -p host-core --locked` 覆盖生命周期状态迁移、v27 迁移及进程重开；`packages/agent-runtime/src/runtime.test.ts` 覆盖按轮作用域的 `GoalReport`；`apps/desktop/test/goal-lifecycle-render-and-control.test.mjs` 覆盖本地化显示与串行控制；`packages/host-runtime/src/plan-dispatch.test.ts` 覆盖有排队输入或待审批合约时自动续轮会等待。
+- **规格**：`03-runtime/02-agent-runtime.md`、`03-runtime/04-data-storage.md`、`03-runtime/06-host-rpc-protocol.md`、`03-runtime/08-error-codes.md`、`03-runtime/10-session-state-machine.md`、`04-ux/08-component-spec.md`、`04-ux/09-interaction-patterns.md`、ADR 0338 / D679。
+- **验收**：F（持久性）、Quality（有界生命周期）、Security（启动不重放）。
+- **自动化**：离线；不需要真实 Provider 执行。
 
 #### E2E-PLUGIN-fetch-redirect-policy
 

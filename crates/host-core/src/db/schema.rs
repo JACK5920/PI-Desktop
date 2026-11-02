@@ -344,3 +344,51 @@ CREATE INDEX IF NOT EXISTS idx_plan_approvals_execution_queue
 CREATE INDEX IF NOT EXISTS idx_plan_approvals_execution_id
   ON plan_approvals(execution_id) WHERE execution_id IS NOT NULL;
 "#;
+
+/// Mutable Goal execution state is separate from the immutable contract and
+/// approval row. `goal_runs` retains each bounded continuation so restart
+/// recovery and later user-directed resume never replay a run.
+pub(crate) const GOAL_LIFECYCLE_SCHEMA: &str = r#"
+CREATE TABLE IF NOT EXISTS goal_lifecycles (
+  proposal_id           TEXT PRIMARY KEY REFERENCES plan_approvals(request_id) ON DELETE CASCADE,
+  session_id            TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  status                TEXT NOT NULL CHECK (status IN ('active', 'paused', 'completed', 'blocked', 'interrupted', 'cleared')),
+  current_execution_id  TEXT,
+  cycle                 INTEGER NOT NULL DEFAULT 1 CHECK (cycle > 0),
+  round_in_cycle        INTEGER NOT NULL DEFAULT 1 CHECK (round_in_cycle > 0),
+  run_count             INTEGER NOT NULL DEFAULT 1 CHECK (run_count > 0),
+  max_rounds            INTEGER NOT NULL DEFAULT 8 CHECK (max_rounds > 0),
+  max_tokens            INTEGER NOT NULL DEFAULT 250000 CHECK (max_tokens > 0),
+  max_duration_ms       INTEGER NOT NULL DEFAULT 3600000 CHECK (max_duration_ms > 0),
+  tokens_used           INTEGER NOT NULL DEFAULT 0 CHECK (tokens_used >= 0),
+  elapsed_ms            INTEGER NOT NULL DEFAULT 0 CHECK (elapsed_ms >= 0),
+  cycle_started_at      INTEGER NOT NULL DEFAULT 0 CHECK (cycle_started_at >= 0),
+  stop_reason           TEXT,
+  latest_report_json    TEXT,
+  created_at            INTEGER NOT NULL,
+  updated_at            INTEGER NOT NULL,
+  version               INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_goal_lifecycles_session
+  ON goal_lifecycles(session_id, updated_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_goal_lifecycles_open_session
+  ON goal_lifecycles(session_id) WHERE status IN ('active', 'paused', 'blocked', 'interrupted');
+
+CREATE TABLE IF NOT EXISTS goal_runs (
+  execution_id          TEXT PRIMARY KEY,
+  proposal_id           TEXT NOT NULL REFERENCES goal_lifecycles(proposal_id) ON DELETE CASCADE,
+  cycle                 INTEGER NOT NULL CHECK (cycle > 0),
+  round_in_cycle        INTEGER NOT NULL CHECK (round_in_cycle > 0),
+  run_count             INTEGER NOT NULL CHECK (run_count > 0),
+  status                TEXT NOT NULL CHECK (status IN ('queued', 'running', 'completed', 'interrupted')),
+  report_json           TEXT,
+  report_turn_id        TEXT,
+  created_at            INTEGER NOT NULL,
+  updated_at            INTEGER NOT NULL,
+  UNIQUE (proposal_id, cycle, round_in_cycle)
+);
+CREATE INDEX IF NOT EXISTS idx_goal_runs_proposal
+  ON goal_runs(proposal_id, run_count DESC);
+CREATE INDEX IF NOT EXISTS idx_goal_runs_queue
+  ON goal_runs(status, created_at ASC) WHERE status = 'queued';
+"#;

@@ -802,6 +802,34 @@ contract names, keep working while a criterion is unmet and an untried approach
 remains, stop early only when a boundary blocks it, and close with a
 criterion-by-criterion report of what was met and the evidence observed.
 
+An approved Goal has a separate host-owned lifecycle, persisted independently
+from the immutable approval/contract row. Each execution round exposes one
+`GoalReport` transition containing the outcome, summary, and every reported
+acceptance criterion with a `met`/`unmet` status and non-empty evidence
+references. The Host validates the report shape, execution identity, active
+lifecycle, and running turn before saving it. Evidence and criterion status
+are Agent-reported claims, not Host-certified test results; the Composer labels
+them accordingly.
+
+Only a completed round that saved `continue` may automatically queue another
+round, and the Host caps this at eight execution rounds total per cycle,
+including the initial approved round. Each cycle also persists a ceiling of
+250,000 reported tokens and 60 minutes of wall-clock time. The Host evaluates
+both budgets after the current execution round settles; it never terminates an
+in-flight round at a budget boundary, but it will not automatically queue a
+subsequent round once either budget is reached. Manual resume starts a new
+cycle and resets both counters. `complete`
+is accepted only when all reported criteria are `met`; `blocked`, a missing
+report, or the round cap stops automatic continuation. Pause, resume, and clear
+are explicit user controls. Resume creates a new execution ID and cycle rather
+than replaying an interrupted execution. Clear removes the Goal from active
+tracking but retains its report/run history, immutable contract, and artifact.
+An automatic continuation waits while the session has queued interactive input
+or a pending Plan/Goal approval; it does not jump ahead of that user work.
+On Host restart every active Goal is persisted as interrupted; the user must
+manually inspect and resume it. Existing approved Goals migrated from schema
+v27 also require manual review because they have no durable criterion report.
+
 ## 5c. Thinking capability and stream contract
 
 - Canonical levels are `off`, `minimal`, `low`, `medium`, `high`, `xhigh`,

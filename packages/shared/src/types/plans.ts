@@ -102,6 +102,67 @@ export type PlanExecution = {
   state: PlanExecutionState;
 };
 
+export type GoalLifecycleStatus =
+  | "active"
+  | "paused"
+  | "completed"
+  | "blocked"
+  | "interrupted"
+  | "cleared";
+
+/** Maximum execution rounds in one Goal cycle, including its initial approved round. */
+export const GOAL_MAX_ROUNDS_PER_CYCLE = 8;
+export const GOAL_MAX_TOKENS_PER_CYCLE = 250_000;
+export const GOAL_MAX_DURATION_MS_PER_CYCLE = 60 * 60 * 1_000;
+
+export type GoalCriterionReport = {
+  criterion: string;
+  status: "met" | "unmet";
+  /** Concrete verification output or artifact references supporting the claim. */
+  evidence: string[];
+};
+
+export type GoalProgressReport = {
+  outcome: "continue" | "complete" | "blocked";
+  summary: string;
+  criteria: GoalCriterionReport[];
+};
+
+/** Host-owned mutable execution state, separate from the immutable contract. */
+export type GoalLifecycle = {
+  proposalId: string;
+  sessionId: string;
+  /** Immutable title from the approved contract, included for restart rehydration. */
+  title: string;
+  status: GoalLifecycleStatus;
+  currentExecutionId?: string;
+  cycle: number;
+  roundInCycle: number;
+  runCount: number;
+  maxRounds: number;
+  maxTokens: number;
+  maxDurationMs: number;
+  tokensUsed: number;
+  elapsedMs: number;
+  stopReason?: string;
+  latestReport?: GoalProgressReport;
+  updatedAt: string;
+  version: number;
+};
+
+export type GoalControlAction = "pause" | "resume" | "clear";
+
+export type GoalControlRequest = {
+  sessionId: string;
+  proposalId: string;
+  action: GoalControlAction;
+};
+
+export type GoalControlResult = {
+  goal: GoalLifecycle;
+  execution?: PlanExecution;
+};
+
 export type PlanExecutionDescriptor = PlanExecution;
 export type ApprovedPlanExecution = PlanExecution;
 
@@ -122,6 +183,7 @@ export type PlanningStateEvent = {
   executionId?: string;
   executionState?: PlanExecutionState;
   proposal?: PlanProposal;
+  goal?: GoalLifecycle | null;
 };
 
 export type PlansPendingResult = {
@@ -129,6 +191,10 @@ export type PlansPendingResult = {
   state?: PlanningState;
   /** Contract kind the session is currently negotiating, when any (D198). */
   kind?: ProposalKind;
+  /** Session-specific active/latest lifecycle when `sessionId` was requested. */
+  goal?: GoalLifecycle | null;
+  /** Latest non-cleared lifecycle per session when the query was global. */
+  goals?: GoalLifecycle[];
 };
 
 export type PlansQueuedExecutionsResult = {
@@ -161,6 +227,7 @@ export type PlanResolutionResult = {
   action?: PlanApprovalAction;
   targetPermissionMode?: GlobalPermissionMode;
   execution?: PlanExecution;
+  goal?: GoalLifecycle | null;
 };
 
 /** Current host state for one immutable plan/goal submission in a history page. */

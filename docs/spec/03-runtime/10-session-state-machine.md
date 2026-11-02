@@ -24,7 +24,21 @@ Agent / queued
   -- dispatcher starts --> Agent / running
 Agent / running
   -- complete | fail | abort --> Agent / inactive
+
+Goal lifecycle (host-owned, separate from operating mode and approval):
+  approved --> active / queued --> active / running
+  active + completed GoalReport(continue) --> next bounded round (max 8/cycle)
+  active + GoalReport(complete) --> completed
+  active + GoalReport(blocked) | missing report --> blocked
+  active -- user pause --> paused
+  paused | blocked | interrupted -- user resume --> active with a new execution ID
+  active -- Host restart --> interrupted (never replay automatically)
+  active | paused | blocked | interrupted | completed -- user clear --> cleared
 ```
+
+Dispatch of an automatic continuation waits while the session has queued
+interactive input or a pending Plan/Goal approval; it must not overtake that
+user work.
 
 Both contract modes retain the permission-mode selector. Their `Bash` policy is
 `ask` or
@@ -246,5 +260,10 @@ transcript-file line first, index transaction second.
     and process recovery are fail closed, and restart does not replay pending,
     queued, or running work
 13. A Goal execution reports each acceptance criterion's outcome before ending
-    the turn, and a scheduled/unattended Goal run is rejected with
-    `PLAN_REQUIRES_INTERACTIVE_SESSION` exactly like Plan
+    the turn through `GoalReport`; its evidence is Agent-reported rather than
+    Host-certified. Only `continue` auto-queues another round, capped at eight
+    per cycle. A Goal paused, blocked, or interrupted by restart requires a
+    user resume that creates a new execution ID; startup never replays it.
+    Clearing hides active tracking but retains historical reports and the
+    immutable contract. A scheduled/unattended Goal run is rejected with
+    `PLAN_REQUIRES_INTERACTIVE_SESSION` exactly like Plan.

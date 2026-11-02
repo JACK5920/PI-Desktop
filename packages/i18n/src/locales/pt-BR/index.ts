@@ -792,7 +792,24 @@ export const ptBR = {
     reject: "Rejeitar",
     untitled: "Objetivo sem título",
     openArtifact: "Abrir objetivo",
-    openArtifactLabel: "Abrir artefato do objetivo {{path}}"
+    openArtifactLabel: "Abrir artefato do objetivo {{path}}",
+    lifecycle: {
+      region: "Progresso do objetivo",
+      status: { active: "Em andamento", paused: "Pausado", completed: "Concluído", blocked: "Bloqueado", interrupted: "Interrompido", cleared: "Limpo" },
+      round: "Ciclo {{cycle}} · rodada automática {{round}}/{{max}}",
+      roundLimit: "Pausado após {{max}} rodadas neste ciclo. Retome para iniciar outro ciclo.",
+      budget: "Orçamento do ciclo: {{tokens}} / {{maxTokens}} tokens · {{elapsed}} / {{maxDuration}}",
+      budgetLimit: "Pausado ao atingir o orçamento de tempo ou tokens deste ciclo. Retome para iniciar outro ciclo.",
+      pausedByUser: "Pausado por você.",
+      restartInterrupted: "Interrompido quando o Host reiniciou. Retome manualmente para continuar.",
+      interrupted: "Esta execução parou sem informar a conclusão. Revise e retome manualmente.",
+      blockedFallback: "O progresso está bloqueado.",
+      latestReport: "Relatório de progresso mais recente do agente",
+      criteria: { met: "Agente relata como atendido", unmet: "Ainda não atendido" },
+      pause: "Pausar", pausing: "Pausando…", resume: "Retomar", resuming: "Retomando…",
+      clear: "Limpar", clearing: "Limpando…",
+      clearConfirm: "Remover este objetivo do acompanhamento ativo e interromper qualquer execução ativa? Os relatórios salvos, o contrato imutável e o artefato serão mantidos.",
+    }
   },
   onboarding: {
     title: "Primeiros passos",
