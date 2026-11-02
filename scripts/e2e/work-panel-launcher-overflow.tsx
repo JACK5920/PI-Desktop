@@ -30,6 +30,14 @@ declare global {
     diffRequests: number;
     draft: string;
   }>;
+  var githubPrReviewProbe: () => Promise<{
+    ok: true;
+    listRequests: number;
+    detailRequests: number;
+    commentWrites: number;
+    reviewWrites: number;
+    draft: string;
+  }>;
 }
 
 function check(condition: unknown, message: string): asserts condition {
@@ -119,7 +127,7 @@ globalThis.launcherOverflowProbe = async (scenario) => {
   const first = rows[0];
   const last = rows.at(-1);
   check(first && last, "Review row is missing");
-  check(rows.length === scenario.count + 2, "Launcher lost or duplicated a host or plugin tool");
+  check(rows.length === scenario.count + 3, "Launcher lost or duplicated a host or plugin tool");
   const body = element(".work-panel-body").getBoundingClientRect();
   const launcher = element(".work-panel-launcher").getBoundingClientRect();
   check(launcher.top >= body.top - 1 && launcher.bottom <= body.bottom + 1,
@@ -284,6 +292,246 @@ globalThis.branchReviewProbe = async () => {
     check(!channels.includes(IPC.invoke.agentPrompt), "Branch Review must not submit a turn");
     console.log("BRANCH_PROBE:complete");
     return { ok: true, diffRequests, draft: draft.text };
+  } finally {
+    unregister();
+  }
+};
+
+globalThis.githubPrReviewProbe = async () => {
+  await ready;
+  await i18n.changeLanguage("en");
+  const sessionId = "github-pr-review-session";
+  const repository = { owner: "vastsa", name: "PI-Desktop", fullName: "vastsa/PI-Desktop" };
+  const pullRequest = {
+    number: 41,
+    title: "Review fixture",
+    state: "open" as const,
+    draft: false,
+    author: "fixture-user",
+    htmlUrl: "https://github.com/vastsa/PI-Desktop/pull/41",
+    baseRef: "main",
+    headRef: "feat/review-fixture",
+    headSha: "head-revision-41",
+    updatedAt: "2026-11-02T00:00:00Z",
+  };
+  const line = "+return value;";
+  const draft = {
+    draftKey: `session:${sessionId}`,
+    sessionId,
+    text: "Keep this draft",
+    references: [] as ComposerFileReference[],
+  };
+  let listRequests = 0;
+  let detailRequests = 0;
+  const commentWrites: unknown[] = [];
+  const reviewWrites: unknown[] = [];
+  const channels: string[] = [];
+  window.piDesktop = {
+    channels: IPC,
+    platform: "darwin",
+    invoke: async (channel, input) => {
+      channels.push(channel);
+      if (channel === IPC.invoke.githubPrReviewAuthStatus) {
+        return { ok: true, data: { configured: true, connected: false, pending: false } };
+      }
+      if (channel === IPC.invoke.githubPrReviewAuthStart) {
+        return { ok: true, data: { configured: true, connected: false, pending: true } };
+      }
+      if (channel === IPC.invoke.githubPrReviewAuthWait) {
+        return { ok: true, data: { configured: true, connected: true, pending: false, login: "fixture-reviewer" } };
+      }
+      if (channel === IPC.invoke.githubPullRequestList) {
+        listRequests += 1;
+        return { ok: true, data: { repository, pullRequests: [pullRequest] } };
+      }
+      if (channel === IPC.invoke.githubPullRequestDetail) {
+        detailRequests += 1;
+        return {
+          ok: true,
+          data: {
+            repository,
+            pullRequest,
+            files: [{
+              path: "src/e2e-example.ts",
+              status: "modified",
+              additions: 1,
+              deletions: 0,
+              patch: "@@ -1,1 +1,2 @@\n const value = 1;\n+return value;",
+            }],
+            filesTruncated: false,
+            checksState: "success",
+            checks: [{ name: "test", state: "success" }],
+          },
+        };
+      }
+      if (channel === IPC.invoke.githubPrReviewComment) {
+        commentWrites.push(input);
+        return { ok: true, data: { htmlUrl: pullRequest.htmlUrl } };
+      }
+      if (channel === IPC.invoke.githubPrReviewSubmit) {
+        reviewWrites.push(input);
+        return { ok: true, data: { htmlUrl: pullRequest.htmlUrl } };
+      }
+      return { ok: true, data: undefined };
+    },
+    on: () => () => undefined,
+  };
+  const unregister = composerDraftBridge.register({
+    read: () => draft,
+    focused: () => false,
+    selection: () => ({ start: 0, end: draft.text.length }),
+    write(text, references) {
+      draft.text = text;
+      draft.references = references;
+    },
+    async stage() { throw new Error("not used"); },
+  });
+  try {
+    host.style.width = "720px";
+    host.style.height = "600px";
+    flushSync(() => {
+      useAppStore.setState({
+        activeSessionId: sessionId,
+        workspace: { path: "/repo", name: "repo" },
+        workPanelWidth: 720,
+        workPanelOpen: true,
+        workPanelTabs: [],
+        activeWorkPanelTabId: null,
+        workPanelContexts: {},
+        pluginViews: [],
+      });
+      root.render(
+        <I18nextProvider i18n={i18n}>
+          <WorkPanel containerWidth={1170} sidebarCollapsed />
+        </I18nextProvider>,
+      );
+    });
+    await rendered();
+    element('[data-work-panel-launcher-item="github-pr-review"]').click();
+    await rendered();
+    for (let frame = 0; frame < 60 && !host.querySelector(".github-pr-auth-actions button"); frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+    check(host.querySelector(".github-pr-auth-actions button"), "GitHub sign-in action was not rendered");
+    check(listRequests === 0 && detailRequests === 0, "opening GitHub PR Review must not fetch automatically");
+    element(".github-pr-review-toolbar button").click();
+    for (let frame = 0; frame < 300 && !host.querySelector(".github-pr-review-content select"); frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+    const selector = host.querySelector<HTMLSelectElement>(".github-pr-review-content select");
+    check(selector, "GitHub PR Review did not load the PR list");
+    selector.value = "41";
+    selector.dispatchEvent(new Event("change", { bubbles: true }));
+    for (let frame = 0; frame < 300 && !host.querySelector(".github-pr-review-file"); frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+    check(host.querySelector(".github-pr-review-file"), "GitHub PR Review did not show the selected diff");
+    check(host.querySelector(".github-pr-check-state")?.textContent?.includes("CI passing"), "CI state was not shown");
+    const feedback = host.querySelector<HTMLButtonElement>(".github-pr-review-line.add .branch-review-line-feedback");
+    check(feedback, "The changed GitHub PR line has no draft-feedback action");
+    feedback.click();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    check(draft.text.includes("GitHub pull request: vastsa/PI-Desktop #41"), "PR identity was omitted from the draft");
+    check(draft.text.includes("Head revision: head-revision-41"), "The feedback is not bound to the displayed revision");
+    check(draft.text.includes("Diff location: src/e2e-example.ts:2"), "The line anchor was omitted from the draft");
+    check(draft.text.includes(JSON.stringify("return value;")), "The selected diff line was omitted from the draft");
+    check(draft.text.startsWith("Keep this draft\n\n"), "The existing composer draft was not preserved");
+    check(listRequests === 1 && detailRequests === 1, "public PR read was not available while signed out");
+
+    const signIn = host.querySelector<HTMLButtonElement>(".github-pr-auth-card .github-pr-auth-actions button");
+    check(signIn, "GitHub sign-in action is missing");
+    signIn.click();
+    for (let frame = 0; frame < 300 && listRequests < 2; frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+    check(listRequests === 2, "successful sign-in did not refresh the pull-request list");
+    for (let frame = 0; frame < 60 && !host.querySelector(".github-pr-auth-account"); frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+    check(host.querySelector(".github-pr-auth-account"), "signed-in account status was not rendered");
+    const refreshedSelector = host.querySelector<HTMLSelectElement>(".github-pr-review-content select");
+    check(refreshedSelector, "signed-in PR list was not rendered");
+    refreshedSelector.value = "41";
+    refreshedSelector.dispatchEvent(new Event("change", { bubbles: true }));
+    for (let frame = 0; frame < 300 && detailRequests < 2; frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+    check(detailRequests === 2, "signed-in PR details were not reloaded");
+    for (let frame = 0; frame < 300 && !host.querySelector(".github-pr-review-line.add"); frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+
+    const signedInLine = host.querySelector<HTMLElement>(".github-pr-review-line.add");
+    check(signedInLine, "The changed PR line disappeared after sign-in");
+    const lineActions = signedInLine.querySelectorAll<HTMLButtonElement>("button");
+    check(lineActions.length === 2, "The changed PR line does not expose draft and comment actions");
+    lineActions[1].click();
+    await rendered();
+    const commentDialog = document.querySelector<HTMLElement>(".github-pr-write-dialog");
+    check(commentDialog, "Inline-comment preview dialog did not open");
+    check(commentDialog.querySelector(".github-pr-write-preview"), "Inline-comment text preview was not shown");
+    const commentBody = commentDialog.querySelector<HTMLTextAreaElement>("textarea");
+    check(commentBody, "Inline-comment text editor is missing");
+    const textSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
+    check(textSetter, "Cannot set the controlled comment editor in the fixture");
+    textSetter.call(commentBody, "Please keep this behavior.");
+    commentBody.dispatchEvent(new Event("input", { bubbles: true }));
+    await rendered();
+    check(commentWrites.length === 0, "Previewing an inline comment wrote to GitHub before confirmation");
+    const commentButtons = commentDialog.querySelectorAll<HTMLButtonElement>("button");
+    const commentConfirm = commentButtons.item(commentButtons.length - 1);
+    check(commentConfirm, "Inline-comment confirmation action is missing");
+    commentConfirm.click();
+    for (let frame = 0; frame < 60 && commentWrites.length === 0; frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+    check(commentWrites.length === 1, "Confirmed inline comment was not sent");
+    check((commentWrites[0] as { body?: string }).body === "Please keep this behavior.", "Confirmed inline-comment content changed");
+    for (let frame = 0; frame < 60 && document.querySelector(".github-pr-write-dialog"); frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+
+    let reviewAction = host.querySelector<HTMLButtonElement>(".github-pr-review-summary button");
+    for (let frame = 0; frame < 300 && (!reviewAction || reviewAction.disabled); frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      reviewAction = host.querySelector<HTMLButtonElement>(".github-pr-review-summary button");
+    }
+    check(reviewAction, "PR review submission action is missing");
+    check(!reviewAction.disabled, "PR review submission action stayed disabled after sign-in");
+    reviewAction.click();
+    for (let frame = 0; frame < 60 && !document.querySelector(".github-pr-write-dialog select"); frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+    const reviewDialog = document.querySelector<HTMLElement>(".github-pr-write-dialog");
+    check(reviewDialog, "Review preview dialog did not open");
+    const eventSelect = reviewDialog.querySelector<HTMLSelectElement>("select");
+    check(eventSelect, "Review action selector is missing");
+    eventSelect.value = "APPROVE";
+    eventSelect.dispatchEvent(new Event("change", { bubbles: true }));
+    const reviewBody = reviewDialog.querySelector<HTMLTextAreaElement>("textarea");
+    check(reviewBody, "Review text editor is missing");
+    textSetter.call(reviewBody, "Looks good to me.");
+    reviewBody.dispatchEvent(new Event("input", { bubbles: true }));
+    await rendered();
+    const approvalConfirm = reviewDialog.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    check(approvalConfirm, "Approval confirmation checkbox is missing");
+    const reviewButtons = reviewDialog.querySelectorAll<HTMLButtonElement>("button");
+    const reviewConfirm = reviewButtons.item(reviewButtons.length - 1);
+    check(reviewConfirm?.disabled, "Approval must remain disabled until explicit confirmation");
+    check(reviewWrites.length === 0, "Review preview wrote to GitHub before confirmation");
+    approvalConfirm.click();
+    await rendered();
+    const confirmedReviewButtons = reviewDialog.querySelectorAll<HTMLButtonElement>("button");
+    const confirmedReviewButton = confirmedReviewButtons.item(confirmedReviewButtons.length - 1);
+    check(confirmedReviewButton && !confirmedReviewButton.disabled, "Approval did not unlock after explicit confirmation");
+    confirmedReviewButton.click();
+    for (let frame = 0; frame < 60 && reviewWrites.length === 0; frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+    check(reviewWrites.length === 1, "Confirmed PR approval was not sent");
+    check((reviewWrites[0] as { event?: string }).event === "APPROVE", "The confirmed review action changed");
+    check(!channels.includes(IPC.invoke.agentPrompt), "GitHub PR feedback must not submit a turn");
+    return { ok: true, listRequests, detailRequests, commentWrites: commentWrites.length, reviewWrites: reviewWrites.length, draft: draft.text };
   } finally {
     unregister();
   }

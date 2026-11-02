@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { dialog, shell, type BrowserWindow, type IpcMain, type IpcMainInvokeEvent } from "electron";
+import { dialog, net, shell, type BrowserWindow, type IpcMain, type IpcMainInvokeEvent } from "electron";
 import { err, ErrorCodes, IPC, ok, type LifecycleDialogChoice, type Result } from "@pi-desktop/shared";
 import type { AgentHostBridge } from "../agent-host-bridge";
 import type { AgentSidecar } from "../agent-sidecar";
@@ -31,6 +31,7 @@ import { registerRemoteHostIpc } from "./remote-host-ipc";
 import { fetchSkillMarketDocument, searchSkillMarket } from "../skill-market-catalog";
 import { registerWindowIpc } from "./window-ipc";
 import { registerWorktreeIpc } from "./worktree-ipc";
+import { registerGitHubPrReviewIpc } from "./github-pr-review-ipc";
 import { createComposerTemplateLoader, registerWorkspaceIpc } from "./workspace-ipc";
 import { registerComposerIpc } from "./composer-ipc";
 import { registerSpeechIpc } from "./speech-ipc";
@@ -51,6 +52,7 @@ export type RegisterIpcDependencies = {
   traySessions: ReturnType<typeof createTraySessions>;
   taskbarUnreadBadge: ReturnType<typeof createTaskbarUnreadBadge>;
   getSidecar: () => AgentSidecar | null;
+  sessionProjects: Map<string, string | null>;
   getAgentHostBridge: () => AgentHostBridge | null;
   /**
    * Resolves the remote backend router once it exists. Renderer IPC calls whose
@@ -338,6 +340,30 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     logger,
     openPath: (path) => shell.openPath(path),
     stripWinLongPrefix,
+  });
+  registerGitHubPrReviewIpc({
+    registrar,
+    sessionProjects: sessionProjects ?? new Map(),
+    fetchImpl: (url, init) => net.fetch(url, init),
+    openExternal: safeOpenExternal,
+    secrets: {
+      getSecret: async (secretRef) => {
+        const host = getHost();
+        if (!host) throw new Error("host unavailable");
+        const result = await host.call<{ value?: string | null }>("secrets.getForRuntime", { secretRef });
+        return typeof result.value === "string" ? result.value : null;
+      },
+      setSecret: async (secretRef, value) => {
+        const host = getHost();
+        if (!host) throw new Error("host unavailable");
+        await host.call("secrets.set", { secretRef, value });
+      },
+      deleteSecret: async (secretRef) => {
+        const host = getHost();
+        if (!host) throw new Error("host unavailable");
+        await host.call("secrets.delete", { secretRef });
+      },
+    },
   });
   const loadComposerTemplatesCached = createComposerTemplateLoader(logger);
   const composerCommandService = registerComposerIpc({

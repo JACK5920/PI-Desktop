@@ -129,7 +129,7 @@ async fn unregistered_remote_identity_is_rejected_before_session_or_workspace_mu
     assert!(state.lock().await.db.list_projects().unwrap().is_empty());
 }
 #[tokio::test]
-async fn remote_read_dispatch_is_local_approval_then_relay_never_local_runner() {
+async fn remote_read_dispatch_uses_local_permission_policy_and_never_local_runner() {
     let (_dir, state, tx, mut rx) = fixture();
     let (_path, id) = create(&state, &tx).await;
     let pending_state = state.clone();
@@ -138,23 +138,13 @@ async fn remote_read_dispatch_is_local_approval_then_relay_never_local_runner() 
     let pending = tokio::spawn(async move {
         handle_request(pending_state,"tools.execute",json!({"sessionId":pending_id,"toolCallId":"read-a","toolName":"Read","args":{"path":"README.md"},"mode":"agent"}),pending_tx).await
     });
-    let permission: Value = serde_json::from_str(
+    let request: Value = serde_json::from_str(
         &tokio::time::timeout(Duration::from_secs(2), rx.recv())
             .await
             .unwrap()
             .unwrap(),
     )
     .unwrap();
-    assert_eq!(permission["method"], "permissions.request");
-    handle_request(
-        state.clone(),
-        "permissions.resolve",
-        json!({"requestId":permission["params"]["requestId"],"decision":"allow-once"}),
-        tx.clone(),
-    )
-    .await
-    .unwrap();
-    let request: Value = serde_json::from_str(&rx.recv().await.unwrap()).unwrap();
     assert_eq!(request["method"], "tools.remoteExecute");
     assert_eq!(request["params"]["remoteWorkspace"]["path"], "/srv/work");
     handle_request(state.clone(),"tools.remoteComplete",json!({"requestId":request["params"]["requestId"],"result":{"ok":true,"content":{"text":"Remote content"}}}),tx.clone()).await.unwrap();
@@ -196,23 +186,13 @@ async fn denied_remote_write_and_cancelled_read_never_run_locally() {
     let read = tokio::spawn(async move {
         handle_request(pending_state,"tools.execute",json!({"sessionId":pending_id,"toolCallId":"read-b","toolName":"Read","args":{"path":"a.txt"},"mode":"agent"}),pending_tx).await
     });
-    let permission: Value = serde_json::from_str(
+    let request: Value = serde_json::from_str(
         &tokio::time::timeout(Duration::from_secs(2), rx.recv())
             .await
             .unwrap()
             .unwrap(),
     )
     .unwrap();
-    assert_eq!(permission["method"], "permissions.request");
-    handle_request(
-        state.clone(),
-        "permissions.resolve",
-        json!({"requestId":permission["params"]["requestId"],"decision":"allow-once"}),
-        tx.clone(),
-    )
-    .await
-    .unwrap();
-    let request: Value = serde_json::from_str(&rx.recv().await.unwrap()).unwrap();
     assert_eq!(request["method"], "tools.remoteExecute");
     handle_request(
         state.clone(),
@@ -227,6 +207,74 @@ async fn denied_remote_write_and_cancelled_read_never_run_locally() {
     assert_eq!(read.await.unwrap().unwrap()["errorCode"], "TOOL_ABORTED");
     assert!(state.lock().await.remote_execs.is_empty());
 }
+
+#[test]
+fn remote_posix_paths_use_remote_workspace_containment_not_desktop_path_rules() {
+    let root = "/srv/work";
+    assert!(!remote_tools::requires_external_permission(
+        Some(root),
+        "Read",
+        &json!({"path":"README.md"}),
+    ));
+    assert!(!remote_tools::requires_external_permission(
+        Some(root),
+        "Read",
+        &json!({"path":"/srv/work/README.md"}),
+    ));
+    assert!(!remote_tools::requires_external_permission(
+        Some(root),
+        "Read",
+        &json!({"path":"src/../README.md"}),
+    ));
+    assert!(remote_tools::requires_external_permission(
+        Some(root),
+        "Read",
+        &json!({"path":"../secrets.txt"}),
+    ));
+    assert!(remote_tools::requires_external_permission(
+        Some(root),
+        "Read",
+        &json!({"path":"/srv/workspace/secrets.txt"}),
+    ));
+}
+
+#[tokio::test]
+async fn remote_read_outside_workspace_requires_local_approval_before_relay() {
+    let (_dir, state, tx, mut rx) = fixture();
+    let (_path, id) = create(&state, &tx).await;
+    let pending_state = state.clone();
+    let pending_tx = tx.clone();
+    let pending_id = id.clone();
+    let read = tokio::spawn(async move {
+        handle_request(
+            pending_state,
+            "tools.execute",
+            json!({"sessionId":pending_id,"toolCallId":"read-outside","toolName":"Read","args":{"path":"../secrets.txt"},"mode":"agent"}),
+            pending_tx,
+        )
+        .await
+    });
+    let request: Value = serde_json::from_str(
+        &tokio::time::timeout(Duration::from_secs(2), rx.recv())
+            .await
+            .unwrap()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(request["method"], "permissions.request");
+    handle_request(
+        state.clone(),
+        "permissions.resolve",
+        json!({"requestId":request["params"]["requestId"],"decision":"deny"}),
+        tx.clone(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(read.await.unwrap().unwrap()["errorCode"], "TOOL_DENIED");
+    assert!(rx.try_recv().is_err());
+    assert!(state.lock().await.remote_execs.is_empty());
+}
+
 #[tokio::test]
 async fn workspace_runner_reads_without_creating_remote_project_session_or_provider_records() {
     let (dir, state, tx, _rx) = fixture();

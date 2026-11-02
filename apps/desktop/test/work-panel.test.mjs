@@ -115,6 +115,27 @@ test("Branch Review is a distinct work-panel tool and does not replace message R
   );
 });
 
+test("GitHub PR Review is isolated from message/local review and only stages editable draft feedback", async () => {
+  const prReviewSource = await readFile(
+    new URL("../src/components/workpanel/GitHubPrReviewTab.tsx", import.meta.url),
+    "utf8",
+  );
+  const serviceSource = await readFile(
+    new URL("../electron/main/github-pr-review-service.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(panelSource, /toolWorkPanelTab\("github-pr-review"\)/);
+  assert.match(panelSource, /activeTab\?\.kind === "github-pr-review"/);
+  assert.match(panelSource, /<GitHubPrReviewTab \/>/);
+  assert.match(prReviewSource, /api\.githubPullRequestList/);
+  assert.match(prReviewSource, /api\.githubPullRequestDetail/);
+  assert.match(prReviewSource, /composerDraftBridge\.appendTextForSession/);
+  assert.doesNotMatch(prReviewSource, /agentPrompt|pullRequestReview|submitReview/);
+  assert.match(serviceSource, /https:\/\/api\.github\.com/);
+  assert.match(serviceSource, /redirect: "error"/);
+  assert.doesNotMatch(serviceSource, /Authorization|POST|PATCH|DELETE/);
+});
+
 test("a viewport-fixed toggle is the sole pointer collapse control", () => {
   assert.match(appSource, /className="app-work-panel-toggle no-drag"/);
   assert.match(appSource, /aria-pressed=\{workPanelOpen \|\| presentedWorkPanelOpen\}/);

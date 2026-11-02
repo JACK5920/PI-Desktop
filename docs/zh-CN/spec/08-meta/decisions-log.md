@@ -5662,3 +5662,25 @@ Markdown 源码，不是 `text/html` 负载；对禁用行内 HTML 的外部编�
   当前轮次会完成；达到任一预算后不再排入自动轮次。暂停、阻塞、缺少报告、重启或达到预算都会停止自动续跑。
 - 恢复始终创建新的 execution ID 和 cycle，并重置该 cycle 的预算。重启把 active Goal 标记为 interrupted，绝不自动重放；清除从当前跟踪中移除 Goal，但保留报告/执行历史和工件。
 - 协议仍为 v11；新增 Host `goals.report` / `goals.control`、Electron IPC 和 Composer 生命周期控件。见 ADR 0338。
+
+## 2026-11-02 — 只读公开 GitHub PR 审查（D680）
+
+- D680 针对一个独立工作面板界面修订 ADR 0308：GitHub PR Review 只从当前本地会话的
+  GitHub.com `origin` 解析仓库，并且只有用户明确点击加载后才请求公开 API。它显示开放 PR、
+  最多 100 个变更文件 patch 和 CI 状态；不访问不支持的主机或私有仓库。
+- 变更行反馈会把 PR URL 和 head SHA 带入匹配会话的 Composer 草稿，作为可编辑上下文。
+  不会自动发送回合、调用 GitHub 写接口、发布评论或审批。现有消息级 Review 与本地 Branch Review
+  仍各自独立。
+- 覆盖包括服务/IPC fixture 和隔离 Electron 工作面板用户路径测试。见 ADR 0340、IPC 协议、
+  组件规格与 E2E-269。
+
+## 2026-11-03 — GitHub App 认证与确认门控的 PR 写入（D681）
+
+- D681 为独立的 GitHub PR Review 增加可选 GitHub App Authorization Code + PKCE 和有时限的 loopback 回调。
+  未登录时仍可读取公开 PR；用户 token 可访问 App 已安装且用户自身有权访问的私有仓库。
+  App 凭据和轮换中的 token 保存在 Host 密钥存储中，绝不返回给 Renderer。
+- 外部写入限于行内评论和 `COMMENT`、`APPROVE`、`REQUEST_CHANGES` 审查。UI 先预览目标、revision 和正文，
+  再由用户明确确认；批准还需要第二个确认框。Main 在发布前重新读取 PR 并校验开放状态、head SHA 和变更行锚点；
+  写操作不会自动重试。
+- 消息级 Review 与本地 Branch Review 仍保持独立数据来源。覆盖包括认证/刷新、过期写入单测以及隔离 Electron
+  预览/确认用户路径。见 ADR 0341、IPC 协议、组件规格和 E2E-270。

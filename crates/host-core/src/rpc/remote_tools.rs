@@ -73,16 +73,54 @@ pub(super) fn requires_external_permission(
         && args
             .get("path")
             .and_then(Value::as_str)
-            .is_some_and(|path| {
-                root.is_some_and(|root| {
-                    let candidate = if Path::new(path).is_absolute() {
-                        PathBuf::from(path)
-                    } else {
-                        Path::new(root).join(path)
-                    };
-                    !workspace::lexically_inside(Path::new(root), &candidate.to_string_lossy())
-                })
-            })
+            .is_some_and(|path| root.is_some_and(|root| !remote_posix_path_is_inside(root, path)))
+}
+
+/// Remote workspace paths use the remote Linux Host's POSIX path syntax, not
+/// the Desktop's `std::path` semantics. In particular, `/srv/work` must stay
+/// absolute when this check runs on Windows. This is only a permission
+/// classification; the remote Host still performs canonical containment before
+/// execution.
+fn remote_posix_path_is_inside(root: &str, input: &str) -> bool {
+    fn components(path: &str) -> Option<Vec<&str>> {
+        if !path.starts_with('/') {
+            return None;
+        }
+        let mut result = Vec::new();
+        for component in path.split('/') {
+            match component {
+                "" | "." => {}
+                ".." => {
+                    result.pop();
+                }
+                value => result.push(value),
+            }
+        }
+        Some(result)
+    }
+
+    let Some(root_components) = components(root) else {
+        return false;
+    };
+    let candidate = if input.starts_with('/') {
+        let Some(absolute_components) = components(input) else {
+            return false;
+        };
+        absolute_components
+    } else {
+        let mut relative_components = root_components.clone();
+        for component in input.split('/') {
+            match component {
+                "" | "." => {}
+                ".." => {
+                    relative_components.pop();
+                }
+                value => relative_components.push(value),
+            }
+        }
+        relative_components
+    };
+    candidate.starts_with(&root_components)
 }
 
 fn failure(

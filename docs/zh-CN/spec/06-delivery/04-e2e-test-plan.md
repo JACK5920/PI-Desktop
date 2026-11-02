@@ -5986,6 +5986,7 @@ eleven-tool-round desktop paths are verified by
 | Quality (turn changed-files disclosure) | E2E-CHAT-turn-changed-files-summary |
 | C / E / G / Quality — Pi kernel upgrade | E2E-PI-130-kernel-upgrade |
 | C / E / G / Quality — Pi kernel upgrade | E2E-PI-140-kernel-upgrade |
+| C / G / Security / Quality — GitHub PR Review | E2E-269、E2E-270 |
 | C — 对话和直播（输入法斜杠别名） | E2E-255 |
 | E——工具和权限（Skill 常驻） | E2E-254 |
 | 品质（Skill 常驻与输入法斜杠别名） | E2E-254、E2E-255 |
@@ -6048,6 +6049,7 @@ eleven-tool-round desktop paths are verified by
 | M6+（已选模型顺序） | E2E-MODEL-selected-order-persists |
 | M6+（MCP 服务器超时覆盖） | E2E-261 |
 | M6+（目的页加载与焦点） | E2E-087b |
+| M6+（代码审查界面） | E2E-268、E2E-269、E2E-270 |
 | M6+（会话列表响应性） | E2E-SESSION-list-refresh-keeps-desktop-responsive |
 | M6+（Windows 更新缓存） | E2E-260 |
 | M6+（独立会话通信） | E2E-SESSION-independent-top-level-communication、E2E-SESSION-hover-card-model-and-links |
@@ -10173,3 +10175,45 @@ PluginPack 产物的解包目录，仅用于开发验证。验收 #1711 前需�
 - **覆盖：** Host Runtime `workspace-diff.test.ts`；RACP `racp.test.ts` 与 `apps/pi-host/src/host-operations.test.ts` 覆盖远程 Host 契约。渲染器 `branch-review-feedback.test.mjs`、`composer-plugin-draft.test.mjs`、`work-panel-tabs.test.mjs`、`work-panel.test.mjs` 和 `remote-session-user-path.test.mjs` 覆盖草稿交接、工作面板注册和远程参数转发。`node scripts/e2e-work-panel-launcher-overflow.mjs` 在隔离 Electron 中用确定性差异样例覆盖渲染后的分支审查流程。
 - **规格：** ADR 0339、`03-runtime/01-ipc-protocol.md`、`04-ux/08-component-spec.md`。
 - **状态：** 离线自动化；不包含 GitHub 联网或外部 PR 评论。
+
+#### E2E-269：审查公开 GitHub PR，但不向外写入
+
+- **前置条件：** 隔离的本地仓库具有 GitHub.com `origin`，Agent 会话绑定该仓库，
+  输入框已有草稿，并使用确定性的公开 GitHub API fixture。fixture 返回一个含变更文件 patch
+  和通过状态检查的开放 PR。不使用 GitHub 凭据或真实账号。
+- **步骤：** 打开工作面板 → GitHub PR Review。确认单纯打开标签页不会请求 API，
+  然后加载 PR 列表并选择 fixture PR。查看分支/revision、变更文件差异和 CI 摘要。
+  对一条变更行添加反馈，再检查输入草稿和转录本。随后打开消息级 Review 与本地 Branch Review。
+- **预期：** Main 只解析该会话本地的 GitHub.com `origin`；不支持的主机、远程会话和
+  无效 PR 选择器会在网络访问前拒绝。只有用户操作才向 `api.github.com` 发有界、无认证的 GET。
+  差异和检查摘要正常显示。行反馈会把仓库、PR URL、head SHA、文件/行锚点以及精确引用行
+  作为非可信来源文本追加到对应可编辑草稿，并保留已有文本。不会发送聊天回合，也不会创建
+  GitHub 评论、审查、审批或其他写入。转录本不变；消息级 Review 与 Branch Review 保持独立数据来源。
+- **覆盖：** `github-pr-review-service.test.mjs` 和 `github-pr-review-ipc.test.mjs` 覆盖公开只读请求、
+  仓库解析、无效输入和公开 API 错误。`github-pr-review.test.mjs`、`work-panel-tabs.test.mjs` 与
+  `work-panel.test.mjs` 覆盖差异解析、revision 绑定的草稿文本、工具注册和只读边界。
+  `node scripts/e2e-work-panel-launcher-overflow.mjs` 使用确定性 IPC fixture 覆盖渲染后的工作面板用户路径。
+- **规格：** ADR 0340、`03-runtime/01-ipc-protocol.md`、`04-ux/01-ui-ia.md`、
+  `04-ux/08-component-spec.md`。
+- **状态：** 离线自动化；真实 GitHub 访问、私有仓库认证以及外部 PR 评论/审批不属于此 MVP。
+
+#### E2E-270：认证 GitHub PR Review 并确认外部写入
+
+- **前置条件：** 隔离的 Electron 工作面板，存在绑定本地 GitHub.com 仓库的会话和已有输入草稿。
+  使用确定性 IPC fixture 提供开放 PR、变更行 patch、GitHub App 状态、授权完成结果和写入响应；fixture
+  初始为已配置但未登录。不使用真实 GitHub 账号、Client Secret、token 或外部写入。
+- **步骤：** 打开工作面板 → GitHub PR Review，确认打开时不请求 GitHub API。未登录时加载并选择 fixture PR，
+  将一条变更行备注加入输入草稿。通过已配置 App 的流程登录，等待列表刷新后重新选择 PR。打开行内评论对话框，
+  输入正文并查看预览，再明确提交。随后打开 PR 审查，选择 `APPROVE`、输入正文，确认未勾选独立复核框时提交按钮禁用，
+  勾选后提交一次。
+- **预期：** 未登录时仍可读取公开 PR。Renderer 只收到认证状态，不接收 Client Secret 或 token。
+  行内评论与批准对话框都显示目标/revision 和可编辑正文；打开、编辑或预览本身不执行写入。
+  每次最终确认只发出一次带当前 revision 的写入；批准必须经过独立复核勾选。Composer 反馈保持本地可编辑，
+  不发送 Agent 回合。服务端会在 POST 前拒绝已关闭 PR、head SHA 变化、行锚点过期或未登录写入。
+- **覆盖：** `github-pr-review-auth.test.mjs` 覆盖 PKCE/state loopback、取消、密钥存储隔离、刷新 token 轮换和暂时性刷新失败；
+  `github-pr-review-write-service.test.mjs` 覆盖已认证的当前 head 行评论、已关闭/过期 PR 拒绝和所有审查事件；
+  `github-pr-review-ipc.test.mjs` 覆盖本地会话仓库解析和认证边界。隔离 Electron 流程
+  `node scripts/e2e-work-panel-launcher-overflow.mjs` 覆盖未登录公开读取、登录状态转换、本地草稿反馈、行内评论预览/确认和批准确认。
+- **规格：** ADR 0341、`03-runtime/01-ipc-protocol.md`、`04-ux/08-component-spec.md`。
+- **状态：** 使用确定性 fixture 离线自动化。真实 OAuth、GitHub App 注册、私有仓库授权和真实外部写入
+  需要本测试环境没有的 App 注册信息与凭据，因此不宣称已进行人工验收。

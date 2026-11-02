@@ -75,6 +75,9 @@ app.whenReady().then(async () => {
     console.log("RUN_BRANCH_REVIEW");
     const branchReview = await window.webContents.executeJavaScript("globalThis.branchReviewProbe()");
     console.log("BRANCH_REVIEW " + JSON.stringify(branchReview));
+    console.log("RUN_GITHUB_PR_REVIEW");
+    const githubPrReview = await window.webContents.executeJavaScript("globalThis.githubPrReviewProbe()");
+    console.log("GITHUB_PR_REVIEW " + JSON.stringify(githubPrReview));
     app.exit(0);
   } catch (error) { console.error(error); app.exit(1); }
 });
@@ -112,6 +115,17 @@ app.whenReady().then(async () => {
   assert.equal(branchReview.diffRequests, 2);
   assert.match(branchReview.draft, /Keep this draft/);
   console.log(branchLine);
+  const githubLine = output.split(/\r?\n/).find((line) => line.startsWith("GITHUB_PR_REVIEW "));
+  assert.ok(githubLine, "GitHub PR Review interaction did not run");
+  const githubPrReview = JSON.parse(githubLine.slice("GITHUB_PR_REVIEW ".length));
+  assert.equal(githubPrReview.ok, true);
+  assert.equal(githubPrReview.listRequests, 2);
+  assert.equal(githubPrReview.detailRequests, 2);
+  assert.equal(githubPrReview.commentWrites, 1);
+  assert.equal(githubPrReview.reviewWrites, 1);
+  assert.match(githubPrReview.draft, /Keep this draft/);
+  assert.match(githubPrReview.draft, /Head revision: head-revision-41/);
+  console.log(githubLine);
 } finally {
   await rm(temp, { recursive: true, force: true });
 }

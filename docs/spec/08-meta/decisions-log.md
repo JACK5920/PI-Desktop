@@ -8118,3 +8118,34 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
   and artifacts.
 - Protocol remains v11 with Host `goals.report` / `goals.control`, Electron
   IPC, and Composer lifecycle controls. See ADR 0338.
+
+## 2026-11-02 — Read-only public GitHub PR review (D680)
+
+- D680 amends ADR 0308 for one independent Work Panel surface: GitHub PR Review
+  resolves only the active local conversation's GitHub.com `origin`, and makes
+  no request until the user chooses to load PRs. Public, unauthenticated reads
+  show open PRs, at most 100 changed-file patches, and CI status; unsupported
+  hosts and private repositories are not accessed.
+- Changed-line feedback carries the PR URL and head SHA into the matching
+  Composer draft as editable context. The feature sends no turn and performs no
+  GitHub write, comment, approval, credential access, or persistent storage.
+  Existing message Review and local Branch Review remain separate.
+- Coverage: service and IPC fixtures plus the isolated Electron Work Panel
+  user-path test. See ADR 0340, the IPC protocol, component spec, and E2E-269.
+
+## 2026-11-03 — GitHub App authentication and confirmation-gated PR writes (D681)
+
+- D681 extends the independent GitHub PR Review surface with optional GitHub
+  App authorization-code + PKCE over a bounded loopback callback. Public reads
+  still work signed out; the user token enables private repositories the App is
+  installed on and the user can access. App credentials and rotating tokens
+  stay in Host secret storage and are never returned to the Renderer.
+- External writes are limited to line comments and `COMMENT`, `APPROVE`, or
+  `REQUEST_CHANGES` reviews. The UI previews the destination, revision, and
+  text before the user confirms; approval requires a second checkbox. Main
+  re-reads the PR and validates open state, head SHA, and changed-line anchor
+  before posting. Writes are not retried automatically.
+- Message Review and local Branch Review retain their separate sources of
+  truth. Coverage includes auth/refresh and stale-write unit tests plus the
+  isolated Electron preview/confirmation path. See ADR 0341, the IPC protocol,
+  component spec, and E2E-270.

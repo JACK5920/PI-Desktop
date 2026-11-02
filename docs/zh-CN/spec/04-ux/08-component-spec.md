@@ -732,6 +732,25 @@ expanded/collapsed 侧边栏仍为 20px/18px 且启动画面为 64 像素。
 显示的锚点一致时才可继续。反馈会追加到当前会话输入框，不替换已有选区；用户仍可
 编辑或删除，而且不会自动发送消息或发布外部评论。
 
+### 5.2.4 GitHub PR Review
+
+GitHub PR Review 是第三个独立的工作面板工具。它只解析当前本地会话的 GitHub.com HTTPS/SSH
+`origin`；仍不支持远程 Host 会话和 GitHub Enterprise。打开标签页不会请求 GitHub API。
+用户明确加载后最多列出 50 个开放 PR，并显示所选 PR 有界的变更文件 patch、分支对、作者、
+revision 和检查/状态摘要。公开内容可免登录读取；访问私有仓库需要安装在该仓库的 GitHub App
+以及用户授权。Electron Main 与 Host 密钥存储处理 App 凭据和轮换中的用户令牌；Renderer 只收到
+连接状态，不接收密钥或 token。
+
+每条变更行都有本地的“加入草稿”操作；连接 GitHub 后还会显示独立的“评论此行”操作。前者会向
+当前会话输入草稿追加带 revision 标识的备注，不会提交聊天回合。后者会打开预览对话框，显示目标仓库、
+PR、head revision、行锚点和评论正文；用户必须在对话框中明确提交，Main 才会发布到 GitHub。
+独立的审查对话框支持 `COMMENT`、`APPROVE` 和 `REQUEST_CHANGES`；批准还必须勾选明确确认。
+每次写入前 Main 都会重新读取 PR，并拒绝已关闭 PR、过期 head 或当前差异侧上已不存在的行锚点。
+单纯打开面板、加载 PR 或打开预览都不会写入。
+
+GitHub 文本仍视为非可信内容；Composer 反馈会明确标注引用行是来源文本。消息级 Review 和本地
+Branch Review 保持各自原有数据来源与行为。
+
 ### 5.2.1 浅色主题表面
 
 - 面板主体采用静音插页纸（`#fafafa`）； 46px 标题带和工具

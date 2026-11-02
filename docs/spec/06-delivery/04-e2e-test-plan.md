@@ -10927,6 +10927,7 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
 | Quality (turn changed-files disclosure) | E2E-CHAT-turn-changed-files-summary |
 | C / E / G / Quality — Pi kernel upgrade | E2E-PI-130-kernel-upgrade |
 | C / E / G / Quality — Pi kernel upgrade | E2E-PI-140-kernel-upgrade |
+| C / G / Security / Quality — GitHub PR Review | E2E-269, E2E-270 |
 | C — Conversation & stream (IME slash alias) | E2E-255 |
 | E — Tools & permissions (Skill residency) | E2E-254 |
 | Quality (Skill residency and IME slash alias) | E2E-254, E2E-255 |
@@ -10989,6 +10990,7 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
 | M6+ (Selected model order) | E2E-MODEL-selected-order-persists |
 | M6+ (MCP server timeout override) | E2E-261 |
 | M6+ (Destination loading and focus) | E2E-087b |
+| M6+ (Code review surfaces) | E2E-268, E2E-269, E2E-270 |
 | M6+ (Session list responsiveness) | E2E-SESSION-list-refresh-keeps-desktop-responsive |
 | M6+ (Windows updater cache) | E2E-260 |
 | M6+ (Independent session communication) | E2E-SESSION-independent-top-level-communication, E2E-SESSION-hover-card-model-and-links |
@@ -15885,7 +15887,11 @@ browser milestones are scheduled.
   cannot replace the current host selection. Project metadata and sessions are
   local and stable after reload, including name/memory/instructions and ordinary
   sidebar/archive operations. Model requests and provider secrets never appear
-  in remote transport. Only locally admitted workspace tools execute on Host.
+  in remote transport. An in-root low-risk Read follows the normal local
+  permission policy and is relayed without a prompt; an outside-workspace path
+  follows the configured local approval policy but remains subject to the
+  remote Host's canonical boundary. POSIX path classification is independent of
+  the Desktop OS. Only locally admitted workspace tools execute on Host.
   Equal paths on two hosts or on Desktop never collide. Failed calls never
   execute locally or replay automatically. Existing remote histories remain readable.
 - **Specs**: `02-architecture/05-remote-agent-control.md`, `04-ux/01-ui-ia.md`,
@@ -19524,3 +19530,74 @@ their separate platform acceptance.
   `04-ux/08-component-spec.md`.
 - **Status:** Automated offline; live GitHub access and external PR comments
   are not part of this feature.
+
+#### E2E-269: Review a public GitHub PR without writing externally
+
+- **Preconditions:** An isolated local repository with a GitHub.com `origin`,
+  an Agent conversation bound to that repository, an existing Composer draft,
+  and deterministic public GitHub API fixtures. The fixture returns one open
+  PR with a changed-file patch and passing checks. No GitHub credential or live
+  account is used.
+- **Steps:** Open Work Panel → GitHub PR Review. Verify opening the tab alone
+  makes no API request, then load the PR list and select the fixture PR. Inspect
+  its branch/revision, changed-file diff, and CI summary. Add feedback on one
+  changed line, then inspect the Composer draft and transcript. Open message
+  Review and local Branch Review afterward.
+- **Expected:** Main resolves only that conversation's local GitHub.com
+  `origin`; unsupported hosts, remote sessions, and invalid PR selectors fail
+  before network access. The user action performs bounded unauthenticated GETs
+  to `api.github.com` only. The diff and check summary render. Line feedback
+  appends the repository, PR URL, head SHA, file/line anchor, and exact quoted
+  line as untrusted source text to the matching editable draft, preserving
+  existing text. It sends no chat turn and creates no GitHub comment, review,
+  approval, or other write. The transcript is unchanged; message Review and
+  Branch Review retain their independent data sources.
+- **Coverage:** `github-pr-review-service.test.mjs` and
+  `github-pr-review-ipc.test.mjs` cover bounded public reads, repository
+  parsing, malformed inputs, and public-API failures. `github-pr-review.test.mjs`,
+  `work-panel-tabs.test.mjs`, and `work-panel.test.mjs` cover diff parsing,
+  revision-bound draft text, registration, and read-only boundaries.
+  `node scripts/e2e-work-panel-launcher-overflow.mjs` exercises the rendered
+  Work Panel user path with deterministic IPC fixtures.
+- **Specs:** ADR 0340, `03-runtime/01-ipc-protocol.md`,
+  `04-ux/01-ui-ia.md`, `04-ux/08-component-spec.md`.
+- **Status:** Automated offline; live GitHub access, private-repository
+  authentication, and external PR comments/approvals are outside this MVP.
+
+#### E2E-270: Authenticate GitHub PR Review and confirm external writes
+
+- **Preconditions:** An isolated Electron Work Panel with an existing local
+  GitHub.com repository/session and Composer draft. Deterministic IPC fixtures
+  provide an open PR, changed-line patch, GitHub App status, authorization
+  completion, and write responses. The fixture starts configured but signed
+  out. No live GitHub account, Client Secret, token, or write is used.
+- **Steps:** Open Work Panel → GitHub PR Review and verify no GitHub API request
+  occurs on open. Load the fixture PR while signed out, select it, and add one
+  changed-line note to the Composer draft. Sign in through the configured App
+  flow; after the list refresh, reopen the fixture PR. Open an inline-comment
+  dialog, enter text, and verify the preview before submitting. Then open a PR
+  review, choose `APPROVE`, enter text, verify submission is disabled until its
+  confirmation checkbox is checked, and submit once.
+- **Expected:** Public reads remain available while signed out. The Renderer
+  receives only auth status, never the Client Secret or token. The inline and
+  approval dialogs show the destination/revision and editable body; opening or
+  editing either dialog sends no write. Each final confirmation sends exactly
+  one write with the displayed current revision. Approval is blocked until the
+  separate checkbox is confirmed. Composer feedback remains local and
+  editable; no Agent turn is sent. The server-side service rejects a closed PR,
+  changed head SHA, stale line anchor, or signed-out write before POSTing.
+- **Coverage:** `github-pr-review-auth.test.mjs` covers PKCE/state loopback,
+  cancellation, secret-store isolation, refresh-token rotation, and transient
+  refresh failures. `github-pr-review-write-service.test.mjs` covers
+  authenticated current-head line comments, closed/stale PR rejection, and all
+  review events. `github-pr-review-ipc.test.mjs` covers local-session origin
+  resolution and auth boundaries. The isolated Electron flow in
+  `node scripts/e2e-work-panel-launcher-overflow.mjs` covers signed-out public
+  reads, sign-in state transition, local draft feedback, inline-comment
+  preview/confirmation, and approval confirmation.
+- **Specs:** ADR 0341, `03-runtime/01-ipc-protocol.md`,
+  `04-ux/08-component-spec.md`.
+- **Status:** Automated offline with deterministic fixtures. Real OAuth, a
+  configured GitHub App, private-repository authorization, and live external
+  writes require app registration and credentials not present in this test
+  environment; they are not claimed as manually accepted.
