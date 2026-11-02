@@ -50,6 +50,10 @@ the steps.
 Import sessions from other local agents, prepare file references in the
 composer, use the work panel for review/browser/files, manage
 notifications, and run scheduled prompts manually or on a remembered cadence.
+The work panel also supports GitHub pull-request review associated with the
+local conversation's repository: public reads work without sign-in, while a
+configured GitHub App enables private-repository access and explicitly
+confirmed line comments or review submissions.
 
 ### H. Portable configuration sync
 
@@ -72,6 +76,7 @@ across devices without synchronizing conversation history or source files.
 - JSONL transcript persistence with a SQLite index
 - Agent / Plan / Goal operating contracts with host-owned approval artifacts
 - Work panel: Review artifacts, Browser previews, transcript-linked files, and the vendored file manager view
+- Independent GitHub PR Review for GitHub.com repositories, with public reads, optional GitHub App authentication for private repositories, PR diffs/CI summaries, editable Composer-draft line feedback, and preview-confirmed comments/reviews
 - Project archive, multi-project sidebar, session fork/import, and notifications
 - Opt-in local MCP control for project, session, Agent, workspace, and reviewed
   desktop operations
@@ -87,11 +92,13 @@ across devices without synchronizing conversation history or source files.
 - Remote Gateway / browser remote control; local loopback MCP control is the
   explicitly bounded exception described by ADR 0203
 - Full IDE experience
+- Private GitHub repository authentication, PR comments, reviews, and approvals (the current PR panel is public and read-only)
 - Trusted plugin provenance/signatures and a capability sandbox for raw plugin
   Node APIs
 - Mobile clients
 - Billing systems
 - Computer Use browser takeover
+- Private GitHub repository authentication, PR comments, reviews, and approvals (the current PR panel is public and read-only)
 
 ## 6. Operating modes
 

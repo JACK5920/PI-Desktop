@@ -32,6 +32,7 @@
 | `plugin` | 插件 install/enable-disable/query/permissions |
 | `commandPalette` | 命令面板搜索和执行 |
 | `workspace` | 工作区选择和遗留工作树诊断 |
+| `github` | 针对本地会话 GitHub origin 的 PR 列表/差异/检查、可选 GitHub App 认证和确认门控审查写入 |
 | `browser` | 工作面板嵌入预览 navigation/bounds/visibility + 状态事件 |
 | `fs` | 工作面板工作区文件 listing/reading/reveal，聊天文件引用对项目、会话临时目录与附件根的补全，以及用户点击后用系统默认应用打开（只读） |
 | `window` | 无框窗口状态、控件和有界工作面板宽度预留 |
@@ -1424,6 +1425,32 @@ type AgentCapabilityQuery = {
   `ReviewRollbackResult`。主机在之前验证当前的后工具哈希
   恢复快照；它返回 `rolledBack`、`alreadyRolledBack`、
   `conflict` 或 `unavailable` 并且永远不会覆盖冲突的后续编辑。
+
+### GitHub PR Review（ADR 0340、ADR 0341）
+
+- `github/pullRequest/list({sessionId})` → `GitHubPullRequestListResult`，以及
+  `github/pullRequest/detail({sessionId, number})` → `GitHubPullRequestDetailResult`，
+  只从指定本地会话解析 `origin`。Main 仅接受 GitHub.com HTTPS/SSH remote，拒绝远程会话、
+  不支持的主机和缺少工作区的情况。单纯打开标签页不会请求 GitHub API；明确点击 Load PRs
+  后最多加载 50 个开放 PR。选择 PR 后最多读取 100 个变更文件 patch、check runs 与 commit status。
+  未登录时可以读取公开内容；使用 GitHub App 用户令牌后，可读取用户和 App 均有权访问的私有仓库。
+- `github/prReview/auth/status` → `GitHubPrReviewAuthStatus`，不返回 token 或 Client Secret。
+  `auth/configure({clientId, clientSecret})` 通过 Host 密钥存储保存凭据且只返回状态；
+  `auth/start`、`auth/wait`、`auth/cancel` 管理最长 5 分钟的 Authorization Code + PKCE
+  loopback 流程；`auth/disconnect` 删除用户及刷新 token，`auth/clearConfiguration` 还会删除 App 凭据。
+  OAuth 仅使用 `offline_access`，不会增加 Renderer 对密钥存储的访问。GitHub App 需具备
+  Pull requests 读写、Checks 只读、Commit statuses 只读权限；访问私有仓库前需安装 App。
+- `github/prReview/comment({sessionId, number, headSha, path, line, side, body})` 发布一条行内评论；
+  `github/prReview/submit({sessionId, number, headSha, event, body})` 提交 `COMMENT`、`APPROVE`
+  或 `REQUEST_CHANGES`。Renderer 在写入前展示目的地、revision、文本预览和明确的提交/取消控件；
+  批准操作还需要单独勾选确认。写入要求已登录，且不会自动重试。
+- Main 在每次写入前重新解析当前会话仓库、取得当前 token 并重新读取 PR；关闭的 PR、head SHA
+  已变化的 PR 会被拒绝。行内评论还须对应当前有界 patch 中 requested `RIGHT`/`LEFT` 侧仍存在的新增/删除行，
+  防止旧预览写到变化后的版本或行锚点。
+- API 仅访问固定的 `https://api.github.com` 与 `https://github.com`，使用 HTTPS，拒绝重定向，
+  并设请求超时及响应体上限。Renderer 接收的仍是有类型约束但不可信的展示数据。行反馈追加到对应会话的
+  可编辑输入草稿，包含 PR URL、head SHA、文件、行号和引用行文本；不会自动提交聊天回合。
+  消息级 Review 与本地 Branch Review 仍是独立数据来源。
 
 ### browser (D100, D333)
 

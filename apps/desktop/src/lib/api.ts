@@ -117,6 +117,13 @@ import type {
   WorkPanelTabMenuRequest,
   NotificationListResult,
   ReviewRollbackResult,
+  GitHubPrReviewAppCredentials,
+  GitHubPrReviewAuthStatus,
+  GitHubPrReviewLineCommentInput,
+  GitHubPrReviewSubmissionInput,
+  GitHubPrReviewWriteResult,
+  GitHubPullRequestDetailResult,
+  GitHubPullRequestListResult,
   PlanProposal,
   GoalControlRequest,
   GoalControlResult,
@@ -1628,6 +1635,28 @@ export const api = {
     const input = typeof request === "string" ? { sessionId: request } : request ?? {};
     return invoke<WorkspaceDiff>(IPC.invoke.workspaceDiff, input);
   },
+  githubPullRequestList: (sessionId: string) =>
+    invoke<GitHubPullRequestListResult>(IPC.invoke.githubPullRequestList, { sessionId }),
+  githubPullRequestDetail: (input: { sessionId: string; number: number }) =>
+    invoke<GitHubPullRequestDetailResult>(IPC.invoke.githubPullRequestDetail, input),
+  githubPrReviewAuthStatus: () =>
+    invoke<GitHubPrReviewAuthStatus>(IPC.invoke.githubPrReviewAuthStatus),
+  githubPrReviewAuthConfigure: (input: GitHubPrReviewAppCredentials) =>
+    invoke<GitHubPrReviewAuthStatus>(IPC.invoke.githubPrReviewAuthConfigure, input),
+  githubPrReviewAuthStart: () =>
+    invoke<GitHubPrReviewAuthStatus>(IPC.invoke.githubPrReviewAuthStart),
+  githubPrReviewAuthWait: () =>
+    invoke<GitHubPrReviewAuthStatus>(IPC.invoke.githubPrReviewAuthWait),
+  githubPrReviewAuthCancel: () =>
+    invoke<GitHubPrReviewAuthStatus>(IPC.invoke.githubPrReviewAuthCancel),
+  githubPrReviewAuthDisconnect: () =>
+    invoke<GitHubPrReviewAuthStatus>(IPC.invoke.githubPrReviewAuthDisconnect),
+  githubPrReviewAuthClearConfiguration: () =>
+    invoke<GitHubPrReviewAuthStatus>(IPC.invoke.githubPrReviewAuthClearConfiguration),
+  githubPrReviewComment: (input: GitHubPrReviewLineCommentInput) =>
+    invoke<GitHubPrReviewWriteResult>(IPC.invoke.githubPrReviewComment, input),
+  githubPrReviewSubmit: (input: GitHubPrReviewSubmissionInput) =>
+    invoke<GitHubPrReviewWriteResult>(IPC.invoke.githubPrReviewSubmit, input),
   workspaceReviewRollback: (input: {
     sessionId: string;
     snapshotId: string;

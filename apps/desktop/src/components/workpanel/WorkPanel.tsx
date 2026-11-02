@@ -48,9 +48,11 @@ import {
   IconPanelRestore,
   IconPlug,
   IconPlus,
+  IconPullRequest,
 } from "../icons";
 import { ReviewTab } from "./ReviewTab";
 import { BranchReviewTab } from "./BranchReviewTab";
+import { GitHubPrReviewTab } from "./GitHubPrReviewTab";
 import { FilesTab } from "./FilesTab";
 import { PluginViewTab } from "./PluginViewTab";
 import { SubagentTranscriptTab } from "./SubagentTranscriptTab";
@@ -69,6 +71,7 @@ const TAB_ICONS = {
   new: IconPlus,
   review: IconDiff,
   "branch-review": IconBranch,
+  "github-pr-review": IconPullRequest,
   file: IconFileText,
   plugin: IconPlug,
   subagent: IconBot,
@@ -127,6 +130,7 @@ function tabLabel(
   if (tab.kind === "new") return t("panel.new.title");
   if (tab.kind === "subagent") return tab.label ?? t("panel.tabs.subagent");
   if (tab.kind === "branch-review") return t("panel.tabs.branchReview");
+  if (tab.kind === "github-pr-review") return t("panel.tabs.githubPrReview");
   if (tab.kind !== "file") return t(`panel.tabs.${tab.kind}`);
   const path = tab.resource ?? "";
   return path.split("/").filter(Boolean).pop() || t("panel.tabs.file");
@@ -150,6 +154,12 @@ function workPanelTools(
       tab: toolWorkPanelTab("branch-review"),
       label: t("panel.tabs.branchReview"),
       icon: IconBranch,
+    },
+    {
+      id: "github-pr-review",
+      tab: toolWorkPanelTab("github-pr-review"),
+      label: t("panel.tabs.githubPrReview"),
+      icon: IconPullRequest,
     },
     ...pluginViews.map((view) => {
       const Icon = pluginViewIcon(view.icon);
@@ -1125,6 +1135,16 @@ function LocalWorkPanel({
               aria-labelledby={`work-panel-tab-${activeTab.id}`}
             >
               <BranchReviewTab />
+            </div>
+          )}
+          {activeTab?.kind === "github-pr-review" && (
+            <div
+              id={`work-panel-surface-${activeTab.id}`}
+              className="work-panel-tabpane"
+              role="tabpanel"
+              aria-labelledby={`work-panel-tab-${activeTab.id}`}
+            >
+              <GitHubPrReviewTab />
             </div>
           )}
           {activeTab?.kind === "file" && (

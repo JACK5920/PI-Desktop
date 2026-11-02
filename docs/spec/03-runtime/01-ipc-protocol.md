@@ -29,6 +29,7 @@ Principles:
 | `plugin` | Plugin install/enable-disable/query/permissions |
 | `commandPalette` | Command palette search and execution |
 | `workspace` | Workspace selection and legacy working-tree diagnostics |
+| `github` | GitHub PR list/diff/checks, optional GitHub App authentication, and confirmation-gated review writes for a local conversation's GitHub origin |
 | `browser` | Work panel embedded preview navigation/bounds/visibility + state events |
 | `fs` | Work panel workspace file listing/reading/reveal, chat file-reference completion against the project, session scratch, and attachment roots, plus user-initiated open with the OS default handler (read-only) |
 | `window` | Frameless window state, controls, and compatibility work-panel geometry channels |
@@ -1885,6 +1886,48 @@ entry or local-page navigation, which follow its existing local-file policy.
   `ReviewRollbackResult`. The host verifies the current post-tool hash before
   restoring the snapshot; it returns `rolledBack`, `alreadyRolledBack`,
   `conflict`, or `unavailable` and never overwrites a conflicting later edit.
+
+### GitHub PR Review (ADR 0340, ADR 0341)
+
+- `github/pullRequest/list({sessionId})` → `GitHubPullRequestListResult` and
+  `github/pullRequest/detail({sessionId, number})` →
+  `GitHubPullRequestDetailResult` resolve `origin` only from the supplied local
+  conversation. Main accepts only GitHub.com HTTPS/SSH remotes and rejects
+  remote sessions, unsupported hosts, and missing workspaces. Opening the tab
+  alone makes no GitHub API request; an explicit Load PRs action loads at most
+  50 open PRs. Selecting a PR loads at most 100 changed-file patches plus
+  check-run and commit-status summaries. Public reads work while signed out;
+  authenticated reads use the configured GitHub App user token for private
+  repositories the user and App can access.
+- `github/prReview/auth/status` → `GitHubPrReviewAuthStatus` never returns a
+  token or Client Secret. `auth/configure({clientId, clientSecret})` stores
+  credentials through Host secret storage and returns only status;
+  `auth/start`, `auth/wait`, and `auth/cancel` control a five-minute
+  authorization-code + PKCE loopback flow; `auth/disconnect` removes user and
+  refresh tokens; `auth/clearConfiguration` also removes App credentials.
+  OAuth uses only `offline_access`; no Renderer access to the secret store is
+  added. The user configures a GitHub App with Pull requests read/write,
+  Checks read, and Commit statuses read permissions and installs it on private
+  repositories as needed.
+- `github/prReview/comment({sessionId, number, headSha, path, line, side,
+  body})` creates one inline comment; `github/prReview/submit({sessionId,
+  number, headSha, event, body})` submits one `COMMENT`, `APPROVE`, or
+  `REQUEST_CHANGES` review. The Renderer first presents the destination,
+  revision, text preview, and explicit submit/cancel controls. Approval also
+  requires a separate confirmation checkbox. These channels require a signed-in
+  user and never retry a write automatically.
+- Main re-resolves the supplied session's repository, obtains the current
+  token, re-reads the PR, and rejects closed PRs or a changed head SHA. Inline
+  comments must still match an added/deleted line in the current bounded patch
+  on the requested `RIGHT`/`LEFT` side. This prevents a stale preview from
+  writing to a changed revision or line anchor.
+- API calls use fixed `https://api.github.com` and `https://github.com`
+  endpoints, HTTPS, redirect rejection, request timeouts, and bounded response
+  bodies. Renderer results are typed untrusted display data. Changed-line
+  Composer-draft feedback remains a separate local, editable operation; it
+  includes the PR URL, head SHA, file, line, and quoted line text but does not
+  submit a chat turn. Message-owned Review and local Branch Review remain
+  separate sources of truth.
 
 ### browser (D100, D333)
 

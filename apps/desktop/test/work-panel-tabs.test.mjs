@@ -33,12 +33,14 @@ test("work panel tabs open on demand and deduplicate by resource", () => {
   const empty = { tabs: [], activeTabId: null };
   const review = openWorkPanelTabState(empty, toolWorkPanelTab("review"));
   const branchReview = openWorkPanelTabState(review, toolWorkPanelTab("branch-review"));
-  const file = openWorkPanelTabState(branchReview, fileWorkPanelTab("src/App.tsx"));
+  const githubPrReview = openWorkPanelTabState(branchReview, toolWorkPanelTab("github-pr-review"));
+  const file = openWorkPanelTabState(githubPrReview, fileWorkPanelTab("src/App.tsx"));
   const reopened = openWorkPanelTabState(file, toolWorkPanelTab("review"));
 
-  assert.deepEqual(reopened.tabs.map((tab) => tab.id), ["review", "branch-review", "file:src/App.tsx"]);
+  assert.deepEqual(reopened.tabs.map((tab) => tab.id), ["review", "branch-review", "github-pr-review", "file:src/App.tsx"]);
   assert.equal(reopened.activeTabId, "review");
   assert.equal(isKnownWorkPanelTab(toolWorkPanelTab("branch-review")), true);
+  assert.equal(isKnownWorkPanelTab(toolWorkPanelTab("github-pr-review")), true);
 });
 
 test("new tabs are unique launcher pages and replace themselves with a tool", () => {

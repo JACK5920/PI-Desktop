@@ -786,6 +786,259 @@
   opacity: 1;
 }
 
+/* Work panel — authenticated, confirmation-gated GitHub pull-request review */
+
+.github-pr-review-tab {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.github-pr-auth-card {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border-bottom: 1px solid var(--ds-border-subtle);
+  background: var(--ds-bg-secondary);
+}
+
+.github-pr-auth-heading,
+.github-pr-auth-actions,
+.github-pr-write-heading,
+.github-pr-write-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.github-pr-auth-heading {
+  color: var(--ds-text-primary);
+  font-size: var(--text-xs);
+}
+
+.github-pr-auth-account {
+  overflow: hidden;
+  color: var(--ds-success);
+  font-size: var(--text-2xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.github-pr-auth-setup {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.github-pr-auth-setup .field-input {
+  width: 100%;
+}
+
+.github-pr-auth-help {
+  color: var(--ds-text-muted);
+  font-size: var(--text-2xs);
+}
+
+.github-pr-auth-help summary {
+  cursor: pointer;
+  color: var(--ds-text-secondary);
+}
+
+.github-pr-auth-help p {
+  margin-top: 6px;
+  white-space: pre-line;
+}
+
+.github-pr-auth-actions {
+  flex-wrap: wrap;
+}
+
+.github-pr-review-toolbar {
+  display: flex;
+  min-width: 0;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border-bottom: 1px solid var(--ds-border-subtle);
+}
+
+.github-pr-review-source {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  color: var(--ds-text-muted);
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.github-pr-review-refresh {
+  flex: 0 0 auto;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.github-pr-review-note {
+  flex: 0 0 auto;
+  padding: 7px 10px;
+  color: var(--ds-text-muted);
+  font-size: var(--text-2xs);
+}
+
+.github-pr-review-content {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+}
+
+.github-pr-review-summary {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 4px;
+  overflow: hidden;
+  color: var(--ds-text-muted);
+  font-size: var(--text-2xs);
+}
+
+.github-pr-review-summary strong {
+  overflow: hidden;
+  color: var(--ds-text-primary);
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.github-pr-check-state.is-success { color: var(--ds-success); }
+.github-pr-check-state.is-failure { color: var(--ds-error); }
+.github-pr-check-state.is-pending { color: var(--ds-warning); }
+
+.github-pr-review-scroll {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  padding: 2px 0 8px;
+}
+
+.github-pr-review-file {
+  overflow: hidden;
+  margin-bottom: 10px;
+  border: 1px solid var(--ds-border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--ds-bg-secondary);
+}
+
+.github-pr-review-file-header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--ds-border-subtle);
+  color: var(--ds-text-muted);
+  font-size: var(--text-2xs);
+}
+
+.github-pr-review-file-header code {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: var(--ds-text-primary);
+  font-family: var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.github-pr-review-line {
+  position: relative;
+  padding-right: 140px;
+}
+
+.github-pr-review-line-actions {
+  position: absolute;
+  top: 1px;
+  right: 4px;
+  display: flex;
+  align-items: start;
+  gap: 3px;
+  opacity: 0;
+}
+
+.github-pr-review-line:hover .github-pr-review-line-actions,
+.github-pr-review-line:focus-within .github-pr-review-line-actions {
+  opacity: 1;
+}
+
+.github-pr-review-line-actions .branch-review-line-feedback,
+.github-pr-review-line-actions > button {
+  position: static;
+  min-height: 22px;
+  padding: 2px 5px;
+  background: var(--ds-bg-secondary);
+  font-size: var(--text-2xs);
+  opacity: 1;
+}
+
+.github-pr-write-overlay {
+  z-index: 40;
+}
+
+.github-pr-write-dialog {
+  display: flex;
+  width: min(560px, calc(100vw - 32px));
+  max-height: min(80vh, 720px);
+  flex-direction: column;
+  gap: 12px;
+  overflow: auto;
+  padding: 18px;
+}
+
+.github-pr-write-heading h2 {
+  margin: 0;
+  color: var(--ds-text-primary);
+  font-size: var(--text-md);
+}
+
+.github-pr-write-target {
+  overflow: hidden;
+  padding: 8px;
+  border: 1px solid var(--ds-border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--ds-bg-secondary);
+  color: var(--ds-text-muted);
+  font-size: var(--text-2xs);
+  text-overflow: ellipsis;
+}
+
+.github-pr-write-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border-left: 3px solid var(--ds-border-strong);
+  background: var(--ds-bg-secondary);
+  color: var(--ds-text-secondary);
+  font-size: var(--text-xs);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.github-pr-write-actions {
+  justify-content: flex-end;
+  margin-top: auto;
+}
+
 @media (max-width: 560px) {
   .branch-review-current-branch {
     display: none;

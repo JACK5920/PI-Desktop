@@ -1132,6 +1132,33 @@ only when its file anchor still matches the displayed anchor. Feedback is
 appended to the active session's Composer draft without replacing selected text;
 the draft remains editable and no turn or external comment is sent.
 
+### 5.2.4 GitHub PR Review
+
+GitHub PR Review is a third, independent Work Panel tool. It resolves only the
+active local conversation's GitHub.com HTTPS/SSH `origin`; remote Host sessions
+and GitHub Enterprise remain unsupported. Opening the tab makes no GitHub API
+request. Explicit loading lists up to 50 open PRs and displays a selected PR's
+bounded changed-file patches, branch pair, author, revision, and check/status
+summary. Public reads work without sign-in. Private-repository reads require a
+GitHub App installed on that repository and user authorization. App credentials
+and rotating user tokens are handled by Electron Main and Host secret storage;
+the Renderer only receives connection status, never secrets or tokens.
+
+Each changed line has a local **Add to draft** action and, while connected, a
+separate **Comment on line** action. The former appends an editable,
+revision-identified note to that session's Composer draft; it never submits a
+turn. The latter opens a preview dialog with the target repository, PR, head
+revision, line, and comment body. The user must submit from that dialog before
+Main posts to GitHub. A separate review dialog offers `COMMENT`, `APPROVE`, and
+`REQUEST_CHANGES`; approval also requires an explicit confirmation checkbox.
+Before any write, Main re-fetches the PR and rejects closed PRs, a stale head,
+or a line that no longer exists in the selected diff side. No write occurs from
+opening the panel, loading a PR, or opening the preview alone.
+
+GitHub text remains untrusted content; the quoted selected line is explicitly
+identified as source text in Composer feedback. The message-owned Review and
+local Branch Review tools retain their existing data sources and behavior.
+
 ### 5.2.1 Light-theme surface
 
 - Panel body uses quiet inset paper (`#fafafa`); the 46px header band and tool
