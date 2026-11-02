@@ -19,13 +19,17 @@ const scenarios = [
   { count: 3, width: 244, height: 520, explicitTab: false, theme: "dark", language: "zh-CN" },
   { count: 0, width: 360, height: 260, explicitTab: true, theme: "light", language: "en" },
 ];
+const branchReviewOnly = process.argv.includes("--branch-review-only");
+const scenarioIndexArgument = process.argv.find((argument) => argument.startsWith("--scenario="));
+const selectedScenario = scenarioIndexArgument ? scenarios[Number(scenarioIndexArgument.slice("--scenario=".length))] : undefined;
+const activeScenarios = branchReviewOnly ? [] : scenarioIndexArgument ? (selectedScenario ? [selectedScenario] : []) : scenarios;
 try {
   const styles = await Promise.all(
     ["tokens", "base", "chat-shell", "ui-kit", "work-panel"].map((name) =>
       readFile(join(root, `apps/desktop/src/styles/${name}.css`), "utf8"),
     ),
   );
-  await writeFile(join(temp, "style.css"), styles.join("\n"));
+  await writeFile(join(temp, "style.css"), `${styles.join("\n")}\n* { animation-duration: 0s !important; transition-duration: 0s !important; scroll-behavior: auto !important; }`);
   await build({
     entryPoints: [join(root, "scripts/e2e/work-panel-launcher-overflow.tsx")],
     outfile: join(temp, "renderer.js"),
@@ -54,17 +58,23 @@ try {
 const { app, BrowserWindow } = require("electron");
 const path = require("node:path");
 app.setPath("userData", path.join(__dirname, "profile"));
+app.commandLine.appendSwitch("disable-backgrounding-occluded-windows");
+app.commandLine.appendSwitch("disable-renderer-backgrounding");
 app.whenReady().then(async () => {
-  const window = new BrowserWindow({ show: false, width: 1000, height: 800,
+  const window = new BrowserWindow({ show: true, width: 1000, height: 800,
     webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } });
   window.webContents.on("console-message", (event) => console.error(event.message));
   try {
     await window.loadFile(path.join(__dirname, "index.html"));
-    for (const scenario of ${JSON.stringify(scenarios)}) {
+    for (const scenario of ${JSON.stringify(activeScenarios)}) {
+      console.log("RUN_LAUNCHER " + JSON.stringify(scenario));
       const result = await window.webContents.executeJavaScript(
         "globalThis.launcherOverflowProbe(" + JSON.stringify(scenario) + ")");
       console.log("LAUNCHER_OVERFLOW " + JSON.stringify({ ...scenario, ...result }));
     }
+    console.log("RUN_BRANCH_REVIEW");
+    const branchReview = await window.webContents.executeJavaScript("globalThis.branchReviewProbe()");
+    console.log("BRANCH_REVIEW " + JSON.stringify(branchReview));
     app.exit(0);
   } catch (error) { console.error(error); app.exit(1); }
 });
@@ -90,11 +100,18 @@ app.whenReady().then(async () => {
   }
   const results = output.split(/\r?\n/).filter((line) => line.startsWith("LAUNCHER_OVERFLOW "));
   assert.equal(code, 0, output.slice(-6000));
-  assert.equal(results.length, scenarios.length, "Not all launcher scenarios ran");
+  assert.equal(results.length, activeScenarios.length, "Not all launcher scenarios ran");
   for (const line of results) {
     assert.equal(JSON.parse(line.slice("LAUNCHER_OVERFLOW ".length)).ok, true);
     console.log(line);
   }
+  const branchLine = output.split(/\r?\n/).find((line) => line.startsWith("BRANCH_REVIEW "));
+  assert.ok(branchLine, "Branch Review interaction did not run");
+  const branchReview = JSON.parse(branchLine.slice("BRANCH_REVIEW ".length));
+  assert.equal(branchReview.ok, true);
+  assert.equal(branchReview.diffRequests, 2);
+  assert.match(branchReview.draft, /Keep this draft/);
+  console.log(branchLine);
 } finally {
   await rm(temp, { recursive: true, force: true });
 }

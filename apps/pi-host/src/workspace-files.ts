@@ -18,7 +18,10 @@ export function createWorkspaceFiles(): NonNullable<RacpHostOperations["workspac
         case "read": return await readOpenableFile(ref, root, [], input.mimeType);
         case "image": return await readOpenableImage(ref, root, [], input.mimeType);
         case "index": return await getWorkspaceFileIndex(root);
-        case "diff": return await collectWorkspaceDiff(root);
+        case "diff": return await collectWorkspaceDiff(root, {
+          ...(input.baseRef ? { baseRef: input.baseRef } : {}),
+          ...(input.includeBases ? { includeBases: true } : {}),
+        });
         case "instructions": return (await loadProjectInstructions(root)) ?? { entries: [] };
         case "resolve": {
           const roots = { project: [{ path: root, name: basename(root), primary: true }] };

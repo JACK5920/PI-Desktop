@@ -71,8 +71,39 @@ test("parses a modified file patch with counts and hunks", () => {
     file.hunks[0].lines.map((l) => l.type),
     ["context", "del", "add", "add"],
   );
+  assert.deepEqual(
+    file.hunks[0].lines.map(({ oldLine, newLine }) => [oldLine, newLine]),
+    [[1, 1], [2, undefined], [undefined, 2], [undefined, 3]],
+  );
   // The no-newline marker never leaks into rendered lines.
   assert.ok(file.hunks[0].lines.every((l) => !l.text.includes("No newline")));
+});
+
+test("tracks deleted and inserted lines on their respective diff sides", () => {
+  const file = parseFilePatch(
+    [
+      "diff --git a/src/x.ts b/src/x.ts",
+      "--- a/src/x.ts",
+      "+++ b/src/x.ts",
+      "@@ -4,3 +4,4 @@",
+      " before",
+      "-removed",
+      "+inserted",
+      " after",
+      "+last",
+    ].join("\n"),
+  );
+
+  assert.deepEqual(
+    file.hunks[0].lines.map(({ type, oldLine, newLine }) => [type, oldLine, newLine]),
+    [
+      ["context", 4, 4],
+      ["del", 5, undefined],
+      ["add", undefined, 5],
+      ["context", 6, 6],
+      ["add", undefined, 7],
+    ],
+  );
 });
 
 test("detects added, deleted, renamed, and binary patches", () => {

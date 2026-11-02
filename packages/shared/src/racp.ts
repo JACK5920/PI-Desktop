@@ -103,12 +103,26 @@ export const RacpRequestContextSchema = Type.Object({
 });
 export type RacpRequestContext = Static<typeof RacpRequestContextSchema>;
 
-export const WorkspaceFilesRequestSchema = Type.Object({
+const WorkspaceFilesBaseProperties = {
   path: Type.String({ minLength: 1, maxLength: 4096 }),
-  operation: Type.Union([Type.Literal("list"), Type.Literal("read"), Type.Literal("index"), Type.Literal("resolve"), Type.Literal("image"), Type.Literal("diff"), Type.Literal("instructions")]),
   ref: Type.Optional(Type.String({ maxLength: 4096 })),
   mimeType: Type.Optional(Type.String({ maxLength: 256 })),
-}, { additionalProperties: false });
+};
+export const WorkspaceFilesRequestSchema = Type.Union([
+  Type.Object({
+    ...WorkspaceFilesBaseProperties,
+    operation: Type.Union([
+      Type.Literal("list"), Type.Literal("read"), Type.Literal("index"),
+      Type.Literal("resolve"), Type.Literal("image"), Type.Literal("instructions"),
+    ]),
+  }, { additionalProperties: false }),
+  Type.Object({
+    ...WorkspaceFilesBaseProperties,
+    operation: Type.Literal("diff"),
+    baseRef: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
+    includeBases: Type.Optional(Type.Boolean()),
+  }, { additionalProperties: false }),
+]);
 export type WorkspaceFilesRequest = Static<typeof WorkspaceFilesRequestSchema>;
 
 /** Plugin reads carry the admitted read scope; no remote write operation exists. */

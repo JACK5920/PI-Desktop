@@ -376,6 +376,25 @@ describe("SSH repository instruction file contract", () => {
     expect(Value.Check(WorkspaceFilesRequestSchema, { path: "/repo", operation: "instructions", globalHome: true })).toBe(false);
     expect(Value.Check(WorkspaceFilesRequestSchema, { path: "/repo", operation: "unknown" })).toBe(false);
   });
+
+  it("allows branch base options only on workspace diff requests", () => {
+    expect(Value.Check(WorkspaceFilesRequestSchema, {
+      path: "/repo",
+      operation: "diff",
+      baseRef: "refs/remotes/origin/main",
+      includeBases: true,
+    })).toBe(true);
+    expect(Value.Check(WorkspaceFilesRequestSchema, {
+      path: "/repo",
+      operation: "diff",
+      baseRef: "x".repeat(513),
+    })).toBe(false);
+    expect(Value.Check(WorkspaceFilesRequestSchema, {
+      path: "/repo",
+      operation: "list",
+      baseRef: "refs/remotes/origin/main",
+    })).toBe(false);
+  });
 });
 
 it("declares plugin file browsing as an owner-only read without changing workspace tools", () => {

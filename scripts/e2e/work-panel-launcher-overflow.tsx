@@ -5,6 +5,8 @@ import { I18nextProvider } from "react-i18next";
 import { catalogs } from "@pi-desktop/i18n";
 import { IPC } from "@pi-desktop/shared";
 import { WorkPanel } from "../../apps/desktop/src/components/workpanel/WorkPanel";
+import { composerDraftBridge } from "../../apps/desktop/src/features/chat/composer/plugins/draft-bridge";
+import type { ComposerFileReference } from "../../apps/desktop/src/features/chat/composer/model";
 import { useAppStore } from "../../apps/desktop/src/stores/app-store";
 
 type Scenario = {
@@ -22,6 +24,11 @@ declare global {
     rows: number;
     scrollHeight: number;
     clientHeight: number;
+  }>;
+  var branchReviewProbe: () => Promise<{
+    ok: true;
+    diffRequests: number;
+    draft: string;
   }>;
 }
 
@@ -112,7 +119,7 @@ globalThis.launcherOverflowProbe = async (scenario) => {
   const first = rows[0];
   const last = rows.at(-1);
   check(first && last, "Review row is missing");
-  check(rows.length === scenario.count + 1, "Launcher lost or duplicated a tool");
+  check(rows.length === scenario.count + 2, "Launcher lost or duplicated a host or plugin tool");
   const body = element(".work-panel-body").getBoundingClientRect();
   const launcher = element(".work-panel-launcher").getBoundingClientRect();
   check(launcher.top >= body.top - 1 && launcher.bottom <= body.bottom + 1,
@@ -162,4 +169,122 @@ globalThis.launcherOverflowProbe = async (scenario) => {
     check(useAppStore.getState().workPanelOpen, "Closing the final view collapsed the panel");
   }
   return result;
+};
+
+globalThis.branchReviewProbe = async () => {
+  console.log("BRANCH_PROBE:start");
+  await ready;
+  await i18n.changeLanguage("en");
+  const sessionId = "branch-review-session";
+  const line = { type: "add", text: "return value;", newLine: 2 };
+  const diff = {
+    repo: true,
+    clean: false,
+    currentBranch: "feature",
+    baseOptions: [{ ref: "refs/heads/main", name: "main", commit: "base-commit" }],
+    branchReview: {
+      baseRef: "refs/heads/main",
+      baseCommit: "base-commit",
+      mergeBaseCommit: "merge-commit",
+      headCommit: "head-commit",
+    },
+    files: [{
+      path: "src/example.ts",
+      status: "modified",
+      additions: 1,
+      deletions: 0,
+      anchorRevision: "anchor-1",
+      hunks: [{ header: "@@ -1,1 +1,2 @@", lines: [
+        { type: "context", text: "function run()", oldLine: 1, newLine: 1 },
+        line,
+      ] }],
+    }],
+  };
+  const draft = {
+    draftKey: `session:${sessionId}`,
+    sessionId,
+    text: "Keep this draft",
+    references: [] as ComposerFileReference[],
+  };
+  let diffRequests = 0;
+  const channels: string[] = [];
+  window.piDesktop = {
+    channels: IPC,
+    platform: "darwin",
+    invoke: async (channel) => {
+      channels.push(channel);
+      if (channel === IPC.invoke.workspaceDiff) {
+        diffRequests += 1;
+        return { ok: true, data: diff };
+      }
+      return { ok: true, data: undefined };
+    },
+    on: () => () => undefined,
+  };
+  const unregister = composerDraftBridge.register({
+    read: () => draft,
+    focused: () => false,
+    selection: () => ({ start: 0, end: draft.text.length }),
+    write(text, references) {
+      draft.text = text;
+      draft.references = references;
+    },
+    async stage() { throw new Error("not used"); },
+  });
+  try {
+    host.style.width = "720px";
+    host.style.height = "600px";
+    flushSync(() => {
+      useAppStore.setState({
+        activeSessionId: sessionId,
+        workspace: { path: "/repo", name: "repo" },
+        workPanelWidth: 720,
+        workPanelOpen: true,
+        workPanelTabs: [],
+        activeWorkPanelTabId: null,
+        workPanelContexts: {},
+        pluginViews: [],
+      });
+      root.render(
+        <I18nextProvider i18n={i18n}>
+          <WorkPanel containerWidth={1170} sidebarCollapsed />
+        </I18nextProvider>,
+      );
+    });
+    console.log("BRANCH_PROBE:mounted");
+    await rendered();
+    console.log("BRANCH_PROBE:rendered-launcher");
+    element('[data-work-panel-launcher-item="branch-review"]').click();
+    console.log("BRANCH_PROBE:clicked-launcher");
+    for (let frame = 0; frame < 300 && !host.querySelector(".branch-review-file"); frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+    check(host.querySelector(".branch-review-file"), "Branch Review did not render the selected base diff");
+    console.log("BRANCH_PROBE:diff-loaded");
+    check(element(".branch-review-current-branch").textContent?.includes("feature"), "The current branch was not shown");
+    check((host.querySelector<HTMLSelectElement>("#branch-review-base")?.value) === "refs/heads/main",
+      "The default locally available base was not selected");
+    const feedback = host.querySelector<HTMLButtonElement>(".branch-review-line.add .branch-review-line-feedback");
+    check(feedback, "The changed line has no feedback action");
+    feedback.click();
+    console.log("BRANCH_PROBE:clicked-feedback");
+    const expected = JSON.stringify({
+      path: "src/example.ts",
+      type: "add",
+      workingTreeLine: 2,
+      text: line.text,
+    });
+    // The API and draft bridge are Promise-driven; yield one event-loop task
+    // rather than depending on another animation frame in a hidden window.
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    console.log("BRANCH_PROBE:draft", draft.text);
+    check(draft.text.includes(expected), "The selected diff feedback did not reach the editable draft");
+    check(draft.text.startsWith("Keep this draft\n\n"), "The existing draft was not preserved");
+    check(diffRequests === 2, "The feedback action must re-read the diff before appending");
+    check(!channels.includes(IPC.invoke.agentPrompt), "Branch Review must not submit a turn");
+    console.log("BRANCH_PROBE:complete");
+    return { ok: true, diffRequests, draft: draft.text };
+  } finally {
+    unregister();
+  }
 };

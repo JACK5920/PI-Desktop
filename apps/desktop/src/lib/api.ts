@@ -1620,7 +1620,14 @@ export const api = {
   /** Toggles the devtools console; rejects unless developer mode is on. */
   toggleDevTools: (open?: boolean) =>
     invoke<{ open: boolean }>(IPC.invoke.devtoolsToggle, { open }),
-  workspaceDiff: (sessionId?: string) => invoke<WorkspaceDiff>(IPC.invoke.workspaceDiff, { ...(sessionId ? { sessionId } : {}) }),
+  workspaceDiff: (request?: string | {
+    sessionId?: string;
+    baseRef?: string;
+    includeBases?: boolean;
+  }) => {
+    const input = typeof request === "string" ? { sessionId: request } : request ?? {};
+    return invoke<WorkspaceDiff>(IPC.invoke.workspaceDiff, input);
+  },
   workspaceReviewRollback: (input: {
     sessionId: string;
     snapshotId: string;

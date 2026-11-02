@@ -192,8 +192,21 @@ export function fakeOperations(sessions: Map<string, SessionSummary>): RacpHostO
         if (path.includes("..")) throw new RacpError("REMOTE_PATH_FORBIDDEN", "escapes root");
         return { kind: "text", content: "hello", size: 5 };
       },
-      async diff() {
-        return { repo: true, clean: true, files: [] };
+      async diff(_sessionId, options = {}) {
+        return {
+          repo: true,
+          clean: true,
+          files: [],
+          ...(options.includeBases ? { baseOptions: [{ ref: "refs/heads/main", name: "main", commit: "commit-main" }] } : {}),
+          ...(options.baseRef ? {
+            branchReview: {
+              baseRef: options.baseRef,
+              baseCommit: "commit-main",
+              mergeBaseCommit: "merge-base",
+              headCommit: "head",
+            },
+          } : {}),
+        };
       },
     },
   };

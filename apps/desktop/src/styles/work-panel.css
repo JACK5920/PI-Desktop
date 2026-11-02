@@ -649,6 +649,149 @@
   color: var(--ds-error);
 }
 
+/* Work panel — local branch review */
+
+.branch-review-tab {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.branch-review-toolbar {
+  display: flex;
+  min-width: 0;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border-bottom: 1px solid var(--ds-border-subtle);
+}
+
+.branch-review-base-select {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 140px;
+  align-items: center;
+  gap: 6px;
+  color: var(--ds-text-muted);
+  font-size: var(--text-2xs);
+}
+
+.branch-review-base-select label {
+  flex: 0 0 auto;
+}
+
+.branch-review-base-select .field-select {
+  min-width: 0;
+  width: 100%;
+}
+
+.branch-review-current-branch {
+  max-width: 30%;
+  overflow: hidden;
+  color: var(--ds-text-muted);
+  font-size: var(--text-2xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.branch-review-refresh {
+  flex: 0 0 auto;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.branch-review-scroll {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  padding: 8px;
+}
+
+.branch-review-note {
+  padding: 8px 10px;
+  color: var(--ds-text-muted);
+  font-size: var(--text-xs);
+}
+
+.branch-review-file {
+  overflow: hidden;
+  margin-bottom: 10px;
+  border: 1px solid var(--ds-border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--ds-bg-secondary);
+}
+
+.branch-review-file-header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--ds-border-subtle);
+  color: var(--ds-text-primary);
+  font-size: var(--text-xs);
+}
+
+.branch-review-file-header code {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.branch-review-file-status {
+  flex: 0 0 auto;
+  color: var(--ds-text-muted);
+  font-size: var(--text-2xs);
+}
+
+.branch-review-diff {
+  overflow-x: auto;
+  padding: 4px 0 8px;
+}
+
+.branch-review-line {
+  position: relative;
+  padding-right: 82px;
+}
+
+.branch-review-line-number {
+  width: 38px;
+  flex: 0 0 38px;
+  padding-right: 6px;
+  color: var(--ds-text-muted);
+  font-size: var(--text-2xs);
+  line-height: var(--leading-prose);
+  text-align: right;
+  user-select: none;
+}
+
+.branch-review-line-feedback {
+  position: absolute;
+  top: 1px;
+  right: 4px;
+  min-height: 22px;
+  padding: 2px 5px;
+  background: var(--ds-bg-secondary);
+  font-size: var(--text-2xs);
+  opacity: 0;
+}
+
+.branch-review-line:hover .branch-review-line-feedback,
+.branch-review-line:focus-within .branch-review-line-feedback {
+  opacity: 1;
+}
+
+@media (max-width: 560px) {
+  .branch-review-current-branch {
+    display: none;
+  }
+}
+
 /* Hunks are set apart by a gap; each opens with its own tinted header line. */
 .diff-hunk + .diff-hunk {
   margin-top: 8px;

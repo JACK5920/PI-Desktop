@@ -591,7 +591,7 @@ session root as working directory and stream through `terminal.output`.
 | `session/compact` | controller | Run a manual context checkpoint on the active session |
 | `workspace/list` | viewer | List entries under the session root, bounded, honoring the Host ignore rules |
 | `workspace/read` | viewer | Read one bounded file under the session root; images as data URLs |
-| `workspace/diff` | viewer | Return the working-tree diff of the session root |
+| `workspace/diff` | viewer | Return the working-tree diff of the session root; optional `baseRef` selects a locally available ref and `includeBases` lists refs without fetching |
 | `terminal/open` | controller | Open a pty on the Host with the session root as cwd; returns a terminal id and the bounded replay ring; policy-gated (security §4.1) |
 | `terminal/input` | controller | Write bytes to an open terminal |
 | `terminal/resize` | controller | Resize an open terminal |
@@ -623,10 +623,12 @@ Legacy remote-Agent operations above remain unchanged.
   the calling device's active operation. Closing the originating connection
   cancels its outstanding calls. Host restarts invalidate late results.
 - `workspace/files` accepts `{ path, operation, ref?, mimeType? }`, where
-  operation is list/read/index/resolve/image/diff/instructions. It reads only the
-  canonical workspace boundary using existing helpers and no persistent Host
-  session. Existing operations and their payloads remain unchanged; this is an
-  additive operation, not a protocol-major change.
+  operation is list/read/index/resolve/image/diff/instructions. For `diff`
+  only, optional `baseRef` selects an advertised local ref and `includeBases`
+  returns available bases; the Host never fetches. It reads only the canonical
+  workspace boundary using existing helpers and no persistent Host session.
+  Existing operations and their payloads remain unchanged; this is an additive
+  operation, not a protocol-major change.
   For `instructions`, Desktop sends `{ path, operation: "instructions" }` and
   the Host returns `{ entries: [{ source, content }] }`, or `{ entries: [] }`.
   Root-only selection takes the first readable, nonempty, contained file in

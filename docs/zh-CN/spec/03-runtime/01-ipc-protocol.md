@@ -1412,10 +1412,13 @@ type AgentCapabilityQuery = {
 
 ### workspace
 
-- `workspace/diff()` → `WorkspaceDiff { repo, clean, files: DiffFile[], truncated? }`。
-  此遗留诊断通道可以检查当前工作树，但它
-  不是评论的真实来源。评论 UI 读取消息拥有的评论
-  相反，来自转录工具结果的记录，因此提交无法删除
+- `workspace/diff({sessionId?, baseRef?, includeBases?})` → `WorkspaceDiff`。
+  不带分支参数的调用继续使用原有的 `HEAD` 到工作树诊断。`includeBases`
+  会列出本地可用的本地分支和远程跟踪分支，并返回默认基准比较；`baseRef`
+  选择其中一个精确的已公布引用。分支比较使用共同祖先，并包含已提交的分支变更和未跟踪文件；
+  不会自动 fetch。每个文件的 `anchorRevision` 绑定所选引用、共同祖先、当前 HEAD、路径和补丁，
+ 用于阻止过期反馈。此通道不是 Review 的真实来源：Review UI 仍只读取消息拥有的审核记录，
+ 因此 Git 提交不会删除已记录的改动。
   记录的变化。
 - `workspace/review/rollback({sessionId, snapshotId})` →
   `ReviewRollbackResult`。主机在之前验证当前的后工具哈希

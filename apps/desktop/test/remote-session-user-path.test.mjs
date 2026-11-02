@@ -71,7 +71,16 @@ test("remote user path: project, session, prompt, approval, files, reconnect wit
   await route(IPC.invoke.toolResolvePermission, { requestId: makeRemoteApprovalRequestId(created.id, "a1"), decision: "allow-once" });
   assert.equal((await route(IPC.invoke.fsList, { sessionId: created.id, path: "" })).entries[0].name, "README.md");
   assert.equal((await route(IPC.invoke.fsRead, { sessionId: created.id, path: "README.md" })).content, "Hello");
-  assert.equal((await route(IPC.invoke.workspaceDiff, { sessionId: created.id })).clean, false);
+  const branchDiff = await route(IPC.invoke.workspaceDiff, {
+    sessionId: created.id,
+    baseRef: "refs/remotes/origin/main",
+    includeBases: true,
+  });
+  assert.equal(branchDiff.clean, false);
+  assert.deepEqual(
+    f.calls.find((entry) => entry.method === "workspace/diff").params,
+    { sessionId: "s1", baseRef: "refs/remotes/origin/main", includeBases: true },
+  );
   f.disconnect();
   assert.equal(f.catalog.summaries()[0].capabilities.canPrompt, false);
   await assert.rejects(route(IPC.invoke.fsRead, { sessionId: created.id, path: "README.md" }), { errorCode: "AGENT_UNAVAILABLE" });
@@ -99,6 +108,7 @@ test("remote model selection and invalid paths are rejected before network dispa
   const { backend, calls } = fixture();
   await assert.rejects(backend.invoke(IPC.invoke.sessionConfigure, ["remote:h1:s1", { providerId: "local-provider" }]), { errorCode: "CAPABILITY_UNAVAILABLE" });
   await assert.rejects(backend.invoke(IPC.invoke.fsRead, [{ sessionId: "remote:h1:s1", path: "bad\0path" }]), { errorCode: "INVALID_ARGUMENT" });
+  await assert.rejects(backend.invoke(IPC.invoke.workspaceDiff, [{ sessionId: "remote:h1:s1", baseRef: "bad\0ref" }]), { errorCode: "INVALID_ARGUMENT" });
   assert.equal(calls.length, 0);
 });
 

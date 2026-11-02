@@ -19,6 +19,9 @@
 Desktop 从已准入项目绑定选择远程根，绑定或连接生命周期改变后拒绝过期结果。
 该操作不扩大既有 `workspace/files` 权限，不授予远程写入能力。
 
+常规 `workspace/files` 的 `diff` 操作可以附带 `baseRef` 选择远端工作区中已公布的本地
+Git 引用，并用 `includeBases` 返回可用基准；Host 不会自动 fetch。其他文件操作不接受这两个字段。
+
 ## 1. 边界与术语
 
 RACP 控制 Agent Host，不是 Electron IPC、`host.proxy`、Rust host-core
@@ -219,7 +222,7 @@ owner，工作区读取都按会话持久根、Host 忽略规则和 `PATH_OUTSID
 | `session/compact` | controller | 对活动会话执行手动上下文检查点 |
 | `workspace/list` | viewer | 有界列出会话根下的条目，遵守 Host 忽略规则 |
 | `workspace/read` | viewer | 读取会话根下的一个有界文件，图片以 data URL 返回 |
-| `workspace/diff` | viewer | 返回会话根的工作树 diff |
+| `workspace/diff` | viewer | 返回会话根的工作树 diff；可选 `baseRef` 选择本地已有引用，`includeBases` 列出引用但不执行 fetch |
 | `terminal/open` | controller | 在 Host 上以会话根为 cwd 打开 pty；返回终端 id 与有界回放环；受策略限制 |
 | `terminal/input` | controller | 向已打开终端写入字节 |
 | `terminal/resize` | controller | 调整已打开终端尺寸 |

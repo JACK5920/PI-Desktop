@@ -275,6 +275,30 @@ test("insertText replaces the selection and focuses; the bridge reads its write 
   assert.throws(() => bridge.insertText(`x${file.token}`), refused("PLUGIN_ACTION_INVALID_PAYLOAD"));
 });
 
+test("session feedback appends after the draft without replacing the selection or sending", () => {
+  const { bridge } = quietBridge();
+  const file = hostChip("a.ts");
+  const composer = fakeComposer({ text: `keep ${file.token}`, references: [file] });
+  bridge.register(composer.handle);
+  composer.state.selection = { start: 0, end: 4 };
+
+  bridge.appendTextForSession(SID, "Review this changed line");
+
+  assert.deepEqual(composer.state.writes.map(({ next, nextReferences, caret, focus }) => ({
+    next,
+    nextReferences,
+    caret,
+    focus,
+  })), [{
+    next: `keep ${file.token}\n\nReview this changed line`,
+    nextReferences: [file],
+    caret: `keep ${file.token}\n\nReview this changed line`.length,
+    focus: true,
+  }]);
+  assert.throws(() => bridge.appendTextForSession("s2", "wrong session"), /another session/);
+  assert.equal(composer.state.writes.length, 1, "a mismatched session writes nothing");
+});
+
 test("replaceDraft checks composer, gesture, focus, generation and anchors, in that order", () => {
   const { bridge } = quietBridge();
   assert.throws(

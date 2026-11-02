@@ -1,10 +1,13 @@
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createWorkspaceFiles } from "./workspace-files.js";
 
 const dirs: string[] = [];
+const execFileAsync = promisify(execFile);
 afterEach(async () => { for (const dir of dirs.splice(0)) await rm(dir, { recursive: true, force: true }); });
 const fixture = async () => {
   const path = await mkdtemp(join(tmpdir(), "workspace-files-")); dirs.push(path);
@@ -12,6 +15,39 @@ const fixture = async () => {
   return path;
 };
 describe("sessionless SSH file views", () => {
+  it("passes branch review base options through the remote workspace-files contract", async () => {
+    const path = await fixture();
+    const git = async (...args: string[]) => execFileAsync("git", args, { cwd: path });
+    await git("init", "--quiet", "--initial-branch=main");
+    await git("config", "user.name", "pi-host-test");
+    await git("config", "user.email", "pi-host-test@example.invalid");
+    await writeFile(join(path, "src", "main.ts"), "base\n", "utf8");
+    await git("add", "src/main.ts");
+    await git("commit", "--quiet", "-m", "base");
+    await git("switch", "--quiet", "-c", "feature");
+    await writeFile(join(path, "src", "main.ts"), "feature\n", "utf8");
+    await git("add", "src/main.ts");
+    await git("commit", "--quiet", "-m", "feature");
+
+    const result = await createWorkspaceFiles().read({
+      path,
+      operation: "diff",
+      baseRef: "refs/heads/main",
+      includeBases: true,
+    }) as {
+      baseOptions: Array<{ ref: string }>;
+      branchReview: { baseRef: string };
+      files: Array<{ path: string; hunks: Array<{ lines: Array<{ type: string; text: string }> }> }>;
+    };
+    expect(result.baseOptions.map((base) => base.ref)).toContain("refs/heads/main");
+    expect(result.branchReview.baseRef).toBe("refs/heads/main");
+    expect(result.files.find((file) => file.path === "src/main.ts")?.hunks.flatMap((hunk) => hunk.lines))
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({ type: "del", text: "base" }),
+        expect.objectContaining({ type: "add", text: "feature" }),
+      ]));
+  });
+
   it("lists, indexes, resolves shorthand and reads the chosen root with the local file contract", async () => {
     const path = await fixture(); const files = createWorkspaceFiles();
     expect(await files.read({ path, operation: "list" })).toMatchObject({ entries: [{ name: "src", kind: "dir" }] });

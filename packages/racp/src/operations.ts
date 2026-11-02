@@ -86,6 +86,11 @@ const SessionConfigureParams = Type.Object({
   permissionMode: Type.Optional(Type.Union([Type.Literal("ask"), Type.Literal("accept-edits"), Type.Literal("auto")])),
 });
 const WorkspacePathParams = Type.Object({ sessionId: Type.String({ minLength: 1 }), path: Type.Optional(Type.String()) });
+const WorkspaceDiffParams = Type.Object({
+  sessionId: Type.String({ minLength: 1 }),
+  baseRef: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
+  includeBases: Type.Optional(Type.Boolean()),
+});
 const TerminalOpenParams = Type.Object({
   sessionId: Type.String({ minLength: 1 }),
   cols: Type.Optional(Type.Integer({ minimum: 1, maximum: 1000 })),
@@ -368,8 +373,11 @@ export function createOperations(): Map<RacpOperation, OperationHandler> {
     return context.operations.workspace.read(input.sessionId, input.path);
   });
   handlers.set("workspace/diff", async (context, params) => {
-    const input = check(SessionIdParams, params);
-    return context.operations.workspace.diff(input.sessionId);
+    const input = check(WorkspaceDiffParams, params);
+    return context.operations.workspace.diff(input.sessionId, {
+      ...(input.baseRef ? { baseRef: input.baseRef } : {}),
+      ...(input.includeBases ? { includeBases: true } : {}),
+    });
   });
 
   handlers.set("terminal/open", async (context, params) => {

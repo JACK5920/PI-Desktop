@@ -1,6 +1,7 @@
 export type WorkPanelTabKind =
   | "new"
   | "review"
+  | "branch-review"
   | "file"
   | "plugin"
   | "subagent";
@@ -247,6 +248,7 @@ export function isKnownWorkPanelTab(tab: WorkPanelTab): boolean {
   return (
     Boolean(tab) &&
     (tab.kind === "new" || tab.kind === "review" ||
+      tab.kind === "branch-review" ||
       tab.kind === "file" || tab.kind === "plugin" ||
       tab.kind === "subagent")
   );
