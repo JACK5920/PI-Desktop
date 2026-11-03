@@ -424,6 +424,8 @@ export const tr = {
     messageMenu: "Mesaj işlemleri",
     conversationMenu: "Konuşma işlemleri",
     selectMessageText: "Mesaj metnini seç",
+    askAboutSelection: "Seçim hakkında soru sor",
+    selectedTextPrompt: "Önceki yanıttaki bu bölümü açıkla:\n\n{{excerpt}}",
     copyConversation: "Konuşmayı kopyala",
     copyLastAnswer: "Son yanıtı kopyala",
     radialMenuOpenBrowser: "Tarayıcıyı aç",

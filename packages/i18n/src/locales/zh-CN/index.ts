@@ -417,6 +417,8 @@ export const zhCN = {
     actionSlotMore: "更多操作",
     conversationMenu: "对话操作",
     selectMessageText: "选中消息文本",
+    askAboutSelection: "询问所选内容",
+    selectedTextPrompt: "请解释上一条回复中的这段内容：\n\n{{excerpt}}",
     copyConversation: "复制整个对话",
     copyLastAnswer: "复制最后一条回复",
     radialMenuOpenBrowser: "打开浏览器",

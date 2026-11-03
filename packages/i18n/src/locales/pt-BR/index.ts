@@ -411,6 +411,8 @@ export const ptBR = {
     messageMenu: "Ações da mensagem",
     conversationMenu: "Ações da conversa",
     selectMessageText: "Selecionar texto da mensagem",
+    askAboutSelection: "Perguntar sobre a seleção",
+    selectedTextPrompt: "Explique este trecho da resposta anterior:\n\n{{excerpt}}",
     copyConversation: "Copiar conversa",
     copyLastAnswer: "Copiar última resposta",
     radialMenuOpenBrowser: "Abrir navegador",

@@ -5511,6 +5511,38 @@ window; opening a normal panel afterward must still work.
   `chat-context-menu-items.test.mjs`, `chat-context-menu-surface.test.mjs`);
   full UI scenario Draft
 
+#### E2E-CHAT-selected-text-follow-up: Ask about selected text in a child session
+
+- **Preconditions**: An idle, forkable session has a completed assistant reply;
+  the user can edit/fork the session.
+- **Steps**: 1) Right-click the completed assistant reply without a selection
+  and confirm **Ask about selection** is absent. 2) Select a phrase inside that
+  reply, right-click it, and choose **Ask about selection**. 3) Inspect and edit
+  the new Composer draft without sending it; submit only after an explicit user
+  action. 4) Return to the parent conversation. 5) Right-click a user message,
+  a different assistant reply, and empty transcript space with no owned text
+  selection.
+- **Expected**: The child is a normal `session.fork` branch whose history ends
+  at the selected assistant response. Its Composer contains a localized,
+  editable prompt with the selected phrase quoted; no request is sent
+  automatically. The parent history and runtime are unchanged. The action is
+  hidden for a missing/out-of-row selection and is not offered on user rows or
+  the conversation background. A fork completed after navigation changes does
+  not steal focus or prefill a different session. No side-chat tab or second
+  transcript/stream is created.
+- **Coverage**: `node scripts/e2e-message-edit-copy.mjs` exercises real Chromium
+  text selection, the production transcript menu, selection gating, and excerpt
+  delivery. `node --test apps/desktop/test/session-fork-running.test.mjs
+  apps/desktop/test/selected-text-followup.test.mjs` covers the store fork,
+  source-message anchor, localized editable prefill, stale navigation, and quote
+  normalization. Full model/provider acceptance is not required for the
+  no-auto-send path.
+- **Specs**: `04-ux/08-component-spec.md` §8.3 / §8.5, ADR 0342.
+- **Acceptance**: C (chat stream), Quality.
+- **Milestone**: Maintenance.
+- **Status**: Automated component and store-path coverage; full visual desktop
+  acceptance Draft.
+
 #### E2E-CHAT-radial-background-menu: Radial menu on the empty transcript background
 
 - **Preconditions**: Settings → General → Radial context menu is available. A

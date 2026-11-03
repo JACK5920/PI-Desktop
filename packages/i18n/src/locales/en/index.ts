@@ -424,6 +424,8 @@ export const en = {
     messageMenu: "Message actions",
     conversationMenu: "Conversation actions",
     selectMessageText: "Select message text",
+    askAboutSelection: "Ask about selection",
+    selectedTextPrompt: "Explain this excerpt from the previous reply:\n\n{{excerpt}}",
     copyConversation: "Copy conversation",
     copyLastAnswer: "Copy last answer",
     radialMenuOpenBrowser: "Open browser",

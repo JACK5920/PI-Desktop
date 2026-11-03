@@ -412,6 +412,8 @@ export const fr = {
     "messageMenu": "Actions du message",
     "conversationMenu": "Actions de la conversation",
     "selectMessageText": "Sélectionner le texte du message",
+    "askAboutSelection": "Poser une question sur la sélection",
+    "selectedTextPrompt": "Explique cet extrait de la réponse précédente :\n\n{{excerpt}}",
     "copyConversation": "Copier la conversation",
     "copyLastAnswer": "Copier la dernière réponse",
     "radialMenuOpenBrowser": "Ouvrir le navigateur",

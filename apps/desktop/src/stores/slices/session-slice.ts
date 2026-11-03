@@ -35,6 +35,7 @@ import {
   type SessionMeta,
 } from "../../lib/sidebar-preferences";
 import { api } from "../../lib/api";
+import { quoteSelectedText } from "../../lib/selected-text-followup";
 import { dropAskDraft } from "../../lib/pending-asks";
 import { isRemoteSession, safeSessionSummary, sessionAllows } from "../../lib/remote-session-safety";
 import { createRefreshCoordinator } from "../../lib/refresh-coordinator";
@@ -770,7 +771,7 @@ export function createSessionSlice({
       });
     },
 
-    forkAssistantMessage: async (messageId) => {
+    forkAssistantMessage: async (messageId, selectedText) => {
       const intent = runtime.beginNavigationIntent();
       // Fork needs only the anchor id: the host reads the canonical prefix.
       // Hydrating the source here would overwrite its concurrently streaming tail.
@@ -789,10 +790,22 @@ export function createSessionSlice({
           i18n.t("nav.branchTitle", { title: sourceTitle }),
           messageId,
         );
+        const activate = runtime.navigationIntentIsCurrent(intent);
         commitForkedSession(result.session, {
-          activate: runtime.navigationIntentIsCurrent(intent),
+          activate,
           clearError: true,
         });
+        if (activate && selectedText?.trim()) {
+          set({
+            composerPrefill: {
+              sessionId: result.session.id,
+              text: i18n.t("chat.selectedTextPrompt", {
+                excerpt: quoteSelectedText(selectedText),
+              }),
+              fileReferences: [],
+            },
+          });
+        }
       } catch (error) {
         set({
           error: error instanceof Error ? error.message : String(error),

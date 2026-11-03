@@ -424,6 +424,8 @@ export const ko = {
     actionSlotMore: "더 많은 작업",
     conversationMenu: "대화 작업",
     selectMessageText: "메시지 텍스트 선택",
+    askAboutSelection: "선택한 내용 질문하기",
+    selectedTextPrompt: "이전 답변에서 선택한 부분을 설명해 주세요:\n\n{{excerpt}}",
     copyConversation: "대화 복사",
     copyLastAnswer: "마지막 답변 복사",
     radialMenuOpenBrowser: "브라우저 열기",

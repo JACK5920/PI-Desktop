@@ -2038,8 +2038,13 @@ Single message render — either user (plaintext) or assistant (markdown streami
   Regenerate / Branch / revision items). Right-clicking empty transcript
   space, a system row, or a permission/outcome card opens a conversation
   menu: Copy conversation, Select conversation text, Scroll to top, Jump to
-  latest. Quote, Annotate, and Open side chat stay retired (ADR 0268). A
-  streaming or empty assistant turn that would produce no items opens
+  latest. Quote, Annotate, and Open side chat stay retired (ADR 0268). **Ask
+  about selection** appears in a completed assistant turn's context menu only
+  while a non-empty selection belongs to that turn. It forks an ordinary child
+  session through that answer and pre-fills the child's Composer with a
+  localized, editable prompt quoting the selection; it never auto-sends or
+  opens a side panel (ADR 0342). A streaming or empty assistant turn that would
+  produce no items opens
   nothing. Copy on a speaking-turn menu writes the live selection in that
   turn captured when the menu opened; a collapsed caret, or a selection
   outside the row, falls back to the whole turn.

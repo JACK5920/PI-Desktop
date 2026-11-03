@@ -399,5 +399,6 @@ Each ADR includes:
 | 0339 | [Add an independent local Branch Review surface](0339-independent-local-branch-review.md) | Accepted |
 | 0340 | [Add read-only GitHub Pull Request review to the Work Panel](0340-read-only-github-pull-request-review.md) | Accepted (amends ADR 0308 for this independent read-only surface) |
 | 0341 | [Authenticate GitHub PR Review and gate external writes](0341-authenticated-github-pr-review-and-confirmed-writes.md) | Accepted (amends ADR 0340 for private reads and confirmed writes) |
+| 0342 | [Selected-text follow-up uses an ordinary session fork](0342-selected-text-follow-up-forks.md) | Accepted (amends ADR 0268) |
 
 | model-reasoning-effort-override | [Model reasoning effort override](model-reasoning-effort-override.md) | Proposed |

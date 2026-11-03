@@ -45,6 +45,8 @@ type ContextMenuAction = {
   disabled?: boolean;
   /** Destructive item: error ink, and never adjacent to what it undoes. */
   danger?: boolean;
+  /** Hide this action unless the right-clicked surface owns a text selection. */
+  requiresSelection?: boolean;
   /** Hairline above this item, splitting the menu into groups. */
   separatorBefore?: boolean;
   onSelect?: (selection: string) => void;
@@ -355,6 +357,9 @@ export function ContextMenu({
   };
 
   if (!state || typeof document === "undefined") return null;
+  const visibleItems = state.items.filter(
+    (item) => !item.requiresSelection || state.selection.trim().length > 0,
+  );
 
   return portalToBody(
     <div
@@ -373,7 +378,7 @@ export function ContextMenu({
           : undefined
       }
     >
-      {state.items.map((item, index) => {
+      {visibleItems.map((item, index) => {
         const hasSubmenu = Boolean(item.submenu?.length);
         const submenuOpen = hasSubmenu && openSubmenuId === item.id;
         return (
