@@ -39,6 +39,7 @@ test("session launch sends Fast mode only for a model the user allowed it on (AD
     const host = {
       isAvailable: () => true,
       async call(method) {
+        if (method === "session.managedOwner") return { pluginId: null };
         if (method === "commandShells.list") {
           const shell = { id: "bash", label: "Bash", dialect: "posix", available: true, isDefault: true };
           return { configuredId: "bash", effective: shell, fallback: false, choices: [shell] };

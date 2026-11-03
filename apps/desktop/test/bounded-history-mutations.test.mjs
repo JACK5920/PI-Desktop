@@ -75,9 +75,13 @@ for (const outcome of ["success", "exception", "reply_started"]) {
 const { registerSessionIpc } = load("../electron/main/ipc/session-ipc.ts", {
   electron: { shell: {} }, "node:fs": fs, "node:path": path, "@pi-desktop/shared": { ErrorCodes, IPC }, "../importers": {}, "../services/session-collaboration": {}, "../bootstrap/remote-hosts.js": {}, "../services/session-search": {},
 });
-function ipcHarness(pending = false, result = { ok: true }) {
+function ipcHarness(pending = false, result = { ok: true }, managedPluginId = null) {
   const handlers = new Map(); const events = [];
-  const host = { call: async (method, input) => { events.push([method, input]); return typeof result === "function" ? result(method) : result; } };
+  const host = { call: async (method, input) => {
+    events.push([method, input]);
+    if (method === "session.managedOwner") return { pluginId: managedPluginId };
+    return typeof result === "function" ? result(method) : result;
+  } };
   registerSessionIpc({ registrar: { handle: (channel, handler) => handlers.set(channel, handler) }, getHost: () => host,
     getSidecar: () => ({ clearProjectInstructionRoot() {}, clearVendorAuthBindings() {}, call: async () => { events.push(["dispose"]); } }), activeTurns: new Map(),
     persistenceOutbox: { prepareSessionMutation: async (id) => { events.push(["strict-drain", id]); if (pending) throw new Error("pending write"); }, prepareSessionReplacement: async () => { events.push(["replacement-drain"]); } },
@@ -93,13 +97,27 @@ for (const [channel, method, input] of [
 ]) {
   test(`${channel} strictly drains before host mutation under rewrite fence`, async () => {
     const h = ipcHarness(); assert.ok(IPC_WHITELIST.has(IPC.invoke[channel])); await h.invoke(channel, input);
-    assert.deepEqual(h.events, [["lock"], ["fence"], ["strict-drain", "s"], ["dispose"], [method, input], ["commit"], ["release"]]);
+    assert.deepEqual(h.events, [
+      ...(channel === "sessionActivateRevision" ? [["session.managedOwner", { sessionId: "s" }]] : []),
+      ["lock"], ["fence"], ["strict-drain", "s"], ["dispose"], [method, input], ["commit"], ["release"],
+    ]);
   });
   test(`${channel} refuses mutation on strict drain failure`, async () => {
     const h = ipcHarness(true); await assert.rejects(h.invoke(channel, input), /pending write/);
-    assert.deepEqual(h.events, [["lock"], ["fence"], ["strict-drain", "s"], ["rollback"], ["release"]]);
+    assert.deepEqual(h.events, [
+      ...(channel === "sessionActivateRevision" ? [["session.managedOwner", { sessionId: "s" }]] : []),
+      ["lock"], ["fence"], ["strict-drain", "s"], ["rollback"], ["release"],
+    ]);
   });
 }
+test("a plugin-managed transcript cannot activate a local revision", async () => {
+  const h = ipcHarness(false, { ok: true }, "example.group-plugin");
+  await assert.rejects(
+    h.invoke("sessionActivateRevision", { sessionId: "s", rootUserId: "u1", revisionIndex: 0 }),
+    { errorCode: "PLUGIN_SESSION_MANAGED" },
+  );
+  assert.deepEqual(h.events, [["session.managedOwner", { sessionId: "s" }]]);
+});
 test("legacy replace and explicit prefix activation retain old wire shapes", async () => {
   const h = ipcHarness(); await h.invoke("sessionReplaceMessages", { sessionId: "s", messages: previous });
   await h.invoke("sessionActivateRevision", { sessionId: "s", rootUserId: "u2", revisionIndex: 1, prefix: previous });

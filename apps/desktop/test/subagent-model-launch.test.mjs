@@ -27,6 +27,7 @@ test("launch resolves definition-only pins without granting Task.model selection
     runtimeState: { host: {
       isAvailable: () => true,
       call: async (method) => {
+        if (method === "session.managedOwner") return { pluginId: null };
         if (method === "commandShells.list") return { configuredId: "bash", effective: shell, fallback: false, choices: [shell] };
         if (method === "providers.list") return { providers };
         if (method === "providers.getSecret") return {};

@@ -26,11 +26,12 @@ const provider = {
   models: [{ id: "parent", thinkingLevels: ["off"] }],
 };
 
-function launchRuntime() {
+function launchRuntime({ managedPluginId = null } = {}) {
   return createSessionLaunchRuntime({
     runtimeState: { host: {
       isAvailable: () => true,
       call: async (method) => {
+        if (method === "session.managedOwner") return { pluginId: managedPluginId };
         if (method === "commandShells.list") return { configuredId: "bash", effective: shell, fallback: false, choices: [shell] };
         if (method === "providers.list") return { providers: [provider] };
         if (method === "providers.getSecret") return {};
@@ -59,6 +60,16 @@ async function launchParams(runtime) {
   }, {});
   return launch.sidecarParams;
 }
+
+test("session launch refuses sessions managed by a plugin", async () => {
+  const runtime = launchRuntime({ managedPluginId: "example.group-plugin" });
+  await assert.rejects(
+    () => runtime.resolveAgentRuntimeLaunch("session", {
+      providerId: provider.id, modelId: "parent", projectPath: workspace,
+    }, {}),
+    (error) => error.errorCode === "PLUGIN_SESSION_MANAGED",
+  );
+});
 
 // The global (~/.pi/agent) precedence and per-kind independence are covered
 // against injectable directories in packages/agent-runtime/src/custom-system-prompt.test.ts;
