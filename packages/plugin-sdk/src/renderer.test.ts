@@ -24,9 +24,14 @@ describe("renderer vocabulary", () => {
       "blockRenderer",
       "composerControl",
       "composerTrigger",
+      "navigationSection",
+      "mainPage",
     ]);
     expect(PLUGIN_RENDERER_ACTIONS).toEqual([
       "plugin.call",
+      "shell.openPage",
+      "session.readContext",
+      "workPanel.openView",
       "composer.insertText",
       "composer.readDraft",
       "composer.replaceDraft",

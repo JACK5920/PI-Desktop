@@ -49,7 +49,7 @@ test("assistant response fork reuses isolated session snapshots", () => {
   const transcript = readTranscriptSourceSync();
 
   assert.match(main, /throughMessageId/);
-  assert.match(store, /forkAssistantMessage:\s*async \(messageId\)/);
+  assert.match(store, /forkAssistantMessage:\s*async \(messageId,\s*selectedText\)/);
   assert.match(store, /api\.forkSession\([\s\S]*?messageId/);
   assert.match(transcript, /forkAssistantMessage\(actionMessage\.id\)/);
   assert.match(transcript, /chat\.forkResponse/);
@@ -132,8 +132,13 @@ test("fork actions commit the child through one durable helper", () => {
   );
   assert.match(
     forkAssistantBlock,
-    /commitForkedSession\(result\.session,\s*\{\s*activate: runtime\.navigationIntentIsCurrent\(intent\)/,
-    "forkAssistantMessage must record the child and gate only activation",
+    /const activate = runtime\.navigationIntentIsCurrent\(intent\);\s*commitForkedSession\(result\.session,\s*\{\s*activate,\s*clearError: true,\s*\}\)/,
+    "forkAssistantMessage must record the child and gate activation before applying its draft",
+  );
+  assert.match(
+    forkAssistantBlock,
+    /if \(activate && selectedText\?\.trim\(\)\)/,
+    "selected text must only prefill the child that owns navigation",
   );
   // A bare early return on a stale intent is what dropped the branch before.
   assert.doesNotMatch(
