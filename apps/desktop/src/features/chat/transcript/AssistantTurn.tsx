@@ -329,6 +329,9 @@ export const AssistantTurn = memo(function AssistantTurn({
         onBranch: () => {
           if (actionMessage) void forkAssistantMessage(actionMessage.id);
         },
+        onAskAboutSelection: (selection) => {
+          if (actionMessage) void forkAssistantMessage(actionMessage.id, selection);
+        },
       }),
     });
   };

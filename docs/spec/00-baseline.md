@@ -1,8 +1,8 @@
 # PI-Desktop Baseline Freeze
 
-- Baseline Version: `0.4.22`
-- Date: `2026-10-08`
-- Status: `Frozen for implementation details (indefinite local permission approvals + Plan checkpoint artifact + approval/execution startup fence + protocol v11 + schema v16 + host-owned plugin session import/read/update/delete P0/P1 + selectable shell catalog + icon-free composer prompt row + turn-boundary context checkpoint compaction + session-scoped work panel + edge-specific work-panel/chat resize ownership + models.dev chat model catalog + provider/runtime safety + M5 hardening + settings IA + project archive + sidebar organization + app update delivery + three-platform release + Extensions page density and theme-readable actions + custom global UI font + ChatGPT-style logical project groups + categorized plugin providers in Add Service)`
+- Baseline Version: `0.4.23`
+- Date: `2026-11-03`
+- Status: `Frozen for implementation details (indefinite local permission approvals + Plan checkpoint artifact + approval/execution startup fence + protocol v11 + schema v29 + host-owned plugin session import/read/update/delete + plugin-managed native transcripts + encrypted per-plugin secrets + session-scoped agent events + bounded plugin renderer shell contributions + categorized plugin providers in Add Service)`
 - Language policy: **English-first**
 - Backend policy: **Rust host core + pi agent sidecar**
 
@@ -46,6 +46,13 @@
 > reveals one-sentence introductions on hover or keyboard focus. Provider count
 > is not capped per plugin. Empty model declarations discover models only after
 > the user saves a key; the Host reuses existing rows and secret storage.
+> `0.4.23` adds explicitly permissioned plugin-managed native transcripts,
+> plugin-scoped encrypted secrets, session-filtered execution events, and
+> bounded renderer navigation/page contributions. Schema v29 records
+> host-verified attachment provenance so a plugin cannot read foreign blobs
+> merely by adding their content-addressed refs to its own transcript (D682 /
+> ADR `plugin-managed-native-transcripts`). No transcript or secret data is
+> backfilled by the migration.
 > `0.4.10` replaces destructive work-panel clearing on conversation switches
 > with runtime session-scoped contexts through D142 / ADR 0028.
 > `0.4.11` adopts turn-boundary model-context checkpoint compaction through

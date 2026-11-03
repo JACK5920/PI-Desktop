@@ -413,6 +413,8 @@ type PluginPermission =
  | "ui.microphone"
  | "project.create"
  | "session.read"
+ | "session.manage.own"
+ | "secrets.store"
  | "session.import"
  | "session.read.own"
  | "session.update.own"

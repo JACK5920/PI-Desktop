@@ -42,6 +42,7 @@ test("session launch resolves Jev credentials only for opted-in Agent mode", asy
     const host = {
       isAvailable: () => true,
       async call(method, input) {
+        if (method === "session.managedOwner") return { pluginId: null };
         if (method === "commandShells.list") {
           const shell = {
             id: "bash",

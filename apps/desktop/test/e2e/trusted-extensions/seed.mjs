@@ -2,7 +2,7 @@
 // and a provider row pointing at the stub server (through host-core's own
 // JSON-RPC, since the MCP control plane blocks providers/create).
 import { spawn } from "node:child_process";
-import { mkdirSync, readFileSync, realpathSync, writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
 const root = process.env.E2E_ROOT || "/tmp/pi-ext-e2e";
@@ -245,6 +245,11 @@ const call = (method, params = {}) => new Promise((resolve, reject) => {
 });
 
 await call("app.handshake", { protocolVersion: 11 });
+const projectResult = await call("projects.create", { path: project });
+const projectPath = projectResult.project?.path;
+if (typeof projectPath !== "string" || !projectPath) {
+  throw new Error("host did not return the canonical fixture project path");
+}
 const created = await call("providers.create", {
   name: "E2E stub",
   type: "openai_compatible",
@@ -262,8 +267,8 @@ await call("settings.set", { language: "en", defaultProviderId: providerId, defa
 for (const [name, dir] of Object.entries(pluginDirs)) {
   await call("plugins.loadDev", { path: dir });
   if (name === "proj") {
-    await call("plugins.setScope", { id: "e2e.proj", scope: { mode: "projects", projects: [realpathSync(project)] } });
+    await call("plugins.setScope", { id: "e2e.proj", scope: { mode: "projects", projects: [projectPath] } });
   }
 }
-console.log(JSON.stringify({ providerId, project: realpathSync(project), agentDir, dataDir }));
+console.log(JSON.stringify({ providerId, project: projectPath, agentDir, dataDir }));
 host.stdin.end(); host.kill();

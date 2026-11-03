@@ -79,7 +79,7 @@ mod tests {
             std::fs::write(file, b"legacy bytes are not rewritten on database open\n").unwrap();
         }
         let db = Database::open(&path).unwrap();
-        assert_eq!(version(db.conn()), 28);
+        assert_eq!(version(db.conn()), SCHEMA_VERSION);
         let backup_path = migration_backup_path(&path, 25);
         let backup = Connection::open(&backup_path).unwrap();
         assert_eq!(version(&backup), 25);
@@ -97,7 +97,7 @@ mod tests {
         drop(db);
         let original_backup = std::fs::read(&backup_path).unwrap();
         let db = Database::open(&path).unwrap();
-        assert_eq!(version(db.conn()), 28);
+        assert_eq!(version(db.conn()), SCHEMA_VERSION);
         assert_eq!(
             std::fs::read(backup_path).unwrap(),
             original_backup,
@@ -106,18 +106,23 @@ mod tests {
     }
 
     #[test]
-    fn fresh_database_uses_28_and_future_29_is_refused() {
+    fn fresh_database_uses_current_schema_and_future_schema_is_refused() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("pi.sqlite");
         let db = Database::open(&path).unwrap();
-        assert_eq!(version(db.conn()), 28);
-        db.conn().pragma_update(None, "user_version", 29).unwrap();
+        assert_eq!(version(db.conn()), SCHEMA_VERSION);
+        let future_version = SCHEMA_VERSION + 1;
+        db.conn()
+            .pragma_update(None, "user_version", future_version)
+            .unwrap();
         drop(db);
         let error = Database::open(&path)
             .err()
             .expect("future schema must be refused");
-        assert!(error.to_string().contains("29 is newer than supported 28"));
-        assert_eq!(version(&Connection::open(path).unwrap()), 29);
+        assert!(error.to_string().contains(&format!(
+            "{future_version} is newer than supported {SCHEMA_VERSION}"
+        )));
+        assert_eq!(version(&Connection::open(path).unwrap()), future_version);
     }
 
     #[test]
@@ -145,7 +150,7 @@ mod tests {
         .unwrap();
         drop(conn);
         let db = Database::open(&path).unwrap();
-        assert_eq!(version(db.conn()), 28);
+        assert_eq!(version(db.conn()), SCHEMA_VERSION);
         for schema in [24, 25] {
             let backup = Connection::open(migration_backup_path(&path, schema)).unwrap();
             assert_eq!(version(&backup), schema);

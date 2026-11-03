@@ -34,6 +34,7 @@ test("the pointer-anchored menu portals, measures, and closes without trapping f
   assert.match(menuSource, /root\.contains\(anchorNode\)/);
   assert.match(menuSource, /root\.contains\(focusNode\)/);
   assert.match(menuSource, /item\.onSelect\?\.\(state\.selection\)/);
+  assert.match(menuSource, /item\.requiresSelection.*state\.selection\.trim\(\)/);
   assert.match(menuSource, /aria-haspopup=\{hasSubmenu \? "menu" : undefined\}/);
   assert.match(menuSource, /setOpenSubmenuId\(item\.id\)/);
   assert.match(menuSource, /event\.key !== "ArrowRight"/);
@@ -50,6 +51,10 @@ test("the transcript owns one menu and each speaking row can open it", () => {
   assert.match(messageRowSource, /userMessageMenuItems\(/);
   assert.match(assistantTurnSource, /onContextMenu=\{onContextMenu\}/);
   assert.match(assistantTurnSource, /assistantTurnMenuItems\(/);
+  assert.match(
+    assistantTurnSource,
+    /onAskAboutSelection:\s*\(selection\)\s*=>\s*\{\s*if \(actionMessage\) void forkAssistantMessage\(actionMessage\.id, selection\);/,
+  );
 });
 
 test("the context-menu surface is a measured fixed layer", () => {

@@ -424,6 +424,8 @@ export const tr = {
     messageMenu: "Mesaj işlemleri",
     conversationMenu: "Konuşma işlemleri",
     selectMessageText: "Mesaj metnini seç",
+    askAboutSelection: "Seçim hakkında soru sor",
+    selectedTextPrompt: "Önceki yanıttaki bu bölümü açıkla:\n\n{{excerpt}}",
     copyConversation: "Konuşmayı kopyala",
     copyLastAnswer: "Son yanıtı kopyala",
     radialMenuOpenBrowser: "Tarayıcıyı aç",
@@ -2635,6 +2637,8 @@ importConfirm: "İçe aktarılan uzantılar ajan sürecinde, ajanın kendi araç
       "browser.cdp": "Çalışma paneli tarayıcısını kontrol et",
       "usage.read": "Kullanım istatistiklerini oku",
       "session.autoTitle": "İlk tur başlık bağlamını oku ve otomatik başlıkları güncelle",
+      "session.manage.own": "Eklentiye ait konuşmaları yönet",
+      "secrets.store": "Eklentiye özel gizli bilgileri sakla",
     },
     permissionHelp: {
       "ui.panel": "Eklentinin uygulama içinde kendi panelini göstermesini sağlar.",
@@ -2693,6 +2697,8 @@ importConfirm: "İçe aktarılan uzantılar ajan sürecinde, ajanın kendi araç
         "Tamamlanan turların kullanım verilerini sayfalı olarak listeler (tur başına token sayaçları). Mesaj içeriği dahil değildir.",
       "session.autoTitle":
         "Yalnızca uygun oturumların ilk istemini ve ilk yanıtını okuyabilir; başlık elle değiştirilmemişse otomatik başlığı günceller. Tam dökümü okuyamaz.",
+      "session.manage.own": "Yalnızca bu eklentiye ait yerel konuşma kayıtlarını oluşturabilir ve güncelleyebilir. Yerel arayüzden gönderilen iletiler yalnızca sahibi eklentiye yönlendirilir; yerel aracı tarafından yedek olarak çalıştırılmaz.",
+      "secrets.store": "Değerleri bu cihazda eklentiye özel alanda şifreli olarak saklar. Bu izin etkin olduğu sürece eklenti bunları okuyabilir; sağlayıcılarla veya diğer eklentilerle paylaşılmaz.",
     },
   },
   /**

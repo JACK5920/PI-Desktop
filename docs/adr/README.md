@@ -20,6 +20,7 @@ Each ADR includes:
 
 | ID | Title | Status |
 |---|---|---|
+| plugin-managed-native-transcripts | [Plugin-managed native transcripts and private storage](plugin-managed-native-transcripts.md) | Accepted for implementation |
 | plugin-projects-list | [Read-only durable project enumeration for plugins](plugin-projects-list.md) | Accepted |
 | append-only-review-state | [Append-only review state](append-only-review-state.md) | Implemented candidate |
 | lossless-tool-image-storage | [Lossless tool-image storage and bounded history mutations](lossless-tool-image-storage.md) | Implemented candidate |
@@ -390,7 +391,6 @@ Each ADR includes:
 | 0333 | [A plugin-owned suggestion in the Composer placeholder](0333-plugin-composer-suggestion.md) | Accepted |
 | 0334 | [OpenAI Fast mode as a per-session switch gated by model settings](0334-openai-fast-mode.md) | Accepted |
 | plugin-fetch-redirect-policy | [Host-enforced plugin fetch redirect policy](plugin-fetch-redirect-policy.md) | Accepted (implementation candidate for #1475) |
-
 | local-agent-remote-workspace-tools | [Local Agent and model requests for remote workspaces](local-agent-remote-workspace-tools.md) | Accepted for implementation |
 | 0332 | [macOS keeps its translucent window surface with an opaque opt-out](0332-macos-opaque-window-surface.md) | Accepted (D665, amended by D666 and D667; supersedes the macOS vibrancy window backing from D348; issue #1064) |
 | gen-ui-inline-visualization | [Inline generative UI visualizations](gen-ui-inline-visualization.md) | Accepted (D671) |
@@ -399,5 +399,6 @@ Each ADR includes:
 | 0339 | [Add an independent local Branch Review surface](0339-independent-local-branch-review.md) | Accepted |
 | 0340 | [Add read-only GitHub Pull Request review to the Work Panel](0340-read-only-github-pull-request-review.md) | Accepted (amends ADR 0308 for this independent read-only surface) |
 | 0341 | [Authenticate GitHub PR Review and gate external writes](0341-authenticated-github-pr-review-and-confirmed-writes.md) | Accepted (amends ADR 0340 for private reads and confirmed writes) |
+| 0342 | [Selected-text follow-up uses an ordinary session fork](0342-selected-text-follow-up-forks.md) | Accepted (amends ADR 0268) |
 
 | model-reasoning-effort-override | [Model reasoning effort override](model-reasoning-effort-override.md) | Proposed |

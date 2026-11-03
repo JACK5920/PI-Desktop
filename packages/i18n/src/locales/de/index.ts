@@ -412,6 +412,8 @@ export const de = {
     "messageMenu": "Nachrichtenaktionen",
     "conversationMenu": "Gesprächsaktionen",
     "selectMessageText": "Nachrichtentext auswählen",
+    "askAboutSelection": "Auswahl besprechen",
+    "selectedTextPrompt": "Erkläre diesen Ausschnitt aus der vorherigen Antwort:\n\n{{excerpt}}",
     "copyConversation": "Gespräch kopieren",
     "copyLastAnswer": "Letzte Antwort kopieren",
     "radialMenuOpenBrowser": "Browser öffnen",
@@ -2623,7 +2625,9 @@ sklm: {
       "bus.subscribe": "Nachrichten von anderen Plugins empfangen",
       "browser.cdp": "Den Arbeitspanel-Browser steuern",
       "usage.read": "Nutzungsstatistiken lesen",
-      "session.autoTitle": "Kontext des ersten Durchlaufs lesen und automatische Titel ändern"
+      "session.autoTitle": "Kontext des ersten Durchlaufs lesen und automatische Titel ändern",
+      "session.manage.own": "Plugin-eigene Unterhaltungen verwalten",
+      "secrets.store": "Private Plugin-Geheimnisse speichern",
     },
     "permissionHelp": {
       "ui.panel": "Lässt das Plugin sein eigenes Panel innerhalb der App anzeigen.",
@@ -2669,7 +2673,9 @@ sklm: {
         "Listet Nutzungsdaten abgeschlossener Runden auf (Token-Zähler pro Runde, seitenweise). Nachrichteninhalte sind nicht enthalten.",
       "session.autoTitle":
         "Kann nur die erste Eingabe und Antwort geeigneter Sitzungen lesen und den Titel ändern, sofern er nicht manuell geändert wurde. Das vollständige Transkript bleibt unzugänglich.",
-    }
+      "session.manage.own": "Kann nur native Transkripte dieses Plugins erstellen und aktualisieren. Native Nachrichten werden ausschließlich an das zuständige Plugin geleitet und niemals lokal vom Agenten ausgeführt.",
+      "secrets.store": "Speichert Werte verschlüsselt auf diesem Gerät im privaten Namensraum des Plugins. Solange diese Berechtigung gilt, kann das Plugin sie lesen; Provider und andere Plugins erhalten keinen Zugriff.",
+    },
   },
   "extensions": {
 

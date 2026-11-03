@@ -220,6 +220,9 @@ impl Database {
             27 => {
                 migrate_v27_to_v28(&conn, path)?;
             }
+            28 => {
+                crate::db::migrations::migrate_v28_to_v29(&conn, path)?;
+            }
             legacy @ 1..=6 => {
                 let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
                 drop(conn);
@@ -286,6 +289,10 @@ impl Database {
         }
         if migrated_version == 27 {
             migrate_v27_to_v28(&conn, path)?;
+            migrated_version = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+        }
+        if migrated_version == 28 {
+            crate::db::migrations::migrate_v28_to_v29(&conn, path)?;
         }
         let db = Self { conn, data_dir };
         db.boot_maintenance()?;

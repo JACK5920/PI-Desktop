@@ -201,7 +201,7 @@ export type AppState = {
   toasts: ToastItem[];
   notifications: AppNotification[];
   unreadNotificationCount: number;
-  page: "chat" | "scheduled" | "plugins" | "settings";
+  page: "chat" | "scheduled" | "plugins" | "settings" | `plugin:${string}/${string}`;
   /** Tab ids come from the shared settings index. */
   settingsTab: SettingsTabId;
   /** Pending row anchor (i18n key) to flash after landing on a settings tab. */
@@ -232,7 +232,7 @@ export type AppState = {
     isolated?: boolean;
   }) => Promise<void>;
   forkSession: (id: string) => Promise<void>;
-  forkAssistantMessage: (messageId: string) => Promise<void>;
+  forkAssistantMessage: (messageId: string, selectedText?: string) => Promise<void>;
   configureActiveSession: (config: {
     mode: Mode;
     providerId?: string;

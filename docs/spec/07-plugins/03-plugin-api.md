@@ -1395,6 +1395,21 @@ adapter returned empty output), `WORKSPACE_CHANGED`, `OPEN_FAILED`,
 `REVEAL_FAILED`, and `CONNECT_FAILED`. Branch on the codes you handle and treat
 the rest as a generic failure.
 
+Additional host-originated errors:
+
+| Code | Trigger and meaning |
+|---|---|
+| `PLUGIN_INVALID_RESULT` | `onComposerTransform` returned a non-string, or the host received a string whose JavaScript `length` exceeds 100,000 UTF-16 code units. Return a string within that bound. |
+| `PLUGIN_TOOL_ABORTED` | A plugin tool invocation is cancelled, finished, unknown/expired, or no longer belongs to the calling plugin process. Pending and late host calls in that invocation are refused. An explicit Error abort reason may retain its own code. |
+| `SPEECH_PROTOCOL_UNSUPPORTED` | `runSpeechAdapter` found no registered adapter for the binding's protocol. An invalid adapter reply instead uses `INVALID_ARGUMENT`; empty text/audio uses `PROVIDER_ERROR`. The code is also documented in the [shared registry](../03-runtime/08-error-codes.md) and [speech specification](../03-runtime/20-speech.md). |
+
+Implementation evidence: `apps/desktop/electron/main/plugin-runtime.ts`
+(`MAX_COMPOSER_TRANSFORM_TEXT_LENGTH`, `runComposerTransform`,
+`runSpeechAdapter`, `sendToChild`), `plugin-tool-invocations.ts`
+(`run`, `assertActive`, `finish`) and `plugin-host-process.mjs`
+(`toolAbortedError`, `cancelInvocation`, `composer.transform`) in the same
+directory. The codes extend the open set above; no new SDK enum is introduced.
+
 ## 5. Events (host -> plugin)
 
 ```ts
@@ -1675,3 +1690,93 @@ Renderer ES modules may import `react/jsx-runtime` or
 its runtimes alongside `react`, `react-dom`, and `react-dom/client`, before
 evaluating plugin entries. This keeps compiled JSX, hooks and context on the
 host React instance in production and development builds.
+
+## Plugin-managed native transcripts
+
+`session.manage.own` grants `pi.session.createManaged({ source, externalId, title, projectId? })` and `pi.session.appendManaged({ sessionId, externalId, author?, message })`. Sources must be declared in `contributes.sessionSources`. Project binding additionally requires `project.create`. Creation returns `{ sessionId, created }`; append returns `{ messageId, appended }`. Managed creation is idempotent but cannot claim ordinary/imported sessions or resurrect trashed sessions. Appends are finalized imported-message shapes with exact identity retries; conflicting content is rejected. Author is a display label only. The host derives message ids and owns storage.
+
+Native text submissions invoke the owner's `onSessionSubmit({ sessionId, messageId, content, attachments })` in its isolated process. The handler acknowledges `{ accepted: true }` only after durable plugin admission. Main never executes these transcripts locally, replays submissions, or falls back when the owner is disabled, uninstalled, crashed or lacks its grant. Voice input is refused; a managed transcript has no turn to attribute a transcription to. Native drafts remain recoverable on rejection. A timeout can follow an accepted plugin operation, so stable identities and durable deduplication are required in the plugin. A concurrent send to one session is fenced before attachment preparation: the second request is refused `BUSY` and only one submission reaches the plugin.
+
+Attachments cross as content-addressed descriptors, never bytes. The host stores each one under `<dataDir>/attachments/<sha256>` and passes `{ ref, name, kind, mimeType?, size? }`, so the same descriptor is portable to another computer. The owning plugin moves bytes itself under `session.manage.own`: `pi.session.beginManagedAttachment({ sessionId, name, size, mimeType? })` returns `{ uploadId }`, `pi.session.writeManagedAttachment({ sessionId, uploadId, offset, dataBase64 })` appends in order, `pi.session.commitManagedAttachment({ sessionId, uploadId })` hashes the staged bytes into place and returns `{ ref, size }`, and `pi.session.readManagedAttachment({ sessionId, ref, offset?, length? })` returns `{ ref, size, offset, eof, contentBase64 }`. An upload is owned by the plugin that began it; a foreign `uploadId` is refused. A read additionally requires host-recorded provenance for that exact ref on that transcript: the host records a ref only when it staged the bytes for a native Composer send, or when the owning plugin committed its own upload. Transcript membership is deliberately *not* the gate, because a managed transcript is plugin-writable — `appendManaged` validates a ref's shape, not its origin — so a plugin could otherwise write another session's `attachments/<sha256>` into its own transcript and read those bytes. A ref belonging to an ordinary session, to another plugin's managed session, or merely appended into this plugin's own transcript is refused, so owning one managed session never exposes another session's bytes. `pi.session.setManagedModel({ sessionId, providerId?, modelId?, thinkingLevel? })` binds display/compose state for the native composer and cannot touch `mode` or `permission_mode`.
+
+`secrets.store` grants `pi.secrets.get(key)`, `set(key, value)` and `delete(key)` in encrypted host storage scoped to the installed plugin id. Keys are 1–128 ASCII alphanumeric/dot/underscore/hyphen characters, starting with an alphanumeric; values are at most 64 KiB in UTF-8. Missing keys return null; deletion is idempotent. No provider id, plugin id or secret reference is accepted from callers. Values are excluded from logs. Existing plugins need no migration. These capabilities require a host release containing ADR `plugin-managed-native-transcripts`; stock 0.17.0 is incompatible.
+
+
+## Session-scoped execution subscriptions
+
+`desktop.control` grants `pi.desktop.subscribeAgentEvents({ sessionId })`, returning
+`{ subscriptionId }`, and `pi.desktop.unsubscribeAgentEvents({ subscriptionId })`.
+Subscribe before dispatching `agent/prompt`. Exact repeated subscriptions reuse
+one id; each plugin may hold at most 64 session subscriptions. Empty or oversized
+ids are refused. Subscriptions belong to one loaded plugin process and disappear
+on unload, disable, crash, reload or shutdown. Delivery checks the current grant
+and disposal state. Other sessions and panels do not receive these events.
+
+`pi.events.on("desktop:agentEvent", handler)` receives `{ subscriptionId,
+...AgentEventEnvelope }`: the same host-normalized events delivered to the native
+chat, including message deltas, thinking, usage, tool start/update/end, errors,
+permission/Ask requests and subagent lineage. These are observational events;
+permission/Ask requests remain owned by the execution-side host. `agent_end` and
+`turn_end` are not durable completion receipts. A delta is append-only; consumers
+must preserve the host's `stream`, reset and message identity semantics.
+
+`pi.events.on("desktop:turnEnded", handler)` receives `{ subscriptionId, sessionId,
+turnId, reason, persisted }`. `persisted: true` means host-core acknowledged the
+terminal write; reason is `completed`, `aborted` or `error`. If host-core is
+unavailable, rejects the write or the write fails, reason is `unknown` and
+`persisted` is false. The older `session:turnEnded` notification retains its
+original reason and adds optional `persisted` for compatibility. A graceful stop
+can complete; an abort retains its host cancellation reason. Process or transport
+loss provides no receipt. There is no replay or delivery guarantee while the
+plugin is absent: consumers must treat an interrupted run as unknown, use stable
+identities, and never replay execution merely because a timer elapsed.
+
+## Renderer session and work-panel actions
+
+A renderer extension declaring `session.readContext` in `rendererActions` may
+`pi.dispatch("session.readContext", {})` to read `{ sessionId, managedByPlugin? }`
+for the active native chat, or null elsewhere. No transcript, settings or
+credentials are included.
+
+Declare `workPanel.openView` to call `pi.dispatch("workPanel.openView", { viewId,
+expectedSessionId })` during a user gesture. The host checks that the chat still
+matches `expectedSessionId` and that this plugin contributes the requested view.
+It opens the existing per-session singleton plugin tab, preserving the standard
+work-panel close, collapse, maximize, sizing and session context lifecycle.
+Calls cannot open another plugin's view, and stale or remote opens are refused.
+
+
+## Renderer main navigation and pages
+
+`navigationSection` adds a category to the native sidebar after Projects.
+`mainPage` registers an owned main-content component with a bounded `pageId`
+(`^[A-Za-z0-9_-]{1,128}$`). Both slots use the existing renderer error boundary
+and load-scoped disposal. A page key is `${pluginId}/${pageId}`; duplicate keys
+and foreign route syntax are rejected. Register the page before its navigation.
+
+Declare `shell.openPage` in `rendererActions` and dispatch it synchronously from
+an actual user gesture with `{ pageId }`. The action opens only that plugin's
+currently registered page. Remote calls, undeclared pages, and malformed payloads
+are refused. Main pages hide the session work panel; native conversation pages
+retain its existing per-session lifecycle. Disposing a page removes its entry and
+returns an active or historical stale plugin route to chat without recording a
+new history entry. Managed transcripts use the owner's navigation and remain
+excluded from ordinary sidebar, search and tray lists while the owner is disabled.
+
+## Bounded unload cleanup
+
+Explicit unload gives `onUnload` at most 12 seconds; application quit uses a
+shorter bounded budget. Existing execution subscriptions continue only during
+that load's cleanup window. New subscriptions, new managed sessions and new desktop
+execution are refused. `session.appendManaged` and private secrets remain available
+for that same load's terminal archival, subject to their existing grants and
+ownership checks. Desktop control permits only `agent/abort`, `session/get` and
+`session/delete` during cleanup. The window closes on hook completion or deadline;
+subscriptions are then cleared and later calls are refused. Missing durable
+receipts remain unknown and must not trigger replay.
+
+`session.emitManagedEvent` presents validated assistant/tool message and tool
+frames for an owned managed transcript. It grants no execution, permission or
+terminal authority and writes no durable history. Stable external message and
+tool identities must also be used by `appendManaged`, so finalized history replaces
+its matching live presentation. Host-generated session namespaces isolate ids.

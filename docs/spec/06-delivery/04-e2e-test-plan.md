@@ -944,6 +944,18 @@
   request candidate per AGENTS.md, with tested head and base recorded.
 
 
+#### Scheduled execution-status wording (English / Simplified Chinese)
+
+- Open Scheduled with a normally ended session whose transcript reports that
+  the requested work could not be completed. Verify that the rail, history and
+  selected-run header say **Session ended** / **会话已结束**, not unqualified
+  task completion. The history hint states that session completion does not
+  confirm task success and asks the reader to verify task evidence.
+- Running, interrupted and error labels also identify the session. No task
+  outcome is inferred, persisted or backfilled by this copy-only correction.
+- Copy validation checks both catalog entries and the existing shared label
+  mapping. Existing Scheduled component/user-path coverage is unchanged.
+
 
 ### E2E-PLUGIN-appearance-extension-lifecycle
 
@@ -2171,6 +2183,13 @@ identify the platform validation still needed.
   Stopping the pending Write cancels its permission;
   approving the stale request fails and creates no file. A mutating operation
   that already started is not reported stopped before its Host result arrives.
+  On a headless Host, hold durable-turn creation, user-row append, and sidecar
+  history restoration in turn, then request abort during each hold. Release the
+  hold and confirm abort settles the runtime before acknowledging cancellation;
+  a follow-up input completes under a new durable turn. Repeat with an approved
+  plan still being admitted, and ensure its execution settles as interrupted.
+  An old turn's delayed abort must leave a newer turn alone, and admission in
+  another session must not wait for this session's cancellation.
 - **Specs linked**: `03-runtime/02-agent-runtime.md`,
   `03-runtime/03-tools-and-permissions.md`, `03-runtime/06-host-rpc-protocol.md`,
   ADR `tool-abort-abandons-host-call`
@@ -2184,7 +2203,12 @@ identify the platform validation still needed.
   `node scripts/e2e-read-only-stop.mjs` runs the production sidecar bundle and
   a localhost provider, holding execution and cancellation responses at the Host
   edge. It verifies follow-up prompts and the Write settlement boundary;
-  rendered Electron interaction remains
+  `packages/host-runtime/src/runtime-service.test.ts` covers headless admission,
+  approved-plan startup, stale aborts, and independent sessions. After building
+  host-runtime and the sidecar bundle, `node scripts/e2e-headless-startup-abort.mjs`
+  exercises the production RuntimeService, stdio transport, sidecar, and local
+  provider through startup cancellation and a successful follow-up.
+  Rendered Electron interaction remains
   a manual validation run.
 
 #### E2E-171: Streaming reply survives quit, crash, and stop
@@ -5510,6 +5534,38 @@ window; opening a normal panel afterward must still work.
 - **Status**: Unit-covered (`chat-context-menu.test.mjs`,
   `chat-context-menu-items.test.mjs`, `chat-context-menu-surface.test.mjs`);
   full UI scenario Draft
+
+#### E2E-CHAT-selected-text-follow-up: Ask about selected text in a child session
+
+- **Preconditions**: An idle, forkable session has a completed assistant reply;
+  the user can edit/fork the session.
+- **Steps**: 1) Right-click the completed assistant reply without a selection
+  and confirm **Ask about selection** is absent. 2) Select a phrase inside that
+  reply, right-click it, and choose **Ask about selection**. 3) Inspect and edit
+  the new Composer draft without sending it; submit only after an explicit user
+  action. 4) Return to the parent conversation. 5) Right-click a user message,
+  a different assistant reply, and empty transcript space with no owned text
+  selection.
+- **Expected**: The child is a normal `session.fork` branch whose history ends
+  at the selected assistant response. Its Composer contains a localized,
+  editable prompt with the selected phrase quoted; no request is sent
+  automatically. The parent history and runtime are unchanged. The action is
+  hidden for a missing/out-of-row selection and is not offered on user rows or
+  the conversation background. A fork completed after navigation changes does
+  not steal focus or prefill a different session. No side-chat tab or second
+  transcript/stream is created.
+- **Coverage**: `node scripts/e2e-message-edit-copy.mjs` exercises real Chromium
+  text selection, the production transcript menu, selection gating, and excerpt
+  delivery. `node --test apps/desktop/test/session-fork-running.test.mjs
+  apps/desktop/test/selected-text-followup.test.mjs` covers the store fork,
+  source-message anchor, localized editable prefill, stale navigation, and quote
+  normalization. Full model/provider acceptance is not required for the
+  no-auto-send path.
+- **Specs**: `04-ux/08-component-spec.md` §8.3 / §8.5, ADR 0342.
+- **Acceptance**: C (chat stream), Quality.
+- **Milestone**: Maintenance.
+- **Status**: Automated component and store-path coverage; full visual desktop
+  acceptance Draft.
 
 #### E2E-CHAT-radial-background-menu: Radial menu on the empty transcript background
 
@@ -10928,6 +10984,7 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
 | C / E / G / Quality — Pi kernel upgrade | E2E-PI-130-kernel-upgrade |
 | C / E / G / Quality — Pi kernel upgrade | E2E-PI-140-kernel-upgrade |
 | C / G / Security / Quality — GitHub PR Review | E2E-269, E2E-270 |
+| C / F / G / Security / Quality — Plugin-managed group-room transcripts | E2E-271 |
 | C — Conversation & stream (IME slash alias) | E2E-255 |
 | E — Tools & permissions (Skill residency) | E2E-254 |
 | Quality (Skill residency and IME slash alias) | E2E-254, E2E-255 |
@@ -10991,6 +11048,7 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
 | M6+ (MCP server timeout override) | E2E-261 |
 | M6+ (Destination loading and focus) | E2E-087b |
 | M6+ (Code review surfaces) | E2E-268, E2E-269, E2E-270 |
+| M6+ (Plugin-managed sessions) | E2E-271 |
 | M6+ (Session list responsiveness) | E2E-SESSION-list-refresh-keeps-desktop-responsive |
 | M6+ (Windows updater cache) | E2E-260 |
 | M6+ (Independent session communication) | E2E-SESSION-independent-top-level-communication, E2E-SESSION-hover-card-model-and-links |
@@ -19601,3 +19659,36 @@ their separate platform acceptance.
   configured GitHub App, private-repository authorization, and live external
   writes require app registration and credentials not present in this test
   environment; they are not claimed as manually accepted.
+
+#### E2E-271: Plugin-managed group-room transcript and native send
+
+- **Preconditions:** An isolated temporary profile/data directory and a fixture
+  plugin declaring `session.manage.own`, `secrets.store`, and `desktop.control`.
+  Host and plugin transports are deterministic fixtures; no real room, model,
+  credentials, or installed-plugin data are used.
+- **Steps:** Load the plugin after explicitly granting its declared permissions.
+  Create a managed session and append a message twice with the same external
+  identity, then retry with conflicting content. Submit text through the native
+  session router. Exercise a host-staged attachment and a plugin upload, then
+  attempt to read a foreign session's ref. Subscribe to one worker session and
+  deliver matching and foreign events. Disable/unload the owner and submit again.
+- **Expected:** Creation and exact append retry are idempotent; conflicting
+  identity reuse is refused. Native sends reach only the durable owner and are
+  never run or replayed locally if the owner is unavailable. Attachment reads
+  require Host-recorded provenance, plugin secrets remain namespaced/encrypted,
+  and events are session-filtered. Unload clears subscriptions; the disabled
+  transcript remains visible and its native draft is recoverable rather than
+  starting a local model turn.
+- **Coverage:** `plugin-managed-sessions.test.mjs`,
+  `plugin-managed-session-process.test.mjs`,
+  `plugin-managed-attachments.test.mjs`, `plugin-secrets.test.mjs`,
+  `plugin-agent-events.test.mjs`, and Host `plugin_sessions::managed` / schema
+  migration tests. This does not replace an isolated packaged-Electron
+  acceptance run.
+- **Specs:** ADR `plugin-managed-native-transcripts`,
+  `07-plugins/02-plugin-manifest-schema.md`, `07-plugins/03-plugin-api.md`, and
+  `07-plugins/13-plugin-permissions-matrix.md`.
+- **Acceptance:** No fallback/replay, no cross-plugin secret or blob access,
+  ordinary and imported session behavior unchanged.
+- **Milestone:** M6+ (plugin API). **Status:** Unit/process/Host coverage;
+  packaged-Electron acceptance is pending.
