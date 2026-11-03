@@ -9,8 +9,8 @@ const transcript = await read("../src/stores/slices/transcript-slice.ts");
 const events = await read("../src/stores/slices/events-slice.ts");
 const sidecarDispatch = await read("../../../packages/agent-runtime/src/sidecar.ts");
 
-test("native model readiness uses capability instead of Desktop secrets", () => {
-  assert.match(composer, /const modelReady\s*=\s*remoteSession\s*\?\s*promptAllowed\s*:\s*nativeSession\s*\?\s*activeSessionSummary\.capabilities\?\.canPrompt === true\s*:/);
+test("native and plugin-managed model readiness use host-owned session state", () => {
+  assert.match(composer, /const modelReady\s*=\s*remoteSession\s*\?\s*promptAllowed\s*:\s*activeSessionSummary\?\.managedByPlugin\s*\?\s*true\s*:\s*nativeSession\s*\?\s*activeSessionSummary\.capabilities\?\.canPrompt === true\s*:/);
 });
 
 test("native abort bypasses smart-stop rewrite and refreshes source detail", () => {
