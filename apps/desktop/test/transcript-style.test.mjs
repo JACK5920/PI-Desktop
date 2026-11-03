@@ -467,7 +467,7 @@ test("delete remains on user turns and is removed from assistant toolbar", async
   assert.match(transcriptSource, /chat\.deleteMessage/);
   assert.match(
     transcriptSource,
-    /const editableUserMessage = isUser && !isSessionMessage && canEditMessages;/,
+    /const editableUserMessage = isUser && !isSessionMessage && !message\.id\.startsWith\("plugin:"\) && canEditMessages;/,
   );
   assert.match(transcriptSource, /\{editableUserMessage \? \(/);
   assert.match(stylesSource, /\.copy-btn\.danger:hover/);
