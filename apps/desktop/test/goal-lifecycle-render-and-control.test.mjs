@@ -31,7 +31,7 @@ async function withGoalModules(run) {
         },
         load(id) {
           if (id !== GOAL_API_MODULE) return null;
-          return `export const api = new Proxy({}, { get: (_target, key) => key === "controlGoal" ? (...args) => globalThis.__goalLifecycleControl(...args) : () => Promise.resolve({}) });`;
+          return `export const api = new Proxy({}, { get: (_target, key) => key === "controlGoal" ? (...args) => globalThis.__goalLifecycleControl(...args) : key === "updateGoalBudget" ? (...args) => globalThis.__goalLifecycleBudgetUpdate(...args) : () => Promise.resolve({}) });`;
         },
       },
     ],
@@ -65,6 +65,11 @@ function goal(status, overrides = {}) {
     roundInCycle: 2,
     runCount: 2,
     maxRounds: 8,
+    maxTokens: 250_000,
+    maxDurationMs: 3_600_000,
+    tokensUsed: 2_000,
+    elapsedMs: 60_000,
+    tokenBudgetUnlimited: false,
     stopReason: status === "interrupted" ? "host_restart" : undefined,
     latestReport: {
       outcome: "continue",
@@ -116,6 +121,7 @@ test("Goal lifecycle bar renders a durable report and only actions valid for the
     assert.match(active, /Reported met|Not yet met/);
     assert.match(active, /pnpm test: FAIL — one regression remains/);
     assert.match(active, /data-testid="goal-pause"/);
+    assert.match(active, /data-testid="goal-budget-edit"/);
     assert.match(active, /data-testid="goal-clear"/);
     assert.doesNotMatch(active, /data-testid="goal-resume"/);
 
@@ -124,9 +130,68 @@ test("Goal lifecycle bar renders a durable report and only actions valid for the
     assert.match(interrupted, /data-testid="goal-resume"/);
     assert.doesNotMatch(interrupted, /data-testid="goal-pause"/);
     assert.match(interrupted, /data-testid="goal-clear"/);
+    assert.match(interrupted, /data-testid="goal-budget-edit"/);
+
+    const budgetStoppedUnlimited = renderBar(
+      modules,
+      goal("paused", { stopReason: "GOAL_BUDGET_EXHAUSTED", tokenBudgetUnlimited: true }),
+    );
+    assert.match(budgetStoppedUnlimited, /time or token budget/);
+    assert.doesNotMatch(budgetStoppedUnlimited, /time budget\./);
+
+    const completed = renderBar(modules, goal("completed"));
+    assert.doesNotMatch(completed, /data-testid="goal-budget-edit"/);
 
     const restored = renderBar(modules, goal("interrupted"), { withProposal: false });
     assert.match(restored, /Persistent goal/);
+  });
+});
+
+test("Goal budget edits use Host result to reconcile the durable lifecycle", async () => {
+  await withGoalModules(async ({ createInteractionSlice }) => {
+    const calls = [];
+    const events = [];
+    const updatedGoal = goal("active", {
+      maxRounds: 18,
+      maxTokens: 600_000,
+      maxDurationMs: 86_400_000,
+      tokenBudgetUnlimited: true,
+    });
+    globalThis.__goalLifecycleBudgetUpdate = async (request) => {
+      calls.push(request);
+      return { goal: updatedGoal };
+    };
+    const state = { handlePlansChanged: (event) => events.push(event) };
+    let actions;
+    actions = createInteractionSlice({
+      get: () => ({ ...state, ...actions }),
+      set: () => undefined,
+      runtime: {},
+      interactionRuntime: { planResolutionRequests: new Map(), nextToastId: () => 1 },
+    });
+
+    await actions.updateGoalBudget("goal-session", "goal-proposal", {
+      maxRounds: 18,
+      maxTokens: 600_000,
+      maxDurationMs: 86_400_000,
+      tokenBudgetUnlimited: true,
+    });
+
+    assert.deepEqual(calls, [{
+      sessionId: "goal-session",
+      proposalId: "goal-proposal",
+      budget: {
+        maxRounds: 18,
+        maxTokens: 600_000,
+        maxDurationMs: 86_400_000,
+        tokenBudgetUnlimited: true,
+      },
+    }]);
+    assert.equal(events.length, 1);
+    assert.equal(events[0].goal.maxRounds, 18);
+    assert.equal(events[0].goal.maxTokens, 600_000);
+    assert.equal(events[0].goal.maxDurationMs, 86_400_000);
+    assert.equal(events[0].goal.tokenBudgetUnlimited, true);
   });
 });
 

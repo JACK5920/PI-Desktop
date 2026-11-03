@@ -767,6 +767,54 @@
   gap: 6px;
 }
 
+.goal-budget-editor {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-items: end;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--ds-border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--ds-bg-elevated-opaque);
+}
+
+.goal-budget-editor .field-input {
+  width: 100%;
+  min-width: 0;
+}
+
+.goal-budget-unlimited {
+  display: flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--ds-text-secondary);
+  font-size: var(--text-xs-plus);
+}
+
+.goal-budget-error {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--ds-error);
+  font-size: var(--text-xs-plus);
+}
+
+.goal-budget-hint {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--ds-text-secondary);
+  font-size: var(--text-xs-plus);
+}
+
+.goal-budget-actions {
+  display: flex;
+  grid-column: 1 / -1;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
 @container composer-stack (max-width: 520px) {
   .plan-approval-bar {
     grid-template-columns: minmax(0, 1fr);
@@ -784,6 +832,10 @@
   .goal-lifecycle-actions {
     width: 100%;
     justify-content: flex-end;
+  }
+
+  .goal-budget-editor {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .plan-approval-artifact-path {

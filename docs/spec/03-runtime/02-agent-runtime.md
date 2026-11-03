@@ -821,13 +821,19 @@ are Agent-reported claims, not Host-certified test results; the Composer labels
 them accordingly.
 
 Only a completed round that saved `continue` may automatically queue another
-round, and the Host caps this at eight execution rounds total per cycle,
-including the initial approved round. Each cycle also persists a ceiling of
-250,000 reported tokens and 60 minutes of wall-clock time. The Host evaluates
-both budgets after the current execution round settles; it never terminates an
-in-flight round at a budget boundary, but it will not automatically queue a
-subsequent round once either budget is reached. Manual resume starts a new
-cycle and resets both counters. `complete`
+round. Each cycle defaults to eight execution rounds total, including the
+initial approved round, and a user may configure 1–32 rounds. The default
+reported-token ceiling is 250,000; a finite ceiling may be any positive safe
+integer through `Number.MAX_SAFE_INTEGER`, or the user may explicitly choose
+unlimited tokens. Usage is still tracked in unlimited mode, but only the token
+cutoff is skipped. Elapsed wall-clock time defaults to 60 minutes and may be
+configured from 1 to 1,440 minutes. The Host evaluates the round and time
+ceilings, and a finite token ceiling when enabled, after the current execution
+round settles; it never terminates an in-flight round at a budget boundary.
+Editing limits for an active, paused, blocked, or interrupted Goal does not
+reset usage, change cycle/execution identity, or cancel the current round.
+Manual resume starts a new cycle and resets cycle usage while retaining the
+configured limits. `complete`
 is accepted only when all reported criteria are `met`; `blocked`, a missing
 report, or the round cap stops automatic continuation. Pause, resume, and clear
 are explicit user controls. Resume creates a new execution ID and cycle rather

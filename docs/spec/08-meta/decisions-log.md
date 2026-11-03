@@ -1,7 +1,7 @@
 # Decisions Log
 
-> Baseline delta: `0.3.0` → `0.4.23`
-> Date: `2026-11-03`
+> Baseline delta: `0.4.24` → `0.4.25`
+> Date: `2026-11-04`
 > Status: Accepted for implementation
 
 This log freezes previously open questions into concrete decisions.
@@ -8184,3 +8184,23 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
   Agent. No RPC, IPC, schema, or persisted-data change is introduced.
 - Coverage: host-core resolver and RPC tests plus E2E-019c / E2E-121. See ADR
   0343 and the permission runtime/UX specifications.
+
+## 2026-11-04 — Configurable per-cycle Goal budgets (D684)
+
+- Keep defaults at 8 rounds, 250,000 reported tokens, and 60 minutes. Allow
+  editing to 1–32 rounds and 1–1,440 minutes; finite token limits accept any
+  positive safe integer through `Number.MAX_SAFE_INTEGER`.
+- Add a persisted unlimited-token mode. Token usage remains tracked and shown,
+  while only the token cutoff is bypassed; round/time limits and explicit
+  manual-resume semantics continue to apply. Keep and allow editing the last
+  finite token value while unlimited is enabled.
+- Active, paused, blocked, and interrupted Goals can be edited. Budget updates
+  preserve counters, cycle, and execution ID, and never interrupt a current
+  round; the Host checks new limits after that round settles. Resume still
+  starts a new cycle and retains the configured limits.
+- Schema v30 adds `goal_lifecycles.token_budget_unlimited` with default `0`;
+  v29 Goals retain their finite token limit. Protocol v11 adds
+  `goals.budget.update`; Host validation remains authoritative.
+- Coverage: Host lifecycle/migration/RPC tests, offline Goal E2E, and the
+  isolated Composer Goal budget user path. See ADR 0344, ADR 0338, and the Goal
+  lifecycle specs.

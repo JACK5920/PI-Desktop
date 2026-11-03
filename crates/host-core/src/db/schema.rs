@@ -386,6 +386,7 @@ CREATE TABLE IF NOT EXISTS goal_lifecycles (
   run_count             INTEGER NOT NULL DEFAULT 1 CHECK (run_count > 0),
   max_rounds            INTEGER NOT NULL DEFAULT 8 CHECK (max_rounds > 0),
   max_tokens            INTEGER NOT NULL DEFAULT 250000 CHECK (max_tokens > 0),
+  token_budget_unlimited INTEGER NOT NULL DEFAULT 0 CHECK (token_budget_unlimited IN (0, 1)),
   max_duration_ms       INTEGER NOT NULL DEFAULT 3600000 CHECK (max_duration_ms > 0),
   tokens_used           INTEGER NOT NULL DEFAULT 0 CHECK (tokens_used >= 0),
   elapsed_ms            INTEGER NOT NULL DEFAULT 0 CHECK (elapsed_ms >= 0),

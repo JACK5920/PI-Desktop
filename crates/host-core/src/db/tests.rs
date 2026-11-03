@@ -491,7 +491,7 @@ fn v28_database_gains_the_managed_attachment_provenance_table() {
     };
 
     let db = Database::open(&path).unwrap();
-    assert_eq!(schema_version(db.conn()), 29);
+    assert_eq!(schema_version(db.conn()), SCHEMA_VERSION);
     assert!(migration_backup_path(&path, 28).exists());
     let rows: i64 = db
         .conn()

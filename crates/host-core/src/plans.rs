@@ -25,8 +25,10 @@ mod repository;
 
 pub use approval::{expire_pending_approvals, gate_session_configure};
 pub use goals::{
-    GoalControlResult, GoalCriterionReport, GoalLifecycle, GoalProgressReport,
-    GOAL_MAX_ROUNDS_PER_CYCLE,
+    GoalBudget, GoalBudgetUpdateResult, GoalControlResult, GoalCriterionReport, GoalLifecycle,
+    GoalProgressReport, GOAL_DEFAULT_DURATION_MS_PER_CYCLE, GOAL_DEFAULT_ROUNDS_PER_CYCLE,
+    GOAL_DEFAULT_TOKENS_PER_CYCLE, GOAL_MAX_DURATION_MS_PER_CYCLE, GOAL_MAX_ROUNDS_PER_CYCLE,
+    GOAL_MIN_DURATION_MS_PER_CYCLE,
 };
 pub use model::{
     kind_for_mode, normalize_kind, PlanArtifact, PlanExecution, PlanHistoryEntry, PlanManager,

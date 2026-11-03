@@ -154,6 +154,7 @@ stdio 与 Tokio 的动态阻塞池隔离，因此后一种情况
 | `PLAN_EXECUTION_INTERRUPTED` | 不 | 已批准的 queued/running Plan 或 Goal 执行已停止且不重播 |
 | `GOAL_ALREADY_ACTIVE` | 不 | 会话已有未清除的 Goal 生命周期 |
 | `GOAL_ACTION_INVALID` | 不 | Goal 控制动作不是 `pause`、`resume` 或 `clear` |
+| `GOAL_BUDGET_INVALID` | 不 | Goal cycle 预算超出 Host 校验范围 |
 | `GOAL_EXECUTION_STALE` | 不 | Goal run 不再是当前获批执行 |
 | `GOAL_NOT_FOUND` | 不 | 会话没有未清除的 Goal 生命周期 |
 | `GOAL_NOT_RESUMABLE` | 不 | 获批 Goal 合约不能手动恢复 |

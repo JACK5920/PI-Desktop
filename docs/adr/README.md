@@ -401,5 +401,6 @@ Each ADR includes:
 | 0341 | [Authenticate GitHub PR Review and gate external writes](0341-authenticated-github-pr-review-and-confirmed-writes.md) | Accepted (amends ADR 0340 for private reads and confirmed writes) |
 | 0342 | [Selected-text follow-up uses an ordinary session fork](0342-selected-text-follow-up-forks.md) | Accepted (amends ADR 0268) |
 | 0343 | [Goal uses fixed Auto permission before approval](0343-goal-fixed-auto-permission-before-approval.md) | Accepted for implementation (D683) |
+| 0344 | [Configure per-cycle Goal budgets](0344-configurable-goal-cycle-budgets.md) | Accepted for implementation (D684; amends ADR 0338 budget limits only) |
 
 | model-reasoning-effort-override | [Model reasoning effort override](model-reasoning-effort-override.md) | Proposed |

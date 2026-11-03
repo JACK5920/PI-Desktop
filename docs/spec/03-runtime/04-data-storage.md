@@ -1,4 +1,4 @@
-# 04. Data Storage (Schema v28)
+# 04. Data Storage (Schema v30)
 
 
 ### Lossless tool-image storage (#1868)
@@ -1781,6 +1781,14 @@ truncating at a guessed position.
   the newest approved Goal lifecycle per session, marks it interrupted for
   review, and never replays an old execution. A v27 backup precedes the
   migration.
+- **Schema v29 is additive.** It records Host-verified provenance for
+  plugin-managed transcript attachment refs. Existing refs receive no
+  historical grant. The v28 migration keeps a v28 backup.
+- **Schema v30 is additive.** It adds
+  `goal_lifecycles.token_budget_unlimited`, defaulting to `0`. Existing Goals
+  preserve their saved finite `max_tokens` budget and remain limited after
+  migration. When unlimited is later enabled, the saved finite value remains
+  available for restoring finite mode. The v29 migration keeps a v29 backup.
 - **Schema v14 is additive.** It adds nullable `sessions.deleted_at`, the
   partial deletion index, and `session_import_origins`. Existing sessions stay
   active and have no origin rows. The migration runs in the same guarded

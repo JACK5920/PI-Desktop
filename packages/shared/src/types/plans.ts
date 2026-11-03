@@ -110,10 +110,13 @@ export type GoalLifecycleStatus =
   | "interrupted"
   | "cleared";
 
-/** Maximum execution rounds in one Goal cycle, including its initial approved round. */
-export const GOAL_MAX_ROUNDS_PER_CYCLE = 8;
-export const GOAL_MAX_TOKENS_PER_CYCLE = 250_000;
-export const GOAL_MAX_DURATION_MS_PER_CYCLE = 60 * 60 * 1_000;
+/** Default execution-round budget, including the initial approved round. */
+export const GOAL_DEFAULT_ROUNDS_PER_CYCLE = 8;
+export const GOAL_MAX_ROUNDS_PER_CYCLE = 32;
+export const GOAL_DEFAULT_TOKENS_PER_CYCLE = 250_000;
+export const GOAL_DEFAULT_DURATION_MS_PER_CYCLE = 60 * 60 * 1_000;
+export const GOAL_MIN_DURATION_MS_PER_CYCLE = 60 * 1_000;
+export const GOAL_MAX_DURATION_MS_PER_CYCLE = 24 * 60 * 60 * 1_000;
 
 export type GoalCriterionReport = {
   criterion: string;
@@ -142,6 +145,8 @@ export type GoalLifecycle = {
   maxRounds: number;
   maxTokens: number;
   maxDurationMs: number;
+  /** Last finite token limit, retained when token cutoff is disabled. */
+  tokenBudgetUnlimited?: boolean;
   tokensUsed: number;
   elapsedMs: number;
   stopReason?: string;
@@ -161,6 +166,24 @@ export type GoalControlRequest = {
 export type GoalControlResult = {
   goal: GoalLifecycle;
   execution?: PlanExecution;
+};
+
+export type GoalBudget = {
+  maxRounds: number;
+  /** Last finite token limit, retained while token limiting is disabled. */
+  maxTokens: number;
+  maxDurationMs: number;
+  tokenBudgetUnlimited: boolean;
+};
+
+export type GoalBudgetUpdateRequest = {
+  sessionId: string;
+  proposalId: string;
+  budget: GoalBudget;
+};
+
+export type GoalBudgetUpdateResult = {
+  goal: GoalLifecycle;
 };
 
 export type PlanExecutionDescriptor = PlanExecution;

@@ -4234,6 +4234,45 @@ async fn handle_request(
             .await;
             Ok(json!(result))
         }
+        "goals.budget.update" => {
+            let session_id = params
+                .get("sessionId")
+                .and_then(|value| value.as_str())
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| rpc_err(1002, "sessionId required", "INVALID_PARAMS"))?;
+            let proposal_id = params
+                .get("proposalId")
+                .and_then(|value| value.as_str())
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| rpc_err(1002, "proposalId required", "INVALID_PARAMS"))?;
+            let budget = params
+                .get("budget")
+                .cloned()
+                .ok_or_else(|| rpc_err(1002, "budget required", "GOAL_BUDGET_INVALID"))
+                .and_then(|value| {
+                    serde_json::from_value::<plans::GoalBudget>(value)
+                        .map_err(|_| rpc_err(1002, "budget is invalid", "GOAL_BUDGET_INVALID"))
+                })?;
+            let result = {
+                let st = state.lock().await;
+                st.plans
+                    .update_goal_budget(&st.db, session_id, proposal_id, budget)
+                    .map_err(plan_rpc_err)?
+            };
+            emit_notification(
+                &tx,
+                "plans.changed",
+                json!({
+                    "sessionId": session_id,
+                    "proposalId": result.goal.proposal_id,
+                    "state": "inactive",
+                    "kind": plans::KIND_GOAL,
+                    "goal": result.goal,
+                }),
+            )
+            .await;
+            Ok(json!(result))
+        }
 
         method if method.starts_with("scheduled.") => {
             let st = state.lock().await;
@@ -9880,6 +9919,110 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(finished["execution"]["state"], "completed");
+    }
+
+    #[tokio::test]
+    async fn goal_budget_update_rpc_persists_limits_and_rejects_invalid_ranges() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let project = data_dir.path().join("project");
+        fs::create_dir_all(&project).unwrap();
+        let mut app_state = AppState::open(data_dir.path()).unwrap();
+        app_state.handshook = true;
+        app_state.workspace.set(project.clone());
+        let session = sessions::create_session(
+            &app_state.db,
+            Some("Goal".into()),
+            Some("goal".into()),
+            None,
+            None,
+            Some(project.to_string_lossy().into_owned()),
+        )
+        .unwrap();
+        let turn_id = sessions::begin_turn(&app_state.db, &session.id, None, None).unwrap();
+        let state = Arc::new(Mutex::new(app_state));
+        let (tx, mut notifications) = mpsc::unbounded_channel();
+        let submitted = handle_request(
+            state.clone(),
+            "plans.submit",
+            json!({
+                "sessionId": session.id,
+                "turnId": turn_id,
+                "toolCallId": "submit-goal-budget-call",
+                "kind": "goal",
+                "title": "Reach the target",
+                "markdown": "# Goal\n- verification passes",
+                "question": "Approve?"
+            }),
+            tx.clone(),
+        )
+        .await
+        .unwrap();
+        let proposal_id = submitted["proposal"]["id"].as_str().unwrap();
+        let proposal_version = submitted["proposal"]["version"].as_i64().unwrap();
+        let _submit_notification = notifications.try_recv().unwrap();
+        let resolved = handle_request(
+            state.clone(),
+            "plans.resolve",
+            json!({
+                "sessionId": session.id,
+                "proposalId": proposal_id,
+                "turnId": turn_id,
+                "toolCallId": "submit-goal-budget-call",
+                "version": proposal_version,
+                "action": "approve",
+                "targetPermissionMode": "auto"
+            }),
+            tx.clone(),
+        )
+        .await
+        .unwrap();
+        let execution_id = resolved["execution"]["id"].as_str().unwrap();
+        let _approval_notification = notifications.try_recv().unwrap();
+
+        let updated = handle_request(
+            state.clone(),
+            "goals.budget.update",
+            json!({
+                "sessionId": session.id,
+                "proposalId": proposal_id,
+                "budget": {
+                    "maxRounds": 24,
+                    "maxTokens": 500_000,
+                    "maxDurationMs": 86_400_000,
+                    "tokenBudgetUnlimited": true
+                }
+            }),
+            tx.clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(updated["goal"]["maxRounds"], 24);
+        assert_eq!(updated["goal"]["maxTokens"], 500_000);
+        assert_eq!(updated["goal"]["maxDurationMs"], 86_400_000);
+        assert_eq!(updated["goal"]["tokenBudgetUnlimited"], true);
+        assert_eq!(updated["goal"]["currentExecutionId"], execution_id);
+        let notification: Value = serde_json::from_str(&notifications.try_recv().unwrap()).unwrap();
+        assert_eq!(notification["method"], "plans.changed");
+        assert_eq!(notification["params"]["goal"]["maxRounds"], 24);
+
+        let error = handle_request(
+            state,
+            "goals.budget.update",
+            json!({
+                "sessionId": session.id,
+                "proposalId": proposal_id,
+                "budget": {
+                    "maxRounds": 33,
+                    "maxTokens": 500_000,
+                    "maxDurationMs": 86_400_000,
+                    "tokenBudgetUnlimited": true
+                }
+            }),
+            tx,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.data.unwrap()["errorCode"], "GOAL_BUDGET_INVALID");
     }
 
     #[tokio::test]

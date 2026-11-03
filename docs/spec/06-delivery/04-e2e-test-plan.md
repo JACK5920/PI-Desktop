@@ -8262,30 +8262,43 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
 - **Preconditions**: An isolated Host profile and project-bound session; no live
   provider is required. Host tests reopen the same database to exercise the
   startup fence.
-- **Steps**: Submit and approve a Goal. Claim its execution, submit one
-  criterion-by-criterion `GoalReport` with evidence, and finish the turn.
-  Confirm `continue` creates a distinct queued execution only after the first
-  execution completes. Pause the next run, manually resume, and verify a new
-  execution ID and cycle. Clear the lifecycle and verify no Goal execution is
-  queued. In a separate process-reopen leg, leave the run queued/running,
-  restart Host, and inspect `plans.pending` before manually resuming.
+- **Steps**: Submit and approve a Goal. Verify the defaults (8 rounds, 250,000
+  reported tokens, 60 minutes, finite token mode), then update its budgets while
+  active to 16 rounds, 1,250,000 tokens, 1,440 minutes, and unlimited token
+  mode. Verify the existing execution identity, cycle, and counters remain
+  unchanged and that `plans.pending` returns the updated values. Claim its
+  execution, submit one criterion-by-criterion `GoalReport` with evidence, and
+  finish the turn. Confirm `continue` creates a distinct queued execution only
+  after the first execution completes. Pause the next run, change back to finite
+  tokens while retaining 1,250,000, manually resume, and verify a new execution
+  ID/cycle with the chosen budgets. Clear the lifecycle and verify no Goal
+  execution is queued. In a separate process-reopen leg, leave the run
+  queued/running, restart Host, and inspect `plans.pending` before manually
+  resuming.
 - **Expected**: Reports are persisted per execution and visible from
   `plans.pending`; stale/wrong-turn or duplicate reports are rejected. Complete
-  requires all reported criteria to be met, missing reports stop as blocked,
-  and automatic continuation pauses after eight execution rounds per cycle,
-  including the initial approved round, or after 250,000 reported tokens or
-  60 minutes of elapsed wall-clock time. A running round may exceed a cap but
-  no next round is queued. Resume resets both cycle budgets. Pause/clear never dispatch
-  an old ID. A Host restart records `interrupted` with `host_restart`, preserves
-  report history, and dispatches nothing until explicit resume creates a new
-  execution. Existing v27 approved Goals migrate to interrupted review state.
+  requires all reported criteria to be met and missing reports stop as blocked.
+  Defaults remain 8 rounds, 250,000 tokens, and 60 minutes; rounds can be
+  configured from 1–32, finite token limits accept any positive safe integer,
+  and time can be configured from 1–1,440 minutes. Unlimited token mode still
+  accumulates usage while bypassing only the token cutoff. A successful budget
+  update does not cancel a running round, alter its execution identity, reset
+  usage, or start a new cycle. The Host checks changed limits only after a
+  round settles; no new automatic round is queued once a configured limit is
+  reached. Resume resets cycle counters while retaining settings. Pause/clear
+  never dispatch an old ID. A Host restart records `interrupted` with
+  `host_restart`, preserves report history, and dispatches nothing until
+  explicit resume creates a new execution. Existing v27 approved Goals migrate
+  to interrupted review state; v29 Goals keep finite token mode and their saved
+  finite limit under schema v30.
   The Composer labels criterion status/evidence as Agent-reported, not
   Host-certified.
 - **Coverage**: `pnpm test:e2e:plan` exercises the no-provider Host RPC journey;
   `cargo test -p host-core --locked` covers lifecycle transitions, v27 migration,
-  and process reopen; `packages/agent-runtime/src/runtime.test.ts` covers the
-  round-scoped GoalReport tool; `apps/desktop/test/goal-lifecycle-render-and-control.test.mjs`
-  covers localized lifecycle rendering and serialized controls.
+  v29→v30 migration, budget validation/update, and process reopen;
+  `packages/agent-runtime/src/runtime.test.ts` covers the round-scoped GoalReport
+  tool; `apps/desktop/test/goal-lifecycle-render-and-control.test.mjs` covers
+  localized lifecycle rendering and serialized controls.
 - **Dispatcher guard**: `packages/host-runtime/src/plan-dispatch.test.ts`
   verifies automatic continuation defers while interactive input or a contract
   approval is pending.
@@ -8297,6 +8310,34 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
   (no-replay startup fence).
 - **Milestone**: Goal lifecycle.
 - **Status**: Automated offline; real provider execution is not required.
+
+#### E2E-GOAL-budget-editor: Edit and restore persisted Goal cycle limits
+
+- **Preconditions**: Isolated Electron profile, project, and Host; the gated
+  Main-only Plan UI probe seeds and approves a Goal directly through the live
+  Host. No model/provider credentials are required, and no execution is
+  dispatched by the probe.
+- **Steps**: Reload the renderer and select the approved Goal. Open Edit limits,
+  change rounds, finite token value above one million, and time to 1,440 minutes;
+  enable unlimited tokens, then change the finite token value while unlimited
+  from 1,250,000 to 1,500,000. Save, reload the renderer, reopen the editor,
+  and verify all limits and unlimited mode were restored from Host state.
+  Disable unlimited, confirm the edited retained token value remains, save, and
+  verify the visible finite budget.
+- **Expected**: The user-facing edit/save path updates the Host through the
+  normal preload/Main/Host bridge; unlimited mode keeps the finite token value
+  editable and persists it for later finite use. Renderer reload rehydrates the
+  persisted state. The new UI never calls a model or alters the Goal
+  execution/cycle while updating its budgets.
+- **Coverage**: `pnpm test:e2e:plan-ui` runs the isolated Electron path;
+  `apps/desktop/test/plan-ui-probe-contract.test.mjs` guards the live-Host probe
+  and case wiring. The full user path is environment-gated on the candidate
+  Electron build/runtime.
+- **Acceptance**: F (durability), Quality (user path), Security (normal Host
+  ownership and no model credentials).
+- **Milestone**: Goal lifecycle budgets.
+- **Status**: Automated offline when the Electron development runtime is
+  available.
 
 #### E2E-CHAT-opaque-floating-decision-and-retry-surfaces: Dock, Plan approval, and retry surfaces occlude transcript text
 
@@ -10996,6 +11037,7 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
 | C — Conversation & stream | E2E-CHAT-long-history-stream-keeps-responsive, E2E-CHAT-running-status-survives-output-pauses, E2E-008, E2E-008d, E2E-008e, E2E-008a, E2E-009, E2E-010, E2E-011, E2E-011a, E2E-011b, E2E-011d, E2E-011e, E2E-011g, E2E-031, E2E-040, E2E-047, E2E-048, E2E-048A, E2E-049, E2E-052, E2E-053, E2E-054, E2E-055, E2E-059, E2E-059a, E2E-060c, E2E-060d, E2E-061, E2E-061a, E2E-062, E2E-064, E2E-065, E2E-068, E2E-071, E2E-073, E2E-074, E2E-075, E2E-081, E2E-083, E2E-084, E2E-086, E2E-087, E2E-088, E2E-088b, E2E-089, E2E-090, E2E-COMPOSER-narrow-controls, E2E-094, E2E-095, E2E-096, E2E-097, E2E-098, E2E-099, E2E-102, E2E-102a, E2E-102b, E2E-102c, E2E-102d, E2E-102g, E2E-106, E2E-109, E2E-111, E2E-114, E2E-116, E2E-117, E2E-118, E2E-119, E2E-120, E2E-121, E2E-218, E2E-259, E2E-219, E2E-AGENTS-001, E2E-142, E2E-144, E2E-145, E2E-146, E2E-146a, E2E-147, E2E-151, E2E-154, E2E-155, E2E-158, E2E-159, E2E-161, E2E-162, E2E-166, E2E-172, E2E-173, E2E-174, E2E-177, E2E-178, E2E-179, E2E-180, E2E-182, E2E-183, E2E-187, E2E-198, E2E-199, E2E-202, E2E-203, E2E-207, E2E-208, E2E-CHAT-content-width-handles, E2E-250, E2E-102i, E2E-PLUGIN-session-orchestrator-real-workers, E2E-SUBAGENT-settlement-updates-before-parent-poll, E2E-SUBAGENT-resume-a-settled-delegation |
 | C — Conversation & stream (composer drafts) | E2E-011c, E2E-011c-1, E2E-011c-2 |
 | C / F / Security / Quality — Goal lifecycle | E2E-GOAL-lifecycle |
+| C / F / Quality — Goal budget editing | E2E-GOAL-lifecycle, E2E-GOAL-budget-editor |
 | D — Workspace | E2E-012, E2E-013, E2E-022B, E2E-024I, E2E-047, E2E-049, E2E-057, E2E-058, E2E-060, E2E-068, E2E-075, E2E-078, E2E-153, E2E-158, E2E-182, E2E-187, E2E-252 |
 | C / D / Quality — Project session history resets after collapse | E2E-263 |
 | D — Workspace (project ordering) | E2E-253 |

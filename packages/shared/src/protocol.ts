@@ -242,6 +242,7 @@ export const IPC = {
     pendingInteractive: "pi-desktop/agent/pendingInteractive",
     plansResolve: "pi-desktop/plans/resolve",
     goalControl: "pi-desktop/goals/control",
+    goalBudgetUpdate: "pi-desktop/goals/budget/update",
     /**
      * List every paired remote `pi-host` this desktop knows, redacted so no
      * device token reaches the renderer. See ADR 0286 (R2b pairing UX).

@@ -20,6 +20,7 @@ const REQUIRED_CASE_IDS = [
   "E2E-117-en",
   "E2E-117-zh-CN",
   "E2E-117-responsive",
+  "E2E-goal-budget-editor",
 ];
 const LIVE_CASE_ID = "E2E-106-live-agent";
 const LIVE_ENV_AVAILABLE = [
@@ -810,6 +811,155 @@ async function clickSelector(state, selector, description) {
     return { clicked: true };
   })()`);
   assert(result?.clicked, `could not click ${description || selector}`);
+}
+
+async function inspectGoalBudget(state) {
+  return state.cdp.evaluate(`(() => {
+    const bar = document.querySelector('[data-testid="goal-lifecycle-bar"]');
+    const editor = bar?.querySelector('[data-testid="goal-budget-editor"]');
+    const find = (id) => bar?.querySelector('[data-testid="' + id + '"]');
+    const toggle = bar?.querySelector('.goal-budget-unlimited [role="switch"]');
+    const visible = (node) => {
+      if (!node) return false;
+      const style = getComputedStyle(node);
+      const rect = node.getBoundingClientRect();
+      return style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
+    };
+    return {
+      status: bar?.getAttribute("data-status") ?? null,
+      editorVisible: visible(editor),
+      editVisible: visible(find("goal-budget-edit")),
+      rounds: find("goal-budget-rounds")?.value ?? null,
+      tokens: find("goal-budget-tokens")?.value ?? null,
+      minutes: find("goal-budget-minutes")?.value ?? null,
+      tokenInputDisabled: find("goal-budget-tokens")?.disabled ?? null,
+      unlimited: toggle?.getAttribute("aria-checked") === "true",
+      unlimitedHintVisible: visible(find("goal-budget-unlimited-hint")),
+      budgetText: (bar?.querySelector(".goal-lifecycle-budget")?.textContent || "").replace(/\\s+/g, " ").trim(),
+    };
+  })()`);
+}
+
+async function setGoalBudgetInput(state, testId, value) {
+  const result = await state.cdp.evaluate(`(() => {
+    const input = document.querySelector('[data-testid="${testId}"]');
+    if (!(input instanceof HTMLInputElement) || input.disabled) return null;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+    if (!setter) return null;
+    setter.call(input, ${JSON.stringify(String(value))});
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    return input.value;
+  })()`);
+  assert(result === String(value), `could not update Goal budget input ${testId}: ${jsonText(result)}`);
+}
+
+async function runGoalBudgetAcceptance(state) {
+  await setLanguage(state, "en");
+  await reloadRenderer(state);
+  const seeded = await runPlanProbe(state, {
+    operation: "seedGoal",
+    workspace: state.workspace,
+  });
+  assert(seeded.sessionId && seeded.proposalId, `Goal UI probe returned no persisted Goal: ${jsonText(seeded)}`);
+  state.goalSessionId = seeded.sessionId;
+  await reloadRenderer(state);
+  await selectSession(state, state.goalSessionId);
+  let snapshot = await waitFor(
+    async () => {
+      const current = await inspectGoalBudget(state);
+      return current.status === "active" ? current : null;
+    },
+    "approved Goal lifecycle after renderer reload",
+    state,
+  );
+  assert(snapshot.editVisible, `active Goal has no Edit limits action: ${jsonText(snapshot)}`);
+  await clickSelector(state, '[data-testid="goal-budget-edit"]', "Goal budget editor");
+  snapshot = await waitFor(
+    async () => {
+      const current = await inspectGoalBudget(state);
+      return current.editorVisible ? current : null;
+    },
+    "Goal budget editor opened",
+    state,
+  );
+  assert(snapshot.rounds === "8", `default Goal round limit changed: ${jsonText(snapshot)}`);
+  assert(snapshot.tokens === "250000", `default Goal token limit changed: ${jsonText(snapshot)}`);
+  assert(snapshot.minutes === "60", `default Goal time limit changed: ${jsonText(snapshot)}`);
+
+  await setGoalBudgetInput(state, "goal-budget-rounds", 16);
+  await setGoalBudgetInput(state, "goal-budget-tokens", 1_250_000);
+  await setGoalBudgetInput(state, "goal-budget-minutes", 1_440);
+  await clickSelector(
+    state,
+    '.goal-budget-unlimited [role="switch"]',
+    "unlimited token budget switch",
+  );
+  snapshot = await inspectGoalBudget(state);
+  assert(snapshot.unlimited, `unlimited token mode did not enable: ${jsonText(snapshot)}`);
+  assert(snapshot.tokenInputDisabled === false, `finite token value cannot be edited while unlimited: ${jsonText(snapshot)}`);
+  assert(snapshot.unlimitedHintVisible, `unlimited token explanation is missing: ${jsonText(snapshot)}`);
+  assert(snapshot.tokens === "1250000", `finite token value was lost while unlimited: ${jsonText(snapshot)}`);
+  await setGoalBudgetInput(state, "goal-budget-tokens", 1_500_000);
+  snapshot = await inspectGoalBudget(state);
+  assert(snapshot.tokens === "1500000", `finite token limit could not be edited while unlimited: ${jsonText(snapshot)}`);
+  await clickSelector(state, '[data-testid="goal-budget-save"]', "save unlimited Goal budget");
+  await waitFor(
+    async () => {
+      const current = await inspectGoalBudget(state);
+      return !current.editorVisible && current.budgetText.includes("token cutoff unlimited")
+        ? current
+        : null;
+    },
+    "unlimited Goal budget saved",
+    state,
+  );
+
+  await reloadRenderer(state);
+  await selectSession(state, state.goalSessionId);
+  snapshot = await waitFor(
+    async () => {
+      const current = await inspectGoalBudget(state);
+      return current.status === "active" && current.budgetText.includes("token cutoff unlimited")
+        ? current
+        : null;
+    },
+    "unlimited Goal budget rehydrated after renderer reload",
+    state,
+  );
+  await clickSelector(state, '[data-testid="goal-budget-edit"]', "reopen Goal budget editor");
+  snapshot = await waitFor(
+    async () => {
+      const current = await inspectGoalBudget(state);
+      return current.editorVisible ? current : null;
+    },
+    "Goal budget editor reopened after renderer reload",
+    state,
+  );
+  assert(snapshot.rounds === "16", `round limit was not durable: ${jsonText(snapshot)}`);
+  assert(snapshot.tokens === "1500000", `edited finite token value was not durable while unlimited: ${jsonText(snapshot)}`);
+  assert(snapshot.minutes === "1440", `time limit was not durable: ${jsonText(snapshot)}`);
+  assert(snapshot.unlimited && snapshot.tokenInputDisabled === false, `unlimited mode did not rehydrate as editable: ${jsonText(snapshot)}`);
+  await clickSelector(
+    state,
+    '.goal-budget-unlimited [role="switch"]',
+    "restore finite token budget switch",
+  );
+  snapshot = await inspectGoalBudget(state);
+  assert(!snapshot.unlimited, `finite token mode did not restore: ${jsonText(snapshot)}`);
+  assert(snapshot.tokens === "1500000", `restoring finite mode lost the edited retained limit: ${jsonText(snapshot)}`);
+  await clickSelector(state, '[data-testid="goal-budget-save"]', "save restored finite Goal budget");
+  snapshot = await waitFor(
+    async () => {
+      const current = await inspectGoalBudget(state);
+      return !current.editorVisible && current.budgetText.includes("1,500,000 tokens")
+        ? current
+        : null;
+    },
+    "restored finite Goal budget saved",
+    state,
+  );
+  return `rounds=${snapshot.rounds ?? 16} tokens=1,500,000 time=1,440m; token limit editable in unlimited mode, persisted, and restored in finite mode`;
 }
 
 async function clickApprovalMenuAndCheckAsk(state) {
@@ -1605,6 +1755,14 @@ async function runAcceptance(state) {
     "zh-CN labels, Ask default, terminal Agent state, pending-only reload hydration, and no stale actions verified",
   );
 
+  try {
+    const detail = await runGoalBudgetAcceptance(state);
+    record("E2E-goal-budget-editor", true, detail);
+  } catch (error) {
+    record("E2E-goal-budget-editor", false, errorText(error));
+    throw error;
+  }
+
   if (!LIVE_ENV_AVAILABLE) {
     console.log(
       `SKIP ${LIVE_CASE_ID} - set PI_DESKTOP_TEST_API_KEY, PI_DESKTOP_TEST_BASE_URL, and PI_DESKTOP_TEST_MODEL for the optional live acceptance case`,
@@ -1659,6 +1817,7 @@ async function main() {
     sessionId: null,
     otherSessionId: null,
     liveSessionId: null,
+    goalSessionId: null,
     probeIdentity: null,
     sidecarChildPid: null,
     screenshots: [],

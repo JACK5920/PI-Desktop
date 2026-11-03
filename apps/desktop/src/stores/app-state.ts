@@ -10,6 +10,7 @@ import type {
   AppVersionInfo,
   AskToolResolution,
   ContextCompactionMark,
+  GoalBudget,
   GoalControlAction,
   GoalLifecycle,
   Mode,
@@ -395,6 +396,7 @@ export type AppState = {
   dropAskDraft: (requestId: string) => void;
   resolvePlan: (resolution: PlanResolveRequest) => Promise<PlanResolutionResult>;
   controlGoal: (sessionId: string, proposalId: string, action: GoalControlAction) => Promise<void>;
+  updateGoalBudget: (sessionId: string, proposalId: string, budget: GoalBudget) => Promise<void>;
   showToast: (message: string, options?: ToastOptions) => void;
   dismissToast: (id: number) => void;
   composerPrefill: ComposerPrefill | null;

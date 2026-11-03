@@ -181,6 +181,7 @@ does not turn temporary thread pressure into a host process exit.
 | `PLAN_INTERNAL` | maybe | a Plan/Goal host failure with no finer classification |
 | `GOAL_ALREADY_ACTIVE` | no | a session already has a non-cleared Goal lifecycle |
 | `GOAL_ACTION_INVALID` | no | Goal control action is not `pause`, `resume`, or `clear` |
+| `GOAL_BUDGET_INVALID` | no | Goal cycle budget is outside the Host-validated ranges |
 | `GOAL_EXECUTION_STALE` | no | Goal run is no longer the active approved execution |
 | `GOAL_NOT_FOUND` | no | the session has no non-cleared Goal lifecycle |
 | `GOAL_NOT_RESUMABLE` | no | the approved Goal contract is not eligible for manual resume |
