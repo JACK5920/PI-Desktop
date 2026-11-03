@@ -2938,8 +2938,9 @@ identify the platform validation still needed.
   Click the same Composer chip to return to Agent. 4) Begin a turn and try to
   toggle mode mid-run or while a pending Plan approval is visible.
 - **Expected**: The Composer chip updates the active session `mode` (Plan and
-  Goal hard-deny Write/Edit and plugin tools while Bash follows the selected
-  permission mode; Agent allows its normal tools per permission settings). The
+  Goal hard-deny Write/Edit and plugin tools; Plan Bash follows the selected
+  permission mode, while Goal contract-phase Bash uses fixed Auto until
+  approval. Agent allows its normal tools per permission settings). The
   chip is disabled while a turn or active pending approval exists and re-enables
   after the session returns idle/planning. No top-bar mode control is rendered.
 - **Specs linked**: `04-ux/08-component-spec.md` (§2, §11),
@@ -3401,15 +3402,34 @@ identify the platform validation still needed.
 - **Milestone**: M5
 - **Status**: Automated (host-core unit tests)
 
-#### E2E-019c: Permission modes govern high-risk approval (D115/D132)
+#### E2E-019c: Permission modes govern high-risk approval (D115/D132/D683)
 
-- **Preconditions**: Agent mode; project open; global default `ask`.
-- **Steps**: 1) With a newly inherited session and global default Ask every time, open the composer menu — expect Ask every time to be selected with no global-default/inherit label — then ask the Agent to write a workspace file and expect a permission card. 2) Switch the session chip to Accept edits; repeat — expect no card for Write/Edit but still a card for Bash. 3) Switch to Auto — expect no card for Bash either. 4) Create another inherited session after setting the global default to Accept edits in Settings — expect the composer chip and menu selection to display Accept edits directly and Write/Edit to be auto-allowed. 5) Switch the session to Plan, then Goal, with Auto set — expect Write/Edit/plugin denied but Bash allowed without confirmation.
-- **Expected**: Effective mode = session override → global default → ask; Plan and Goal Write/Edit/plugin hard denies outrank every mode while their Bash follows the selected mode; the composer chip and menu always display the effective mode without default/inherit provenance.
-- **Specs linked**: `03-runtime/03-tools-and-permissions.md §6`, `03-runtime/04-data-storage.md`, `08-meta/decisions-log.md` (D115/D132)
+- **Preconditions**: Agent mode; project open; global default `ask`; the primary session inherits its permission mode.
+- **Steps**:
+  1. In Agent mode, verify the inherited session displays Ask every time; ask it
+     to write a workspace file and expect a permission card.
+  2. Switch the session to Accept edits; repeat — expect no card for Write/Edit
+     but still a card for Bash.
+  3. Switch to Auto — expect no card for Bash either.
+  4. Create another inherited session after setting the global default to
+     Accept edits in Settings — expect the composer chip and menu selection to
+     display Accept edits directly and Write/Edit to be auto-allowed.
+  5. In Plan with Auto selected, verify Write/Edit/plugin tools remain denied
+     and Bash follows the selected mode.
+  6. In Goal on the original inherited session while the global default is Ask,
+     verify the fixed Auto chip has no menu, admitted Bash runs without a
+     permission card, and Write/Edit/plugin tools remain denied. Check that the
+     stored session permission is still `inherit`.
+  7. Return to Agent and verify the inherited session again follows global Ask
+     and prompts for Bash.
+- **Expected**: Agent and Plan resolve session override → global default → ask. Goal's contract phase uses fixed Auto regardless of those settings, without changing the stored session permission; its hard denies still outrank Auto. Leaving Goal restores the existing Agent/Plan resolution.
+- **Specs linked**: `03-runtime/03-tools-and-permissions.md §6`, `03-runtime/04-data-storage.md`, `04-ux/03-permission-ux.md`, ADR 0343, `08-meta/decisions-log.md` (D115/D132/D683)
 - **Acceptance**: E (permission modes resolve and enforce host-side)
 - **Milestone**: M5
-- **Status**: Partially automated (host-core unit tests: evaluate matrix, Plan policy precedence, session grants under ask; renderer source test: effective-only composer options and selection)
+- **Status**: Partially automated (host-core unit/RPC tests cover the
+  effective-mode matrix, Goal fixed Auto with inherited Ask, Goal hard-deny
+  precedence, Plan policy, and unchanged stored permission; renderer source
+  test covers effective-only composer options and selection)
 
 #### E2E-019d: Bash tool sees the user's login-shell toolchain (D181)
 
@@ -10075,27 +10095,37 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
 
 #### E2E-121: Goal approval resumes autonomous acceptance-criteria execution
 
-- **Preconditions**: A project-bound session has a configured provider and is
-  idle in Agent mode; the workspace permits host artifact creation and has no
-  prior test goal artifact.
-- **Steps**: 1) Switch the session to Goal and let the Agent call
-  `EnterGoalMode`, then `SubmitGoal(title, markdown, question)`. 2) Inspect the
-  exact Markdown bytes in the new `.pi/goal/*.md` artifact and the matching
-  `plan_approvals` row. 3) Confirm the shared approval card exposes only
-  Approve/Reject and that Goal denies Write/Edit/plugin tools while Bash follows
-  the selected permission mode. 4) Approve with Ask and observe the same Agent
-  resume in Agent mode. 5) Inspect the final response for criterion-by-criterion
-  verification or an explicit boundary, then reload the session.
+- **Preconditions**: A project-bound session has a configured provider, global
+  permission default `ask`, and stored session permission `inherit`; it is idle
+  in Agent mode. The workspace permits host artifact creation and has no prior
+  test goal artifact.
+- **Steps**: 1) Switch the session to Goal and verify the Composer shows fixed
+  Auto without a permission-mode menu. Let the Agent call `EnterGoalMode`, then
+  `SubmitGoal(title, markdown, question)`. 2) During the Goal contract phase,
+  have the Agent run an admitted Bash check; verify it runs without a permission
+  request and the stored session permission remains `inherit`. Verify Write,
+  Edit, unknown tools, the other contract submit tool, and plugins without
+  declared safe actions remain denied. 3) Inspect the exact Markdown bytes in
+  the new `.pi/goal/*.md` artifact and the matching `plan_approvals` row. 4)
+  Confirm the approval card exposes only Approve/Reject plus its execution-mode
+  choice; approve with Ask. 5) Observe the same Agent resume in Agent mode and
+  verify a high-risk Bash action now follows Ask and requires its ordinary
+  permission decision. Allow it, then inspect the final response for
+  criterion-by-criterion verification or an explicit boundary. 6) Reload the
+  session and verify the transcript and stored permission preference.
 - **Expected**: Goal uses the Plan approval pipeline without a second planner;
-  the artifact is immutable and the row records `kind = goal`, path, hash,
-  size, and execution state. Approval is a separate user decision, transitions
-  the session to Agent, and starts autonomous work only after approval. The
-  transcript remains reviewable after reload and no scheduled/unattended Goal
-  run can bypass the approval boundary.
+  its pre-approval contract phase uses Host-enforced fixed Auto while preserving
+  the session's `inherit` preference. The artifact is immutable and the row
+  records `kind = goal`, path, hash, size, and execution state. Approval is a
+  separate user decision: its selected mode (Ask in this scenario) governs the
+  post-approval Agent run, not the earlier Goal contract phase. The transcript
+  remains reviewable after reload and no scheduled/unattended Goal run can
+  bypass the approval boundary.
 - **Specs linked**: `03-runtime/02-agent-runtime.md`,
   `03-runtime/03-tools-and-permissions.md`, `03-runtime/04-data-storage.md`,
   `03-runtime/06-host-rpc-protocol.md`, `03-runtime/10-session-state-machine.md`,
-  `04-ux/01-ui-ia.md`, `04-ux/08-component-spec.md`, D198
+  `04-ux/01-ui-ia.md`, `04-ux/03-permission-ux.md`,
+  `04-ux/08-component-spec.md`, ADR 0343, D198, D683
 - **Acceptance**: C (conversation & stream), E (tools & permissions),
   F (persistence), H (diagnostics), Security
 - **Milestone**: M6+

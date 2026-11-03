@@ -625,11 +625,14 @@ a usage tab.
     keys are written to the host secret store; subscription/OAuth logins are
     not imported. Re-importing an equivalent provider is skipped.
 
-The permission-mode selector remains available in the composer while the
-session is in Agent, Plan, or Goal. In Plan and Goal it controls Bash
-confirmation only: Ask and Accept edits prompt, while Auto may run a mutating
-Bash command without confirmation. The AI Defaults card must describe that both
-contract modes are intent boundaries, not strict read-only security profiles.
+The per-session permission-mode selector remains available in the composer in
+Agent and Plan. Goal shows a fixed Auto chip without a mode menu; its contract
+phase uses Host-enforced Auto regardless of the stored session preference or
+global default. The Goal approval card separately selects the permission mode
+for the post-approval Agent run. Plan Bash follows the effective session/global
+mode, while Goal contract Bash may mutate without a permission prompt. The AI
+Defaults card must describe that both contract modes are intent boundaries,
+not strict read-only security profiles.
 
 ### Jev classifier
 

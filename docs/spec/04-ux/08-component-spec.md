@@ -3014,8 +3014,10 @@ present the interrupted terminal snapshot after restart.
 - The card is a session-scoped `region` with a localized plan title.
 - Approval, reject, and abort controls have explicit labels and
   keyboard focus.
-- The selected permission mode exposes radio semantics and its Plan/Goal Bash
-  consequence is available in the accessible description.
+- The selected permission mode exposes radio semantics. Its Plan Bash
+  consequence and Goal's post-approval Agent Bash consequence are available in
+  the accessible description; Goal's pre-approval contract phase remains fixed
+  Auto.
 - Resolution does not navigate to another session or take focus from a
   different session.
 

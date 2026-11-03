@@ -8170,3 +8170,17 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
 - Validation is limited to isolated fixtures; no real room transport, provider
   request, or installed plugin data is used. See ADR
   `plugin-managed-native-transcripts` and E2E-271.
+
+## 2026-11-03 — Goal fixed Auto permission before approval (D683)
+
+- While a durable session is in Goal contract mode, host-core resolves the
+  effective permission as Auto regardless of the stored session permission or
+  global default. Entering or leaving Goal does not mutate the stored
+  preference; Agent and Plan keep their existing session → global → Ask
+  resolution.
+- Goal's Host-owned tool allowlist and hard denies remain authoritative, and an
+  explicit delegated permission scope keeps its precedence. The approval
+  card's selected mode applies only after approval transitions the session to
+  Agent. No RPC, IPC, schema, or persisted-data change is introduced.
+- Coverage: host-core resolver and RPC tests plus E2E-019c / E2E-121. See ADR
+  0343 and the permission runtime/UX specifications.

@@ -16,7 +16,8 @@ It does **not** replace pi. It provides safe host capabilities to:
    explicit outside paths
 2. Builtin tool execution (Read/Glob/Grep/Write/Edit/Bash)
 3. Authoritative durable session-mode and tool-policy evaluation
-4. Permission policy evaluation, including Plan/Goal Bash prompts
+4. Permission policy evaluation, including Plan Bash prompts and Goal's fixed
+   Auto contract phase before approval
 5. Immutable `.pi/plan/*.md` and `.pi/goal/*.md` artifact writer,
    `plan_approvals` broker, and
    startup interruption fence
@@ -113,7 +114,10 @@ notification.list
 2. Host resolves the durable session mode; request-supplied mode is never
    authoritative
 3. Plan and Goal deny Write/Edit/plugin/unknown tools before permission evaluation
-4. Plan and Goal Bash follow the durable permission mode and may mutate under Auto
+4. Plan Bash follows the effective session/global permission mode. Goal's
+   pre-approval contract phase uses fixed Auto without changing the stored
+   session preference; the approval-selected mode governs the post-approval
+   Agent run. Admitted Bash may mutate under Auto in either phase.
 5. Plan and Goal artifact bytes, path, hash, size, and approval/execution identity are
    host-authenticated
 6. Plan/Goal approval is host-authenticated, durable, and atomic before Agent entry
@@ -144,8 +148,9 @@ notification.list
    through the `session.endTurn` transaction; results already visible in the
    focused current chat and aborted turns create none
 6. a durable Plan or Goal session cannot authorize Write/Edit/plugin tools through
-   a conflicting request mode, and Plan/Goal Bash follows the resolved permission
-   mode
+   a conflicting request mode. Plan Bash follows the resolved permission mode;
+   Goal's contract-phase Bash uses fixed Auto, while the approval-selected mode
+   governs post-approval Agent execution.
 7. SubmitPlan writes exact Markdown bytes to a new `.pi/plan/*.md` artifact and
    stores durable path/hash/size plus structured title/question in
    `plan_approvals`; approval is approve/reject-only, session/turn/version

@@ -1017,15 +1017,15 @@ Before generic permission evaluation, host-core applies the mode policy:
   all permission modes and grants. The host reads the session's **durable** mode
   for this check, so a sidecar claiming `agent` in `tools.execute` cannot widen
   it, and the `*_IN_PLAN` error codes are shared by both kinds.
-- Plan and Goal `Bash` follows the resolved permission mode: `ask` and
-  `accept-edits`
-  emit `permissions.request`; `auto` executes without confirmation and may
-  mutate. The host re-resolves the effective shell ID/dialect and requires the
-  exact `expectedCommandShellId` and `expectedCommandShellDialect` before
-  permission evaluation and again before spawn; it streams stdout/stderr
-  separately. A configured shell may fall back to the first available platform
-  shell before the turn pin is created, but execution never changes shell
-  after the pin.
+- Plan `Bash` follows the resolved session/global permission mode. Goal
+  contract-phase `Bash` uses Host-enforced fixed Auto before approval, without
+  changing the stored session permission; the approval-selected mode governs
+  post-approval Agent execution. Admitted Auto Bash may mutate. The host
+  re-resolves the effective shell ID/dialect and requires the exact
+  `expectedCommandShellId` and `expectedCommandShellDialect` before permission
+  evaluation and again before spawn; it streams stdout/stderr separately. A
+  configured shell may fall back to the first available platform shell before
+  the turn pin is created, but execution never changes shell after the pin.
 - Agent applies the normal registered-tool and permission policy.
 
 The visible tool list is not the security boundary; a forged RPC call is

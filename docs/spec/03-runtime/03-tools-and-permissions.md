@@ -752,33 +752,38 @@ auto-allowed only in `auto`; `ask` and `accept-edits` both confirm it.
 
 Resolution order per tool call (host-core `tools.execute`):
 
-1. Session's persisted `permission_mode`, unless it is `inherit`
-2. Global `defaultPermissionMode` from app settings (`ask` / `accept-edits` / `auto`)
-3. `ask`
+1. A durable Goal session uses the Goal contract's fixed `auto` posture
+   before approval; this does not mutate the stored session preference.
+2. Otherwise, the session's persisted `permission_mode`, unless it is `inherit`
+3. Global `defaultPermissionMode` from app settings (`ask` / `accept-edits` / `auto`)
+4. `ask`
 
 Rules:
 
 - The session value is stored in `sessions.permission_mode`
   (`inherit | ask | accept-edits | auto`, default `inherit`, schema v5) and
   set via `session.configure` `permissionMode`.
-- Plan's hard deny wins over every permission mode for Write/Edit and plugin
-  tools that lack `planSafeActions`. `auto` cannot re-enable a hidden or denied tool.
+- Plan and Goal hard denies win over every permission mode for Write/Edit,
+  unknown tools, the other contract submit tool, and plugin tools that lack
+  `planSafeActions`. `auto` cannot re-enable a hidden or denied tool.
 - Low-risk tools (`Read`/`Glob`/`Grep`) inside the session roots auto-allow in
   every mode, as before.
 - `BrowserPreview` is an explicit read-only UI inspection capability and is
   available in both operating modes.
-- Plan retains the permission-mode selector. Bash is confirmed under `ask` and
-  `accept-edits`, and is auto-allowed under `auto`; therefore Plan is planning
-  intent, not a strict read-only security profile.
+- Plan retains the effective permission-mode selector. Its Bash is confirmed
+  under `ask` and `accept-edits`, and auto-allowed under `auto`. Goal instead
+  uses fixed `auto` during its pre-approval contract phase, independent of the
+  stored session or global mode; its approval card separately chooses the
+  post-approval Agent permission mode. Both contract modes express intent, not
+  strict read-only security profiles.
 - `allow-session` grants continue to work under `ask` and stay scoped to the
   session; under `accept-edits`/`auto` they are simply never needed.
 - Scratch-directory writes (D114) stay prompt-free in every mode.
-- UI: Settings → segmented global default; composer shows a per-session chip in
-  Agent, Plan, and Goal whose menu offers the three effective modes without a
-  separate global-default/inherit entry. The chip and selected menu item
-  display the effective mode; choosing an item stores that explicit session
-  override. Existing inherited sessions continue to resolve through the
-  global setting until the user chooses a mode.
+- UI: Settings → segmented global default; Agent and Plan show the effective
+  permission mode and allow a per-session override. Goal shows a fixed Auto
+  chip without a menu. Entering or leaving Goal does not change the stored
+  session permission; the Host applies Goal's fixed Auto posture only while
+  the durable session mode is Goal.
 - Enforcement lives in host-core only; the sidecar/model is never told the
   mode and cannot influence it.
 
@@ -841,8 +846,11 @@ for the current key-log policy.
   call cannot bypass the matrix. Plugin tools that declare a non-empty list are admitted; the runner still rejects any action outside that list (ADR 0211).
 - Agent mode uses permission cards or the selected automatic policy for
   Write/Edit/Bash and registered plugin tools.
-- Plan and Goal Bash may mutate workspace or scratch state when the user selected Auto;
-  the UI must make that tradeoff visible.
+- Plan Bash follows the effective session/global permission mode. Goal's
+  pre-approval contract phase uses fixed Auto regardless of the stored session
+  or global mode; its approval-selected mode applies to the post-approval Agent
+  run. Admitted Bash may mutate workspace or scratch state under Auto, so the
+  UI must make that tradeoff visible.
 - allow-session is remembered per toolName for the active session only
 - Session grants follow `sessionId` across project-tab switches and are never
   inherited by another session or Temporary conversation
