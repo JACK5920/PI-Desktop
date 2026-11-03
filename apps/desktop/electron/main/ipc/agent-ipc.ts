@@ -1,6 +1,6 @@
 import type { createManagedSessionRouter } from "../plugin-managed-sessions";
 import { expandMcpInvocation } from "../composer-mcp";
-import { IPC, ErrorCodes, compactionRecordId, findSkillMentions, isGlobalPermissionMode, isRpcTimeoutError, type AgentEventEnvelope, type AgentPromptRequest, type AgentSteerRequest, type UiMessage, type AgentQueuePushRequest, type AgentStopRequest, type AgentStopSubagentsRequest, type AskToolResolution, type GlobalPermissionMode, type MessageUsage, type PendingInteractiveRequests, type PlanExecutionFinishStatus, type PlanResolutionResult, type PlanResolveRequest, type GoalControlRequest, type GoalControlResult, type VoiceOrigin } from "@pi-desktop/shared";
+import { IPC, ErrorCodes, compactionRecordId, findSkillMentions, isGlobalPermissionMode, isRpcTimeoutError, type AgentEventEnvelope, type AgentPromptRequest, type AgentSteerRequest, type UiMessage, type AgentQueuePushRequest, type AgentStopRequest, type AgentStopSubagentsRequest, type AskToolResolution, type GlobalPermissionMode, type MessageUsage, type PendingInteractiveRequests, type PlanExecutionFinishStatus, type PlanResolutionResult, type PlanResolveRequest, type GoalBudgetUpdateRequest, type GoalBudgetUpdateResult, type GoalControlRequest, type GoalControlResult, type VoiceOrigin } from "@pi-desktop/shared";
 import type { FinishTurn } from "../runtime/plans";
 import { expandSlashInvocation, visionFromModelConfig, type ComposerTemplate } from "@pi-desktop/agent-runtime";
 import { appendPromptFallbackPaths, durableUserMessageId, preparePromptAttachments, type PreparedPromptAttachment } from "../prompt-attachments";
@@ -935,6 +935,25 @@ export function registerAgentIpc({
       void dispatchApprovedPlan(result.execution);
     }
     return result;
+  });
+
+  handle(IPC.invoke.goalBudgetUpdate, async (request: GoalBudgetUpdateRequest) => {
+    const sessionId = String(request?.sessionId ?? "").trim();
+    if (!sessionId) throw new Error("sessionId required");
+    const proposalId = String(request?.proposalId ?? "").trim();
+    if (!proposalId) throw new Error("proposalId required");
+    rejectNativeAgentOperation(sessionId);
+    if (!host) throw new Error("host unavailable");
+    const releaseSessionOperation = await acquireSessionOperation(sessionId);
+    try {
+      return await host.call<GoalBudgetUpdateResult>("goals.budget.update", {
+        sessionId,
+        proposalId,
+        budget: request.budget,
+      });
+    } finally {
+      releaseSessionOperation?.();
+    }
   });
 
 }

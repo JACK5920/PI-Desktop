@@ -1158,6 +1158,194 @@ fn goal_control_requires_the_current_proposal_id() {
 }
 
 #[test]
+fn goal_budget_update_preserves_the_active_execution_and_cycle_usage() {
+    let (dir, db) = test_db();
+    let root = dir.path().join("workspace");
+    fs::create_dir_all(&root).unwrap();
+    let manager = PlanManager;
+    let (proposal, execution, turn_id) =
+        approve_goal(&manager, &db, &root, "goal-budget-update-active");
+    manager.claim_execution(&db, &execution.id).unwrap();
+    db.conn()
+        .execute(
+            "UPDATE turns SET usage_json = ?1 WHERE id = ?2",
+            params![json!({"totalTokens": 91}).to_string(), turn_id],
+        )
+        .unwrap();
+    manager
+        .report_goal(
+            &db,
+            &proposal.session_id,
+            &proposal.id,
+            &execution.id,
+            &turn_id,
+            &goal_report("continue", "unmet"),
+        )
+        .unwrap();
+    let before = manager
+        .goal_for_session(&db, &proposal.session_id)
+        .unwrap()
+        .unwrap();
+
+    let updated = manager
+        .update_goal_budget(
+            &db,
+            &proposal.session_id,
+            &proposal.id,
+            GoalBudget {
+                max_rounds: 17,
+                max_tokens: 9_007_199_254_740_991,
+                max_duration_ms: 7_200_000,
+                token_budget_unlimited: false,
+            },
+        )
+        .unwrap()
+        .goal;
+
+    assert_eq!(updated.status, "active");
+    assert_eq!(updated.current_execution_id, before.current_execution_id);
+    assert_eq!(updated.cycle, before.cycle);
+    assert_eq!(updated.round_in_cycle, before.round_in_cycle);
+    assert_eq!(updated.run_count, before.run_count);
+    assert_eq!(updated.tokens_used, 91);
+    assert_eq!(updated.elapsed_ms, before.elapsed_ms);
+    assert_eq!(updated.version, before.version + 1);
+    assert_eq!(updated.max_rounds, 17);
+    assert_eq!(updated.max_tokens, 9_007_199_254_740_991);
+    assert_eq!(updated.max_duration_ms, 7_200_000);
+    assert!(!updated.token_budget_unlimited);
+
+    let run_status: String = db
+        .conn()
+        .query_row(
+            "SELECT status FROM goal_runs WHERE execution_id = ?1",
+            params![execution.id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(run_status, "running");
+
+    let unlimited = manager
+        .update_goal_budget(
+            &db,
+            &proposal.session_id,
+            &proposal.id,
+            GoalBudget {
+                token_budget_unlimited: true,
+                ..GoalBudget {
+                    max_rounds: 17,
+                    max_tokens: 345_678,
+                    max_duration_ms: 7_200_000,
+                    token_budget_unlimited: false,
+                }
+            },
+        )
+        .unwrap()
+        .goal;
+    assert!(unlimited.token_budget_unlimited);
+    assert_eq!(unlimited.max_tokens, 345_678);
+    assert_eq!(unlimited.tokens_used, 91);
+    assert_eq!(unlimited.current_execution_id, Some(execution.id));
+}
+
+#[test]
+fn goal_budget_update_rejects_invalid_stale_and_terminal_changes() {
+    let (dir, db) = test_db();
+    let root = dir.path().join("workspace");
+    fs::create_dir_all(&root).unwrap();
+    let manager = PlanManager;
+    let (proposal, execution, _) = approve_goal(&manager, &db, &root, "goal-budget-invalid");
+    let valid = GoalBudget {
+        max_rounds: 8,
+        max_tokens: 250_000,
+        max_duration_ms: 3_600_000,
+        token_budget_unlimited: false,
+    };
+    let invalid_budgets = [
+        GoalBudget {
+            max_rounds: 0,
+            ..valid
+        },
+        GoalBudget {
+            max_rounds: 33,
+            ..valid
+        },
+        GoalBudget {
+            max_tokens: 0,
+            ..valid
+        },
+        GoalBudget {
+            max_tokens: 9_007_199_254_740_992,
+            ..valid
+        },
+        GoalBudget {
+            max_duration_ms: 59_999,
+            ..valid
+        },
+        GoalBudget {
+            max_duration_ms: 86_400_001,
+            ..valid
+        },
+    ];
+    for budget in invalid_budgets {
+        assert_eq!(
+            manager
+                .update_goal_budget(&db, &proposal.session_id, &proposal.id, budget)
+                .unwrap_err()
+                .to_string(),
+            "GOAL_BUDGET_INVALID"
+        );
+    }
+    assert_eq!(
+        manager
+            .update_goal_budget(&db, &proposal.session_id, "stale-goal-proposal", valid,)
+            .unwrap_err()
+            .to_string(),
+        "GOAL_NOT_FOUND"
+    );
+    manager
+        .control_goal(&db, &proposal.session_id, &proposal.id, "clear")
+        .unwrap();
+    assert_eq!(
+        manager
+            .update_goal_budget(&db, &proposal.session_id, &proposal.id, valid)
+            .unwrap_err()
+            .to_string(),
+        "GOAL_STATE_CONFLICT"
+    );
+    assert_eq!(
+        manager
+            .finish_execution(&db, &execution.id, EXECUTION_INTERRUPTED, None)
+            .unwrap()
+            .state,
+        EXECUTION_INTERRUPTED
+    );
+
+    let (completed, first, turn_id) = approve_goal(&manager, &db, &root, "goal-budget-completed");
+    manager.claim_execution(&db, &first.id).unwrap();
+    manager
+        .report_goal(
+            &db,
+            &completed.session_id,
+            &completed.id,
+            &first.id,
+            &turn_id,
+            &goal_report("complete", "met"),
+        )
+        .unwrap();
+    manager
+        .finish_execution(&db, &first.id, EXECUTION_COMPLETED, None)
+        .unwrap();
+    assert_eq!(
+        manager
+            .update_goal_budget(&db, &completed.session_id, &completed.id, valid)
+            .unwrap_err()
+            .to_string(),
+        "GOAL_STATE_CONFLICT"
+    );
+}
+
+#[test]
 fn a_goal_round_limit_pauses_until_explicit_resume() {
     let (dir, db) = test_db();
     let root = dir.path().join("workspace");
@@ -1264,6 +1452,110 @@ fn a_goal_token_budget_pauses_auto_continuation_and_resets_on_resume() {
 }
 
 #[test]
+fn unlimited_goal_tokens_keep_usage_and_round_limits_enforced() {
+    let (dir, db) = test_db();
+    let root = dir.path().join("workspace");
+    fs::create_dir_all(&root).unwrap();
+    let manager = PlanManager;
+    let (proposal, first, first_turn_id) =
+        approve_goal(&manager, &db, &root, "goal-unlimited-token-budget");
+    db.conn()
+        .execute(
+            "UPDATE goal_lifecycles
+             SET max_rounds = 2, max_tokens = 1, token_budget_unlimited = 1
+             WHERE proposal_id = ?1",
+            params![proposal.id],
+        )
+        .unwrap();
+    db.conn()
+        .execute(
+            "UPDATE turns SET usage_json = ?1 WHERE id = ?2",
+            params![json!({"totalTokens": 100}).to_string(), first_turn_id],
+        )
+        .unwrap();
+
+    manager.claim_execution(&db, &first.id).unwrap();
+    manager
+        .report_goal(
+            &db,
+            &proposal.session_id,
+            &proposal.id,
+            &first.id,
+            &first_turn_id,
+            &goal_report("continue", "unmet"),
+        )
+        .unwrap();
+    let second = manager
+        .finish_execution(&db, &first.id, EXECUTION_COMPLETED, None)
+        .unwrap();
+    sessions::end_turn(&db, &first_turn_id, "completed", None, None, false).unwrap();
+    assert_eq!(second.state, EXECUTION_QUEUED);
+    let after_first = manager
+        .goal_for_session(&db, &proposal.session_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(after_first.status, "active");
+    assert_eq!(after_first.round_in_cycle, 2);
+    assert_eq!(after_first.tokens_used, 100);
+    assert_eq!(after_first.max_tokens, 1);
+    let unlimited: i64 = db
+        .conn()
+        .query_row(
+            "SELECT token_budget_unlimited FROM goal_lifecycles WHERE proposal_id = ?1",
+            params![proposal.id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(unlimited, 1);
+
+    let second_turn_id = live_turn(&db, &proposal.session_id);
+    db.conn()
+        .execute(
+            "UPDATE turns SET usage_json = ?1 WHERE id = ?2",
+            params![json!({"totalTokens": 100}).to_string(), second_turn_id],
+        )
+        .unwrap();
+    manager.claim_execution(&db, &second.id).unwrap();
+    manager
+        .report_goal(
+            &db,
+            &proposal.session_id,
+            &proposal.id,
+            &second.id,
+            &second_turn_id,
+            &goal_report("continue", "unmet"),
+        )
+        .unwrap();
+    manager
+        .finish_execution(&db, &second.id, EXECUTION_COMPLETED, None)
+        .unwrap();
+
+    let stopped = manager
+        .goal_for_session(&db, &proposal.session_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(stopped.status, "paused");
+    assert_eq!(
+        stopped.stop_reason.as_deref(),
+        Some("GOAL_AUTO_ROUND_LIMIT")
+    );
+    assert_eq!(stopped.tokens_used, 200);
+    let unlimited: i64 = db
+        .conn()
+        .query_row(
+            "SELECT token_budget_unlimited FROM goal_lifecycles WHERE proposal_id = ?1",
+            params![proposal.id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(unlimited, 1);
+    assert!(manager
+        .queued_executions(&db, Some(&proposal.session_id))
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
 fn a_goal_time_budget_pauses_auto_continuation_after_the_current_round() {
     let (dir, db) = test_db();
     let root = dir.path().join("workspace");
@@ -1274,7 +1566,8 @@ fn a_goal_time_budget_pauses_auto_continuation_after_the_current_round() {
     db.conn()
         .execute(
             "UPDATE goal_lifecycles
-             SET max_duration_ms = 5_000, cycle_started_at = ?1
+             SET max_tokens = 1, token_budget_unlimited = 1,
+                 max_duration_ms = 5_000, cycle_started_at = ?1
              WHERE proposal_id = ?2",
             params![expired_at, proposal.id],
         )
@@ -1398,6 +1691,75 @@ fn schema_v27_goal_migration_never_assumes_completion_or_replays_work() {
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
     assert_eq!(version, crate::db::SCHEMA_VERSION);
+}
+
+#[test]
+fn schema_v29_goal_budget_migration_preserves_finite_budgets() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("pi.sqlite");
+    let (session_id, proposal_id) = {
+        let db = Database::open(&path).unwrap();
+        let root = dir.path().join("workspace");
+        fs::create_dir_all(&root).unwrap();
+        let (proposal, _, _) = approve_goal(&PlanManager, &db, &root, "goal-v29-budget");
+        db.conn()
+            .execute(
+                "UPDATE goal_lifecycles
+                 SET max_rounds = 15, max_tokens = 123456, max_duration_ms = 7200000,
+                     tokens_used = 777, elapsed_ms = 1234
+                 WHERE proposal_id = ?1",
+                params![proposal.id],
+            )
+            .unwrap();
+        (proposal.session_id, proposal.id)
+    };
+
+    {
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        let has_unlimited_column: bool = conn
+            .query_row(
+                "SELECT EXISTS(
+                   SELECT 1 FROM pragma_table_info('goal_lifecycles')
+                   WHERE name = 'token_budget_unlimited'
+                 )",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        if has_unlimited_column {
+            conn.execute_batch("ALTER TABLE goal_lifecycles DROP COLUMN token_budget_unlimited;")
+                .unwrap();
+        }
+        conn.pragma_update(None, "user_version", 29_i64).unwrap();
+    }
+
+    let migrated = Database::open(&path).unwrap();
+    let lifecycle = PlanManager
+        .goal_for_session(&migrated, &session_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(lifecycle.proposal_id, proposal_id);
+    assert_eq!(lifecycle.max_rounds, 15);
+    assert_eq!(lifecycle.max_tokens, 123456);
+    assert_eq!(lifecycle.max_duration_ms, 7200000);
+    assert_eq!(lifecycle.tokens_used, 777);
+    assert_eq!(lifecycle.elapsed_ms, 1234);
+    let unlimited: i64 = migrated
+        .conn()
+        .query_row(
+            "SELECT token_budget_unlimited FROM goal_lifecycles WHERE proposal_id = ?1",
+            params![proposal_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(unlimited, 0);
+    assert_eq!(
+        crate::db::SCHEMA_VERSION,
+        migrated
+            .conn()
+            .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+            .unwrap()
+    );
 }
 
 #[test]

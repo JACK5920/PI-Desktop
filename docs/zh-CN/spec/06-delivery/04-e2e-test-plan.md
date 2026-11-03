@@ -5969,6 +5969,7 @@ eleven-tool-round desktop paths are verified by
 | C — 对话和直播 | E2E-CHAT-running-status-survives-output-pauses、E2E-008、E2E-008d、E2E-008a、E2E-009、E2E-010、E2E-011、E2E-011a、E2E-011b、E2E-031、E2E-040、E2E-047、E2E-048、E2E-048c、E2E-048A、E2E-049、E2E-052、 E2E-053、E2E-054、E2E-055、E2E-059、E2E-059a、E2E-060c、E2E-060d、E2E-061、E2E-061a、E2E-062、E2E-064、E2E-065、E2E-068、E2E-071、 E2E-073、E2E-074、E2E-075、E2E-081、E2E-083、E2E-084、E2E-086、E2E-087、E2E-088、E2E-088b、E2E-089、E2E-090、E2E-094、E2E-095、E2E-096、 E2E-097、E2E-098、E2E-099、E2E-102、E2E-102a、E2E-102b、E2E-106、E2E-109、E2E-111、E2E-114、E2E-116、E2E-117、E2E-118、E2E-119、 E2E-120、E2E-121、E2E-代理-001、E2E-142、E2E-144、E2E-145、E2E-146、E2E-147、E2E-151、E2E-199、E2E-250、E2E-166、E2E-SUBAGENT-resume-a-settled-delegation |
 | C — 对话和直播（输入框草稿） | E2E-011c、E2E-011c-1、E2E-011c-2 |
 | C / F / 安全 / 品质 — Goal 生命周期 | E2E-GOAL-lifecycle |
+| C / F / 品质 — Goal 预算编辑 | E2E-GOAL-lifecycle、E2E-GOAL-budget-editor |
 | A / C / F / Quality — Tray session navigation | E2E-TRAY-bounded-session-navigation |
 | D——工作区 | E2E-012、E2E-013、E2E-022B、E2E-024I、E2E-047、E2E-049、E2E-057、E2E-058、E2E-060、E2E-068、E2E-075、E2E-078、E2E-153 |
 | D——工作区（项目排序） | E2E-253 |
@@ -10020,12 +10021,22 @@ host-created files. The full app's file-preview viewer is covered separately.
 #### E2E-GOAL-lifecycle：持久化、报告、有界续跑、暂停、恢复与清除 Goal
 
 - **前置条件**：隔离的 Host profile 与绑定项目的会话；不需要真实 Provider。Host 测试通过重开同一数据库验证启动恢复。
-- **步骤**：提交并批准 Goal；认领其执行，提交逐条包含证据的 `GoalReport` 并结束 turn。确认 `continue` 只在首个执行结束后创建不同 ID 的排队执行。暂停下一轮，手动恢复并确认新的 execution ID 与 cycle。清除生命周期并确认没有 Goal 执行仍在排队。另一个进程重开场景中，保留 queued/running run，重启 Host，并在手动恢复前检查 `plans.pending`。
-- **预期**：每个执行轮次的报告均持久化并可由 `plans.pending` 读取；错误 turn、过期执行或重复报告会被拒绝。`complete` 要求所有已报告标准均为 `met`；缺少报告会将生命周期停止为 blocked；每个 cycle 最多八个执行轮次（含首次获批轮次），或在达到 250,000 个已报告 token、60 分钟墙钟时间后暂停自动续跑。当前轮次可超过预算，但不会再排入下一轮；手动 Resume 会重置两个预算。Pause/Clear 不会派发旧 ID。Host 重启后记录 `interrupted` 与 `host_restart`，保留报告历史，直到用户显式恢复并创建新执行才会派发。v27 获批 Goal 会迁移为 interrupted 供用户检查。Composer 将证据标记为 Agent 报告，而非 Host 认证。
-- **覆盖**：`pnpm test:e2e:plan` 执行无 Provider 的 Host RPC 用户流程；`cargo test -p host-core --locked` 覆盖生命周期状态迁移、v27 迁移及进程重开；`packages/agent-runtime/src/runtime.test.ts` 覆盖按轮作用域的 `GoalReport`；`apps/desktop/test/goal-lifecycle-render-and-control.test.mjs` 覆盖本地化显示与串行控制；`packages/host-runtime/src/plan-dispatch.test.ts` 覆盖有排队输入或待审批合约时自动续轮会等待。
+- **步骤**：提交并批准 Goal。先确认默认值为 8 轮、250,000 个已报告 Token、60 分钟且 Token 限制已启用；然后在 Goal 仍为 active 时改为 16 轮、1,250,000 个 Token、1,440 分钟，并启用“不限 Token”。确认当前执行身份、cycle 和计数器均未改变，且 `plans.pending` 返回更新后的值。认领执行，提交逐条包含证据的 `GoalReport` 并结束 turn；确认 `continue` 只在首个执行结束后创建不同 ID 的排队执行。暂停下一轮，切回有限 Token 并确认保留 1,250,000 的值；手动恢复并确认新 execution ID / cycle 使用所选预算。清除生命周期并确认没有 Goal 执行仍在排队。另一个进程重开场景中，保留 queued/running run，重启 Host，并在手动恢复前检查 `plans.pending`。
+- **预期**：每个执行轮次的报告均持久化并可由 `plans.pending` 读取；错误 turn、过期执行或重复报告会被拒绝。`complete` 要求所有已报告标准均为 `met`；缺少报告会将生命周期停止为 blocked。默认预算仍为 8 轮、250,000 个 Token 和 60 分钟；轮数可设为 1–32，有限 Token 上限可设为任意正安全整数，时间可设为 1–1,440 分钟。“不限 Token”仍累计用量，仅跳过 Token 截止；轮数和时间限制继续生效。成功更新预算不会取消当前轮、改变执行身份、重置用量或开启新 cycle；Host 仅在当前轮结束后检查新限制，达到配置的任一限制后不再排入下一轮。手动 Resume 会重置 cycle 计数器但保留预算。Pause/Clear 不会派发旧 ID。Host 重启后记录 `interrupted` 与 `host_restart`，保留报告历史，直到用户显式恢复并创建新执行才会派发。v27 获批 Goal 会迁移为 interrupted 供用户检查；v29 Goal 升级到 schema v30 后保留其有限 Token 限制。Composer 将证据标记为 Agent 报告，而非 Host 认证。
+- **覆盖**：`pnpm test:e2e:plan` 执行无 Provider 的 Host RPC 用户流程；`cargo test -p host-core --locked` 覆盖生命周期状态迁移、v27 与 v29→v30 迁移及进程重开；`packages/agent-runtime/src/runtime.test.ts` 覆盖按轮作用域的 `GoalReport`；`apps/desktop/test/goal-lifecycle-render-and-control.test.mjs` 覆盖本地化显示与串行控制；`packages/host-runtime/src/plan-dispatch.test.ts` 覆盖有排队输入或待审批合约时自动续轮会等待。
 - **规格**：`03-runtime/02-agent-runtime.md`、`03-runtime/04-data-storage.md`、`03-runtime/06-host-rpc-protocol.md`、`03-runtime/08-error-codes.md`、`03-runtime/10-session-state-machine.md`、`04-ux/08-component-spec.md`、`04-ux/09-interaction-patterns.md`、ADR 0338 / D679。
 - **验收**：F（持久性）、Quality（有界生命周期）、Security（启动不重放）。
 - **自动化**：离线；不需要真实 Provider 执行。
+
+#### E2E-GOAL-budget-editor：编辑并恢复已持久化的 Goal cycle 预算
+
+- **前置条件**：隔离 Electron profile、项目和 Host；由受门控的 Main-only Plan UI probe 直接通过实时 Host 创建并批准 Goal。无需模型/Provider 凭证，probe 不会派发执行。
+- **步骤**：重载渲染器并选中获批 Goal。打开“编辑预算”，把轮数、有限 Token 值（设为超过 100 万）和时间改为 1,440 分钟；启用“不限 Token”后，在不限模式下把有限值从 1,250,000 改为 1,500,000。保存并重载渲染器，再次打开编辑器，确认 Host 中的预算与不限状态均已恢复。关闭“不限 Token”，确认修改后的有限值仍在，保存并检查显示的有限预算。
+- **预期**：用户编辑/保存路径经正常 preload、Main、Host 桥接更新 Host；不限模式仍允许编辑并持久化有限 Token 值，供之后切回有限模式使用。渲染器重载后从 Host 恢复持久化状态。UI 修改预算时不调用模型、不更改 Goal 执行或 cycle。
+- **覆盖**：`pnpm test:e2e:plan-ui` 运行隔离 Electron 路径；`apps/desktop/test/plan-ui-probe-contract.test.mjs` 校验实时 Host probe 与门控接线。完整用户流程要求候选 Electron 构建/运行环境可用。
+- **验收**：F（持久性）、Quality（用户流程）、Security（Host 正常持有状态且不需要模型凭证）。
+- **里程碑**：Goal 生命周期预算。
+- **状态**：Electron 开发运行时可用时自动离线覆盖。
 
 #### E2E-PLUGIN-fetch-redirect-policy
 

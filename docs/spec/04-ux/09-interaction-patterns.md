@@ -1145,14 +1145,25 @@ or post-approval Goal Agent Bash under its selected Ask or Accept edits mode)
 7. An approved Goal shows its durable lifecycle in the originating Composer.
    Each completed execution round reports all criteria through `GoalReport`;
    the Host saves the Agent-reported evidence and automatically queues another
-   round only for `continue`, up to eight execution rounds per cycle,
-   including the initial approved round, and subject to 250,000 reported tokens
-   and 60 minutes of elapsed wall-clock time per cycle. A current round may
-   exceed either budget; reaching a cap prevents further automatic continuation.
-   Pause stops the
+   round only for `continue`, up to the configured round limit (8 by default,
+   1–32 per cycle). The finite token ceiling defaults to 250,000 reported
+   tokens and may be edited to any positive safe integer; the user may instead
+   select unlimited tokens, which skips only the token cutoff while continuing
+   usage accounting. The elapsed-time ceiling defaults to 60 minutes and is
+   configurable from 1 to 1,440 minutes. The Host checks current limits after
+   the round settles; a running round may exceed a budget but is never
+   terminated at the boundary.
+8. Edit limits is available for active, paused, blocked, and interrupted Goals.
+   The user may edit all three limits, including the retained finite token
+   value while unlimited mode is enabled, and toggle unlimited tokens without
+   losing that value. Saving persists limits but does not
+   reset usage, change the cycle/execution identity, cancel a current round, or
+   resume a stopped Goal. When a limit is reached, no further automatic
+   continuation is queued. Pause stops the
    current run, Resume starts a fresh execution after pause/block/restart, and
    Clear removes active tracking while retaining the audit/history and
-   immutable artifact. After restart the bar says the run was interrupted and
+   immutable artifact. Resume starts a new cycle, resets cycle usage, and keeps
+   the configured budgets. After restart the bar says the run was interrupted and
    requires a manual Resume; boot never dispatches it automatically.
 
 The approval card is session-scoped. Background sessions may retain a pending

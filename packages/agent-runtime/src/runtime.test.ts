@@ -5016,6 +5016,10 @@ describe("DesktopAgentRuntime plan transitions", () => {
     expect(internal.content).toContain("<approved-goal-markdown>");
     expect(internal.content).toContain(execution.artifact.relativePath);
     expect(internal.content).toContain("verify every acceptance criterion");
+    expect(internal.content).toContain(
+      "The Host enforces this Goal's saved round and time limits, and its token limit only when enabled.",
+    );
+    expect(internal.content).not.toContain("up to 8 rounds per cycle");
     expect(internal.content).not.toContain("Execute the approved implementation plan");
 
     await runtime.dispose();

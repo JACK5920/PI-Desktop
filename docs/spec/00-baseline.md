@@ -1,8 +1,8 @@
 # PI-Desktop Baseline Freeze
 
-- Baseline Version: `0.4.24`
-- Date: `2026-11-03`
-- Status: `Frozen for implementation details (indefinite local permission approvals + Plan checkpoint artifact + approval/execution startup fence + protocol v11 + schema v29 + host-owned plugin session import/read/update/delete + plugin-managed native transcripts + encrypted per-plugin secrets + session-scoped agent events + bounded plugin renderer shell contributions + categorized plugin providers in Add Service)`
+- Baseline Version: `0.4.25`
+- Date: `2026-11-04`
+- Status: `Frozen for implementation details (indefinite local permission approvals + Plan checkpoint artifact + approval/execution startup fence + protocol v11 + schema v30 + host-owned plugin session import/read/update/delete + plugin-managed native transcripts + encrypted per-plugin secrets + session-scoped agent events + bounded plugin renderer shell contributions + categorized plugin providers in Add Service)`
 - Language policy: **English-first**
 - Backend policy: **Rust host core + pi agent sidecar**
 
@@ -57,7 +57,11 @@
 > host-core during the pre-approval contract phase (D683 / ADR 0343). The
 > session's stored permission preference remains unchanged; the
 > approval-selected mode governs the post-approval Agent run. No protocol or
-> storage schema changes.
+> storage schema changes. `0.4.25` makes per-cycle Goal budgets editable
+> without interrupting the current round, and adds an explicit unlimited-token
+> mode while retaining the finite token limit (D684 / ADR 0344). Schema v30
+> defaults existing Goals to their saved finite token limit; protocol remains
+> v11.
 > `0.4.10` replaces destructive work-panel clearing on conversation switches
 > with runtime session-scoped contexts through D142 / ADR 0028.
 > `0.4.11` adopts turn-boundary model-context checkpoint compaction through

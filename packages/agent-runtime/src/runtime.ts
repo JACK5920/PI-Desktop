@@ -120,7 +120,6 @@ import {
   isToolsOutputParams,
   MAX_ASK_TOOL_QUESTION_CHARS,
   MAX_SUBAGENT_CONCURRENCY,
-  GOAL_MAX_ROUNDS_PER_CYCLE,
   normalizeAskToolOption,
   normalizeSubagentName,
   proposalKindForMode,
@@ -9219,7 +9218,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
             "</approved-goal-markdown>",
             "Choose your own approach with the normal Agent tools. Then verify every acceptance criterion yourself, running the checks the contract names rather than assuming they pass.",
             "Keep working while a criterion is still unmet and you have an untried approach. Stop early only if a boundary in the contract blocks you or a criterion cannot be verified; say which one and why.",
-            `This is one bounded execution round (up to ${GOAL_MAX_ROUNDS_PER_CYCLE} rounds per cycle, including this one). At the end of this round, call GoalReport exactly once with every acceptance criterion, its met/unmet status, and concrete observed evidence.`,
+            "This is one bounded execution round. The Host enforces this Goal's saved round and time limits, and its token limit only when enabled. At the end of this round, call GoalReport exactly once with every acceptance criterion, its met/unmet status, and concrete observed evidence.",
             "Choose complete only when every criterion is met and supported by evidence; choose continue when work remains; choose blocked only when a contract boundary or external dependency prevents progress. The Host records each report and automatically starts the next round only after this turn finishes.",
           ].join("\n")
         : [

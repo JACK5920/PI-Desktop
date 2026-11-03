@@ -2,9 +2,23 @@ use super::*;
 use crate::plans::execution::execution_from_proposal;
 use rusqlite::{types::Type, Transaction};
 
-pub const GOAL_MAX_ROUNDS_PER_CYCLE: i64 = 8;
-pub const GOAL_MAX_TOKENS_PER_CYCLE: i64 = 250_000;
-pub const GOAL_MAX_DURATION_MS_PER_CYCLE: i64 = 60 * 60 * 1_000;
+pub const GOAL_DEFAULT_ROUNDS_PER_CYCLE: i64 = 8;
+pub const GOAL_MAX_ROUNDS_PER_CYCLE: i64 = 32;
+pub const GOAL_DEFAULT_TOKENS_PER_CYCLE: i64 = 250_000;
+pub const GOAL_DEFAULT_DURATION_MS_PER_CYCLE: i64 = 60 * 60 * 1_000;
+pub const GOAL_MIN_DURATION_MS_PER_CYCLE: i64 = 60 * 1_000;
+pub const GOAL_MAX_DURATION_MS_PER_CYCLE: i64 = 24 * 60 * 60 * 1_000;
+const GOAL_MAX_SAFE_TOKEN_BUDGET: i64 = 9_007_199_254_740_991;
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GoalBudget {
+    pub max_rounds: i64,
+    /// The last finite token budget; retained while token limiting is disabled.
+    pub max_tokens: i64,
+    pub max_duration_ms: i64,
+    pub token_budget_unlimited: bool,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -36,6 +50,7 @@ pub struct GoalLifecycle {
     pub max_rounds: i64,
     pub max_tokens: i64,
     pub max_duration_ms: i64,
+    pub token_budget_unlimited: bool,
     pub tokens_used: i64,
     pub elapsed_ms: i64,
     pub stop_reason: Option<String>,
@@ -50,6 +65,12 @@ pub struct GoalControlResult {
     pub goal: GoalLifecycle,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub execution: Option<PlanExecution>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GoalBudgetUpdateResult {
+    pub goal: GoalLifecycle,
 }
 
 fn report_from_json(
@@ -80,6 +101,7 @@ fn goal_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<GoalLifecycle> {
         max_duration_ms: row.get(14)?,
         tokens_used: row.get(15)?,
         elapsed_ms: row.get(16)?,
+        token_budget_unlimited: row.get(17)?,
         stop_reason: row.get(8)?,
         latest_report: report_from_json(row.get(9)?, 9)?,
         updated_at: ms_to_ts(updated_at),
@@ -91,7 +113,8 @@ const GOAL_COLUMNS: &str = "proposal_id, session_id, status, current_execution_i
     cycle, round_in_cycle, run_count, max_rounds, stop_reason,
     latest_report_json, updated_at, version,
     (SELECT title FROM plan_approvals WHERE request_id = goal_lifecycles.proposal_id),
-    max_tokens, max_duration_ms, tokens_used, elapsed_ms";
+    max_tokens, max_duration_ms, tokens_used, elapsed_ms,
+    token_budget_unlimited";
 
 pub(crate) fn current_for_session(
     db: &Database,
@@ -166,9 +189,9 @@ pub(crate) fn create_goal_tx(
             proposal_id,
             session_id,
             execution_id,
-            GOAL_MAX_ROUNDS_PER_CYCLE,
-            GOAL_MAX_TOKENS_PER_CYCLE,
-            GOAL_MAX_DURATION_MS_PER_CYCLE,
+            GOAL_DEFAULT_ROUNDS_PER_CYCLE,
+            GOAL_DEFAULT_TOKENS_PER_CYCLE,
+            GOAL_DEFAULT_DURATION_MS_PER_CYCLE,
             now
         ],
     )?;
@@ -373,7 +396,8 @@ pub(crate) fn finish_run_tx(
     };
     let current = tx.query_row(
         "SELECT status, current_execution_id, cycle, round_in_cycle, run_count,
-                max_rounds, session_id, max_tokens, max_duration_ms, cycle_started_at
+                max_rounds, session_id, max_tokens, max_duration_ms, cycle_started_at,
+                token_budget_unlimited
          FROM goal_lifecycles WHERE proposal_id = ?1",
         params![proposal.id],
         |row| {
@@ -388,6 +412,7 @@ pub(crate) fn finish_run_tx(
                 row.get::<_, i64>(7)?,
                 row.get::<_, i64>(8)?,
                 row.get::<_, i64>(9)?,
+                row.get::<_, bool>(10)?,
             ))
         },
     )?;
@@ -467,7 +492,7 @@ pub(crate) fn finish_run_tx(
             )?;
             Ok(None)
         }
-        "continue" if tokens_used >= current.7 || elapsed_ms >= current.8 => {
+        "continue" if (!current.10 && tokens_used >= current.7) || elapsed_ms >= current.8 => {
             tx.execute(
                 "UPDATE goal_lifecycles
                  SET status = 'paused', stop_reason = 'GOAL_BUDGET_EXHAUSTED',
@@ -537,6 +562,83 @@ pub(crate) fn finish_run_tx(
         }
         _ => Err(plan_error("GOAL_REPORT_INVALID")),
     }
+}
+
+fn validate_budget(budget: GoalBudget) -> Result<()> {
+    if !(1..=GOAL_MAX_ROUNDS_PER_CYCLE).contains(&budget.max_rounds)
+        || !(1..=GOAL_MAX_SAFE_TOKEN_BUDGET).contains(&budget.max_tokens)
+        || !(GOAL_MIN_DURATION_MS_PER_CYCLE..=GOAL_MAX_DURATION_MS_PER_CYCLE)
+            .contains(&budget.max_duration_ms)
+    {
+        return Err(plan_error("GOAL_BUDGET_INVALID"));
+    }
+    Ok(())
+}
+
+pub(crate) fn update_budget(
+    db: &Database,
+    session_id: &str,
+    proposal_id: &str,
+    budget: GoalBudget,
+) -> Result<GoalBudgetUpdateResult> {
+    validate_budget(budget)?;
+    let now = now_ms();
+    let tx = db.conn().unchecked_transaction()?;
+    let status: Option<String> = tx
+        .query_row(
+            "SELECT status FROM goal_lifecycles
+             WHERE session_id = ?1 AND proposal_id = ?2",
+            params![session_id, proposal_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let Some(status) = status else {
+        return Err(plan_error("GOAL_NOT_FOUND"));
+    };
+    if !matches!(
+        status.as_str(),
+        "active" | "paused" | "blocked" | "interrupted"
+    ) {
+        return Err(plan_error("GOAL_STATE_CONFLICT"));
+    }
+    let changed = tx.execute(
+        "UPDATE goal_lifecycles
+         SET max_rounds = ?1, max_tokens = ?2, max_duration_ms = ?3,
+             token_budget_unlimited = ?4, updated_at = ?5, version = version + 1
+         WHERE session_id = ?6 AND proposal_id = ?7
+           AND status IN ('active', 'paused', 'blocked', 'interrupted')",
+        params![
+            budget.max_rounds,
+            budget.max_tokens,
+            budget.max_duration_ms,
+            budget.token_budget_unlimited,
+            now,
+            session_id,
+            proposal_id
+        ],
+    )?;
+    if changed != 1 {
+        return Err(plan_error("GOAL_STATE_CONFLICT"));
+    }
+    let goal = tx.query_row(
+        &format!("SELECT {GOAL_COLUMNS} FROM goal_lifecycles WHERE proposal_id = ?1"),
+        params![proposal_id],
+        goal_from_row,
+    )?;
+    audit::append_tx(
+        &tx,
+        "goal_budget_updated",
+        Some(session_id),
+        json!({
+            "proposalId": proposal_id,
+            "maxRounds": budget.max_rounds,
+            "maxTokens": budget.max_tokens,
+            "maxDurationMs": budget.max_duration_ms,
+            "tokenBudgetUnlimited": budget.token_budget_unlimited,
+        }),
+    )?;
+    tx.commit()?;
+    Ok(GoalBudgetUpdateResult { goal })
 }
 
 fn get_proposal_tx(tx: &Transaction<'_>, proposal_id: &str) -> Result<Option<PlanProposal>> {
@@ -754,5 +856,15 @@ impl PlanManager {
         action: &str,
     ) -> Result<GoalControlResult> {
         control(db, session_id, proposal_id, action)
+    }
+
+    pub fn update_goal_budget(
+        &self,
+        db: &Database,
+        session_id: &str,
+        proposal_id: &str,
+        budget: GoalBudget,
+    ) -> Result<GoalBudgetUpdateResult> {
+        update_budget(db, session_id, proposal_id, budget)
     }
 }

@@ -127,6 +127,8 @@ import type {
   PlanProposal,
   GoalControlRequest,
   GoalControlResult,
+  GoalBudgetUpdateRequest,
+  GoalBudgetUpdateResult,
   PlanResolveRequest,
   PlanResolutionResult,
   PlanningStateEvent,
@@ -1226,6 +1228,8 @@ export const api = {
     invoke<PlanResolutionResult>(IPC.invoke.plansResolve, resolution),
   controlGoal: (request: GoalControlRequest) =>
     invoke<GoalControlResult>(IPC.invoke.goalControl, request),
+  updateGoalBudget: (request: GoalBudgetUpdateRequest) =>
+    invoke<GoalBudgetUpdateResult>(IPC.invoke.goalBudgetUpdate, request),
   listPlugins: () =>
     invoke<{ plugins: PluginSummary[] }>(IPC.invoke.pluginList),
   /** One renderer slot component asking its own plugin for one JSON answer. */

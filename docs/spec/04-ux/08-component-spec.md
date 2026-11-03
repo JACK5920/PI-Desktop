@@ -3028,8 +3028,9 @@ present the interrupted terminal snapshot after restart.
 The Composer shows one session-scoped `GoalLifecycleBar` for each non-cleared
 Goal. It presents the contract title, active/paused/completed/blocked/
 interrupted status, cycle and bounded-round progress, and an expandable latest
-  Agent progress report. It also shows tokens and elapsed time used against
-  the current cycle limits (250,000 tokens and 60 minutes by default). Each criterion shows its reported status and cited
+Agent progress report. It also shows tokens and elapsed time used against the
+current cycle limits (8 rounds, 250,000 tokens, and 60 minutes by default).
+Each criterion shows its reported status and cited
 evidence as text. The UI labels the report as Agent-reported; it does not imply
 that Host independently ran or certified the cited checks.
 
@@ -3037,8 +3038,8 @@ that Host independently ran or certified the cited checks.
 
 | Lifecycle | Actions |
 |---|---|
-| Active | Pause, Clear |
-| Paused / Blocked / Interrupted | Resume, Clear |
+| Active | Edit limits, Pause, Clear |
+| Paused / Blocked / Interrupted | Edit limits, Resume, Clear |
 | Completed | Clear |
 | Cleared | No bar |
 
@@ -3050,6 +3051,17 @@ copy, status, and evidence-status text are localized. The bar is a named
 `region`; actions are shared buttons, and expanded evidence remains ordinary
 escaped text. An active round may finish beyond a cycle budget; reaching a
 budget prevents another automatic round rather than killing current work.
+
+Edit limits is available only while active, paused, blocked, or interrupted.
+The form accepts 1–32 rounds, a positive safe-integer finite token limit, and
+1–1,440 minutes. Defaults remain 8 rounds, 250,000 tokens, and 60 minutes. The
+No token limit switch leaves the finite token value visible and editable for
+later restoration; it disables only the Host token cutoff, not usage tracking,
+round limits, or time limits. Saving updates the Host-owned Goal without
+resetting counters, changing its cycle/execution identity, canceling a running
+round, or resuming a stopped Goal. A successful save is durable across renderer
+reload. Form errors are localized and shown inline; Host validation remains
+authoritative.
 
 ---
 

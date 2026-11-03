@@ -1023,3 +1023,38 @@ pub(crate) fn migrate_v28_to_v29(conn: &Connection, path: &Path) -> Result<()> {
     })?;
     Ok(())
 }
+
+/// v30 adds an explicit unlimited-token mode while retaining the last finite
+/// token budget. Existing Goal rows remain finite at their saved value.
+pub(crate) fn migrate_v29_to_v30_tx(tx: &rusqlite::Transaction<'_>) -> Result<()> {
+    let has_unlimited_column: bool = tx.query_row(
+        "SELECT EXISTS(
+           SELECT 1 FROM pragma_table_info('goal_lifecycles')
+           WHERE name = 'token_budget_unlimited'
+         )",
+        [],
+        |row| row.get(0),
+    )?;
+    if !has_unlimited_column {
+        tx.execute_batch(
+            "ALTER TABLE goal_lifecycles
+               ADD COLUMN token_budget_unlimited INTEGER NOT NULL DEFAULT 0
+                 CHECK (token_budget_unlimited IN (0, 1));",
+        )?;
+    }
+    tx.pragma_update(None, "user_version", 30i64)?;
+    Ok(())
+}
+
+pub(crate) fn migrate_v29_to_v30(conn: &Connection, path: &Path) -> Result<()> {
+    let backup = create_migration_backup(conn, path, 29)?;
+    let tx = conn.unchecked_transaction()?;
+    migrate_v29_to_v30_tx(&tx)?;
+    tx.commit().with_context(|| {
+        format!(
+            "commit schema v29 to v30 migration; backup {} remains",
+            backup.display()
+        )
+    })?;
+    Ok(())
+}
