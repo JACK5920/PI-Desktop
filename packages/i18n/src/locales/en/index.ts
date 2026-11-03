@@ -2645,6 +2645,8 @@ importConfirm: "Imported extensions run inside the agent process with the same a
       "browser.cdp": "Control the work-panel browser",
       "usage.read": "Read usage statistics",
       "session.autoTitle": "Read first-turn title context and update automatic titles",
+      "session.manage.own": "Manage plugin-owned conversations",
+      "secrets.store": "Store private plugin secrets",
     },
     permissionHelp: {
       "ui.panel": "Lets the plugin show its own panel inside the app.",
@@ -2707,6 +2709,8 @@ importConfirm: "Imported extensions run inside the agent process with the same a
         "Lists completed-turn usage facts (paginated token counters and session titles). No message content is included.",
       "session.autoTitle":
         "Can read only the first prompt and reply for eligible sessions, then replace an automatic title if it has not been manually changed. It cannot read the full transcript.",
+      "session.manage.own": "Can create and update only this plugin's native transcripts. Native sends go only to the owning plugin; they never fall back to local agent execution.",
+      "secrets.store": "Stores values encrypted on this device in the plugin's private namespace. The plugin can read them while this grant remains active; keys are not shared with providers or other plugins.",
     },
   },
   /**

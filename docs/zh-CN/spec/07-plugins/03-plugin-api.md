@@ -1425,3 +1425,50 @@ window.pluginBridge.on(event, handler)
 宿主会在执行插件入口前，通过 import map 暴露这两个运行时以及 `react`、`react-dom`、
 `react-dom/client`。因此在生产和开发构建中，编译后的 JSX、Hook 和上下文都使用宿主的
 同一个 React 实例。
+
+## 插件托管的原生会话
+
+`session.manage.own` 授予 `pi.session.createManaged({ source, externalId, title, projectId? })`、
+`pi.session.appendManaged({ sessionId, externalId, author?, message })` 和受隔离进程调用的
+`onSessionSubmit`。`source` 必须在 `contributes.sessionSources` 中声明。宿主生成会话 ID，
+按插件来源持久化所有权；普通或导入的会话不能被认领，已删除的会话也不会被静默复活。
+消息以外部 ID 幂等追加；相同 ID 的不同内容会被拒绝。`author` 只是展示名称，不授予权限。
+
+用户在原生输入框提交托管会话时，Host 只把请求转交给所属且已加载的插件。
+插件必须返回 `{ accepted: true }`；缺少插件、授权或处理器、处理失败以及 Host 读取失败都不会
+回退到本地智能体执行，也不会自动重放。文本草稿在失败后仍可恢复。托管会话不接受语音输入。
+同一会话的并发提交会被互斥栅栏拒绝，避免同一用户操作被投递两次。
+
+附件只以内容寻址描述符跨边界，字节保存在 `<dataDir>/attachments/<sha256>`。
+`beginManagedAttachment` / `writeManagedAttachment` / `commitManagedAttachment` 由插件身份
+拥有上传并分块写入；`readManagedAttachment` 也必须校验会话所有权及 Host 记录的来源。
+仅将另一个会话的 `attachments/<sha256>` 写进自己的转录，不能取得读取权限。
+`setManagedModel` 仅设置输入框显示/撰写模型与思考等级，不可修改会话模式或权限模式。
+
+## 插件私有密钥
+
+`secrets.store` 授予 `pi.secrets.get(key)`、`set(key, value)` 与 `delete(key)`。Host 根据已加载
+插件 ID 推导加密命名空间，调用方不能提供插件 ID、Provider ID 或密钥引用。键为受限 ASCII
+标识，值最多 64 KiB UTF-8；值使用现有 Host 加密存储，且不会写入日志。缺失键返回 `null`，
+删除操作幂等。该授权不会向既有插件自动授予。
+
+## 会话级执行事件订阅
+
+`desktop.control` 授予 `pi.desktop.subscribeAgentEvents({ sessionId })` 与
+`unsubscribeAgentEvents({ subscriptionId })`。订阅仅属于当前插件进程，并按会话过滤；插件卸载、
+禁用、崩溃、重载或关闭时会清除。`desktop:agentEvent` 是观察流，不授予审批权或执行重放。
+`desktop:turnEnded` 只有在 Host 确认终态持久化后才报告持久化成功；未知结果不得触发重试执行。
+
+## 渲染器会话、工作面板与主壳扩展
+
+声明 `session.readContext` 后，`pi.dispatch` 只读取当前原生会话 ID 及可选的 `managedByPlugin`，
+不返回对话内容、设置或凭据。声明 `workPanel.openView` 后，插件只能在用户手势中打开自己的
+已注册工作面板视图，并须传入预期会话 ID；会话改变时请求会被拒绝。
+`navigationSection` / `mainPage` 使用现有渲染器注册表；`shell.openPage` 只能打开本插件拥有且
+已注册的页面。页面注册和导航项受去重、路径校验、错误边界及卸载清理保护。
+
+## 有界卸载清理
+
+显式卸载的 `onUnload` 最长运行 12 秒；应用退出预算更短。清理期间已有订阅可接收终态事件，
+插件可以追加已有会话的最终消息并清理自己的私有存储，但不能新建会话、新订阅或启动新执行。
+钩子结束或预算耗尽后立即清除订阅并拒绝后续调用。未收到持久终态回执表示结果未知，不得重放。

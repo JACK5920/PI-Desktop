@@ -464,6 +464,55 @@ fn v25_database_gains_session_fast_mode_defaulting_off() {
     assert!(!summary.fast_mode);
 }
 
+/// v29 adds host-recorded attachment provenance. A v28 database has no table,
+/// so the upgrade creates it, preserves existing sessions, and leaves a backup.
+#[test]
+fn v28_database_gains_the_managed_attachment_provenance_table() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("pi.sqlite");
+    let session_id = {
+        let db = Database::open(&path).unwrap();
+        let session = crate::sessions::create_session(
+            &db,
+            Some("v28 session".into()),
+            Some("agent".into()),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        db.conn()
+            .execute_batch(
+                "DROP TABLE session_managed_attachments;
+                 PRAGMA user_version = 28;",
+            )
+            .unwrap();
+        session.id
+    };
+
+    let db = Database::open(&path).unwrap();
+    assert_eq!(schema_version(db.conn()), 29);
+    assert!(migration_backup_path(&path, 28).exists());
+    let rows: i64 = db
+        .conn()
+        .query_row(
+            "SELECT COUNT(*) FROM session_managed_attachments",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(rows, 0);
+    let rejected = db.conn().execute(
+        "INSERT INTO session_managed_attachments (session_id, ref, origin, created_at)
+         VALUES (?1, 'attachments/x', 'guess', 1)",
+        params![session_id],
+    );
+    assert!(rejected.is_err(), "origin must be host or plugin");
+    assert!(crate::sessions::get_session(&db, &session_id)
+        .unwrap()
+        .is_some());
+}
+
 /// v21 owns the session checklist. A real v20 database has neither the
 /// `sessions` stamps nor the `session_todo` table, so the upgrade must add
 /// both, keep the v20 rows, leave a readable pre-migration backup, and stay

@@ -20,6 +20,7 @@ Each ADR includes:
 
 | ID | Title | Status |
 |---|---|---|
+| plugin-managed-native-transcripts | [Plugin-managed native transcripts and private storage](plugin-managed-native-transcripts.md) | Accepted for implementation |
 | plugin-projects-list | [Read-only durable project enumeration for plugins](plugin-projects-list.md) | Accepted |
 | append-only-review-state | [Append-only review state](append-only-review-state.md) | Implemented candidate |
 | lossless-tool-image-storage | [Lossless tool-image storage and bounded history mutations](lossless-tool-image-storage.md) | Implemented candidate |
@@ -390,7 +391,6 @@ Each ADR includes:
 | 0333 | [A plugin-owned suggestion in the Composer placeholder](0333-plugin-composer-suggestion.md) | Accepted |
 | 0334 | [OpenAI Fast mode as a per-session switch gated by model settings](0334-openai-fast-mode.md) | Accepted |
 | plugin-fetch-redirect-policy | [Host-enforced plugin fetch redirect policy](plugin-fetch-redirect-policy.md) | Accepted (implementation candidate for #1475) |
-
 | local-agent-remote-workspace-tools | [Local Agent and model requests for remote workspaces](local-agent-remote-workspace-tools.md) | Accepted for implementation |
 | 0332 | [macOS keeps its translucent window surface with an opaque opt-out](0332-macos-opaque-window-surface.md) | Accepted (D665, amended by D666 and D667; supersedes the macOS vibrancy window backing from D348; issue #1064) |
 | gen-ui-inline-visualization | [Inline generative UI visualizations](gen-ui-inline-visualization.md) | Accepted (D671) |

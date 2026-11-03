@@ -149,6 +149,9 @@ pub struct SessionSummary {
     /// session. Filled in by the list and single-summary reads.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worktree: Option<crate::session_worktrees::lifecycle::WorktreeSummary>,
+    /// Durable plugin ownership, independent of the plugin lifecycle.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub managed_by_plugin: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1319,7 +1322,9 @@ const SUMMARY_SELECT: &str =
     "SELECT s.id, s.title, s.last_seq, p.path, s.model_id, s.provider_id, s.mode,
             s.thinking_level, s.permission_mode, s.updated_at, s.created_at,
             EXISTS (SELECT 1 FROM task_runs r WHERE r.session_id = s.id) AS scheduled_run,
-            s.fast_mode
+            s.fast_mode,
+            (SELECT oi.plugin_id FROM session_import_origins oi
+             WHERE oi.session_id = s.id AND json_extract(oi.origin_json, '$.managed') = 1) AS managed_by_plugin
      FROM sessions s LEFT JOIN projects p ON p.id = s.project_id
      WHERE s.deleted_at IS NULL";
 
@@ -1341,6 +1346,7 @@ pub(crate) fn summary_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Sess
         scheduled_run: row.get("scheduled_run")?,
         fast_mode: row.get("fast_mode")?,
         worktree: None,
+        managed_by_plugin: row.get("managed_by_plugin")?,
     })
 }
 
@@ -1503,6 +1509,7 @@ pub fn create_session_with_options(
         scheduled_run: false,
         // A new or forked session starts without a worktree (ADR 0329).
         worktree: None,
+        managed_by_plugin: None,
     })
 }
 
@@ -1888,6 +1895,7 @@ pub fn fork_session_through(
         scheduled_run: false,
         // A new or forked session starts without a worktree (ADR 0329).
         worktree: None,
+        managed_by_plugin: None,
     };
     let messages = records.into_iter().map(record_to_ui).collect();
     Ok(ForkSessionResult::Created(Box::new(SessionDetail {
@@ -5262,6 +5270,7 @@ mod tests {
             scheduled_run: false,
             fast_mode: false,
             worktree: None,
+            managed_by_plugin: None,
             created_at: "2025-01-01T00:00:00Z".into(),
             updated_at: "2025-01-02T00:00:00Z".into(),
         };
@@ -5316,6 +5325,7 @@ mod tests {
             scheduled_run: false,
             fast_mode: false,
             worktree: None,
+            managed_by_plugin: None,
             created_at: "2025-01-01T00:00:00Z".into(),
             updated_at: "2025-01-01T00:00:00Z".into(),
         };
@@ -6496,6 +6506,7 @@ mod tests {
             scheduled_run: false,
             fast_mode: false,
             worktree: None,
+            managed_by_plugin: None,
             created_at: "2025-01-01T00:00:00Z".into(),
             updated_at: "2025-01-01T00:00:00Z".into(),
         };

@@ -2623,7 +2623,9 @@ sklm: {
       "bus.subscribe": "Recevoir des messages d'autres plugins",
       "browser.cdp": "Contrôler le navigateur du panneau de travail",
       "usage.read": "Lire les statistiques d'utilisation",
-      "session.autoTitle": "Lire le contexte du premier tour et modifier les titres automatiques"
+      "session.autoTitle": "Lire le contexte du premier tour et modifier les titres automatiques",
+      "session.manage.own": "Gérer les conversations appartenant au plugin",
+      "secrets.store": "Stocker les secrets privés du plugin",
     },
     "permissionHelp": {
       "ui.panel": "Permet au plugin d'afficher son propre panneau dans l'application.",
@@ -2669,7 +2671,9 @@ sklm: {
         "Liste les données d'utilisation des tours terminés (compteurs de tokens par tour, paginés). Aucun contenu de message n'est inclus.",
       "session.autoTitle":
         "Peut lire uniquement le premier message et la première réponse des sessions admissibles, puis modifier le titre s'il n'a pas été changé manuellement. Ne peut pas lire la transcription complète.",
-    }
+      "session.manage.own": "Peut créer et mettre à jour uniquement les transcriptions natives de ce plugin. Les messages envoyés depuis l’interface native sont transmis uniquement au plugin propriétaire, sans exécution de secours par l’agent local.",
+      "secrets.store": "Stocke les valeurs chiffrées sur cet appareil dans l’espace privé du plugin. Celui-ci peut les lire tant que l’autorisation reste active ; elles ne sont partagées ni avec les fournisseurs ni avec les autres plugins.",
+    },
   },
   "extensions": {
 

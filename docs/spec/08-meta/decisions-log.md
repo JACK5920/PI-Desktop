@@ -1,7 +1,7 @@
 # Decisions Log
 
-> Baseline delta: `0.3.0` → `0.4.22`
-> Date: `2026-10-08`
+> Baseline delta: `0.3.0` → `0.4.23`
+> Date: `2026-11-03`
 > Status: Accepted for implementation
 
 This log freezes previously open questions into concrete decisions.
@@ -8149,3 +8149,24 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
   truth. Coverage includes auth/refresh and stale-write unit tests plus the
   isolated Electron preview/confirmation path. See ADR 0341, the IPC protocol,
   component spec, and E2E-270.
+
+## 2026-11-03 — Plugin-managed native transcripts and private plugin storage (D682)
+
+- Add high-risk `session.manage.own` and `secrets.store` grants. A plugin may
+  create and append only its own durable managed transcripts; the Host records
+  ownership in the existing plugin-origin sidecar. Native text sends route only
+  to the loaded owner, and never fall back to local agent execution or replay.
+- Schema v29 records Host-verified provenance for managed attachment refs. An
+  existing descriptor, transcript membership, or a plugin-chosen ref cannot
+  grant access to bytes in the shared content-addressed store. The migration
+  grants no historical refs.
+- Encrypted plugin secrets use a Host-derived namespace and cannot address
+  provider credentials or another plugin's keys. Session-filtered execution
+  events require `desktop.control`; renderer view and main-page actions remain
+  declared, gesture-bound, owner-scoped, and lifecycle-managed.
+- Preserve existing ordinary/imported sessions and native permission behavior.
+  Disabling or losing the owner fails closed; it does not start a local agent.
+  Group-room execution remains in the plugin's separate worker sessions.
+- Validation is limited to isolated fixtures; no real room transport, provider
+  request, or installed plugin data is used. See ADR
+  `plugin-managed-native-transcripts` and E2E-271.

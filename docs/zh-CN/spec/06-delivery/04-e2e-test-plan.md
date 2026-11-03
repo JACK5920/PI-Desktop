@@ -5987,6 +5987,7 @@ eleven-tool-round desktop paths are verified by
 | C / E / G / Quality — Pi kernel upgrade | E2E-PI-130-kernel-upgrade |
 | C / E / G / Quality — Pi kernel upgrade | E2E-PI-140-kernel-upgrade |
 | C / G / Security / Quality — GitHub PR Review | E2E-269、E2E-270 |
+| C / F / G / Security / Quality — Plugin-managed group-room transcripts | E2E-271 |
 | C — 对话和直播（输入法斜杠别名） | E2E-255 |
 | E——工具和权限（Skill 常驻） | E2E-254 |
 | 品质（Skill 常驻与输入法斜杠别名） | E2E-254、E2E-255 |
@@ -6050,6 +6051,7 @@ eleven-tool-round desktop paths are verified by
 | M6+（MCP 服务器超时覆盖） | E2E-261 |
 | M6+（目的页加载与焦点） | E2E-087b |
 | M6+（代码审查界面） | E2E-268、E2E-269、E2E-270 |
+| M6+（插件托管会话） | E2E-271 |
 | M6+（会话列表响应性） | E2E-SESSION-list-refresh-keeps-desktop-responsive |
 | M6+（Windows 更新缓存） | E2E-260 |
 | M6+（独立会话通信） | E2E-SESSION-independent-top-level-communication、E2E-SESSION-hover-card-model-and-links |
@@ -10217,3 +10219,22 @@ PluginPack 产物的解包目录，仅用于开发验证。验收 #1711 前需�
 - **规格：** ADR 0341、`03-runtime/01-ipc-protocol.md`、`04-ux/08-component-spec.md`。
 - **状态：** 使用确定性 fixture 离线自动化。真实 OAuth、GitHub App 注册、私有仓库授权和真实外部写入
   需要本测试环境没有的 App 注册信息与凭据，因此不宣称已进行人工验收。
+
+#### E2E-271：插件托管的群聊转录与原生发送
+
+- **前置条件：** 使用隔离的临时 profile/数据目录，以及声明
+  `session.manage.own`、`secrets.store` 和 `desktop.control` 的 fixture 插件。
+  Host 与插件传输使用确定性 fixture；不使用真实群聊、模型、凭据或已安装插件数据。
+- **步骤：** 显式授予清单权限后加载插件。创建托管会话，并以相同外部身份追加同一消息两次，
+  再用冲突内容重试。通过原生会话路由提交文本。测试 Host 暂存附件与插件上传，再尝试读取其他会话的引用。
+  订阅一个工作会话并分别投递匹配和外部事件。禁用/卸载所属插件后再次提交。
+- **预期：** 会话创建及精确重试幂等，冲突身份重用会被拒绝。原生发送只交给持久所有者；所有者不可用时
+  不会在本地执行或自动重放。附件读取必须有 Host 来源记录，密钥按插件命名空间加密，事件按会话过滤。
+  卸载会清除订阅；插件禁用后转录仍可见，原生草稿可恢复，不会启动本地模型回合。
+- **覆盖：** `plugin-managed-sessions.test.mjs`、`plugin-managed-session-process.test.mjs`、
+  `plugin-managed-attachments.test.mjs`、`plugin-secrets.test.mjs`、`plugin-agent-events.test.mjs`，以及
+  Host `plugin_sessions::managed` / schema 迁移测试。这些测试不替代打包版 Electron 隔离验收。
+- **规格：** ADR `plugin-managed-native-transcripts`、`07-plugins/02-plugin-manifest-schema.md`、
+  `07-plugins/03-plugin-api.md`、`07-plugins/13-plugin-permissions-matrix.md`。
+- **验收：** 不回退或重放；不跨插件读取密钥或附件；普通及导入会话行为保持不变。
+- **里程碑：** M6+（插件 API）。**状态：** 单元/进程/Host 覆盖；打包版 Electron 验收待完成。

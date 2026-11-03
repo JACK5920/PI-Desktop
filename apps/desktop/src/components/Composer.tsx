@@ -409,7 +409,11 @@ export function Composer({
     thinkingLevel,
     controlsBlocked,
   });
-  const modelReady = remoteSession ? promptAllowed : nativeSession
+  const modelReady = remoteSession
+    ? promptAllowed
+    : activeSessionSummary?.managedByPlugin
+    ? true
+    : nativeSession
     ? activeSessionSummary.capabilities?.canPrompt === true
     : !!provider &&
       provider.enabled &&

@@ -2623,7 +2623,9 @@ sklm: {
       "bus.subscribe": "Recibir mensajes de otros complementos",
       "browser.cdp": "Controlar el navegador del panel de trabajo",
       "usage.read": "Leer estadísticas de uso",
-      "session.autoTitle": "Leer el contexto del primer turno y actualizar títulos automáticos"
+      "session.autoTitle": "Leer el contexto del primer turno y actualizar títulos automáticos",
+      "session.manage.own": "Administrar conversaciones propias del plugin",
+      "secrets.store": "Guardar secretos privados del plugin",
     },
     "permissionHelp": {
       "ui.panel": "Permite que el complemento muestre su propio panel dentro de la aplicación.",
@@ -2669,7 +2671,9 @@ sklm: {
         "Enumera los datos de uso de los turnos completados (contadores de tokens por turno, paginados). No incluye el contenido de los mensajes.",
       "session.autoTitle":
         "Solo puede leer el primer mensaje y la primera respuesta de las sesiones aptas y actualizar el título si nadie lo cambió manualmente. No puede leer la transcripción completa.",
-    }
+      "session.manage.own": "Puede crear y actualizar únicamente las transcripciones nativas de este plugin. Los mensajes enviados desde la interfaz nativa solo se dirigen al plugin propietario; nunca se ejecutan como alternativa en el agente local.",
+      "secrets.store": "Guarda valores cifrados en este dispositivo, dentro del espacio privado del plugin. El plugin puede leerlos mientras siga autorizado; no se comparten con proveedores ni con otros plugins.",
+    },
   },
   "extensions": {
 

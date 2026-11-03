@@ -1001,3 +1001,25 @@ pub(crate) fn migrate_v21_to_v22(conn: &Connection, path: &Path) -> Result<()> {
     })?;
     Ok(())
 }
+
+/// v29 adds host-recorded provenance for plugin-managed transcript attachments.
+/// Existing refs receive no grant: only byte movement through the host or the
+/// owning plugin can establish provenance after this migration.
+pub(crate) fn migrate_v28_to_v29_tx(tx: &rusqlite::Transaction<'_>) -> Result<()> {
+    tx.execute_batch(crate::db::MANAGED_ATTACHMENTS_DDL)?;
+    tx.pragma_update(None, "user_version", 29i64)?;
+    Ok(())
+}
+
+pub(crate) fn migrate_v28_to_v29(conn: &Connection, path: &Path) -> Result<()> {
+    let backup = create_migration_backup(conn, path, 28)?;
+    let tx = conn.unchecked_transaction()?;
+    migrate_v28_to_v29_tx(&tx)?;
+    tx.commit().with_context(|| {
+        format!(
+            "commit schema v28 to v29 migration; backup {} remains",
+            backup.display()
+        )
+    })?;
+    Ok(())
+}
