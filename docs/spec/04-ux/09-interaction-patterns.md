@@ -1083,7 +1083,8 @@ may be retained while exactly one workspace supplies the visible shell context.
 ### 5.1 Flow sequence
 
 ```text
-Agent calls a permission-gated tool (including Plan/Goal Bash under Ask or Accept edits)
+Agent calls a permission-gated tool (including Plan Bash under Ask or Accept edits,
+or post-approval Goal Agent Bash under its selected Ask or Accept edits mode)
   → PermissionCard inserted inline in transcript
   → Composer disabled (cannot send new prompt)
   → User responds: Allow once / Allow session / Deny

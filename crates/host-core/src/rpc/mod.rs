@@ -31,7 +31,9 @@ use crate::artifacts;
 use crate::audit;
 use crate::background_tasks;
 use crate::notifications;
-use crate::permissions::{PermissionDecision, PermissionEvaluationParams, PermissionManager};
+use crate::permissions::{
+    effective_permission_mode, PermissionDecision, PermissionEvaluationParams, PermissionManager,
+};
 use crate::plans;
 use crate::plugin_sessions;
 use crate::plugin_usage;
@@ -4433,38 +4435,29 @@ async fn handle_request(
                     if st.shutting_down {
                         return Err(rpc_err(1001, "host is shutting down", "HOST_SHUTTING_DOWN"));
                     }
-                    // Effective permission mode (D115): per-session override
-                    // unless it is `inherit`, then the global settings default,
-                    // then `ask`. A subagent's tool call carries its own scope
-                    // (ADR 0089), which resolves the call under that mode
-                    // instead; external-path gating and the contract modes'
-                    // hard deny are untouched by the override.
+                    // Resolve authorization from Host-owned session state.
+                    // Goal's fixed Auto contract is applied here rather than
+                    // by mutating the persisted session setting; an explicit
+                    // delegate scope retains its existing precedence.
                     let session_pm = sessions::session_permission_mode(&st.db, &p.session_id)
-                        .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?
-                        .filter(|m| m != "inherit");
-                    let effective_pm = match session_pm {
-                        Some(m) => m,
-                        None => st
-                            .db
-                            .get_setting("app")
-                            .ok()
-                            .flatten()
-                            .and_then(|s| {
-                                s.get("defaultPermissionMode")
-                                    .and_then(|v| v.as_str())
-                                    .map(str::to_string)
-                            })
-                            .filter(|m| sessions::is_valid_permission_mode(m) && m != "inherit")
-                            .unwrap_or_else(|| "ask".to_string()),
-                    };
-                    let effective_pm = match p.permission_scope.as_deref() {
-                        Some(scope)
-                            if sessions::is_valid_permission_mode(scope) && scope != "inherit" =>
-                        {
-                            scope.to_string()
-                        }
-                        _ => effective_pm,
-                    };
+                        .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?;
+                    let default_pm = st
+                        .db
+                        .get_setting("app")
+                        .ok()
+                        .flatten()
+                        .and_then(|settings| {
+                            settings
+                                .get("defaultPermissionMode")
+                                .and_then(|value| value.as_str())
+                                .map(str::to_string)
+                        });
+                    let effective_pm = effective_permission_mode(
+                        &durable_mode,
+                        session_pm.as_deref(),
+                        default_pm.as_deref(),
+                        p.permission_scope.as_deref(),
+                    );
                     // Resolve the tool root from the persisted session instead of
                     // the mutable global workspace. This keeps background turns
                     // isolated when the renderer switches between project tabs.
@@ -5176,25 +5169,24 @@ async fn handle_request(
                 return Err(rpc_err(1007, "session not found", "SESSION_NOT_FOUND"));
             };
             let session_pm = sessions::session_permission_mode(&st.db, session_id)
-                .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?
-                .filter(|value| value != "inherit");
-            let effective_pm = session_pm
-                .or_else(|| {
-                    st.db
-                        .get_setting("app")
-                        .ok()
-                        .flatten()
-                        .and_then(|settings| {
-                            settings
-                                .get("defaultPermissionMode")
-                                .and_then(|value| value.as_str())
-                                .filter(|value| {
-                                    sessions::is_valid_permission_mode(value) && *value != "inherit"
-                                })
-                                .map(str::to_string)
-                        })
-                })
-                .unwrap_or_else(|| "ask".into());
+                .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?;
+            let default_pm = st
+                .db
+                .get_setting("app")
+                .ok()
+                .flatten()
+                .and_then(|settings| {
+                    settings
+                        .get("defaultPermissionMode")
+                        .and_then(|value| value.as_str())
+                        .map(str::to_string)
+                });
+            let effective_pm = effective_permission_mode(
+                &mode,
+                session_pm.as_deref(),
+                default_pm.as_deref(),
+                None,
+            );
             let args = params.get("args").cloned().unwrap_or_else(|| json!({}));
             let workspace_path = resolve_tool_workspace_for_call(&st, session_id, &args)?;
             let external_path_permission =
@@ -10849,6 +10841,104 @@ mod tests {
         .unwrap();
         assert_eq!(bash["ok"], true);
         assert_eq!(bash["content"]["stdout"], "goal-bash");
+    }
+
+    #[tokio::test]
+    async fn goal_fixed_auto_allows_bash_even_when_session_inherits_ask() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let project = data_dir.path().join("project");
+        fs::create_dir_all(&project).unwrap();
+        let mut app_state = AppState::open(data_dir.path()).unwrap();
+        app_state.handshook = true;
+        app_state
+            .db
+            .set_setting("app", &json!({ "defaultPermissionMode": "ask" }))
+            .unwrap();
+        let session = sessions::create_session(
+            &app_state.db,
+            Some("Goal".into()),
+            Some("goal".into()),
+            None,
+            None,
+            Some(project.to_string_lossy().into_owned()),
+        )
+        .unwrap();
+        let session_id = session.id.clone();
+        assert_eq!(
+            sessions::session_permission_mode(&app_state.db, &session_id)
+                .unwrap()
+                .as_deref(),
+            Some("inherit")
+        );
+        let state = Arc::new(Mutex::new(app_state));
+        let (tx, mut notifications) = mpsc::unbounded_channel();
+
+        let evaluation = handle_request(
+            state.clone(),
+            "permissions.evaluate",
+            json!({
+                "sessionId": session_id,
+                "toolName": "Bash",
+                "args": { "command": "inspect workspace" }
+            }),
+            tx.clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(evaluation["decision"], "allow-once");
+
+        #[cfg(windows)]
+        let command = "[Console]::Out.Write('goal-auto')";
+        #[cfg(not(windows))]
+        let command = "printf goal-auto";
+        let command_shell_id = crate::tools::shell::default_shell_id();
+        let execute_state = state.clone();
+        let execute_session_id = session_id.clone();
+        let mut execute_task = tokio::spawn(async move {
+            handle_request(
+                execute_state,
+                "tools.execute",
+                json!({
+                    "sessionId": execute_session_id,
+                    "toolCallId": "goal-fixed-auto-bash",
+                    "toolName": "Bash",
+                    "args": { "command": command },
+                    "expectedCommandShellId": command_shell_id,
+                    "expectedCommandShellDialect": crate::tools::shell::dialect_for_id(command_shell_id),
+                    "mode": "agent"
+                }),
+                tx,
+            )
+            .await
+        });
+        let result = loop {
+            tokio::select! {
+                biased;
+                notification = notifications.recv() => {
+                    match notification {
+                        Some(notification) => {
+                            let notification: Value = serde_json::from_str(&notification).unwrap();
+                            assert_ne!(
+                                notification["method"],
+                                "permissions.request",
+                                "Goal's fixed Auto mode unexpectedly requested permission"
+                            );
+                        }
+                        None => break execute_task.await.unwrap().unwrap(),
+                    }
+                }
+                result = &mut execute_task => break result.unwrap().unwrap(),
+            }
+        };
+        assert_eq!(result["ok"], true);
+        assert_eq!(result["content"]["stdout"], "goal-auto");
+        assert_eq!(
+            sessions::session_permission_mode(&state.lock().await.db, &session_id)
+                .unwrap()
+                .as_deref(),
+            Some("inherit"),
+            "Goal's fixed Auto policy must not persistently change the session override"
+        );
     }
 
     #[tokio::test]

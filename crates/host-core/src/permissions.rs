@@ -85,6 +85,33 @@ pub struct PermissionEvaluationParams<'a> {
     pub plan_safe_actions: Option<&'a [String]>,
 }
 
+/// Resolve the permission mode at the Host boundary.
+///
+/// Goal is intentionally fixed to Auto while it is negotiating its contract,
+/// matching the Composer chip. The approved Goal execution transitions to
+/// Agent and uses the permission mode selected on the approval card. An
+/// explicit scoped mode remains authoritative for delegated calls.
+pub fn effective_permission_mode(
+    durable_mode: &str,
+    session_permission_mode: Option<&str>,
+    default_permission_mode: Option<&str>,
+    permission_scope: Option<&str>,
+) -> String {
+    let valid_explicit_mode =
+        |mode: &&str| crate::sessions::is_valid_permission_mode(mode) && *mode != "inherit";
+    if let Some(scope) = permission_scope.filter(valid_explicit_mode) {
+        return scope.to_string();
+    }
+    if durable_mode == "goal" {
+        return "auto".to_string();
+    }
+    session_permission_mode
+        .filter(valid_explicit_mode)
+        .or_else(|| default_permission_mode.filter(valid_explicit_mode))
+        .unwrap_or("ask")
+        .to_string()
+}
+
 #[derive(Debug)]
 struct Pending {
     /// Creation time used by the `permissions.pending` read and ordering.
@@ -393,6 +420,31 @@ mod tests {
 
     fn no_grants() -> HashMap<String, Vec<String>> {
         HashMap::new()
+    }
+
+    #[test]
+    fn goal_uses_fixed_auto_without_changing_other_mode_resolution() {
+        assert_eq!(
+            effective_permission_mode("goal", Some("inherit"), Some("ask"), None),
+            "auto"
+        );
+        assert_eq!(
+            effective_permission_mode("goal", Some("ask"), Some("ask"), None),
+            "auto"
+        );
+        assert_eq!(
+            effective_permission_mode("goal", Some("ask"), Some("auto"), Some("ask")),
+            "ask",
+            "an explicit scoped mode retains its existing precedence"
+        );
+        assert_eq!(
+            effective_permission_mode("plan", Some("inherit"), Some("ask"), None),
+            "ask"
+        );
+        assert_eq!(
+            effective_permission_mode("agent", None, Some("accept-edits"), None),
+            "accept-edits"
+        );
     }
 
     #[test]

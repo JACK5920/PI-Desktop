@@ -45,8 +45,10 @@ MVP passes when:
 ### E. Tools and permissions
 - [x] Plan and Goal deny Write/Edit/plugin tools under every permission mode —
   auto:`test:e2e:plan` E2E-105 + host-core permission tests
-- [x] Plan and Goal Bash prompt under Ask/Accept edits and run without confirmation
-  under explicit Auto — auto:`test:e2e:plan` E2E-105 + host-core permission tests
+- [x] Plan Bash follows its effective Ask/Accept edits/Auto mode. Goal contract
+  Bash uses fixed Auto before approval regardless of session/global preference;
+  approval-selected permission governs the Agent run — host-core RPC tests,
+  E2E-019c / E2E-121
 - [x] Agent mode uses permission policy for Write/Edit/Bash — manual:M3
 - [x] Local permission cards remain pending until an explicit decision or
   cancellation; tool execution budgets remain enforced — unit/host-core: issue #1214 (D636)
