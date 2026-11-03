@@ -2,6 +2,7 @@ import { IconClock } from "./icons";
 import { RemoteProjectGroups } from "./remote/RemoteProjectGroups";
 import { groupRemoteProjectSessions } from "../lib/remote-project-catalog";
 import { isRemoteSession, sessionAllows } from "../lib/remote-session-safety";
+import { PluginNavigationSections } from "../plugins/renderer-slots/ShellSlots";
 import {
   useCallback,
   useEffect,
@@ -2748,6 +2749,8 @@ export function Sidebar({
               showLastReplyDate: settings?.sidebarSessionTime === true,
             })} />
         </div>
+
+        <PluginNavigationSections />
 
         <div className="sidebar-footer no-drag">
           <div className="footer-actions">

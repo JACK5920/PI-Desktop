@@ -549,3 +549,16 @@ test("an echoed reasoning replay placeholder is not shown as thinking (#1945)", 
   assert.ok(turn);
   assert.equal(JSON.stringify(turn).includes('"kind":"thinking"'), false);
 });
+
+test("keeps finalized plugin replies separate with their own authors", () => {
+  const messages = [
+    message("user", "user", "Ask everyone"),
+    message("plugin:room:one", "assistant", "First reply", { agentName: "Computer one" }),
+    message("plugin:room:two", "assistant", "Second reply", { agentName: "Computer two" }),
+  ];
+  const { entries } = buildTranscriptEntries(messages);
+  assert.equal(entries.length, 3);
+  assert.deepEqual(entries.slice(1).map(entry => entry.kind), ["message", "message"]);
+  assert.equal(entries[1].message.agentName, "Computer one");
+  assert.equal(entries[2].message.agentName, "Computer two");
+});

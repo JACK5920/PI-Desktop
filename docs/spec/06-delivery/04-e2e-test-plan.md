@@ -10960,6 +10960,7 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
 | C / E / G / Quality — Pi kernel upgrade | E2E-PI-130-kernel-upgrade |
 | C / E / G / Quality — Pi kernel upgrade | E2E-PI-140-kernel-upgrade |
 | C / G / Security / Quality — GitHub PR Review | E2E-269, E2E-270 |
+| C / F / G / Security / Quality — Plugin-managed group-room transcripts | E2E-271 |
 | C — Conversation & stream (IME slash alias) | E2E-255 |
 | E — Tools & permissions (Skill residency) | E2E-254 |
 | Quality (Skill residency and IME slash alias) | E2E-254, E2E-255 |
@@ -11023,6 +11024,7 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
 | M6+ (MCP server timeout override) | E2E-261 |
 | M6+ (Destination loading and focus) | E2E-087b |
 | M6+ (Code review surfaces) | E2E-268, E2E-269, E2E-270 |
+| M6+ (Plugin-managed sessions) | E2E-271 |
 | M6+ (Session list responsiveness) | E2E-SESSION-list-refresh-keeps-desktop-responsive |
 | M6+ (Windows updater cache) | E2E-260 |
 | M6+ (Independent session communication) | E2E-SESSION-independent-top-level-communication, E2E-SESSION-hover-card-model-and-links |
@@ -19633,3 +19635,36 @@ their separate platform acceptance.
   configured GitHub App, private-repository authorization, and live external
   writes require app registration and credentials not present in this test
   environment; they are not claimed as manually accepted.
+
+#### E2E-271: Plugin-managed group-room transcript and native send
+
+- **Preconditions:** An isolated temporary profile/data directory and a fixture
+  plugin declaring `session.manage.own`, `secrets.store`, and `desktop.control`.
+  Host and plugin transports are deterministic fixtures; no real room, model,
+  credentials, or installed-plugin data are used.
+- **Steps:** Load the plugin after explicitly granting its declared permissions.
+  Create a managed session and append a message twice with the same external
+  identity, then retry with conflicting content. Submit text through the native
+  session router. Exercise a host-staged attachment and a plugin upload, then
+  attempt to read a foreign session's ref. Subscribe to one worker session and
+  deliver matching and foreign events. Disable/unload the owner and submit again.
+- **Expected:** Creation and exact append retry are idempotent; conflicting
+  identity reuse is refused. Native sends reach only the durable owner and are
+  never run or replayed locally if the owner is unavailable. Attachment reads
+  require Host-recorded provenance, plugin secrets remain namespaced/encrypted,
+  and events are session-filtered. Unload clears subscriptions; the disabled
+  transcript remains visible and its native draft is recoverable rather than
+  starting a local model turn.
+- **Coverage:** `plugin-managed-sessions.test.mjs`,
+  `plugin-managed-session-process.test.mjs`,
+  `plugin-managed-attachments.test.mjs`, `plugin-secrets.test.mjs`,
+  `plugin-agent-events.test.mjs`, and Host `plugin_sessions::managed` / schema
+  migration tests. This does not replace an isolated packaged-Electron
+  acceptance run.
+- **Specs:** ADR `plugin-managed-native-transcripts`,
+  `07-plugins/02-plugin-manifest-schema.md`, `07-plugins/03-plugin-api.md`, and
+  `07-plugins/13-plugin-permissions-matrix.md`.
+- **Acceptance:** No fallback/replay, no cross-plugin secret or blob access,
+  ordinary and imported session behavior unchanged.
+- **Milestone:** M6+ (plugin API). **Status:** Unit/process/Host coverage;
+  packaged-Electron acceptance is pending.

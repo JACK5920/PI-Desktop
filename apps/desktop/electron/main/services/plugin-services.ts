@@ -49,6 +49,7 @@ import {
 } from "../plugin-mcp";
 import { McpOAuthManager } from "../mcp-oauth";
 import { PluginPanelHost } from "../plugin-panel-host";
+import { createManagedAttachmentStore } from "../plugin-managed-attachments";
 import { PluginViewHost } from "../plugin-view-host";
 import { SESSION_SCOPED_EVENTS, sessionEventScopeFilter } from "../plugin-session-scope";
 import { BrowserPane } from "../browser-view";
@@ -69,7 +70,11 @@ export type PluginServicesDependencies = {
   logger: Logger;
   getMainWindow: () => BrowserWindow | null;
   getHost: () => HostProcess | null;
-  sendToRenderer: (channel: string, payload: unknown) => void;
+  sendToRenderer: (
+    channel: string,
+    payload: unknown,
+    options?: { pluginDelivery?: boolean },
+  ) => void;
   safeOpenExternal: (rawUrl: unknown) => Promise<void>;
   stripWinLongPrefix: (path: string) => string;
   clipboardHistory: ClipboardHistory;
@@ -151,6 +156,70 @@ export function createPluginServices({
       });
     },
   );
+  /**
+   * Blob storage for managed (plugin-owned) transcripts. A plugin may only
+   * read a blob for a transcript it owns, so the ref alone is never enough.
+   */
+  const managedAttachments = createManagedAttachmentStore(dataDir);
+  const assertManagedAttachmentOwner = async (
+    pluginId: string,
+    input: Record<string, unknown>,
+  ): Promise<void> => {
+    const sessionId = typeof input.sessionId === "string" ? input.sessionId.trim() : "";
+    if (!sessionId) {
+      throw Object.assign(new Error("sessionId required"), { code: "INVALID_PARAMS" });
+    }
+    const host = getHost();
+    if (!host) throw Object.assign(new Error("host unavailable"), { code: "UNSUPPORTED" });
+    const result = await host.call<{ pluginId: string | null }>("session.managedOwner", { sessionId });
+    if (result.pluginId !== pluginId) {
+      throw Object.assign(new Error("Session is not managed by this plugin"), { code: "PERMISSION_DENIED" });
+    }
+  };
+  /**
+   * Record that the host itself moved these bytes for this managed transcript.
+   *
+   * This is the only source of read authorization. The transcript is
+   * plugin-writable — `appendManaged` validates a ref's shape, not its origin —
+   * so "the ref appears in that transcript" cannot be the gate: a plugin could
+   * append another session's `attachments/<sha256>` and then read those bytes.
+   * A row written here can only come from a path that actually moved the bytes.
+   */
+  const grantManagedRef = async (
+    pluginId: string,
+    sessionId: string,
+    ref: string,
+    origin: "host" | "plugin",
+  ): Promise<void> => {
+    const host = getHost();
+    if (!host) throw Object.assign(new Error("host unavailable"), { code: "UNSUPPORTED" });
+    await host.call("session.managedGrantRef", { sessionId, ref, origin, pluginId });
+  };
+  /**
+   * A read is only as narrow as the ref it names. The blob store is shared by
+   * every session on this machine, so ownership of one managed session is not
+   * enough: the host must have recorded provenance for that exact ref on that
+   * transcript. A ref belonging to an ordinary session, to another plugin's
+   * managed session, or appended by this plugin into its own transcript is
+   * refused here and never reaches the store.
+   */
+  const assertManagedAttachmentRef = async (
+    pluginId: string,
+    input: Record<string, unknown>,
+  ): Promise<void> => {
+    const ref = typeof input.ref === "string" ? input.ref.trim() : "";
+    const sessionId = typeof input.sessionId === "string" ? input.sessionId.trim() : "";
+    const host = getHost();
+    if (!host) throw Object.assign(new Error("host unavailable"), { code: "UNSUPPORTED" });
+    const result = await host.call<{ granted?: unknown }>("session.managedAuthorizeRef", {
+      sessionId,
+      ref,
+      pluginId,
+    });
+    if (result.granted !== true) {
+      throw Object.assign(new Error("Attachment does not belong to this session"), { code: "PERMISSION_DENIED" });
+    }
+  };
   const callPluginSessionHost = async (
     method: string,
     pluginId: string,
@@ -161,6 +230,8 @@ export function createPluginServices({
     }
     const result = await getHost()!.call(method, { ...input, pluginId });
     const changed =
+      (method === "plugin.session.createManaged" && (result as { created?: unknown })?.created === true) ||
+      method === "plugin.session.appendManaged" ||
       (method === "plugin.session.import" &&
         (result as { imported?: unknown })?.imported === true) ||
       (method === "plugin.session.importBatch" &&
@@ -169,10 +240,17 @@ export function createPluginServices({
         (result as { updated?: unknown })?.updated === true) ||
       (method === "plugin.session.setAutoTitle" &&
         (result as { updated?: unknown })?.updated === true) ||
+      (method === "plugin.session.setManagedModel" &&
+        (result as { updated?: unknown })?.updated === true) ||
       (method === "plugin.session.delete" &&
         (result as { deleted?: unknown })?.deleted === true);
     if (changed) {
-      sendToRenderer(IPC.event.sessionsChanged, { reason: method, pluginId });
+      sendToRenderer(IPC.event.sessionsChanged, { reason: method, pluginId,
+        ...(method === "plugin.session.appendManaged" ||
+        method === "plugin.session.setManagedModel"
+          ? { sessionId: input.sessionId }
+          : {}),
+      });
     }
     return result;
   };
@@ -382,7 +460,56 @@ export function createPluginServices({
       }>("session.get", { id: sessionId });
       return pluginSessionContextFromSession(sessionId, detail?.session, stripToolName);
     },
+    secretsHostCall: async (method, params) => {
+      const host = getHost();
+      if (!host) throw new Error("host unavailable");
+      return host.call(method, params);
+    },
     session: {
+      createManaged: (pluginId, input) => callPluginSessionHost("plugin.session.createManaged", pluginId, input),
+      appendManaged: (pluginId, input) => callPluginSessionHost("plugin.session.appendManaged", pluginId, input),
+      setManagedModel: (pluginId, input) =>
+        callPluginSessionHost("plugin.session.setManagedModel", pluginId, input),
+      // Blob bytes never cross the plugin boundary in bulk: an upload is staged
+      // through the local store, which owns the bounds and the owner check.
+      readManagedAttachment: async (pluginId, input) => {
+        await assertManagedAttachmentOwner(pluginId, input);
+        await assertManagedAttachmentRef(pluginId, input);
+        return managedAttachments.read(input);
+      },
+      beginManagedAttachment: async (pluginId, input) => {
+        await assertManagedAttachmentOwner(pluginId, input);
+        return managedAttachments.begin(pluginId, input);
+      },
+      writeManagedAttachment: (pluginId, input) => managedAttachments.write(pluginId, input),
+      commitManagedAttachment: async (pluginId, input) => {
+        // The ownership check runs before the bytes are hashed into place, so a
+        // foreign sessionId cannot leave a committed blob behind a thrown error.
+        await assertManagedAttachmentOwner(pluginId, input);
+        const committed = await managedAttachments.commit(pluginId, input);
+        // The plugin moved these bytes itself, so the host records the ref as
+        // readable on this transcript. Without this row a later
+        // `readManagedAttachment` for the ref would be refused.
+        const sessionId = typeof input.sessionId === "string" ? input.sessionId.trim() : "";
+        await grantManagedRef(pluginId, sessionId, committed.ref, "plugin");
+        // A newly stored blob makes a previously placeholder-only message
+        // renderable, so tell the renderer the transcript changed.
+        sendToRenderer(IPC.event.sessionsChanged, {
+          reason: "plugin.session.commitManagedAttachment",
+          pluginId,
+        });
+        return committed;
+      },
+      managedOwner: async (sessionId) => {
+        const host = getHost();
+        if (!host) throw new Error("host unavailable");
+        const result = await host.call<{ pluginId: string | null }>("session.managedOwner", { sessionId });
+        return result.pluginId;
+      },
+      // Presentation envelopes are display-only; they never reach plugin
+      // execution-event subscribers.
+      emitManagedEvent: (envelope) =>
+        sendToRenderer(IPC.event.agentMessage, envelope, { pluginDelivery: false }),
       list: (pluginId, input) => callPluginSessionHost("plugin.session.list", pluginId, input),
       get: (pluginId, input) => callPluginSessionHost("plugin.session.get", pluginId, input),
       listMessages: (pluginId, input) =>
@@ -627,6 +754,7 @@ export function createPluginServices({
     }
   };
   const announceTurnEnded = (payload: TurnEndedPayload): void => {
+    plugins.deliverTurnEnded(payload);
     broadcastSessionEvent("session:turnEnded", payload);
     // The snapshot also carries the running turn, so a surface that subscribes
     // to `session:activated` learns the selected session went idle from the
@@ -785,6 +913,9 @@ export function createPluginServices({
       if (pluginId === BROWSER_PLUGIN_ID) browserHost.disposeGuest();
       // A stopped plugin loses its line in the composer with it.
       composerSuggestion.clearPlugin(pluginId);
+      // A half-written upload belongs to a plugin that is gone; dropping it
+      // keeps the staging area from accumulating abandoned bytes.
+      managedAttachments.discardPlugin(pluginId);
     },
   });
   const speech = createSpeechService({
@@ -807,5 +938,10 @@ export function createPluginServices({
     pluginSession,
     composerSuggestion,
     speech,
+    // The managed-session router stages native Composer attachments before the
+    // send reaches the plugin, so it records their provenance through the same
+    // gate the plugin's own `commitManagedAttachment` uses.
+    grantManagedAttachment: (pluginId: string, sessionId: string, ref: string) =>
+      grantManagedRef(pluginId, sessionId, ref, "host"),
   };
 }
