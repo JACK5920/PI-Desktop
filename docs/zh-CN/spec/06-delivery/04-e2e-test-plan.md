@@ -6061,7 +6061,7 @@ eleven-tool-round desktop paths are verified by
 | 后MVP | E2E-022A、E2E-022B、E2E-022C、E2E-024I、E2E-024J、E2E-024K、E2E-024L、E2E-024M（插件路线图 R2/R3/R6） |
 | 基线后本地自动化 | E2E-220 |
 | 基线后本地自动化（MCP `pi_session_get` 超大 compaction） | E2E-MCP-session-get-projects-large-compaction |
-| MVP 后远程控制 | E2E-221、E2E-222、E2E-223、E2E-224、E2E-225、E2E-226、E2E-227、E2E-228、E2E-229、E2E-230、E2E-231、E2E-232、E2E-REMOTE-HOST-settings-compact-inventory |
+| MVP 后远程控制 | E2E-221、E2E-222、E2E-223、E2E-224、E2E-225、E2E-226、E2E-227、E2E-228、E2E-229、E2E-230、E2E-231、E2E-232、E2E-REMOTE-HOME、E2E-REMOTE-HOST-settings-compact-inventory |
 | 受信任扩展（R7 v1） | E2E-DIALOG-long-text-boundaries、E2E-241、E2E-242、E2E-HOOKS-cancel-and-dispose、E2E-243、E2E-TRUSTED-EXTENSION-temporary-session-cwd-is-scratch、E2E-244、E2E-245、E2E-PLUGIN-imported-pi-package-skills、E2E-PLUGIN-import-extension-installs-dependencies、E2E-PLUGIN-import-extension-reports-missing-dependency、E2E-PLUGIN-declared-provider-appears-in-the-native-provider-list |
 | 受信任扩展（R7 v1 npm 恢复） | E2E-PLUGIN-import-extension-recovers-missing-npm |
 | Post-MVP 回归覆盖（插件工具调度） | E2E-PLUGIN-slow-tool-is-not-cut-off-by-host-dispatch |
@@ -10097,6 +10097,14 @@ host-created files. The full app's file-preview viewer is covered separately.
 - **关联规格**：`03-runtime/11-provider-model-system.md`、`03-runtime/04-data-storage.md`（v27）、
   `04-ux/04-builtin-commands.md`、ADR 0334、issue #1657。
 - **状态**：自动化覆盖见英文版。完整的设置 → `/fast` → 捕获请求路径为手动验证场景。
+
+### E2E-REMOTE-HOME：本地 Agent 通过 Host 访问远程工作区
+
+- **前置条件：** 构建后的 JS 工作区包和 Rust Host；Linux POSIX 临时目录；本地模型 fixture 与 loopback RACP。无需真实 SSH、账号、密钥、服务商凭据、付费 API 或用户正在运行的应用。
+- **步骤：** 运行 `PI_HOST_CORE_BINARY=target/debug/pi-desktop-host-core node scripts/e2e-local-agent-remote-tools.mjs`。让本地模型 fixture 请求读取远程 `README.md` 并通过 Bash 写入标记文件；检查请求经生产 Desktop relay、loopback WebSocket RACP 和真实 Rust Host 执行。
+- **预期：** 远程工作区使用 Linux POSIX 路径；Read 与获准的 Bash 只在远程 Host 上执行，文件内容正确，权限请求由本地边界处理；模型凭据不会进入远程工具请求，远程 Host 不需要 provider 配置，也不会创建持久远程项目或会话。断连后的工具请求不会被重放或回退到本地执行。
+- **自动化：** Ubuntu CI 的 `trusted-extensions-e2e` job 在构建 host-core 后运行该脚本。它覆盖本地 Agent 到远程工作区 Host 的离线集成路径，但不覆盖真实 SSH 传输或发布安装。
+- **状态：** Ubuntu CI 自动化；真实 SSH 发布验收仍由单独配置 Linux SSH 目标机的 E2E-231 负责。
 
 ### E2E-REMOTE-FILE-MANAGER：受限的插件远程读取
 
