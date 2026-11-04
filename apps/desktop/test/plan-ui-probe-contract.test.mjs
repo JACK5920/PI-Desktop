@@ -80,8 +80,29 @@ test("Goal budget UI acceptance edits, saves, and rehydrates a Goal through the 
   assert.match(probeSource, /operation === "seedGoal"/);
   assert.match(probeSource, /"plans\.resolve"/);
   assert.match(probeSource, /targetPermissionMode: "auto"/);
+  assert.match(probeSource, /goal-budget-ui-probe-\$\{session\.id\}/);
+  for (const snapshotField of [
+    "maxRounds",
+    "maxTokens",
+    "maxDurationMs",
+    "tokenBudgetUnlimited",
+  ]) {
+    assert.match(probeSource, new RegExp(`goal\\?: \\{[^}]*${snapshotField}`, "s"));
+    assert.match(probeSource, new RegExp(`goal\\.${snapshotField}`));
+  }
   assert.match(harnessSource, /E2E-goal-budget-editor/);
   assert.match(harnessSource, /operation: "seedGoal"/);
+  for (const selector of [
+    "goal-budget-defaults-rounds",
+    "goal-budget-defaults-tokens",
+    "goal-budget-defaults-duration",
+    "goal-budget-defaults-save",
+  ]) {
+    assert.match(harnessSource, new RegExp(`"${selector}"`));
+  }
+  assert.match(harnessSource, /Goal budget defaults saved/);
+  assert.match(harnessSource, /approved Goal did not snapshot saved system defaults/);
+  assert.match(harnessSource, /existing Goal retains approved budget snapshot after system defaults changed/);
   for (const selector of [
     "goal-budget-edit",
     "goal-budget-rounds",

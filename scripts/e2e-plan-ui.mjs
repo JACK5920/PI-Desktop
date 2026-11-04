@@ -854,14 +854,151 @@ async function setGoalBudgetInput(state, testId, value) {
   assert(result === String(value), `could not update Goal budget input ${testId}: ${jsonText(result)}`);
 }
 
+async function inspectGoalBudgetDefaults(state) {
+  return state.cdp.evaluate(`(() => {
+    const form = document.querySelector('#goal-budget-defaults-form');
+    const find = (id) => form?.querySelector('[data-testid="' + id + '"]');
+    const toggle = form?.querySelector('[role="switch"]');
+    const visible = (node) => {
+      if (!node) return false;
+      const style = getComputedStyle(node);
+      const rect = node.getBoundingClientRect();
+      return style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
+    };
+    return {
+      visible: visible(form),
+      rounds: find("goal-budget-defaults-rounds")?.value ?? null,
+      tokens: find("goal-budget-defaults-tokens")?.value ?? null,
+      duration: find("goal-budget-defaults-duration")?.value ?? null,
+      tokenInputDisabled: find("goal-budget-defaults-tokens")?.disabled ?? null,
+      unlimited: toggle?.getAttribute("aria-checked") === "true",
+    };
+  })()`);
+}
+
+async function openGoalBudgetDefaultsSettings(state) {
+  await clickSelector(state, '[data-nav="settings"]', "System Settings navigation");
+  await waitFor(
+    async () => state.cdp.evaluate(`document.querySelectorAll(".settings-nav-item").length > 0`),
+    "System Settings navigation items",
+    state,
+  );
+  const clicked = await state.cdp.evaluate(`(() => {
+    const visible = (node) => {
+      const style = getComputedStyle(node);
+      const rect = node.getBoundingClientRect();
+      return style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
+    };
+    const item = [...document.querySelectorAll(".settings-nav-item")]
+      .find((node) => node.textContent?.trim() === "AI" && visible(node));
+    item?.click();
+    return Boolean(item);
+  })()`);
+  assert(clicked, "could not open the AI System Settings destination");
+  await waitFor(
+    async () => (await inspectGoalBudgetDefaults(state)).visible,
+    "Goal budget defaults card in AI settings",
+    state,
+  );
+}
+
+async function saveGoalBudgetDefaults(state, budget) {
+  const snapshot = await inspectGoalBudgetDefaults(state);
+  await setGoalBudgetInput(state, "goal-budget-defaults-rounds", budget.maxRounds);
+  await setGoalBudgetInput(state, "goal-budget-defaults-tokens", budget.maxTokens);
+  await setGoalBudgetInput(state, "goal-budget-defaults-duration", budget.maxDurationMinutes);
+  if (snapshot.unlimited !== budget.tokenBudgetUnlimited) {
+    await clickSelector(
+      state,
+      '#goal-budget-defaults-form [role="switch"]',
+      "Goal default unlimited-token switch",
+    );
+  }
+  await clickSelector(
+    state,
+    '[data-testid="goal-budget-defaults-save"]',
+    "save Goal budget defaults",
+  );
+  await waitFor(
+    async () => {
+      const settings = await getSettings(state);
+      const saved = settings?.goalBudgetDefaults;
+      return saved?.maxRounds === budget.maxRounds &&
+        saved?.maxTokens === budget.maxTokens &&
+        saved?.maxDurationMs === budget.maxDurationMinutes * 60_000 &&
+        saved?.tokenBudgetUnlimited === budget.tokenBudgetUnlimited
+        ? settings
+        : null;
+    },
+    "Goal budget defaults saved",
+    state,
+  );
+  const afterSave = await inspectGoalBudgetDefaults(state);
+  assert(
+    afterSave.rounds === String(budget.maxRounds) &&
+      afterSave.tokens === String(budget.maxTokens) &&
+      afterSave.duration === String(budget.maxDurationMinutes) &&
+      afterSave.unlimited === budget.tokenBudgetUnlimited,
+    `Goal budget settings UI did not retain the saved values: ${jsonText(afterSave)}`,
+  );
+}
+
+function assertGoalBudgetSnapshot(seeded, expected, label) {
+  const budget = seeded?.goalBudget;
+  assert(
+    budget?.maxRounds === expected.maxRounds &&
+      budget?.maxTokens === expected.maxTokens &&
+      budget?.maxDurationMs === expected.maxDurationMinutes * 60_000 &&
+      budget?.tokenBudgetUnlimited === expected.tokenBudgetUnlimited,
+    `${label}: ${jsonText(seeded)}`,
+  );
+}
+
 async function runGoalBudgetAcceptance(state) {
   await setLanguage(state, "en");
   await reloadRenderer(state);
+  await openGoalBudgetDefaultsSettings(state);
+  let defaults = await inspectGoalBudgetDefaults(state);
+  assert(
+    defaults.rounds === "8" && defaults.tokens === "250000" &&
+      defaults.duration === "60" && defaults.unlimited &&
+      defaults.tokenInputDisabled === false,
+    `new-profile Goal budget defaults are incorrect: ${jsonText(defaults)}`,
+  );
+
+  const defaultBudget = {
+    maxRounds: 8,
+    maxTokens: 250_000,
+    maxDurationMinutes: 60,
+    tokenBudgetUnlimited: true,
+  };
+  const defaultGoal = await runPlanProbe(state, {
+    operation: "seedGoal",
+    workspace: state.workspace,
+  });
+  assert(defaultGoal.sessionId && defaultGoal.proposalId, `default Goal probe returned no persisted Goal: ${jsonText(defaultGoal)}`);
+  assertGoalBudgetSnapshot(defaultGoal, defaultBudget, "approved Goal did not snapshot unlimited system defaults");
+
+  const savedBudget = {
+    maxRounds: 12,
+    maxTokens: 1_250_000,
+    maxDurationMinutes: 90,
+    tokenBudgetUnlimited: true,
+  };
+  await saveGoalBudgetDefaults(state, savedBudget);
   const seeded = await runPlanProbe(state, {
     operation: "seedGoal",
     workspace: state.workspace,
   });
-  assert(seeded.sessionId && seeded.proposalId, `Goal UI probe returned no persisted Goal: ${jsonText(seeded)}`);
+  assert(seeded.sessionId && seeded.proposalId, `custom Goal probe returned no persisted Goal: ${jsonText(seeded)}`);
+  assertGoalBudgetSnapshot(seeded, savedBudget, "approved Goal did not snapshot saved system defaults");
+
+  await saveGoalBudgetDefaults(state, {
+    maxRounds: 20,
+    maxTokens: 3_000_000,
+    maxDurationMinutes: 120,
+    tokenBudgetUnlimited: false,
+  });
   state.goalSessionId = seeded.sessionId;
   await reloadRenderer(state);
   await selectSession(state, state.goalSessionId);
@@ -895,26 +1032,20 @@ async function runGoalBudgetAcceptance(state) {
     "Goal budget editor opened",
     state,
   );
-  assert(snapshot.rounds === "8", `default Goal round limit changed: ${jsonText(snapshot)}`);
-  assert(snapshot.tokens === "250000", `default Goal token limit changed: ${jsonText(snapshot)}`);
-  assert(snapshot.minutes === "60", `default Goal time limit changed: ${jsonText(snapshot)}`);
+  assert(
+    snapshot.rounds === "12" && snapshot.tokens === "1250000" &&
+      snapshot.minutes === "90" && snapshot.unlimited,
+    `existing Goal retains approved budget snapshot after system defaults changed: ${jsonText(snapshot)}`,
+  );
 
   await setGoalBudgetInput(state, "goal-budget-rounds", 16);
-  await setGoalBudgetInput(state, "goal-budget-tokens", 1_250_000);
+  await setGoalBudgetInput(state, "goal-budget-tokens", 1_500_000);
   await setGoalBudgetInput(state, "goal-budget-minutes", 1_440);
-  await clickSelector(
-    state,
-    '.goal-budget-unlimited [role="switch"]',
-    "unlimited token budget switch",
-  );
   snapshot = await inspectGoalBudget(state);
   assert(snapshot.unlimited, `unlimited token mode did not enable: ${jsonText(snapshot)}`);
   assert(snapshot.tokenInputDisabled === false, `finite token value cannot be edited while unlimited: ${jsonText(snapshot)}`);
   assert(snapshot.unlimitedHintVisible, `unlimited token explanation is missing: ${jsonText(snapshot)}`);
-  assert(snapshot.tokens === "1250000", `finite token value was lost while unlimited: ${jsonText(snapshot)}`);
-  await setGoalBudgetInput(state, "goal-budget-tokens", 1_500_000);
-  snapshot = await inspectGoalBudget(state);
-  assert(snapshot.tokens === "1500000", `finite token limit could not be edited while unlimited: ${jsonText(snapshot)}`);
+  assert(snapshot.tokens === "1500000", `finite token value could not be edited while unlimited: ${jsonText(snapshot)}`);
   await clickSelector(state, '[data-testid="goal-budget-save"]', "save unlimited Goal budget");
   await waitFor(
     async () => {
@@ -993,7 +1124,7 @@ async function runGoalBudgetAcceptance(state) {
   );
   assert(snapshot.status === "paused", `Goal resumed while elapsed time was frozen: ${jsonText(snapshot)}`);
   assert(snapshot.budgetText === frozenElapsedText, `paused Goal elapsed time continued ticking: ${jsonText(snapshot)}`);
-  return `active elapsed display ticked, paused time froze; rounds=${snapshot.rounds ?? 16} tokens=1,500,000 time=1,440m; token limit editable in unlimited mode, persisted, and restored in finite mode`;
+  return `default unlimited and custom Goal budget snapshots verified; later defaults did not mutate the existing Goal; active elapsed display ticked, paused time froze; rounds=16 tokens=1,500,000 time=1,440m; token limit editable in unlimited mode, persisted, and restored in finite mode`;
 }
 
 async function clickApprovalMenuAndCheckAsk(state) {

@@ -313,7 +313,13 @@ to later refresh and inference; the vendor picker does not collect them.
 
 ### Settings
 - `settings.get`
-- `settings.set` — optional `networkProxy` (`system` / `direct` / `custom`).
+- `settings.set` — optional `networkProxy` (`system` / `direct` / `custom`),
+  and optional `AppSettings.goalBudgetDefaults`. `settings.get` normalizes a
+  missing or malformed Goal budget default to 8 rounds, a retained finite
+  token value of 250,000, 60 minutes, and unlimited tokens enabled; writes
+  reject invalid rounds, finite tokens, duration, or unlimited flag values.
+  The setting is a portable application preference and uses no schema or RPC
+  version change.
   Custom requires an `http`/`https`/`socks5` URL. host-core uses the stored
   value for marketplace `curl --proxy` and does not put it on process env.
 
@@ -1245,8 +1251,12 @@ execution descriptor. Clear removes the Goal from current tracking but retains
 historical reports and immutable artifacts. Goal reports are Agent-authored
 claims; the Host validates their structure and scope, not the truth of the
 evidence they cite. Automatic `continue` rounds are queued only after the
-previous turn settles. Each cycle defaults to eight rounds, 250,000 reported
-tokens, and 60 minutes of elapsed wall-clock time. `goals.budget.update` accepts
+previous turn settles. On approval, the Host reads the latest app-level
+`goalBudgetDefaults` in the same transaction that creates the lifecycle, then
+stores that budget as the Goal's snapshot. Missing defaults normalize to 8
+rounds, 250,000 retained finite tokens, 60 minutes, and unlimited tokens
+enabled. Settings changes affect later approvals only and do not rewrite any
+existing Goal; `goals.budget.update` remains the per-Goal override. It accepts
 `{ sessionId, proposalId, budget }` and updates the durable limits for the current
 Goal, where `budget` contains `maxRounds` (1–32), `maxTokens` (a positive safe
 integer through `Number.MAX_SAFE_INTEGER`), `maxDurationMs` (60,000–86,400,000),

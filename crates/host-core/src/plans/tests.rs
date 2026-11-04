@@ -1510,7 +1510,9 @@ fn a_goal_token_budget_pauses_auto_continuation_and_resets_on_resume() {
     let (proposal, execution, turn_id) = approve_goal(&manager, &db, &root, "goal-token-budget");
     db.conn()
         .execute(
-            "UPDATE goal_lifecycles SET max_tokens = 100 WHERE proposal_id = ?1",
+            "UPDATE goal_lifecycles
+             SET max_tokens = 100, token_budget_unlimited = 0
+             WHERE proposal_id = ?1",
             params![proposal.id],
         )
         .unwrap();
@@ -1919,3 +1921,67 @@ fn host_restart_interrupts_goal_and_requires_a_new_manual_resume_execution() {
 
 #[path = "history_tests.rs"]
 mod history;
+
+#[test]
+fn goal_creation_snapshots_configured_defaults_and_keeps_existing_goal_unchanged() {
+    let (dir, db) = test_db();
+    let root = dir.path().join("workspace");
+    fs::create_dir_all(&root).unwrap();
+    let manager = PlanManager;
+    let configured = json!({
+        "maxRounds": 17,
+        "maxTokens": 789_123,
+        "maxDurationMs": 7_200_000,
+        "tokenBudgetUnlimited": false
+    });
+    db.set_setting("app", &json!({"goalBudgetDefaults": configured}))
+        .unwrap();
+
+    let (proposal, _, _) = approve_goal(&manager, &db, &root, "goal-custom-defaults");
+    let before = manager
+        .goal_for_session(&db, &proposal.session_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(before.max_rounds, 17);
+    assert_eq!(before.max_tokens, 789_123);
+    assert_eq!(before.max_duration_ms, 7_200_000);
+    assert!(!before.token_budget_unlimited);
+
+    db.set_setting(
+        "app",
+        &json!({
+            "goalBudgetDefaults": {
+                "maxRounds": 13,
+                "maxTokens": 100_000,
+                "maxDurationMs": 1_800_000,
+                "tokenBudgetUnlimited": true
+            }
+        }),
+    )
+    .unwrap();
+    let after = manager
+        .goal_for_session(&db, &proposal.session_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(after.max_rounds, before.max_rounds);
+    assert_eq!(after.max_tokens, before.max_tokens);
+    assert_eq!(after.max_duration_ms, before.max_duration_ms);
+    assert_eq!(after.token_budget_unlimited, before.token_budget_unlimited);
+}
+
+#[test]
+fn new_goal_without_saved_defaults_has_unlimited_token_budget() {
+    let (dir, db) = test_db();
+    let root = dir.path().join("workspace");
+    fs::create_dir_all(&root).unwrap();
+
+    let (proposal, _, _) = approve_goal(&PlanManager, &db, &root, "goal-unlimited-default");
+    let goal = PlanManager
+        .goal_for_session(&db, &proposal.session_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(goal.max_rounds, GOAL_DEFAULT_ROUNDS_PER_CYCLE);
+    assert_eq!(goal.max_tokens, GOAL_DEFAULT_TOKENS_PER_CYCLE);
+    assert_eq!(goal.max_duration_ms, GOAL_DEFAULT_DURATION_MS_PER_CYCLE);
+    assert!(goal.token_budget_unlimited);
+}

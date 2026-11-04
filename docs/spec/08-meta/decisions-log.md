@@ -8187,9 +8187,11 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
 
 ## 2026-11-04 — Configurable per-cycle Goal budgets (D684)
 
-- Keep defaults at 8 rounds, 250,000 reported tokens, and 60 minutes. Allow
-  editing to 1–32 rounds and 1–1,440 minutes; finite token limits accept any
-  positive safe integer through `Number.MAX_SAFE_INTEGER`.
+- The original defaults were 8 rounds, 250,000 reported tokens, and 60
+  minutes. ADR 0345 / D685 amends only the default token mode and settings
+  scope; the current default is unlimited tokens with 250,000 retained as the
+  finite value. Allow editing to 1–32 rounds and 1–1,440 minutes; finite token
+  limits accept any positive safe integer through `Number.MAX_SAFE_INTEGER`.
 - Add a persisted unlimited-token mode. Token usage remains tracked and shown,
   while only the token cutoff is bypassed; round/time limits and explicit
   manual-resume semantics continue to apply. Keep and allow editing the last
@@ -8204,3 +8206,19 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
 - Coverage: Host lifecycle/migration/RPC tests, offline Goal E2E, and the
   isolated Composer Goal budget user path. See ADR 0344, ADR 0338, and the Goal
   lifecycle specs.
+
+## 2026-11-04 — Goal budget defaults in AI Settings (D685)
+
+- Add optional, Host-normalized `AppSettings.goalBudgetDefaults` with defaults
+  of 8 rounds, a retained finite token value of 250,000, 60 minutes, and
+  unlimited tokens enabled. The AI Settings card supports editing the global
+  defaults; unlimited mode leaves the finite value editable.
+- Host approval snapshots the latest saved settings in the same transaction
+  that creates a new Goal lifecycle. Settings affect future approvals only and
+  never rewrite an existing Goal; per-Goal budget editing remains available.
+- `goalBudgetDefaults` is included in portable application-settings sync. No
+  database schema or RPC protocol migration is introduced; unlimited token mode
+  still tracks usage and skips only the token cutoff.
+- Coverage: shared/Host/Renderer settings tests, config-sync tests, and
+  `E2E-GOAL-budget-editor` for default settings, custom snapshots, and existing
+  Goal immutability. See ADR 0345 and the runtime/UX Goal budget specs.

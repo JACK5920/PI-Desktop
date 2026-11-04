@@ -300,7 +300,7 @@ export function createPlanUiProbe(deps: PlanUiProbeDeps) {
         );
         const turnId = turnResponse.turnId;
         if (!turnId) throw new Error("Goal UI probe session.beginTurn returned no turn");
-        const toolCallId = "goal-budget-ui-probe";
+        const toolCallId = `goal-budget-ui-probe-${session.id}`;
         const submitted = await activeHost.call<{
           status?: string;
           proposal?: {
@@ -334,7 +334,14 @@ export function createPlanUiProbe(deps: PlanUiProbeDeps) {
         const resolved = await activeHost.call<{
           state?: string;
           action?: string;
-          goal?: { proposalId?: string; status?: string } | null;
+          goal?: {
+            proposalId?: string;
+            status?: string;
+            maxRounds?: number;
+            maxTokens?: number;
+            maxDurationMs?: number;
+            tokenBudgetUnlimited?: boolean;
+          } | null;
           execution?: { id?: string; state?: string } | null;
         }>("plans.resolve", {
           sessionId: session.id,
@@ -363,6 +370,12 @@ export function createPlanUiProbe(deps: PlanUiProbeDeps) {
           projectPath: session.projectPath,
           proposalId: proposal.id,
           goalStatus: resolved.goal.status,
+          goalBudget: {
+            maxRounds: resolved.goal.maxRounds,
+            maxTokens: resolved.goal.maxTokens,
+            maxDurationMs: resolved.goal.maxDurationMs,
+            tokenBudgetUnlimited: resolved.goal.tokenBudgetUnlimited,
+          },
           executionId: resolved.execution?.id,
         };
       }

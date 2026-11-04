@@ -1203,9 +1203,19 @@ mod tests {
                     }]
                 }))?,
             )?;
-            state
-                .db
-                .set_setting("app", &json!({ "theme": "light", "language": "en" }))?;
+            state.db.set_setting(
+                "app",
+                &json!({
+                    "theme": "light",
+                    "language": "en",
+                    "goalBudgetDefaults": {
+                        "maxRounds": 11,
+                        "maxTokens": 987_654,
+                        "maxDurationMs": 5_400_000,
+                        "tokenBudgetUnlimited": true
+                    }
+                }),
+            )?;
             state.mcp_servers.upsert(McpServerInput {
                 id: "portable-server".into(),
                 label: Some("Portable MCP".into()),
@@ -1329,6 +1339,20 @@ mod tests {
             )
             .await?;
             assert!(!remote.entities.is_empty(), "remote entities missing");
+            let remote_budget = remote
+                .entities
+                .iter()
+                .find(|entity| entity.domain == DOMAIN_APPLICATION)
+                .and_then(|entity| entity.payload.get("goalBudgetDefaults"));
+            assert_eq!(
+                remote_budget,
+                Some(&json!({
+                    "maxRounds": 11,
+                    "maxTokens": 987_654,
+                    "maxDurationMs": 5_400_000,
+                    "tokenBudgetUnlimited": true
+                }))
+            );
             assert!(
                 load_base(&state, &key)?.is_none(),
                 "device B unexpectedly has base"
@@ -1348,6 +1372,21 @@ mod tests {
         }
         let received = sync_now(device_b.clone(), tx.clone()).await?;
         assert!(!pending_approvals(&received).is_empty());
+        let imported_budget = device_b
+            .lock()
+            .await
+            .db
+            .get_setting("app")?
+            .and_then(|settings| settings.get("goalBudgetDefaults").cloned());
+        assert_eq!(
+            imported_budget,
+            Some(json!({
+                "maxRounds": 11,
+                "maxTokens": 987_654,
+                "maxDurationMs": 5_400_000,
+                "tokenBudgetUnlimited": true
+            }))
+        );
         {
             let state = device_b.lock().await;
             state
@@ -1458,9 +1497,19 @@ mod tests {
 
         {
             let state = device_b.lock().await;
-            state
-                .db
-                .set_setting("app", &json!({ "theme": "light", "language": "en" }))?;
+            state.db.set_setting(
+                "app",
+                &json!({
+                    "theme": "light",
+                    "language": "en",
+                    "goalBudgetDefaults": {
+                        "maxRounds": 11,
+                        "maxTokens": 987_654,
+                        "maxDurationMs": 5_400_000,
+                        "tokenBudgetUnlimited": true
+                    }
+                }),
+            )?;
         }
         sync_now(device_b.clone(), tx.clone()).await?;
         {

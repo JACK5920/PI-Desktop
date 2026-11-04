@@ -3029,7 +3029,8 @@ The Composer shows one session-scoped `GoalLifecycleBar` for each non-cleared
 Goal. It presents the contract title, active/paused/completed/blocked/
 interrupted status, cycle and bounded-round progress, and an expandable latest
 Agent progress report. It also shows tokens and elapsed time used against the
-current cycle limits (8 rounds, 250,000 tokens, and 60 minutes by default).
+current cycle's Host-owned budget snapshot (8 rounds, a retained 250,000 finite
+token value, 60 minutes, and unlimited tokens by default).
 While active, provider-reported token usage updates from the current Goal
 execution's deduplicated Main-process usage aggregate; it is never estimated.
 The displayed token total cannot fall below either that live value or the latest
@@ -3066,7 +3067,9 @@ while the Goal lifecycle bar independently shows the current active state.
 
 Edit limits is available only while active, paused, blocked, or interrupted.
 The form accepts 1–32 rounds, a positive safe-integer finite token limit, and
-1–1,440 minutes. Defaults remain 8 rounds, 250,000 tokens, and 60 minutes. The
+1–1,440 minutes. Defaults are read from the Goal's approval-time snapshot: 8
+rounds, a retained finite value of 250,000 tokens, 60 minutes, and unlimited
+tokens enabled unless the user saved different defaults in AI Settings. The
 No token limit switch leaves the finite token value visible and editable for
 later restoration; it disables only the Host token cutoff, not usage tracking,
 round limits, or time limits. Saving updates the Host-owned Goal without
@@ -3074,6 +3077,18 @@ resetting counters, changing its cycle/execution identity, canceling a running
 round, or resuming a stopped Goal. A successful save is durable across renderer
 reload. Form errors are localized and shown inline; Host validation remains
 authoritative.
+
+## 10C. GoalBudgetDefaultsCard (AI Settings)
+
+The AI Settings destination exposes a `GoalBudgetDefaultsCard` for future Goal
+approvals. It edits rounds, the retained finite token number, duration, and an
+unlimited-token switch with the same constraints and shared form validation as
+the per-Goal editor. The finite token field remains editable when unlimited is
+on. Saving writes one Host-owned `AppSettings.goalBudgetDefaults` preference;
+the Host reads and normalizes it inside the approval transaction that creates
+each new Goal lifecycle. The preference is portable through existing
+configuration sync. A save does not update existing Goal cycles. Search
+indexes the card and each localized control label.
 
 ---
 

@@ -143,6 +143,8 @@ test("Basics and AI tabs expose their respective app and AI controls", () => {
   assert.match(aiSource, /infiniteProviderRetry: settings\.infiniteProviderRetry !== true/);
   assert.match(aiSource, /LargePasteThresholdRow/);
   assert.match(aiSource, /ContextUsageDisplayRow/);
+  assert.match(aiSource, /<GoalBudgetDefaultsCard\b/);
+  assert.match(aiSource, /saveSettings=\{saveSettings\}/);
   assert.doesNotMatch(aiSource, /PromptEnhancementCard|promptEnhancement/);
   assert.doesNotMatch(aiSource, /EnhancementModelCard/);
   assert.match(
