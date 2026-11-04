@@ -116,6 +116,7 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     settleComposerSuggestion,
     getPluginLauncherWindow,
     togglePluginLauncher,
+    openPluginMarket,
     safeOpenExternal,
     updater,
     pluginServices,
@@ -596,6 +597,7 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     plugins,
     localApps,
     getLocale: getUpdaterLocale,
+    openPluginMarket,
   });
   registerSpeechIpc({ registrar, speech });
 
