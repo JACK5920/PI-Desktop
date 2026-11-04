@@ -2038,13 +2038,12 @@ Single message render — either user (plaintext) or assistant (markdown streami
   Regenerate / Branch / revision items). Right-clicking empty transcript
   space, a system row, or a permission/outcome card opens a conversation
   menu: Copy conversation, Select conversation text, Scroll to top, Jump to
-  latest. Quote, Annotate, and Open side chat stay retired (ADR 0268). **Ask
-  about selection** appears in a completed assistant turn's context menu only
-  while a non-empty selection belongs to that turn. It forks an ordinary child
-  session through that answer and pre-fills the child's Composer with a
-  localized, editable prompt quoting the selection; it never auto-sends or
-  opens a side panel (ADR 0342). A streaming or empty assistant turn that would
-  produce no items opens
+  latest. The context menu remains separate from the floating selection
+  toolbar: it does not contain Quote, Annotate, or Open side chat actions.
+  **Ask about selection** remains the ordinary activated-fork action from ADR
+  0342; it requires a non-empty selection owned by a completed assistant turn,
+  creates a normal child, and pre-fills its Composer with an editable localized
+  quote without sending. A streaming or empty assistant turn that would produce no items opens
   nothing. Copy on a speaking-turn menu writes the live selection in that
   turn captured when the menu opened; a collapsed caret, or a selection
   outside the row, falls back to the whole turn.
@@ -2057,6 +2056,37 @@ Single message render — either user (plaintext) or assistant (markdown streami
   Fork creates and activates an independent session whose snapshot ends at the
   selected assistant response, requires an idle source, and leaves that
   source's transcript, live runtime, and provider cache state untouched (D134).
+  Separately, selecting eligible transcript text opens a small anchored toolbar.
+  Its Copy action writes the exact captured excerpt (capped at 2,000 characters);
+  selected user text can be appended as a localized editable quote, and selected
+  assistant text can be saved as a numbered response annotation or opened in a
+  docked side-chat draft. The toolbar retains the source session/message even if
+  selection collapses when focus moves. These actions never submit a prompt.
+  Pending annotation excerpts/comments attach to the next ordinary prompt as a
+  JSON payload and remain reviewable, editable, removable, and clearable from
+  the Composer; only unchanged attachments are consumed after Host admission.
+  An assistant's exact `:codex-annotation{index="N"}` directive renders as a
+  keyboard-operable reference when it resolves against that user request; it
+  opens a text-only excerpt/comment/source card. Unknown indices remain ordinary
+  text. Prompt display, edit, queue, and title projections omit the generated
+  envelope.
+  **Ask in side chat** opens a WorkPanel draft without a child session or send.
+  The first explicit non-empty Send forks at the selected assistant message
+  without activating the child. The parent transcript and Composer stay active;
+  the child reuses the normal transcript, Stop, approval, AskTool, and event
+  handling for its own session id. Add to main chat appends the latest child
+  answer to the parent draft; Open as a conversation selects the normal child;
+  closing a sent side-chat tab releases only its renderer projection and does
+  not stop or delete that child. Its transcript supports copy, quote-to-compact-
+  draft, and annotation review for the child session; nested Ask in side chat
+  is omitted until the child is promoted to a normal conversation. While docked,
+  hide history edit/delete/revision and assistant regenerate/fork actions because
+  their existing host operations target the active session; promotion restores
+  the normal child-session actions. A child error's Continue action must target
+  that child explicitly rather than the still-active parent. A stale
+  fork/send cannot reopen a closed tab,
+  switch the active parent, or overwrite a newer draft. The ordinary Ask-about-
+  selection fork remains a distinct context-menu path (ADR 0346).
   Opening a user-message editor must hydrate canonical history before seeding the
   draft when the loaded transcript is partial or display-limited. Never seed an
   editable draft from clipped display text. Failed reads keep the editor closed
@@ -3329,6 +3359,9 @@ reasoning-level control.
   captured draft — text plus inline file-reference chips — to the composer;
   after an app restart, when that in-memory draft is unavailable, restore the
   Host-stored content and image/file attachments without rewriting the content;
+  if the queued prompt contains response annotations, restore those as Composer
+  attachments before any newer pending annotations, without showing the encoded
+  envelope in the queue row;
   while the input is non-empty (or holds attachments) the action is refused with
   a toast and nothing changes. Remove drops the row after Host acknowledgement.
 - Send now: promotes the row to the end of the session's priority block, so a

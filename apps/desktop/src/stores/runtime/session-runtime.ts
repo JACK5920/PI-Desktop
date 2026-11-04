@@ -137,6 +137,24 @@ export function createSessionRuntime({ get, set }: StoreAccess): SessionRuntime 
   const toolStartsByCallId = new Map<string, ToolStart>();
   const planSyncGenerations = new Map<string, number>();
 
+  function publishSideChatTranscript(id: string, messages: UiMessage[]): void {
+    const state = get();
+    const matching = Object.values(state.sideChats ?? {}).filter(
+      (sideChat) => sideChat.childSessionId === id && sideChat.messages !== messages,
+    );
+    if (matching.length === 0) return;
+    set((current) => {
+      let changed = false;
+      const sideChats = { ...current.sideChats };
+      for (const [sideChatId, sideChat] of Object.entries(sideChats)) {
+        if (sideChat.childSessionId !== id || sideChat.messages === messages) continue;
+        sideChats[sideChatId] = { ...sideChat, messages };
+        changed = true;
+      }
+      return changed ? { sideChats } : {};
+    });
+  }
+
   function cacheSessionTranscript(
     id: string,
     messages: UiMessage[],
@@ -145,6 +163,7 @@ export function createSessionRuntime({ get, set }: StoreAccess): SessionRuntime 
     const normalized = dedupeSessionMessages(messages);
     sessionTranscriptCache.delete(id);
     sessionTranscriptCache.set(id, normalized);
+    publishSideChatTranscript(id, normalized);
     if (window) sessionHistoryCache.set(id, window);
     while (sessionTranscriptCache.size > SESSION_TRANSCRIPT_CACHE_LIMIT) {
       const oldestId = sessionTranscriptCache.keys().next().value;
@@ -234,10 +253,9 @@ export function createSessionRuntime({ get, set }: StoreAccess): SessionRuntime 
     }
     const cached = sessionTranscriptCache.get(sessionId);
     if (cached) {
-      sessionTranscriptCache.set(
-        sessionId,
-        upsertLiveSessionMessage(cached, message),
-      );
+      const next = upsertLiveSessionMessage(cached, message);
+      sessionTranscriptCache.set(sessionId, next);
+      publishSideChatTranscript(sessionId, next);
     }
   }
 
@@ -253,10 +271,9 @@ export function createSessionRuntime({ get, set }: StoreAccess): SessionRuntime 
     }
     const cached = sessionTranscriptCache.get(sessionId);
     if (cached?.includes(message)) {
-      sessionTranscriptCache.set(
-        sessionId,
-        removeLiveSessionMessage(cached, message.id),
-      );
+      const next = removeLiveSessionMessage(cached, message.id);
+      sessionTranscriptCache.set(sessionId, next);
+      publishSideChatTranscript(sessionId, next);
     }
   }
 

@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
+import { register } from "node:module";
 import test from "node:test";
 import { placeContextMenu } from "../src/lib/context-menu.ts";
-import { conversationPlainText, copySelectionOrFallback } from "../src/lib/chat-transcript-text.ts";
+
+register(new URL("./helpers/ts-import-hooks.mjs", import.meta.url));
+const { conversationPlainText, copySelectionOrFallback } = await import(
+  "../src/lib/chat-transcript-text.ts"
+);
 
 test("a menu that fits the viewport stays at the pointer", () => {
   assert.deepEqual(

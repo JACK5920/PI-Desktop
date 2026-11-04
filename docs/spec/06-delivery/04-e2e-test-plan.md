@@ -5539,8 +5539,9 @@ window; opening a normal panel afterward must still work.
   text highlights the bubble. Escape and Tab dismiss the menu without
   running an item.
   A link still offers Open in default browser, Open in work panel, and
-  Copy link address. Quote, Annotate, and Open side chat are absent
-  (ADR 0268). The surface is a viewport-fixed body-level layer and does
+  Copy link address. Quote, Annotate, and Open side chat are not context-menu
+  items; selection actions are provided by the separate toolbar (ADR 0346).
+  The surface is a viewport-fixed body-level layer and does
   not resize the transcript. During editing, Copy uses the selected draft text
   or the full draft with a collapsed caret; Select message text selects the
   draft. Edit, Delete, and revision actions are absent until editing ends.
@@ -5586,6 +5587,125 @@ window; opening a normal panel afterward must still work.
 - **Milestone**: Maintenance.
 - **Status**: Automated component and store-path coverage; full visual desktop
   acceptance Draft.
+
+#### E2E-CHAT-selection-capture-v2: Capture, copy, and append transcript selections
+
+- **Preconditions**: An editable local session contains completed user and
+  assistant messages, with a non-empty draft and the transcript selection
+  toolbar enabled.
+- **Steps**: 1) Select part of a user message and copy it from the selection
+  toolbar. 2) Repeat and append it to chat. 3) Select text from a completed
+  assistant answer, open the comment editor, then change the browser selection
+  before saving. 4) Collapse or move the selection while the toolbar is open and
+  verify actions still use the captured source.
+- **Expected**: Copy writes the exact captured excerpt; Add to chat appends a
+  localized quote with attribution without replacing the existing draft or
+  references. The assistant comment editor saves the originally captured
+  excerpt, not the later browser selection. Empty, cross-message, ineligible, or
+  remote selections expose no invalid action; excerpt normalization enforces
+  the 2,000-character cap without splitting a Unicode code point. Context-menu
+  Copy, message-row Copy, Select message text, and ordinary Ask about selection
+  keep their distinct behavior.
+- **Coverage**: `node scripts/e2e-selection-reference-workflow.mjs` exercises
+  selection/copy/append and captured-source behavior in Chromium;
+  `node --test apps/desktop/test/transcript-selection.test.mjs
+  apps/desktop/test/selection-draft-append.test.mjs
+  apps/desktop/test/selected-text-followup.test.mjs` covers normalization,
+  ownership, and existing fork semantics.
+- **Specs**: `04-ux/08-component-spec.md` §7, `04-ux/09-interaction-patterns.md`
+  §7.6, ADR 0346.
+- **Acceptance**: C (chat stream), Quality.
+- **Milestone**: Maintenance.
+- **Status**: Automated Chromium fixture and helper coverage; full visual desktop
+  acceptance remains separate.
+
+#### E2E-CHAT-annotation-citation-flow-v2: Attach a commented excerpt and cite it in an answer
+
+- **Preconditions**: A completed assistant answer and a local writable Composer.
+- **Steps**: 1) Select an assistant excerpt and choose Add to chat. 2) Add a
+  comment, attach it, and review the Composer references. 3) Edit the comment,
+  remove or clear pending annotations, then attach the excerpt again. 4) Submit
+  a non-empty ordinary request and inspect the user bubble, edit seed, and queue
+  preview. 5) Render an answer containing the exact citation directive and open
+  its reference.
+- **Expected**: The Composer exposes ordered, editable, removable references;
+  cancelled edits do not attach, duplicate source/excerpt reopens its editor,
+  and a reference without a comment is valid. The model receives an explicit
+  JSON-serialized annotation envelope, while visible request projections show
+  only the user's request. Acceptance consumes only unchanged submitted
+  attachments; rejection preserves them, and annotation-only submit is not
+  admitted. Editing a queued prompt restores its hidden annotation attachments
+  ahead of any newer pending Composer attachments, and a failed queue admission
+  keeps the original attachments. A valid citation opens a safe text-only
+  excerpt/comment/source card; unknown indices and hostile reference text stay
+  inert ordinary text.
+- **Coverage**: `node scripts/e2e-selection-reference-workflow.mjs` covers attach,
+  edit, prompt serialization, and citation rendering. `node --test
+  apps/desktop/test/response-annotations.test.mjs
+  apps/desktop/test/response-annotation-slice.test.mjs
+  apps/desktop/test/response-annotation-citations.test.mjs
+  apps/desktop/test/queue-pending-actions.test.mjs
+  apps/desktop/test/composer-submit-race.test.mjs
+  apps/desktop/test/session-title-prompt-fallback.test.mjs` covers serialization,
+  display reduction, order, exact-snapshot acknowledgement, and rejection.
+- **Specs**: `04-ux/08-component-spec.md` §7 / §11,
+  `04-ux/09-interaction-patterns.md` §7.6, ADR 0346.
+- **Acceptance**: C (chat stream), Quality, Security.
+- **Milestone**: Maintenance.
+- **Status**: Automated Chromium/store/helper coverage; real-provider acceptance
+  is not part of this fixture.
+
+#### E2E-CHAT-docked-follow-up-tab-v2: Keep a child follow-up beside its parent
+
+- **Preconditions**: A completed assistant reply in a forkable local session;
+  the user can open and prompt a child session.
+- **Steps**: 1) Select assistant text and open Ask in side chat; verify no child
+  session or prompt exists before Send. 2) Enter a non-empty prompt and Send.
+  3) While the child streams, inspect its transcript and resolve a child-scoped
+  permission request and AskTool card. 4) Add the result to the main Composer.
+  5) Open one child as a conversation; open and send another side chat, then
+  close its tab. 6) In the child transcript, append selected user text to its
+  compact draft and attach/review a selected assistant annotation; verify nested
+  Ask in side chat is not offered and history mutation actions are hidden while
+  docked. Verify Continue on a child error targets the child, not the active
+  parent. 7) Exercise rejected prompt retry and close/session-switch races.
+- **Expected**: Only explicit Send forks and submits, using the selected
+  assistant message as the anchor. The parent remains active with its original
+  transcript position and draft. Child events, permission resolution, and
+  AskTool answers are scoped to the child id and use the existing Host-owned
+  path. Add to main chat appends without replacing the parent draft; promotion
+  activates the normal child and releases only its side-chat projection;
+  closing a sent tab preserves the durable child without stopping it. A rejected
+  prompt keeps the created child retryable, duplicate first sends create one
+  child, and late fork/send completion cannot reopen a closed tab or overwrite a
+  different session's draft. Child transcript selection actions target the
+  child draft and annotation list; a nested docked tab is not created under a
+  hidden WorkPanel context.
+- **Coverage**: `node scripts/e2e-selection-reference-workflow.mjs` exercises
+  first-send fork/send, child streaming, permission and AskTool UI/resolution,
+  parent selection, Add to main chat, promotion, and close retention with a
+  deterministic Host/store fixture in real Chromium. It also selects child
+  transcript text, appends into the compact child draft, attaches/reviews a
+  child annotation, and verifies that nested Ask in side chat is not exposed.
+  `node --test
+  apps/desktop/test/side-chat-lifecycle.test.mjs
+  apps/desktop/test/side-chat-store.test.mjs
+  apps/desktop/test/session-fork-running.test.mjs
+  apps/desktop/test/work-panel-tabs.test.mjs
+  apps/desktop/test/session-runtime-updates.test.mjs
+  apps/desktop/test/session-message-presentation.test.mjs
+  apps/desktop/test/plugin-action-slots.test.mjs
+  apps/desktop/test/chat-context-menu-surface.test.mjs
+  apps/desktop/test/chat-error-message.test.mjs` covers lifecycle races, retry,
+  tab cleanup, session-scoped history/error actions, and session event projections.
+  The browser fixture does
+  not call a real provider or Host.
+- **Specs**: `04-ux/08-component-spec.md` §7, `04-ux/09-interaction-patterns.md`
+  §7.6, ADR 0346.
+- **Acceptance**: C (chat stream), E (tools and permissions), Quality.
+- **Milestone**: Maintenance.
+- **Status**: Automated Chromium/store coverage; full desktop visual and real
+  Host/provider acceptance remain separate.
 
 #### E2E-CHAT-radial-background-menu: Radial menu on the empty transcript background
 
@@ -11058,6 +11178,8 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
 | A / C / F / Quality — Tray session navigation | E2E-TRAY-bounded-session-navigation |
 | B — Model config | E2E-005, E2E-PROVIDER-custom-endpoint-no-api-key, E2E-006, E2E-007, E2E-038, E2E-050, E2E-052, E2E-055, E2E-066, E2E-080, E2E-082, E2E-102c, E2E-102d, E2E-102e, E2E-151, E2E-154, E2E-163, E2E-166, E2E-172, E2E-174, E2E-197, E2E-005G, E2E-005J, E2E-199, E2E-201, E2E-202, E2E-203, E2E-205, E2E-206, E2E-209, E2E-PLUGIN-provider-catalog-add-service |
 | C — Conversation & stream | E2E-CHAT-long-history-stream-keeps-responsive, E2E-CHAT-running-status-survives-output-pauses, E2E-008, E2E-008d, E2E-008e, E2E-008a, E2E-009, E2E-010, E2E-011, E2E-011a, E2E-011b, E2E-011d, E2E-011e, E2E-011g, E2E-031, E2E-040, E2E-047, E2E-048, E2E-048A, E2E-049, E2E-052, E2E-053, E2E-054, E2E-055, E2E-059, E2E-059a, E2E-060c, E2E-060d, E2E-061, E2E-061a, E2E-062, E2E-064, E2E-065, E2E-068, E2E-071, E2E-073, E2E-074, E2E-075, E2E-081, E2E-083, E2E-084, E2E-086, E2E-087, E2E-088, E2E-088b, E2E-089, E2E-090, E2E-COMPOSER-narrow-controls, E2E-094, E2E-095, E2E-096, E2E-097, E2E-098, E2E-099, E2E-102, E2E-102a, E2E-102b, E2E-102c, E2E-102d, E2E-102g, E2E-106, E2E-109, E2E-111, E2E-114, E2E-116, E2E-117, E2E-118, E2E-119, E2E-120, E2E-121, E2E-218, E2E-259, E2E-219, E2E-AGENTS-001, E2E-142, E2E-144, E2E-145, E2E-146, E2E-146a, E2E-147, E2E-151, E2E-154, E2E-155, E2E-158, E2E-159, E2E-161, E2E-162, E2E-166, E2E-172, E2E-173, E2E-174, E2E-177, E2E-178, E2E-179, E2E-180, E2E-182, E2E-183, E2E-187, E2E-198, E2E-199, E2E-202, E2E-203, E2E-207, E2E-208, E2E-CHAT-content-width-handles, E2E-250, E2E-102i, E2E-PLUGIN-session-orchestrator-real-workers, E2E-SUBAGENT-settlement-updates-before-parent-poll, E2E-SUBAGENT-resume-a-settled-delegation |
+| C / Quality — Transcript selection references | E2E-CHAT-selection-capture-v2, E2E-CHAT-annotation-citation-flow-v2 |
+| C / E / Quality — Docked follow-up session | E2E-CHAT-docked-follow-up-tab-v2 |
 | C — Conversation & stream (composer drafts) | E2E-011c, E2E-011c-1, E2E-011c-2 |
 | C / F / Security / Quality — Goal lifecycle | E2E-GOAL-lifecycle |
 | C / F / Quality — Goal budget editing | E2E-GOAL-lifecycle, E2E-GOAL-budget-editor |

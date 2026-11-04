@@ -55,6 +55,8 @@ import type {
 } from "../lib/composer-smart-stop";
 import type { SidebarSessionOutcome } from "../lib/sidebar-session-status";
 import type { WorkPanelContext, WorkPanelTab } from "../lib/work-panel-tabs";
+import type { ResponseAnnotation } from "../lib/response-annotations";
+import type { SideChatLifecycle } from "../lib/side-chat-lifecycle";
 
 export type { WorkPanelTab } from "../lib/work-panel-tabs";
 
@@ -90,6 +92,14 @@ export type AgentTurnResult = {
 };
 
 export type PendingPlanRefreshResult = "pending" | "terminal" | "unavailable";
+
+export type SideChatState = SideChatLifecycle & {
+  id: string;
+  parentSessionId: string;
+  sourceMessageId: string;
+  excerpt: string;
+  messages: UiMessage[];
+};
 
 export type SessionHistoryWindow = {
   messageStart: number;
@@ -201,6 +211,35 @@ export type AppState = {
   goalProgress: Record<string, GoalProgressEvent>;
   /** Host-authoritative Todo snapshots keyed by session. */
   sessionTodos: Record<string, SessionTodoSnapshot>;
+  /** Unsent renderer-only excerpt attachments, isolated by session. */
+  responseAnnotations: Record<string, ResponseAnnotation[]>;
+  /** Transient docked follow-up sessions; the child sessions themselves are durable. */
+  sideChats: Record<string, SideChatState>;
+  openSideChat: (
+    parentSessionId: string,
+    sourceMessageId: string,
+    excerpt: string,
+  ) => string | null;
+  setSideChatDraft: (sideChatId: string, text: string) => void;
+  sendSideChatPrompt: (sideChatId: string, content: string) => Promise<boolean>;
+  closeSideChat: (sideChatId: string) => void;
+  promoteSideChatToConversation: (sideChatId: string) => Promise<void>;
+  addResponseAnnotation: (
+    sessionId: string,
+    sourceMessageId: string,
+    excerpt: string,
+  ) => string | null;
+  editResponseAnnotation: (
+    sessionId: string,
+    annotationId: string,
+    comment?: string,
+  ) => void;
+  removeResponseAnnotation: (sessionId: string, annotationId: string) => void;
+  clearResponseAnnotations: (sessionId: string) => void;
+  consumeAcceptedAnnotations: (
+    sessionId: string,
+    submittedSnapshot: readonly ResponseAnnotation[],
+  ) => void;
   applyTodosChanged: (snapshot: SessionTodoSnapshot) => void;
   toasts: ToastItem[];
   notifications: AppNotification[];
@@ -237,6 +276,11 @@ export type AppState = {
   }) => Promise<void>;
   forkSession: (id: string) => Promise<void>;
   forkAssistantMessage: (messageId: string, selectedText?: string) => Promise<void>;
+  /** Fork a completed assistant row from an explicit parent without navigating. */
+  forkAssistantMessageInSession: (
+    sessionId: string,
+    messageId: string,
+  ) => Promise<string | null>;
   configureActiveSession: (config: {
     mode: Mode;
     providerId?: string;
@@ -443,7 +487,7 @@ export type AppState = {
     targetTabId: string,
     insertAfter: boolean,
   ) => void;
-  closeWorkPanelTab: (tabId: string) => void;
+  closeWorkPanelTab: (tabId: string, sessionId?: string) => void;
   closeOtherWorkPanelTabs: (tabId: string) => void;
   closeAllWorkPanelTabs: () => void;
   collapseWorkPanel: () => void;

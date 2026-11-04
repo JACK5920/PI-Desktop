@@ -10,6 +10,8 @@ import { getExtraMessageAttachments } from "../src/features/chat/transcript/extr
 import { isRemoteSession, safeSessionSummary, sessionAllows } from "../src/lib/remote-session-safety.ts";
 
 const t = (key, values) => values?.name ? `${key}: ${values.name}` : key;
+let paneSessionId = "local-session";
+let historyActionsAllowed = true;
 const store = {
   sessions: [],
   editUserMessage: async () => true,
@@ -44,7 +46,15 @@ function loadComponent(name, extras = {}) {
     "react-i18next": { useTranslation: () => ({ t }) },
     "../../../stores/app-store": { useAppStore },
     "../../../lib/remote-session-safety": { isRemoteSession, safeSessionSummary, sessionAllows },
-    "../../../plugins/renderer-slots/use-slots": { useSlotSessionId: () => "local-session" },
+    "../../../lib/response-annotations": {
+      annotationsForAssistantMessage: () => [],
+      requestTextWithoutAnnotations: (content) => content,
+      transcriptMessagesForSession: () => [],
+    },
+    "./transcript-action-scope": {
+      useTranscriptHistoryActionsAllowed: () => historyActionsAllowed,
+    },
+    "../../../plugins/renderer-slots/use-slots": { useSlotSessionId: () => paneSessionId },
     "../../../hooks/use-preview-target": { useOpenChatFileRef: () => () => {} },
     "../../../lib/chat-links": { splitChatText: () => [] },
     "../../../components/Markdown": { Markdown: ({ source: text }) => text },
@@ -91,7 +101,11 @@ const provenance = {
   targetSessionId: "worker-session-id",
   kind: "task",
 };
-const render = (message) => renderToStaticMarkup(React.createElement(MessageRow, { message, isRunning: false }));
+const render = (message, { sessionId = "local-session", allowHistoryMutations = true } = {}) => {
+  paneSessionId = sessionId;
+  historyActionsAllowed = allowHistoryMutations;
+  return renderToStaticMarkup(React.createElement(MessageRow, { message, isRunning: false }));
+};
 
 test("a human message keeps editing, deletion and regenerate navigation", () => {
   const html = render(userMessage);
@@ -99,6 +113,13 @@ test("a human message keeps editing, deletion and regenerate navigation", () => 
   assert.match(html, /aria-label="chat.editMessage"/);
   assert.match(html, /aria-label="chat.deleteMessage"/);
   assert.match(html, /aria-label="chat.revisions"/);
+});
+
+test("a docked child transcript keeps selection and copy but hides history mutations", () => {
+  const html = render(userMessage, { sessionId: "side-chat-child", allowHistoryMutations: false });
+  assert.match(html, /aria-label="chat.copy"/);
+  assert.match(html, /data-selection-eligible="true"/);
+  assert.doesNotMatch(html, /chat.editMessage|chat.deleteMessage|chat.revisions/);
 });
 
 test("an attributed session message names its source and cannot be edited as human input", () => {

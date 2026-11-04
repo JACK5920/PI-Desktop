@@ -168,6 +168,7 @@ export function createSessionSlice({
   | "newSession"
   | "forkSession"
   | "forkAssistantMessage"
+  | "forkAssistantMessageInSession"
   | "configureActiveSession"
   | "abortSession"
 > {
@@ -817,6 +818,31 @@ export function createSessionSlice({
           errorCode: (error as { code?: string })?.code ?? null,
         });
       }
+    },
+
+    forkAssistantMessageInSession: async (sessionId, messageId) => {
+      const state = get();
+      if (!sessionId || !messageId || state.selectingSessionId === sessionId) return null;
+      const source = state.sessions.find((session) => session.id === sessionId);
+      if (!source || !sessionAllows(source, "canEditMessages") ||
+        !sessionAllows(source, "canPrompt")) return null;
+      const transcript = state.activeSessionId === sessionId
+        ? state.messages
+        : state.retainedTranscripts[sessionId] ?? runtime.sessionTranscriptCache.get(sessionId) ?? [];
+      const message = transcript.find((candidate) => candidate.id === messageId);
+      if (!message || message.role !== "assistant" || message.status === "streaming") return null;
+
+      const sourceTitle = source.title.trim() || i18n.t("chat.untitledTask");
+      const result = await api.forkSession(
+        sessionId,
+        i18n.t("nav.branchTitle", { title: sourceTitle }),
+        messageId,
+      );
+      // A side chat is a separate reading surface. Persist the new child in
+      // the session inventory/cache, but never let this action navigate away
+      // from the parent conversation.
+      commitForkedSession(result.session, { activate: false, clearError: true });
+      return result.session.id;
     },
 
     configureActiveSession: async (config) => {

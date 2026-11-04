@@ -20,6 +20,10 @@ const assistantTurnSource = await readFile(
   new URL("../src/features/chat/transcript/AssistantTurn.tsx", import.meta.url),
   "utf8",
 );
+const sideChatTabSource = await readFile(
+  new URL("../src/components/workpanel/SideChatTab.tsx", import.meta.url),
+  "utf8",
+);
 
 test("the pointer-anchored menu portals, measures, and closes without trapping focus", () => {
   assert.match(menuSource, /portalToBody\(/);
@@ -55,6 +59,20 @@ test("the transcript owns one menu and each speaking row can open it", () => {
     assistantTurnSource,
     /onAskAboutSelection:\s*\(selection\)\s*=>\s*\{\s*if \(actionMessage\) void forkAssistantMessage\(actionMessage\.id, selection\);/,
   );
+});
+
+test("docked child assistant history hides actions owned by the active parent session", () => {
+  assert.match(
+    assistantTurnSource,
+    /const canMutateHistory = canEditMessages && historyActionsAllowed;/,
+  );
+  assert.match(
+    assistantTurnSource,
+    /complete: complete && Boolean\(actionMessage\) && canMutateHistory,/,
+  );
+  assert.equal((assistantTurnSource.match(/\{canMutateHistory \? <TooltipButton/g) ?? []).length, 2);
+  assert.match(sideChatTabSource, /allowHistoryMutations=\{false\}/);
+  assert.match(transcriptSource, /TranscriptHistoryActionsContext\.Provider value=\{props\.allowHistoryMutations \?\? true\}/);
 });
 
 test("the context-menu surface is a measured fixed layer", () => {

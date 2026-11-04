@@ -1,4 +1,4 @@
-import { memo, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { memo, useCallback, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { useTranslation } from "react-i18next";
 import type { PlanningState, RadialMenuAction, UiMessage } from "@pi-desktop/shared";
 import { proposalKindForMode } from "@pi-desktop/shared";
@@ -45,13 +45,16 @@ import {
 } from "./TranscriptMenu";
 import { conversationMenuItems, hasConversationToCopy } from "./menu-items";
 import { browserPluginTab } from "../../../lib/work-panel-tabs";
-import { isRemoteSession } from "../../../lib/remote-session-safety";
+import { isRemoteSession, sessionAllows } from "../../../lib/remote-session-safety";
 import {
   RADIAL_MENU_ACTION_LABEL_KEYS,
   RADIAL_MENU_DIRECTIONS,
   resolveRadialMenu,
 } from "../../../lib/radial-menu";
 import { SlotSessionProvider } from "../../../plugins/renderer-slots/use-slots";
+import { TranscriptSelectionToolbar } from "./TranscriptSelectionToolbar";
+import type { TranscriptSelection } from "../../../lib/transcript-selection";
+import { TranscriptHistoryActionsContext } from "./transcript-action-scope";
 
 type ChatTranscriptProps = {
   sessionId: string | undefined;
@@ -62,6 +65,8 @@ type ChatTranscriptProps = {
   pendingPermission?: PendingPermission;
   /** Requests waiting behind this one, from other delegates (ADR 0062). */
   queuedPermissions?: number;
+  /** Restore permission focus to the owner of a compact transcript surface. */
+  permissionFocusTarget?: () => HTMLElement | null;
   askPending?: boolean;
   planningState?: PlanningState;
   /**
@@ -79,6 +84,12 @@ type ChatTranscriptProps = {
   onLoadNewer?: () => Promise<void>;
   onReturnToLatest?: () => void;
   navigationLoading?: boolean;
+  /** Disable starting a nested docked chat when this transcript is already in one. */
+  allowSideChatSelection?: boolean;
+  /** Append a selected user excerpt to a compact pane-owned draft instead of the main Composer. */
+  onAppendUserSelection?: (selection: TranscriptSelection) => void;
+  /** Hide history mutations when this transcript is a docked, non-active child. */
+  allowHistoryMutations?: boolean;
 };
 
 /**
@@ -90,9 +101,11 @@ export const ChatTranscript = memo(function ChatTranscript(
   props: ChatTranscriptProps,
 ) {
   return (
-    <TranscriptMenuProvider>
-      <TranscriptBody {...props} />
-    </TranscriptMenuProvider>
+    <TranscriptHistoryActionsContext.Provider value={props.allowHistoryMutations ?? true}>
+      <TranscriptMenuProvider>
+        <TranscriptBody {...props} />
+      </TranscriptMenuProvider>
+    </TranscriptHistoryActionsContext.Provider>
   );
 });
 
@@ -104,6 +117,7 @@ function TranscriptBody({
   isRunning,
   pendingPermission,
   queuedPermissions = 0,
+  permissionFocusTarget,
   askPending = false,
   planningState,
   paneVisible = true,
@@ -115,6 +129,8 @@ function TranscriptBody({
   onLoadNewer,
   onReturnToLatest,
   navigationLoading = false,
+  allowSideChatSelection = true,
+  onAppendUserSelection,
 }: ChatTranscriptProps) {
   const { t } = useTranslation();
   const openTranscriptMenu = useTranscriptMenu();
@@ -129,6 +145,7 @@ function TranscriptBody({
       : undefined,
   );
   const openWorkPanelTab = useAppStore((state) => state.openWorkPanelTab);
+  const openSideChat = useAppStore((state) => state.openSideChat);
   const openWorkPanel = useAppStore((state) => state.openWorkPanel);
   const collapseWorkPanel = useAppStore((state) => state.collapseWorkPanel);
   const workPanelOpen = useAppStore((state) => state.workPanelOpen);
@@ -141,6 +158,7 @@ function TranscriptBody({
     y: number;
   } | null>(null);
   const transcriptRunning = isRunning && liveTail;
+  const [selectionRoot, setSelectionRoot] = useState<HTMLDivElement | null>(null);
   const latestTurnResult = useAppStore((state) =>
     sessionId ? state.latestTurnResults[sessionId] : undefined,
   );
@@ -200,6 +218,10 @@ function TranscriptBody({
     readingWindow,
     onRestoreReading,
   });
+  const bindContentRef = useCallback((node: HTMLDivElement | null) => {
+    contentRef.current = node;
+    setSelectionRoot(node);
+  }, [contentRef]);
 
   const continuationCursor = useAppStore((state) =>
     sessionId ? state.transcriptViews[sessionId]?.messageEnd : undefined,
@@ -458,7 +480,7 @@ function TranscriptBody({
         role="log"
         aria-live="polite"
       >
-        <div className="thread-content" ref={contentRef}>
+        <div className="thread-content" ref={bindContentRef}>
           <div
             ref={historyBoundaryRef}
             className="transcript-history-loading"
@@ -505,6 +527,7 @@ function TranscriptBody({
               key={pendingPermission.requestId}
               permission={pendingPermission}
               queued={queuedPermissions}
+              focusTarget={permissionFocusTarget}
             />
           ) : null}
           {runtimeStatusLane ? (
@@ -551,6 +574,28 @@ function TranscriptBody({
       {navigationLoading ? (
         <div className="transcript-navigation-loading" role="status">{t("chat.loadingSession")}</div>
       ) : null}
+      <TranscriptSelectionToolbar
+        transcriptRoot={selectionRoot}
+        sessionId={sessionId}
+        onAppendUserSelection={onAppendUserSelection}
+        onAskInSideChat={
+          allowSideChatSelection &&
+          sessionSummary &&
+          sessionAllows(sessionSummary, "canEditMessages") &&
+          sessionAllows(sessionSummary, "canPrompt")
+            ? (selection) => {
+              const sideChatId = openSideChat(
+                selection.sessionId,
+                selection.messageId,
+                selection.excerpt,
+              );
+              if (!sideChatId) {
+                showToast(t("chat.sideChatOpenFailed"), { variant: "error" });
+              }
+            }
+            : undefined
+        }
+      />
       {(showJump || readingWindow) && !veilCovering ? (
         <TooltipButton
           className="jump-latest-btn"

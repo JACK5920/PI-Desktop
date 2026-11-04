@@ -72,6 +72,7 @@ const shared = load(new URL("../src/features/chat/transcript/shared.tsx", import
   "react/jsx-runtime": jsxRuntime,
   "react-i18next": { useTranslation: () => ({ t, i18n: { language: locale } }) },
   "@pi-desktop/shared": await import("@pi-desktop/shared"),
+  "../../../plugins/renderer-slots/use-slots": { useSlotSessionId: () => "local-session" },
   "./disclosure": {},
   "./TextShimmer": {
     TextShimmer: ({ text }) => React.createElement("span", null, text),
@@ -139,6 +140,12 @@ const { MessageRow } = load(new URL("../src/features/chat/transcript/MessageRow.
     sessionAllows,
   },
   "../../../plugins/renderer-slots/use-slots": { useSlotSessionId: () => "local-session" },
+  "../../../lib/response-annotations": {
+    annotationsForAssistantMessage: () => [],
+    requestTextWithoutAnnotations: (content) => content,
+    transcriptMessagesForSession: () => [],
+  },
+  "./transcript-action-scope": { useTranscriptHistoryActionsAllowed: () => true },
   "../../../plugins/renderer-slots/slot-message": { slotMessage: () => undefined },
   "./menu-items": { userMessageMenuItems: () => [] },
   "./ActionBarSlots": { ActionSlotSide: () => null },

@@ -1341,6 +1341,45 @@ Running turns and pending approvals continue to gate the controls.
 - Selection rules must not disable `focus-visible` feedback or native window
   drag regions.
 
+### 7.6 Transcript selection references and side chats (D686)
+
+- A non-empty selection wholly owned by one eligible local writable transcript
+  message captures its session id, message id, role, excerpt, and range before
+  an action receives focus. Actions use that captured excerpt even if the native
+  selection collapses or changes afterward. The toolbar is dismissed on Escape,
+  outside press, invalid/collapsed selection, owner-session change, or loss of
+  the eligible message; repositioning after scroll/resize is allowed only while
+  the captured range remains valid.
+- The toolbar copies only the captured excerpt, capped at 2,000 characters
+  without splitting a Unicode code point. Selected user text can be appended as
+  a localized editable quote to the current Composer; selected assistant text
+  can open the optional-comment editor and attach the excerpt to the next
+  ordinary request. Neither action sends. Message-row Copy and context-menu
+  Copy keep their existing full-message / live-selection semantics, and
+  **Ask about selection** remains the ordinary activated-fork context-menu path.
+- The Composer's annotation review exposes edit, remove, and clear-all actions.
+  Ordinary send and queued admission serialize the exact attachment snapshot as
+  JSON before the user's request text; only unchanged attachments are consumed
+  after Host admission. Rejected submissions keep the attachment, and an
+  annotation alone does not qualify as a prompt. Transcript, edit, queue, and
+  title projections show only the user's request text. A citation is recognized
+  only for exact `:codex-annotation{index="N"}` syntax associated with that
+  assistant turn's preceding request; activation opens a safe text-only
+  excerpt/comment/source card. Unknown citations remain ordinary text.
+- **Ask in side chat** creates an unsent WorkPanel draft. The first explicit
+  non-empty Send creates a normal non-activating child fork and submits only
+  through the existing child-session path. The parent session, reading
+  position, and Composer remain in place. Child streaming, Stop, permissions,
+  and AskTool requests remain scoped to that child and use existing Host-owned
+  controls. Add to main chat appends the latest answer to the parent draft; Open
+  as a conversation selects the normal child. Closing a sent tab releases its
+  transient projection without stopping or deleting the durable child. A late
+  fork/send completion cannot recreate a closed tab or overwrite another
+  session's newer draft. Selection copy, quote-to-draft, and annotations also
+  work in the child transcript; child quotes append to its compact input and
+  pending annotations are reviewable there. Nested Ask in side chat is not
+  offered from a docked child; promote it to a normal conversation first.
+
 ## 8. Drag / drop
 
 ### 8.1 MVP status

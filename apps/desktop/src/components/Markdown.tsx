@@ -18,7 +18,11 @@ import {
   type RefObject,
   type ReactNode,
 } from "react";
-import ReactMarkdown, { type Components, type Options } from "react-markdown";
+import ReactMarkdown, {
+  defaultUrlTransform,
+  type Components,
+  type Options,
+} from "react-markdown";
 import rehypeKatex from "rehype-katex";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
@@ -70,6 +74,12 @@ import { useAppStore } from "../stores/app-store";
 import { useReferencedImageDataUrl } from "../lib/use-referenced-image-data-url";
 import { absoluteImagePath, remarkLocalImagePaths } from "../lib/markdown-image-paths";
 import { remarkNormalizeWrappedMarkdownLinkDestinations } from "../lib/markdown-link-destinations";
+import {
+  isResponseAnnotationCitationNode,
+  remarkResponseAnnotationCitations,
+  type ParsedResponseAnnotation,
+} from "../lib/response-annotations";
+import { AnnotationCitation } from "../features/chat/transcript/AnnotationCitation";
 import { useOpenChatFileRef } from "../hooks/use-preview-target";
 import {
   useChatFileMenuItems,
@@ -426,6 +436,8 @@ const MarkdownBlockContext = createContext({
   closedFence: false,
   renderDiagrams: true,
   originalRaw: "",
+  responseAnnotations: [] as readonly ParsedResponseAnnotation[],
+  annotationSessionId: undefined as string | undefined,
 });
 
 const MarkdownBaseDirContext = createContext("");
@@ -573,11 +585,12 @@ function InlineCode({
 }
 
 function Anchor({
-  node: _node,
+  node,
   children,
   href,
   ...rest
 }: ComponentProps<"a"> & { node?: unknown }) {
+  const { responseAnnotations, annotationSessionId } = useContext(MarkdownBlockContext);
   const { t } = useTranslation();
   const localToolsAllowed = useChatSessionCapability("canUseLocalTools");
   const root = useAppStore((s) => localToolsAllowed ? s.workspace?.path : undefined);
@@ -588,6 +601,22 @@ function Anchor({
   const showToast = useAppStore((s) => s.showToast);
 
   const { contextMenu, openContextMenu, closeContextMenu } = useContextMenu();
+
+  const citationIndex = isResponseAnnotationCitationNode(node)
+    ? /^pi-annotation:([1-9]\d*)$/.exec(href ?? "")
+    : null;
+  if (citationIndex) {
+    const index = Number(citationIndex[1]);
+    const annotation = responseAnnotations[index - 1];
+    if (!annotation) return <>{children}</>;
+    return (
+      <AnnotationCitation
+        annotation={annotation}
+        index={index}
+        sessionId={annotationSessionId}
+      />
+    );
+  }
 
   /*
     Copying reports through the toast host: the menu closes the moment the item
@@ -843,6 +872,7 @@ const staticRemarkPlugins = [
   ...markdownRemarkPlugins,
   remarkNormalizeWrappedMarkdownLinkDestinations,
   remarkLocalImagePaths,
+  remarkResponseAnnotationCitations,
 ];
 
 // Extend the default schema only for the media elements rendered above, plus
@@ -851,8 +881,13 @@ const staticRemarkPlugins = [
 // (single-line or mid-paragraph) as inline math instead of display math.
 const sanitizeSchema = {
   ...defaultSchema,
+  protocols: {
+    ...defaultSchema.protocols,
+    href: [...(defaultSchema.protocols?.href ?? []), "pi-annotation"],
+  },
   attributes: {
     ...defaultSchema.attributes,
+    a: [...(defaultSchema.attributes?.a ?? []), "dataPiAnnotationCitation"],
     code: [["className", /^language-./, "math-inline", "math-display"]],
     img: [...(defaultSchema.attributes?.img || []), "src", "alt", "title", "className"],
     audio: ["src", "controls", "preload", "className"],
@@ -894,6 +929,8 @@ const Block = memo(function MarkdownBlock({
   renderDiagrams,
   workspaceRoot,
   baseDir,
+  responseAnnotations,
+  annotationSessionId,
 }: {
   raw: string;
   originalRaw: string;
@@ -901,14 +938,18 @@ const Block = memo(function MarkdownBlock({
   renderDiagrams: boolean;
   workspaceRoot?: string | null;
   baseDir?: string;
+  responseAnnotations?: readonly ParsedResponseAnnotation[];
+  annotationSessionId?: string;
 }) {
   const context = useMemo(
     () => ({
       closedFence: isClosedFencedCodeBlock(raw),
       renderDiagrams,
       originalRaw,
+      responseAnnotations: responseAnnotations ?? [],
+      annotationSessionId,
     }),
-    [raw, originalRaw, renderDiagrams],
+    [raw, originalRaw, renderDiagrams, responseAnnotations, annotationSessionId],
   );
   const remarkPlugins = useMemo(
     () => [
@@ -944,6 +985,9 @@ const Block = memo(function MarkdownBlock({
           remarkPlugins={remarkPlugins}
           rehypePlugins={positionedRehypePlugins}
           components={markdownComponents}
+          urlTransform={(url) =>
+            /^pi-annotation:[1-9]\d*$/.test(url) ? url : defaultUrlTransform(url)
+          }
         >
           {raw}
         </ReactMarkdown>
@@ -957,6 +1001,8 @@ export const Markdown = memo(function Markdown({
   renderDiagrams = true,
   baseDir,
   streaming = false,
+  responseAnnotations,
+  annotationSessionId,
 }: {
   source: string;
   renderDiagrams?: boolean;
@@ -964,6 +1010,9 @@ export const Markdown = memo(function Markdown({
   streaming?: boolean;
   /** Workspace-relative directory of the source file, for `./` / `../` links. */
   baseDir?: string;
+  /** Structured source excerpts attached to the user prompt for this answer. */
+  responseAnnotations?: readonly ParsedResponseAnnotation[];
+  annotationSessionId?: string;
 }) {
   const workspaceRoot = useAppStore((s) => s.workspace?.path);
 
@@ -1050,6 +1099,8 @@ export const Markdown = memo(function Markdown({
               renderDiagrams={renderDiagrams}
               workspaceRoot={workspaceRoot}
               baseDir={baseDir}
+              responseAnnotations={responseAnnotations}
+              annotationSessionId={annotationSessionId}
             />
           );
         })}

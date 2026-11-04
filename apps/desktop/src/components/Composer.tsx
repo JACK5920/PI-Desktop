@@ -59,6 +59,7 @@ import { useComposerModelMenu } from "../features/chat/composer/hooks/useCompose
 import { useVoiceInput } from "../features/voice/useVoiceInput";
 import { ComposerToolbar } from "../features/chat/composer/ComposerToolbar";
 import { ComposerStatus } from "../features/chat/composer/ComposerStatus";
+import { ComposerAnnotationAttachments } from "../features/chat/composer/ComposerAnnotationAttachments";
 
 const EMPTY_QUEUED_PROMPTS: QueuedPrompt[] = [];
 
@@ -592,6 +593,7 @@ export function Composer({
               onAccept={completions.acceptCompletion}
             />
           ) : null}
+          <ComposerAnnotationAttachments />
           <ComposerInput
             imagePreview={draft.imagePreview}
             inputRef={ref}
