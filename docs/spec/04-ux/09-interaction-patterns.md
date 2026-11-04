@@ -1372,7 +1372,9 @@ Running turns and pending approvals continue to gate the controls.
   position, and Composer remain in place. Child streaming, Stop, permissions,
   and AskTool requests remain scoped to that child and use existing Host-owned
   controls. Add to main chat appends the latest answer to the parent draft; Open
-  as a conversation selects the normal child. Closing a sent tab releases its
+  as a conversation selects the normal child. Promotion waits for an in-flight
+  send to settle and carries any retained draft into the child Composer without
+  replacing its existing draft. Closing a sent tab releases its
   transient projection without stopping or deleting the durable child. A late
   fork/send completion cannot recreate a closed tab or overwrite another
   session's newer draft. Selection copy, quote-to-draft, and annotations also

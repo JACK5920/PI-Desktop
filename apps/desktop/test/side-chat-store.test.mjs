@@ -13,6 +13,8 @@ await i18n.init({
   } } } },
 });
 const { createSideChatSlice } = await import("../src/stores/slices/side-chat-slice.ts");
+const { deleteComposerDraft, draftKeyForSession, readComposerDraft, writeComposerDraft } =
+  await import("../src/lib/composer-draft-cache.ts");
 
 function deferred() {
   let resolve;
@@ -29,6 +31,7 @@ function fixture() {
     sessions: [{ id: "parent", source: "local", title: "Parent" }],
     messages: [assistant],
     retainedTranscripts: {},
+    composerPrefill: null,
     sideChats: {},
     openWorkPanelTabForSession: (sessionId, tab) => { opened.push({ sessionId, tab }); },
     closeWorkPanelTab: (tabId, sessionId) => { closed.push({ tabId, sessionId }); },
@@ -133,4 +136,45 @@ test("promoting a side chat closes its transient tab and selects the durable chi
   await h.slice.promoteSideChatToConversation(sideChatId);
   assert.equal(h.get().sideChats[sideChatId], undefined);
   assert.deepEqual(h.selected, ["child-1"]);
+});
+
+test("promoting during a rejected first send preserves the draft in the child composer", async (t) => {
+  const h = fixture();
+  const sideChatId = h.slice.openSideChat("parent", "answer-1", "quote");
+  assert.ok(sideChatId);
+  const childSessionId = "child-promotion-draft";
+  const draftKey = draftKeyForSession(childSessionId);
+  const existingFile = { path: "/tmp/child-note.txt", name: "child-note.txt", kind: "file" };
+  writeComposerDraft(draftKey, { text: "existing child draft", fileReferences: [existingFile] });
+  t.after(() => deleteComposerDraft(draftKey));
+
+  const sendResult = deferred();
+  const sendStarted = deferred();
+  h.set({
+    sendPrompt: async (...args) => {
+      h.sendCalls.push(args);
+      sendStarted.resolve();
+      return sendResult.promise;
+    },
+  });
+
+  const sending = h.slice.sendSideChatPrompt(sideChatId, "question");
+  h.fork.resolve(childSessionId);
+  await sendStarted.promise;
+
+  const promoting = h.slice.promoteSideChatToConversation(sideChatId);
+  await Promise.resolve();
+  assert.ok(h.get().sideChats[sideChatId], "promotion must keep the side-chat draft until send outcome is known");
+  assert.deepEqual(h.selected, [], "promotion must not navigate away while the first send is unresolved");
+
+  sendResult.resolve(false);
+  assert.equal(await sending, false);
+  await promoting;
+
+  assert.equal(h.get().sideChats[sideChatId], undefined);
+  assert.deepEqual(h.selected, [childSessionId]);
+  assert.deepEqual(readComposerDraft(draftKey), {
+    text: "existing child draft\n\nquestion",
+    fileReferences: [existingFile],
+  });
 });

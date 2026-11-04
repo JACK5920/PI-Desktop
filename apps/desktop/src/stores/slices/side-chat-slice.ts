@@ -7,6 +7,11 @@ import {
   resolveSideChatFork,
   resolveSideChatSend,
 } from "../../lib/side-chat-lifecycle";
+import {
+  draftKeyForSession,
+  readComposerDraft,
+  writeComposerDraft,
+} from "../../lib/composer-draft-cache";
 import { sideChatWorkPanelTab } from "../../lib/work-panel-tabs";
 import type { AppState, SideChatState } from "../app-state";
 import type { StoreAccess } from "./types";
@@ -200,10 +205,35 @@ export function createSideChatSlice({ get, set, getCachedTranscript }: SideChatS
     closeSideChat,
 
     promoteSideChatToConversation: async (sideChatId) => {
+      const pendingSend = pendingSends.get(sideChatId);
+      if (pendingSend) await pendingSend;
+
       const current = get().sideChats[sideChatId];
       if (!current?.childSessionId) return;
+      const { childSessionId, draftText } = current;
+      if (draftText.trim()) {
+        const draftKey = draftKeyForSession(childSessionId);
+        const state = get();
+        const pendingPrefill = state.composerPrefill?.sessionId === childSessionId
+          ? state.composerPrefill
+          : undefined;
+        const cachedDraft = readComposerDraft(draftKey);
+        const existingText = pendingPrefill?.text ?? cachedDraft?.text ?? "";
+        const separator = existingText.length === 0
+          ? ""
+          : existingText.endsWith("\n") ? "\n" : "\n\n";
+        const promotedDraft = {
+          text: `${existingText}${separator}${draftText}`,
+          fileReferences: (pendingPrefill?.fileReferences ?? cachedDraft?.fileReferences ?? [])
+            .map((reference) => ({ ...reference })),
+        };
+        writeComposerDraft(draftKey, promotedDraft);
+        if (pendingPrefill) {
+          set({ composerPrefill: { sessionId: childSessionId, ...promotedDraft } });
+        }
+      }
       closeSideChat(sideChatId);
-      await get().selectSession(current.childSessionId);
+      await get().selectSession(childSessionId);
     },
   };
 }

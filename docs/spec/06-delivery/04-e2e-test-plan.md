@@ -5668,7 +5668,9 @@ window; opening a normal panel afterward must still work.
   compact draft and attach/review a selected assistant annotation; verify nested
   Ask in side chat is not offered and history mutation actions are hidden while
   docked. Verify Continue on a child error targets the child, not the active
-  parent. 7) Exercise rejected prompt retry and close/session-switch races.
+  parent. 7) Request promotion during a deferred first send, reject the send,
+  and verify the unsent text survives in the child Composer; also exercise
+  retry and close/session-switch races.
 - **Expected**: Only explicit Send forks and submits, using the selected
   assistant message as the anchor. The parent remains active with its original
   transcript position and draft. Child events, permission resolution, and
@@ -5678,15 +5680,19 @@ window; opening a normal panel afterward must still work.
   closing a sent tab preserves the durable child without stopping it. A rejected
   prompt keeps the created child retryable, duplicate first sends create one
   child, and late fork/send completion cannot reopen a closed tab or overwrite a
-  different session's draft. Child transcript selection actions target the
-  child draft and annotation list; a nested docked tab is not created under a
-  hidden WorkPanel context.
+  different session's draft. Promotion waits for an in-flight first send to
+  settle; if it is rejected, the retained side-chat draft is appended to the
+  child Composer without replacing its existing text or file references. Child
+  transcript selection actions target the child draft and annotation list; a
+  nested docked tab is not created under a hidden WorkPanel context.
 - **Coverage**: `node scripts/e2e-selection-reference-workflow.mjs` exercises
   first-send fork/send, child streaming, permission and AskTool UI/resolution,
   parent selection, Add to main chat, promotion, and close retention with a
   deterministic Host/store fixture in real Chromium. It also selects child
   transcript text, appends into the compact child draft, attaches/reviews a
   child annotation, and verifies that nested Ask in side chat is not exposed.
+  `side-chat-store.test.mjs` verifies that promotion waits for a rejected first
+  send and retains its draft alongside existing child-composer content.
   `node --test
   apps/desktop/test/side-chat-lifecycle.test.mjs
   apps/desktop/test/side-chat-store.test.mjs
