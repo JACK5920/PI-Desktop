@@ -873,6 +873,18 @@ async function runGoalBudgetAcceptance(state) {
     "approved Goal lifecycle after renderer reload",
     state,
   );
+  const initialElapsedText = snapshot.budgetText;
+  snapshot = await waitFor(
+    async () => {
+      const current = await inspectGoalBudget(state);
+      return current.status === "active" && current.budgetText !== initialElapsedText
+        ? current
+        : null;
+    },
+    "live Goal elapsed display tick",
+    state,
+    5_000,
+  );
   assert(snapshot.editVisible, `active Goal has no Edit limits action: ${jsonText(snapshot)}`);
   await clickSelector(state, '[data-testid="goal-budget-edit"]', "Goal budget editor");
   snapshot = await waitFor(
@@ -959,7 +971,29 @@ async function runGoalBudgetAcceptance(state) {
     "restored finite Goal budget saved",
     state,
   );
-  return `rounds=${snapshot.rounds ?? 16} tokens=1,500,000 time=1,440m; token limit editable in unlimited mode, persisted, and restored in finite mode`;
+  await clickSelector(state, '[data-testid="goal-pause"]', "pause Goal after elapsed display check");
+  snapshot = await waitFor(
+    async () => {
+      const current = await inspectGoalBudget(state);
+      return current.status === "paused" ? current : null;
+    },
+    "Goal paused after live elapsed display check",
+    state,
+  );
+  const frozenElapsedText = snapshot.budgetText;
+  const pauseObservedAt = Date.now();
+  snapshot = await waitFor(
+    async () => {
+      const current = await inspectGoalBudget(state);
+      return Date.now() - pauseObservedAt >= 1_200 ? current : null;
+    },
+    "paused Goal remains frozen through another timer interval",
+    state,
+    3_000,
+  );
+  assert(snapshot.status === "paused", `Goal resumed while elapsed time was frozen: ${jsonText(snapshot)}`);
+  assert(snapshot.budgetText === frozenElapsedText, `paused Goal elapsed time continued ticking: ${jsonText(snapshot)}`);
+  return `active elapsed display ticked, paused time froze; rounds=${snapshot.rounds ?? 16} tokens=1,500,000 time=1,440m; token limit editable in unlimited mode, persisted, and restored in finite mode`;
 }
 
 async function clickApprovalMenuAndCheckAsk(state) {

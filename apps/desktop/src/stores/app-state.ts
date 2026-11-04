@@ -13,6 +13,7 @@ import type {
   GoalBudget,
   GoalControlAction,
   GoalLifecycle,
+  GoalProgressEvent,
   Mode,
   ModelInfo,
   OnboardingState,
@@ -196,6 +197,8 @@ export type AppState = {
   planCheckpoints: Record<string, PlanProposal>;
   /** Latest Host-owned Goal lifecycle per session (cleared goals are omitted). */
   goalLifecycles: Record<string, GoalLifecycle>;
+  /** Execution-scoped provider usage overlays, never persisted as Goal state. */
+  goalProgress: Record<string, GoalProgressEvent>;
   /** Host-authoritative Todo snapshots keyed by session. */
   sessionTodos: Record<string, SessionTodoSnapshot>;
   applyTodosChanged: (snapshot: SessionTodoSnapshot) => void;
@@ -374,6 +377,7 @@ export type AppState = {
   refreshPlanCheckpoints: () => Promise<void>;
   handleAgentEvent: (envelope: AgentEventEnvelope) => void;
   handlePlansChanged: (event: PlanningStateEvent) => void;
+  applyGoalProgressChanged: (event: GoalProgressEvent) => void;
   setPage: (page: AppState["page"], opts?: { record?: boolean }) => void;
   setSettingsTab: (tab: AppState["settingsTab"]) => void;
   setSettingsAnchor: (key: string | null) => void;

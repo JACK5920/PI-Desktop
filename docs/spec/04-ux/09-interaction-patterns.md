@@ -1152,7 +1152,14 @@ or post-approval Goal Agent Bash under its selected Ask or Accept edits mode)
    usage accounting. The elapsed-time ceiling defaults to 60 minutes and is
    configurable from 1 to 1,440 minutes. The Host checks current limits after
    the round settles; a running round may exceed a budget but is never
-   terminated at the boundary.
+   terminated at the boundary. During an active execution, the Composer's token
+   count updates only when provider-reported usage arrives, using Main's
+   deduplicated turn aggregate; it does not estimate tokens or change Host
+   enforcement. Active cycle elapsed time refreshes once per second from the
+   Host cycle-start timestamp and freezes to the Host snapshot while stopped.
+   Progress is scoped to the current session, proposal, and execution, so a late
+   event cannot update a resumed cycle. Chinese labels distinguish “第 N 个
+   周期” from “第 N / M 轮”.
 8. Edit limits is available for active, paused, blocked, and interrupted Goals.
    The user may edit all three limits, including the retained finite token
    value while unlimited mode is enabled, and toggle unlimited tokens without
@@ -1164,7 +1171,10 @@ or post-approval Goal Agent Bash under its selected Ask or Accept edits mode)
    Clear removes active tracking while retaining the audit/history and
    immutable artifact. Resume starts a new cycle, resets cycle usage, and keeps
    the configured budgets. After restart the bar says the run was interrupted and
-   requires a manual Resume; boot never dispatches it automatically.
+   requires a manual Resume; boot never dispatches it automatically. The
+   transcript's stopped label refers to that specific historical turn (“This
+   run stopped”), not the current Goal lifecycle; a resumed Goal can be active
+   while its earlier turn remains stopped.
 
 The approval card is session-scoped. Background sessions may retain a pending
 approval or queued/running execution state in `plan_approvals`, but opening

@@ -93,4 +93,7 @@ test("Goal budget UI acceptance edits, saves, and rehydrates a Goal through the 
   }
   assert.match(harnessSource, /goal-budget-unlimited-hint/);
   assert.match(harnessSource, /unlimited Goal budget rehydrated after renderer reload/);
+  assert.match(harnessSource, /live Goal elapsed display tick/);
+  assert.match(harnessSource, /paused Goal remains frozen through another timer interval/);
+  assert.match(harnessSource, /\[data-testid="goal-pause"\]/);
 });

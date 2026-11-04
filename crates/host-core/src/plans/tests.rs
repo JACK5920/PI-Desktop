@@ -1014,6 +1014,112 @@ fn goal_reports_are_persisted_and_complete_only_with_criterion_evidence() {
 }
 
 #[test]
+fn goal_lifecycle_exposes_the_persisted_cycle_start_timestamp() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = Database::open(&dir.path().join("pi.sqlite")).unwrap();
+    let root = dir.path().join("workspace");
+    fs::create_dir_all(&root).unwrap();
+    let manager = PlanManager;
+    let (proposal, execution, _) = approve_goal(&manager, &db, &root, "goal-cycle-start");
+    manager.claim_execution(&db, &execution.id).unwrap();
+
+    let lifecycle = PlanManager
+        .goal_for_session(&db, &proposal.session_id)
+        .unwrap()
+        .unwrap();
+    let serialized = serde_json::to_value(lifecycle).unwrap();
+    let original_cycle_start = serialized["cycleStartedAt"].as_i64().unwrap_or_default();
+    assert!(original_cycle_start > 0);
+
+    let old_cycle_start = original_cycle_start - 60_000;
+    db.conn()
+        .execute(
+            "UPDATE goal_lifecycles SET cycle_started_at = ?1 WHERE proposal_id = ?2",
+            params![old_cycle_start, proposal.id],
+        )
+        .unwrap();
+    manager
+        .control_goal(&db, &proposal.session_id, &proposal.id, "pause")
+        .unwrap();
+    let resumed = manager
+        .control_goal(&db, &proposal.session_id, &proposal.id, "resume")
+        .unwrap();
+
+    assert_eq!(resumed.goal.cycle, 2);
+    assert!(resumed.goal.cycle_started_at > old_cycle_start);
+    let resumed_serialized = serde_json::to_value(&resumed.goal).unwrap();
+    assert_eq!(
+        resumed_serialized["cycleStartedAt"].as_i64(),
+        Some(resumed.goal.cycle_started_at),
+    );
+}
+
+#[test]
+fn pausing_a_goal_persists_its_frozen_cycle_elapsed_time() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = Database::open(&dir.path().join("pi.sqlite")).unwrap();
+    let root = dir.path().join("workspace");
+    fs::create_dir_all(&root).unwrap();
+    let manager = PlanManager;
+    let (proposal, execution, _) = approve_goal(&manager, &db, &root, "goal-pause-elapsed");
+    manager.claim_execution(&db, &execution.id).unwrap();
+
+    let old_cycle_start = now_ms() - 60_000;
+    db.conn()
+        .execute(
+            "UPDATE goal_lifecycles SET cycle_started_at = ?1 WHERE proposal_id = ?2",
+            params![old_cycle_start, proposal.id],
+        )
+        .unwrap();
+
+    let paused = manager
+        .control_goal(&db, &proposal.session_id, &proposal.id, "pause")
+        .unwrap();
+    let persisted = manager
+        .goal_for_session(&db, &proposal.session_id)
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(paused.goal.status, "paused");
+    assert!(paused.goal.elapsed_ms >= 60_000);
+    assert_eq!(paused.goal.elapsed_ms, persisted.elapsed_ms);
+}
+
+#[test]
+fn interrupting_a_goal_persists_its_frozen_cycle_elapsed_time() {
+    let (dir, db) = test_db();
+    let root = dir.path().join("workspace");
+    fs::create_dir_all(&root).unwrap();
+    let manager = PlanManager;
+    let (proposal, execution, _) = approve_goal(&manager, &db, &root, "goal-interrupt-elapsed");
+    manager.claim_execution(&db, &execution.id).unwrap();
+
+    let old_cycle_start = now_ms() - 60_000;
+    db.conn()
+        .execute(
+            "UPDATE goal_lifecycles SET cycle_started_at = ?1 WHERE proposal_id = ?2",
+            params![old_cycle_start, proposal.id],
+        )
+        .unwrap();
+
+    manager
+        .finish_execution(
+            &db,
+            &execution.id,
+            EXECUTION_INTERRUPTED,
+            Some("run_failed"),
+        )
+        .unwrap();
+    let interrupted = manager
+        .goal_for_session(&db, &proposal.session_id)
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(interrupted.status, "interrupted");
+    assert!(interrupted.elapsed_ms >= 60_000);
+}
+
+#[test]
 fn continuing_goal_creates_a_distinct_queued_round_and_then_finishes() {
     let (dir, db) = test_db();
     let root = dir.path().join("workspace");

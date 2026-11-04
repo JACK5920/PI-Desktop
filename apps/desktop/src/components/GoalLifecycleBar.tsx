@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { TFunction } from "i18next";
 import type { FormEvent } from "react";
 import { useTranslation } from "react-i18next";
@@ -9,7 +9,13 @@ import {
   type GoalBudget,
   type GoalControlAction,
   type GoalLifecycle,
+  type GoalProgressEvent,
 } from "@pi-desktop/shared";
+import {
+  formatGoalElapsed,
+  goalElapsedMs,
+  goalTokensUsed,
+} from "../lib/goal-lifecycle-state";
 import { useAppStore } from "../stores/app-store";
 import { Badge, Button, Field, Input, SettingsToggle } from "./ui";
 
@@ -83,8 +89,14 @@ function statusDetail(goal: GoalLifecycle, t: TFunction): string {
   return "";
 }
 
-export function GoalLifecycleBar({ goal }: { goal: GoalLifecycle }) {
-  const { t } = useTranslation();
+export function GoalLifecycleBar({
+  goal,
+  liveProgress,
+}: {
+  goal: GoalLifecycle;
+  liveProgress?: GoalProgressEvent;
+}) {
+  const { t, i18n } = useTranslation();
   const sessionId = goal.sessionId;
   const controlGoal = useAppStore((state) => state.controlGoal);
   const updateGoalBudget = useAppStore((state) => state.updateGoalBudget);
@@ -93,6 +105,21 @@ export function GoalLifecycleBar({ goal }: { goal: GoalLifecycle }) {
   const [busy, setBusy] = useState<GoalControlAction | "budget" | null>(null);
   const [budgetDraft, setBudgetDraft] = useState<GoalBudgetDraft | null>(null);
   const [budgetError, setBudgetError] = useState(false);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (
+      goal.status !== "active" ||
+      typeof goal.cycleStartedAt !== "number" ||
+      !Number.isFinite(goal.cycleStartedAt)
+    ) {
+      return;
+    }
+    const refreshNow = () => setNowMs(Date.now());
+    refreshNow();
+    const interval = window.setInterval(refreshNow, 1_000);
+    return () => window.clearInterval(interval);
+  }, [goal.status, goal.cycleStartedAt, goal.currentExecutionId]);
 
   if (goal.status === "cleared") return null;
 
@@ -119,6 +146,9 @@ export function GoalLifecycleBar({ goal }: { goal: GoalLifecycle }) {
   const canEditBudget = ["active", "paused", "blocked", "interrupted"].includes(goal.status);
   const formatTokens = (value: number) => new Intl.NumberFormat().format(value);
   const formatMinutes = (value: number) => `${Math.ceil(value / 60_000)}m`;
+  const elapsedMs = goalElapsedMs(goal, nowMs);
+  const tokensUsed = goalTokensUsed(goal, liveProgress);
+  const elapsed = formatGoalElapsed(elapsedMs, i18n.resolvedLanguage || i18n.language);
   const budgetValidation = budgetDraft ? validateBudgetDraft(budgetDraft) : null;
 
   const startBudgetEdit = () => {
@@ -175,14 +205,14 @@ export function GoalLifecycleBar({ goal }: { goal: GoalLifecycle }) {
         <p className="goal-lifecycle-budget">
           {goal.tokenBudgetUnlimited
             ? t("goal.lifecycle.budgetUnlimited", {
-                tokens: formatTokens(goal.tokensUsed),
-                elapsed: formatMinutes(goal.elapsedMs),
+                tokens: formatTokens(tokensUsed),
+                elapsed,
                 maxDuration: formatMinutes(goal.maxDurationMs),
               })
             : t("goal.lifecycle.budget", {
-                tokens: formatTokens(goal.tokensUsed),
+                tokens: formatTokens(tokensUsed),
                 maxTokens: formatTokens(goal.maxTokens),
-                elapsed: formatMinutes(goal.elapsedMs),
+                elapsed,
                 maxDuration: formatMinutes(goal.maxDurationMs),
               })}
         </p>

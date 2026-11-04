@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { usageForEvent, ownsUsageTurn, applyMessageUpdate, tagMessageToolLineage, toolCallLineage, type AgentEventEnvelope, type UiMessage } from "@pi-desktop/shared";
-import type { FinishTurn } from "./plans";
+import { usageForEvent, ownsUsageTurn, applyMessageUpdate, tagMessageToolLineage, toolCallLineage, type AgentEventEnvelope, type GoalProgressEvent, type MessageUsage, type UiMessage } from "@pi-desktop/shared";
+import type { ApprovedExecutionTurn, FinishTurn } from "./plans";
 import type { RuntimeState } from "./context";
 import type { InflightCheckpointer } from "@pi-desktop/host-runtime";
 import type { Logger } from "../logger";
@@ -16,13 +16,15 @@ export type EventPersistenceDependencies = {
   activeToolCalls: Map<string, any>;
   activeToolCallKey: (sessionId: string, toolCallId: string) => string;
   approvedExecutionIdsBySession: Map<string, string>;
-  approvedExecutionTurns: Map<string, any>;
+  approvedExecutionTurns: Map<string, ApprovedExecutionTurn>;
   pendingExecutionFinishes: Map<string, any>;
   planSubmissionTurnIds: Set<string>;
   planSubmissionTurnKey: (sessionId: string, turnId: string) => string;
   inflightCheckpointer: InflightCheckpointer;
   persistenceOutbox: PersistenceOutbox;
   addActiveTurnUsage: (sessionId: string, usage: any) => void;
+  getActiveTurnUsage?: (sessionId: string) => MessageUsage | undefined;
+  emitGoalProgress?: (event: GoalProgressEvent) => void;
   logger: Logger;
   finishTurn: FinishTurn;
   /**
@@ -55,6 +57,8 @@ export function createEventPersistence({
   inflightCheckpointer,
   persistenceOutbox,
   addActiveTurnUsage,
+  getActiveTurnUsage,
+  emitGoalProgress,
   logger,
   finishTurn,
   isStaleTerminalEvent,
@@ -124,20 +128,6 @@ function persistAgentEvent(envelope: AgentEventEnvelope): UiMessage | undefined 
     return;
   }
   const turnId = activeTurnId;
-  const usage = usageForEvent(envelope);
-  if (usage) {
-    if (ownsUsageTurn(envelope, turnId)) addActiveTurnUsage(envelope.sessionId, usage);
-    const usageTurnId = envelope.turnId ?? turnId;
-    if (usageTurnId && (usage.operationId || usage.operations?.length)) {
-      void persistenceOutbox.enqueue({
-        key: `usage:${envelope.sessionId}:${usageTurnId}:${createHash("sha256").update(JSON.stringify(usage)).digest("hex")}`,
-        sessionId: envelope.sessionId, turnId: usageTurnId, usage,
-      }, () => runtimeState.host).catch((error: unknown) => {
-        logger.app("persistence", "warn", "usage enqueue failed", { sessionId: envelope.sessionId, data: String(error) });
-      });
-    }
-  }
-
   const executionId = (() => {
     const candidate = approvedExecutionIdsBySession.get(envelope.sessionId);
     if (!candidate) return undefined;
@@ -149,6 +139,46 @@ function persistAgentEvent(envelope: AgentEventEnvelope): UiMessage | undefined 
       ? candidate
       : undefined;
   })();
+  const executionTurn = executionId
+    ? approvedExecutionTurns.get(executionId)
+    : undefined;
+  const usage = usageForEvent(envelope);
+  if (usage) {
+    const ownsCurrentTurn = ownsUsageTurn(envelope, turnId);
+    if (ownsCurrentTurn) {
+      addActiveTurnUsage(envelope.sessionId, usage);
+      if (
+        executionId &&
+        executionTurn?.kind === "goal" &&
+        executionTurn.tokensUsedBaseline !== undefined &&
+        executionTurn.proposalId &&
+        (envelope.turnId || turnId) === executionTurn.turnId
+      ) {
+        const activeUsage = getActiveTurnUsage?.(envelope.sessionId);
+        const turnTokens = activeUsage?.totalTokens;
+        const tokensUsed = executionTurn.tokensUsedBaseline + Math.max(0, turnTokens ?? 0);
+        if (Number.isSafeInteger(tokensUsed) && turnTokens !== undefined) {
+          emitGoalProgress?.({
+            sessionId: envelope.sessionId,
+            proposalId: executionTurn.proposalId,
+            executionId,
+            turnId: executionTurn.turnId,
+            tokensUsed,
+          });
+        }
+      }
+    }
+    const usageTurnId = envelope.turnId ?? turnId;
+    if (usageTurnId && (usage.operationId || usage.operations?.length)) {
+      void persistenceOutbox.enqueue({
+        key: `usage:${envelope.sessionId}:${usageTurnId}:${createHash("sha256").update(JSON.stringify(usage)).digest("hex")}`,
+        sessionId: envelope.sessionId, turnId: usageTurnId, usage,
+      }, () => runtimeState.host).catch((error: unknown) => {
+        logger.app("persistence", "warn", "usage enqueue failed", { sessionId: envelope.sessionId, data: String(error) });
+      });
+    }
+  }
+
   if (
     event.type === "planning_state" &&
     event.state === "awaiting_approval" &&

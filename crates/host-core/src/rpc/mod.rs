@@ -7871,19 +7871,20 @@ mod tests {
 
     #[cfg(windows)]
     fn descendant_marker_bash_command(started: &Path, late: &Path) -> String {
+        let started = started.to_string_lossy().replace('\'', "''");
+        let late = late.to_string_lossy().replace('\'', "''");
         format!(
-            "$null = Start-Process -FilePath powershell.exe -ArgumentList @('-NoLogo','-NoProfile','-Command',\"Start-Sleep -Milliseconds 1000; [IO.File]::WriteAllText('{}', 'late')\") -WindowStyle Hidden; [IO.File]::WriteAllText('{}', 'started'); Start-Sleep -Seconds 30",
-            late.display(),
-            started.display()
+            "$null = Start-Process -FilePath powershell.exe -ArgumentList @('-NoLogo','-NoProfile','-Command',\"[IO.File]::WriteAllText('{}', 'started'); Start-Sleep -Milliseconds 1000; [IO.File]::WriteAllText('{}', 'late')\") -WindowStyle Hidden; Start-Sleep -Seconds 30",
+            started, late
         )
     }
 
     #[cfg(not(windows))]
     fn descendant_marker_bash_command(started: &Path, late: &Path) -> String {
         format!(
-            "(sleep 1; printf late > '{}') & printf started > '{}'; sleep 30",
-            late.display(),
-            started.display()
+            "(printf started > '{}'; sleep 1; printf late > '{}') & sleep 30",
+            started.display(),
+            late.display()
         )
     }
 
@@ -9546,7 +9547,7 @@ mod tests {
         let started_command = descendant_marker_bash_command(&started_marker, &late_marker);
         let session_id = session.id.clone();
         let pending_state = state.clone();
-        let pending_task = tokio::spawn(async move {
+        let mut pending_task = tokio::spawn(async move {
             handle_request(
                 pending_state,
                 "tools.execute",
@@ -9564,16 +9565,48 @@ mod tests {
             .await
         });
         wait_for_bash_registration(&state, &session.id, "abort-during-execution").await;
-        for _ in 0..100 {
-            if started_marker.exists() {
-                break;
+        // The child itself signals readiness, so abort cannot race ahead of
+        // descendant startup. Cold Windows PowerShell launches can take
+        // several seconds; keep the setup bounded while allowing that latency.
+        let startup = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            loop {
+                if started_marker.exists() {
+                    return None;
+                }
+                tokio::select! {
+                    result = &mut pending_task => return Some(result),
+                    _ = tokio::time::sleep(std::time::Duration::from_millis(10)) => {}
+                }
             }
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        })
+        .await;
+        match startup {
+            Ok(None) => {}
+            Ok(Some(result)) => {
+                panic!("Bash execution ended before its descendant became ready: {result:?}")
+            }
+            Err(_) => {
+                let aborted = handle_request(
+                    state.clone(),
+                    "tools.abort",
+                    json!({
+                        "sessionId": session.id,
+                        "toolCallId": "abort-during-execution"
+                    }),
+                    mpsc::unbounded_channel().0,
+                )
+                .await
+                .unwrap();
+                let result = tokio::time::timeout(std::time::Duration::from_secs(5), pending_task)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .unwrap();
+                panic!(
+                    "Bash descendant did not become ready within ten seconds; abort={aborted:?}; result={result:?}"
+                );
+            }
         }
-        assert!(
-            started_marker.exists(),
-            "the command should have started before abort"
-        );
 
         let aborted = handle_request(
             state.clone(),

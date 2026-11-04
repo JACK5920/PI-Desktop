@@ -127,6 +127,7 @@ import type {
   PlanProposal,
   GoalControlRequest,
   GoalControlResult,
+  GoalProgressEvent,
   GoalBudgetUpdateRequest,
   GoalBudgetUpdateResult,
   PlanResolveRequest,
@@ -698,6 +699,18 @@ function normalizePlansChangedEvent(value: unknown): PlanningStateEvent {
       ? {}
       : { executionState }),
   };
+}
+
+function isGoalProgressEvent(value: unknown): value is GoalProgressEvent {
+  if (!value || typeof value !== "object") return false;
+  const event = value as Partial<GoalProgressEvent>;
+  return (
+    typeof event.sessionId === "string" && event.sessionId.length > 0 &&
+    typeof event.proposalId === "string" && event.proposalId.length > 0 &&
+    typeof event.executionId === "string" && event.executionId.length > 0 &&
+    typeof event.turnId === "string" && event.turnId.length > 0 &&
+    typeof event.tokensUsed === "number" && Number.isSafeInteger(event.tokensUsed) && event.tokensUsed >= 0
+  );
 }
 
 export const api = {
@@ -1984,6 +1997,12 @@ export const api = {
     return window.piDesktop.on(IPC.event.plansChanged, (payload) =>
       listener(normalizePlansChangedEvent(payload)),
     );
+  },
+  onGoalProgress: (listener: (event: GoalProgressEvent) => void) => {
+    if (!window.piDesktop?.on) return () => undefined;
+    return window.piDesktop.on(IPC.event.goalProgress, (payload) => {
+      if (isGoalProgressEvent(payload)) listener(payload);
+    });
   },
   getTodos: (sessionId: string) =>
     invoke<SessionTodoSnapshot>(IPC.invoke.todosGet, { sessionId }),

@@ -144,6 +144,9 @@ export function Composer({
   const goalLifecycle = useAppStore((s) =>
     s.activeSessionId ? s.goalLifecycles[s.activeSessionId] : undefined,
   );
+  const goalProgress = useAppStore((s) =>
+    s.activeSessionId ? s.goalProgress[s.activeSessionId] : undefined,
+  );
   const pendingAsk = useAppStore((s) =>
     headAsk(s.pendingAsks, s.activeSessionId),
   );
@@ -549,7 +552,7 @@ export function Composer({
           <PlanApprovalBar proposal={planCheckpoint} />
         ) : null}
         {goalLifecycle && goalLifecycle.status !== "cleared" && localToolsAllowed && !nativeSession ? (
-          <GoalLifecycleBar goal={goalLifecycle} />
+          <GoalLifecycleBar goal={goalLifecycle} liveProgress={goalProgress} />
         ) : null}
         {pendingAsk ? (
           <AskToolCard key={pendingAsk.requestId} request={pendingAsk} queued={queuedAsks} />

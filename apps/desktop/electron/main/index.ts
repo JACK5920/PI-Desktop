@@ -62,7 +62,7 @@ import { registerApplicationActivation } from "./bootstrap/app-activation";
 import { createHostRuntime } from "./runtime/host";
 import { createSidecarRuntime } from "./runtime/sidecar";
 import { createEventPersistence } from "./runtime/event-persistence";
-import { createPlanRuntime } from "./runtime/plans";
+import { createPlanRuntime, type ApprovedExecutionTurn } from "./runtime/plans";
 import { createRuntimeLifecycle } from "./runtime/lifecycle";
 import {
   createProviderCatalogRuntime,
@@ -610,7 +610,7 @@ const approvedExecutionIdsBySession = new Map<string, string>();
 /** executionId → durable execution turn identity. */
 const approvedExecutionTurns = new Map<
   string,
-  { sessionId: string; turnId: string }
+  ApprovedExecutionTurn
 >();
 /** Claimed executions remain tracked even before their durable turn exists. */
 const claimedExecutionSessions = new Map<string, string>();
@@ -752,6 +752,8 @@ const eventPersistence = createEventPersistence({
   inflightCheckpointer,
   persistenceOutbox,
   addActiveTurnUsage,
+  getActiveTurnUsage: (sessionId) => activeTurnUsages.get(sessionId),
+  emitGoalProgress: (event) => sendToRenderer(IPC.event.goalProgress, event),
   logger,
   finishTurn,
   isStaleTerminalEvent,

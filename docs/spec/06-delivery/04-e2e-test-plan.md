@@ -8265,7 +8265,14 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
 - **Steps**: Submit and approve a Goal. Verify the defaults (8 rounds, 250,000
   reported tokens, 60 minutes, finite token mode), then update its budgets while
   active to 16 rounds, 1,250,000 tokens, 1,440 minutes, and unlimited token
-  mode. Verify the existing execution identity, cycle, and counters remain
+  mode. During an active run, deliver repeated cumulative provider-usage
+  snapshots and observe the Composer's live token total and active elapsed time;
+  wait for the visible elapsed display to advance, then pause and confirm the
+  displayed time stays frozen through another timer interval. Separately
+  interrupt an active run before its first GoalReport and verify the Host stores
+  the elapsed snapshot instead of resetting it. Resume and compare the new cycle
+  and execution identity with the preceding turn's stopped transcript label. Verify
+  the existing execution identity, cycle, and counters remain
   unchanged and that `plans.pending` returns the updated values. Claim its
   execution, submit one criterion-by-criterion `GoalReport` with evidence, and
   finish the turn. Confirm `continue` creates a distinct queued execution only
@@ -8292,13 +8299,22 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
   to interrupted review state; v29 Goals keep finite token mode and their saved
   finite limit under schema v30.
   The Composer labels criterion status/evidence as Agent-reported, not
-  Host-certified.
+  Host-certified. Live tokens use only provider-reported, deduplicated usage,
+  never move backward below the Host snapshot, and reject mismatched or stale
+  session/proposal/execution events. Elapsed time advances to seconds only
+  while active and freezes after pause/interruption. After resume, the lifecycle
+  names “第 N 个周期” distinctly from its execution-round count; the old turn
+  reads “This run stopped” and does not imply the resumed Goal itself is stopped.
 - **Coverage**: `pnpm test:e2e:plan` exercises the no-provider Host RPC journey;
   `cargo test -p host-core --locked` covers lifecycle transitions, v27 migration,
   v29→v30 migration, budget validation/update, and process reopen;
   `packages/agent-runtime/src/runtime.test.ts` covers the round-scoped GoalReport
   tool; `apps/desktop/test/goal-lifecycle-render-and-control.test.mjs` covers
-  localized lifecycle rendering and serialized controls.
+  localized lifecycle rendering and serialized controls;
+  `apps/desktop/test/goal-live-progress.test.mjs` covers provider usage
+  attribution/deduplication, IPC validation, identity fencing, monotonic overlay
+  and elapsed projection; `apps/desktop/test/turn-process.test.mjs` preserves
+  the stopped-turn classifier.
 - **Dispatcher guard**: `packages/host-runtime/src/plan-dispatch.test.ts`
   verifies automatic continuation defers while interactive input or a contract
   approval is pending.
@@ -8309,7 +8325,9 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
 - **Acceptance**: F (durability), Quality (bounded lifecycle), Security
   (no-replay startup fence).
 - **Milestone**: Goal lifecycle.
-- **Status**: Automated offline; real provider execution is not required.
+- **Status**: Host/Main/Renderer projection checks are automated offline. The
+  isolated Electron `test:e2e:plan-ui` path verifies the active elapsed tick and
+  pause freeze without a provider; live provider acceptance remains optional.
 
 #### E2E-GOAL-budget-editor: Edit and restore persisted Goal cycle limits
 

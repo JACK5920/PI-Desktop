@@ -14,6 +14,7 @@ import {
   latestPlanProposal,
   terminalizeMissingPlan,
 } from "../../lib/plan-mode-state";
+import { retainMatchingGoalProgress } from "../../lib/goal-lifecycle-state";
 import {
   EMPTY_SESSION_WINDOW,
   sessionIsReusableEmpty,
@@ -233,36 +234,40 @@ export function createSessionSlice({
             : undefined;
         const executionActive = isActivePlanExecution(checkpoint);
         const planRunSettled = Boolean(activeProposal || executionActive || wasPending);
-        set((state) => ({
-          planningStates: {
-            ...state.planningStates,
-            [sessionId]: nextState,
-          },
-          planCheckpoints: checkpoint
-            ? { ...state.planCheckpoints, [sessionId]: checkpoint }
-            : state.planCheckpoints,
-          goalLifecycles: result.goal && result.goal.status !== "cleared"
+        set((state) => {
+          const goalLifecycles = result.goal && result.goal.status !== "cleared"
             ? { ...state.goalLifecycles, [sessionId]: result.goal }
-            : withoutRecordKey(state.goalLifecycles, sessionId),
-          pendingPlans: activeProposal
-            ? { ...state.pendingPlans, [sessionId]: activeProposal }
-            : withoutRecordKey(state.pendingPlans, sessionId),
-          runningSessions: planRunSettled
-            ? { ...state.runningSessions, [sessionId]: executionActive }
-            : state.runningSessions,
-          isRunning:
-            state.activeSessionId === sessionId && planRunSettled
-              ? executionActive
-              : state.isRunning,
-          sessions: state.sessions.map((session) =>
-            session.id === sessionId
-              ? {
-                  ...session,
-                  mode: sessionModeForPlanningState(nextState, nextKind),
-                }
-              : session,
-          ),
-        }));
+            : withoutRecordKey(state.goalLifecycles, sessionId);
+          return {
+            planningStates: {
+              ...state.planningStates,
+              [sessionId]: nextState,
+            },
+            planCheckpoints: checkpoint
+              ? { ...state.planCheckpoints, [sessionId]: checkpoint }
+              : state.planCheckpoints,
+            goalLifecycles,
+            goalProgress: retainMatchingGoalProgress(goalLifecycles, state.goalProgress),
+            pendingPlans: activeProposal
+              ? { ...state.pendingPlans, [sessionId]: activeProposal }
+              : withoutRecordKey(state.pendingPlans, sessionId),
+            runningSessions: planRunSettled
+              ? { ...state.runningSessions, [sessionId]: executionActive }
+              : state.runningSessions,
+            isRunning:
+              state.activeSessionId === sessionId && planRunSettled
+                ? executionActive
+                : state.isRunning,
+            sessions: state.sessions.map((session) =>
+              session.id === sessionId
+                ? {
+                    ...session,
+                    mode: sessionModeForPlanningState(nextState, nextKind),
+                  }
+                : session,
+            ),
+          };
+        });
         if (checkpoint && activeProposal) {
           openPlanArtifact(
             checkpoint,
