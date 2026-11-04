@@ -45,6 +45,7 @@ pub struct GoalLifecycle {
     pub status: String,
     pub current_execution_id: Option<String>,
     pub cycle: i64,
+    pub cycle_started_at: i64,
     pub round_in_cycle: i64,
     pub run_count: i64,
     pub max_rounds: i64,
@@ -94,6 +95,7 @@ fn goal_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<GoalLifecycle> {
         status: row.get(2)?,
         current_execution_id: row.get(3)?,
         cycle: row.get(4)?,
+        cycle_started_at: row.get(18)?,
         round_in_cycle: row.get(5)?,
         run_count: row.get(6)?,
         max_rounds: row.get(7)?,
@@ -114,7 +116,7 @@ const GOAL_COLUMNS: &str = "proposal_id, session_id, status, current_execution_i
     latest_report_json, updated_at, version,
     (SELECT title FROM plan_approvals WHERE request_id = goal_lifecycles.proposal_id),
     max_tokens, max_duration_ms, tokens_used, elapsed_ms,
-    token_budget_unlimited";
+    token_budget_unlimited, cycle_started_at";
 
 pub(crate) fn current_for_session(
     db: &Database,
@@ -426,13 +428,15 @@ pub(crate) fn finish_run_tx(
             params![now, execution_id],
         )?;
         if current.0 == "active" {
+            let (_, elapsed_ms) = budget_snapshot_tx(tx, &proposal.id, current.2, current.9, now)?;
             tx.execute(
                 "UPDATE goal_lifecycles
-                 SET status = 'interrupted', stop_reason = ?1, updated_at = ?2,
+                 SET status = 'interrupted', stop_reason = ?1, elapsed_ms = ?2, updated_at = ?3,
                      version = version + 1
-                 WHERE proposal_id = ?3 AND current_execution_id = ?4 AND status = 'active'",
+                 WHERE proposal_id = ?4 AND current_execution_id = ?5 AND status = 'active'",
                 params![
                     error_code.unwrap_or("PLAN_EXECUTION_INTERRUPTED"),
+                    elapsed_ms,
                     now,
                     proposal.id,
                     execution_id
@@ -681,13 +685,17 @@ pub(crate) fn control(
                 }
                 return Err(plan_error("GOAL_STATE_CONFLICT"));
             }
+            let frozen_elapsed_ms = now
+                .saturating_sub(goal.cycle_started_at)
+                .max(goal.elapsed_ms);
             tx.execute(
                 "UPDATE goal_lifecycles SET status = 'paused', stop_reason = 'user_paused',
-                    updated_at = ?1, version = version + 1
-                 WHERE proposal_id = ?2 AND status = 'active'",
-                params![now, goal.proposal_id],
+                    elapsed_ms = ?2, updated_at = ?1, version = version + 1
+                 WHERE proposal_id = ?3 AND status = 'active'",
+                params![now, frozen_elapsed_ms, goal.proposal_id],
             )?;
             interrupt_current_run_tx(&tx, &goal, now)?;
+            goal.elapsed_ms = frozen_elapsed_ms;
         }
         "clear" => {
             if goal.status != "cleared" {
@@ -753,6 +761,7 @@ pub(crate) fn control(
             goal.run_count = next_run_count;
             goal.tokens_used = 0;
             goal.elapsed_ms = 0;
+            goal.cycle_started_at = now;
             goal.stop_reason = None;
             goal.updated_at = ms_to_ts(now);
             goal.version += 1;

@@ -659,6 +659,9 @@ export function useAppShellRuntime() {
       useAppStore.getState().applyQueueChanged(event),
     );
     const offPlansChanged = api.onPlansChanged(handlePlansChanged);
+    const offGoalProgress = api.onGoalProgress((event) =>
+      useAppStore.getState().applyGoalProgressChanged(event),
+    );
     const offTodosChanged = api.onTodosChanged((snapshot) =>
       useAppStore.getState().applyTodosChanged(snapshot),
     );
@@ -953,6 +956,7 @@ export function useAppShellRuntime() {
       offEvent();
       offQueueChanged();
       offPlansChanged();
+      offGoalProgress();
       offTodosChanged();
       offToast();
       offNotificationSound();

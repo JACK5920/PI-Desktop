@@ -140,6 +140,8 @@ export type GoalLifecycle = {
   status: GoalLifecycleStatus;
   currentExecutionId?: string;
   cycle: number;
+  /** Persisted Host start time for displaying live elapsed time while active. */
+  cycleStartedAt?: number;
   roundInCycle: number;
   runCount: number;
   maxRounds: number;
@@ -153,6 +155,16 @@ export type GoalLifecycle = {
   latestReport?: GoalProgressReport;
   updatedAt: string;
   version: number;
+};
+
+/** Transient provider-reported usage for the current Goal execution. */
+export type GoalProgressEvent = {
+  sessionId: string;
+  proposalId: string;
+  executionId: string;
+  turnId: string;
+  /** Cycle total, including earlier settled rounds and this active turn. */
+  tokensUsed: number;
 };
 
 export type GoalControlAction = "pause" | "resume" | "clear";

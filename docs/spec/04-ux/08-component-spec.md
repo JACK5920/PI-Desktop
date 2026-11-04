@@ -3030,6 +3030,15 @@ Goal. It presents the contract title, active/paused/completed/blocked/
 interrupted status, cycle and bounded-round progress, and an expandable latest
 Agent progress report. It also shows tokens and elapsed time used against the
 current cycle limits (8 rounds, 250,000 tokens, and 60 minutes by default).
+While active, provider-reported token usage updates from the current Goal
+execution's deduplicated Main-process usage aggregate; it is never estimated.
+The displayed token total cannot fall below either that live value or the latest
+Host snapshot, and stale execution progress is discarded when the lifecycle
+becomes inactive or changes execution identity. Active elapsed time is derived
+from the Host cycle start timestamp and refreshes once per second. Paused,
+completed, blocked, and interrupted Goals use the frozen Host elapsed snapshot.
+Chinese cycle text names the cycle explicitly (for example, “第 2 个周期 · 第
+1 / 8 轮”).
 Each criterion shows its reported status and cited
 evidence as text. The UI labels the report as Agent-reported; it does not imply
 that Host independently ran or certified the cited checks.
@@ -3051,6 +3060,9 @@ copy, status, and evidence-status text are localized. The bar is a named
 `region`; actions are shared buttons, and expanded evidence remains ordinary
 escaped text. An active round may finish beyond a cycle budget; reaching a
 budget prevents another automatic round rather than killing current work.
+The per-turn transcript status describes that historical run only: after a
+Goal is resumed, an earlier turn still reads “This run stopped” (localized)
+while the Goal lifecycle bar independently shows the current active state.
 
 Edit limits is available only while active, paused, blocked, or interrupted.
 The form accepts 1–32 rounds, a positive safe-integer finite token limit, and

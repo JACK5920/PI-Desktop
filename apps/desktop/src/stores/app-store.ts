@@ -11,7 +11,10 @@ import {
   PROTOCOL_VERSION,
 } from "@pi-desktop/shared";
 import { api } from "../lib/api";
-import { mergeGoalLifecycleSnapshots } from "../lib/goal-lifecycle-state";
+import {
+  mergeGoalLifecycleSnapshots,
+  retainMatchingGoalProgress,
+} from "../lib/goal-lifecycle-state";
 import { rememberProject } from "../lib/recent-projects";
 import {
   RETAINED_SESSION_PANE_LIMIT,
@@ -372,36 +375,43 @@ export const useAppStore = create<AppState>((set, get) => {
           .map((goal) => [goal.sessionId, goal]),
       );
       if (generation !== bootstrapGeneration) return;
-      set((state) => ({
-        ready: true,
-        version,
-        healthOk: health.ok,
-        settings,
-        sessions: hydratedSessions,
-        runningSessions: {
-          ...Object.fromEntries((sessions.runningSessionIds ?? []).map((id) => [id, true])),
-          // Live start/end events received during bootstrap outrank its snapshot.
-          ...state.runningSessions,
-        },
-        providers: providers.providers,
-        providerModels: cachedProviderModels,
-        workspace: currentWorkspace,
-        activeProjectPath: currentWorkspace?.path,
-        openProjectPaths,
-        openProjects: hydratedProjects,
-        onboarding,
-        plugins: plugins.plugins,
-        planningStates,
-        pendingPlans,
-        goalLifecycles: mergeGoalLifecycleSnapshots(
+      set((state) => {
+        const nextGoalLifecycles = mergeGoalLifecycleSnapshots(
           goalLifecycles,
           state.goalLifecycles,
-        ),
-        planCheckpoints: latestPlanCheckpoints,
-        notifications: notifications.notifications,
-        unreadNotificationCount: notifications.unreadCount,
-        sessionOutcomes: latestSessionOutcomes(notifications.notifications),
-      }));
+        );
+        return {
+          ready: true,
+          version,
+          healthOk: health.ok,
+          settings,
+          sessions: hydratedSessions,
+          runningSessions: {
+            ...Object.fromEntries((sessions.runningSessionIds ?? []).map((id) => [id, true])),
+            // Live start/end events received during bootstrap outrank its snapshot.
+            ...state.runningSessions,
+          },
+          providers: providers.providers,
+          providerModels: cachedProviderModels,
+          workspace: currentWorkspace,
+          activeProjectPath: currentWorkspace?.path,
+          openProjectPaths,
+          openProjects: hydratedProjects,
+          onboarding,
+          plugins: plugins.plugins,
+          planningStates,
+          pendingPlans,
+          goalLifecycles: nextGoalLifecycles,
+          goalProgress: retainMatchingGoalProgress(
+            nextGoalLifecycles,
+            state.goalProgress,
+          ),
+          planCheckpoints: latestPlanCheckpoints,
+          notifications: notifications.notifications,
+          unreadNotificationCount: notifications.unreadCount,
+          sessionOutcomes: latestSessionOutcomes(notifications.notifications),
+        };
+      });
 
       // The artifact's surface depends on which plugin views are launchable, and
       // the launcher list is only read after `ready`. Resolve it before the

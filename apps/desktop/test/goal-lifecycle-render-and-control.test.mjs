@@ -9,11 +9,23 @@ import { createServer } from "vite";
 import { fileURLToPath } from "node:url";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
+const LOCAL_SHARED = fileURLToPath(
+  new URL("../../../packages/shared/dist/index.js", import.meta.url),
+);
+const LOCAL_I18N = fileURLToPath(
+  new URL("../../../packages/i18n/dist/index.js", import.meta.url),
+);
 const GOAL_API_MODULE = "\0goal-lifecycle-test-api";
 
 async function withGoalModules(run) {
   const server = await createServer({
     root: ROOT,
+    resolve: {
+      alias: {
+        "@pi-desktop/shared": LOCAL_SHARED,
+        "@pi-desktop/i18n": LOCAL_I18N,
+      },
+    },
     configFile: false,
     logLevel: "silent",
     server: { middlewareMode: true, hmr: false, ws: false },
@@ -69,6 +81,7 @@ function goal(status, overrides = {}) {
     maxDurationMs: 3_600_000,
     tokensUsed: 2_000,
     elapsedMs: 60_000,
+    cycleStartedAt: Date.now() - 60_000,
     tokenBudgetUnlimited: false,
     stopReason: status === "interrupted" ? "host_restart" : undefined,
     latestReport: {
@@ -105,7 +118,10 @@ function renderBar({ GoalLifecycleBar, useAppStore, i18n }, lifecycle, options =
     createElement(
       I18nextProvider,
       { i18n },
-      createElement(GoalLifecycleBar, { goal: lifecycle }),
+      createElement(GoalLifecycleBar, {
+        goal: lifecycle,
+        liveProgress: options.liveProgress,
+      }),
     ),
   );
 }
@@ -145,6 +161,49 @@ test("Goal lifecycle bar renders a durable report and only actions valid for the
     const restored = renderBar(modules, goal("interrupted"), { withProposal: false });
     assert.match(restored, /Persistent goal/);
   });
+});
+
+test("Goal lifecycle bar shows matching live reported token progress", async () => {
+  await withGoalModules((modules) => {
+    const current = renderBar(modules, goal("active"), {
+      liveProgress: {
+        sessionId: "goal-session",
+        proposalId: "goal-proposal",
+        executionId: "goal-execution",
+        turnId: "goal-turn",
+        tokensUsed: 2_450,
+      },
+    });
+    assert.match(current, /2,450 \/ 250,000 tokens/);
+
+    const stale = renderBar(modules, goal("active"), {
+      liveProgress: {
+        sessionId: "goal-session",
+        proposalId: "goal-proposal",
+        executionId: "old-execution",
+        turnId: "old-turn",
+        tokensUsed: 9_999,
+      },
+    });
+    assert.match(stale, /2,000 \/ 250,000 tokens/);
+    assert.doesNotMatch(stale, /9,999 \/ 250,000 tokens/);
+  });
+});
+
+test("Goal lifecycle bar renders active cycle elapsed time to the second", async () => {
+  const originalNow = Date.now;
+  Date.now = () => 75_000;
+  try {
+    await withGoalModules((modules) => {
+      const active = renderBar(
+        modules,
+        goal("active", { cycleStartedAt: 10_000, elapsedMs: 0 }),
+      );
+      assert.match(active, /1 min 5 sec/);
+    });
+  } finally {
+    Date.now = originalNow;
+  }
 });
 
 test("Goal budget edits use Host result to reconcile the durable lifecycle", async () => {
