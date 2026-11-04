@@ -423,6 +423,7 @@ export const es = {
     "annotationCommentPlaceholder": "¿En qué debería centrarse el asistente?",
     "saveAnnotation": "Adjuntar fragmento",
     "annotationAttachments": "Referencias ({{count}})",
+    "sentAnnotationReferences": "Referencias usadas ({{count}})",
     "reviewAnnotations": "Revisar referencias",
     "editAnnotation": "Editar nota",
     "removeAnnotation": "Quitar referencia",

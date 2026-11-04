@@ -435,6 +435,7 @@ export const en = {
     annotationCommentPlaceholder: "What should the assistant focus on?",
     saveAnnotation: "Attach excerpt",
     annotationAttachments: "References ({{count}})",
+    sentAnnotationReferences: "References used ({{count}})",
     reviewAnnotations: "Review references",
     editAnnotation: "Edit note",
     removeAnnotation: "Remove reference",

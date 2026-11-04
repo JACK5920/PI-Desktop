@@ -207,10 +207,11 @@
   bottom: calc(100% + 8px);
   display: grid;
   width: min(420px, calc(100vw - 32px));
+  box-sizing: border-box;
   max-height: min(420px, calc(100vh - 180px));
   gap: 10px;
   overflow: auto;
-  padding: 12px;
+  padding: 16px;
   border: 1px solid var(--ds-border-subtle);
   border-radius: var(--radius-lg);
   background: var(--ds-bg-elevated-opaque);
@@ -230,7 +231,7 @@
   display: grid;
   gap: 6px;
   min-width: 0;
-  padding: 9px;
+  padding: 12px;
   border: 1px solid var(--ds-border-subtle);
   border-radius: var(--radius-md);
   background: var(--ds-bg-secondary);
@@ -278,8 +279,16 @@
 
 .composer-annotation-actions {
   display: flex;
+  flex-wrap: wrap;
+  min-width: 0;
   justify-content: flex-end;
   gap: 6px;
+}
+
+.composer-annotation-actions > * {
+  flex: 0 1 auto;
+  min-width: 0;
+  white-space: normal;
 }
 
 .composer-annotation-edit {

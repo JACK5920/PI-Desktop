@@ -27,12 +27,18 @@
   align-items: center;
   gap: 4px;
   max-width: calc(100vw - 16px);
+  box-sizing: border-box;
   padding: 5px;
   border: 1px solid var(--ds-border-subtle);
   border-radius: var(--radius-lg);
   background: var(--ds-bg-elevated-opaque);
   box-shadow: var(--ds-shadow-dialog);
   color: var(--ds-text-primary);
+}
+
+.transcript-selection-toolbar.is-editing-comment {
+  max-height: calc(100vh - 16px);
+  overflow: auto;
 }
 
 .transcript-selection-action {
@@ -152,9 +158,17 @@
 
 .transcript-selection-annotation-editor {
   display: grid;
-  width: min(350px, calc(100vw - 36px));
+  width: min(350px, calc(100vw - 48px));
+  min-width: 0;
   gap: 8px;
-  padding: 6px;
+  padding: 8px;
+  box-sizing: border-box;
+}
+
+.transcript-selection-annotation-editor textarea {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .transcript-selection-annotation-label {
@@ -165,8 +179,71 @@
 
 .transcript-selection-annotation-actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.transcript-selection-annotation-actions > * {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.message-annotation-summary {
+  align-self: flex-end;
+  max-width: min(100%, 420px);
+  margin-top: 8px;
+  color: var(--ds-text-secondary);
+  font-size: var(--text-xs);
+  text-align: start;
+}
+
+.message-annotation-summary > summary {
+  width: fit-content;
+  max-width: 100%;
+  padding: 4px 8px;
+  border-radius: var(--radius-full);
+  background: var(--ds-bg-chip);
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.message-annotation-summary > summary:hover,
+.message-annotation-summary > summary:focus-visible {
+  color: var(--ds-text-primary);
+  background: var(--ds-bg-hover);
+}
+
+.message-annotation-summary-list {
+  display: grid;
+  gap: 8px;
+  margin: 6px 0 0;
+  padding: 10px 12px 10px 30px;
+  border: 1px solid var(--ds-border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--ds-bg-elevated-opaque);
+}
+
+.message-annotation-summary-item {
+  min-width: 0;
+}
+
+.message-annotation-summary-item blockquote,
+.message-annotation-summary-item p {
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.message-annotation-summary-item blockquote {
+  padding-inline-start: 8px;
+  border-inline-start: 2px solid var(--ds-border-strong);
+  color: var(--ds-text-primary);
+}
+
+.message-annotation-summary-item p {
+  margin-top: 4px;
+  color: var(--ds-text-secondary);
 }
 
 .message-row.user {
