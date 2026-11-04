@@ -23,6 +23,7 @@ function harness(messages, background = []) {
     activeSessionId: "active", messages,
     retainedSessionIds: ["active", "background"],
     retainedTranscripts: { active: messages, background },
+    sideChats: {},
     runningSessions: { active: true, background: true },
     sessionHistory: {},
   };
@@ -115,6 +116,26 @@ test("background deltas update only their cache and leave active and retained ar
   const cached = h.runtime.sessionTranscriptCache.get("background");
   assert.equal(cached.at(-1).content, "delta");
   assert.equal(getSessionMessageSnapshot(cached).owner, getSessionMessageSnapshot(background).owner);
+}));
+
+test("an open side-chat tab receives reactive snapshots from its background child transcript", () => withFrames((flush) => {
+  const child = [message("child-live", { content: "", status: "streaming" })];
+  const h = harness([message("active")]);
+  h.set({ sideChats: {
+    "side-chat:1": {
+      id: "side-chat:1", parentSessionId: "active", sourceMessageId: "answer",
+      excerpt: "quote", status: "ready", operationId: 1, draftText: "",
+      childSessionId: "child", messages: child,
+    },
+  } });
+  h.runtime.cacheSessionTranscript("child", child);
+  h.get().handleAgentEvent(envelope("child", "child-live", "next"));
+  flush();
+  const projected = h.get().sideChats["side-chat:1"].messages;
+  assert.equal(projected.at(-1).content, "next");
+  assert.notEqual(projected, child);
+  assert.equal(h.get().activeSessionId, "active");
+  assert.equal(h.get().messages[0].content, "active");
 }));
 
 test("active and background duplicate inputs apply deltas to the last value at the first position", () => withFrames((flush) => {

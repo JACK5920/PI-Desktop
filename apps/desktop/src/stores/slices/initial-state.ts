@@ -80,6 +80,8 @@ export function createInitialState(): AppStateData {
     goalLifecycles: {},
     goalProgress: {},
     sessionTodos: {},
+    responseAnnotations: {},
+    sideChats: {},
     page: "chat",
     settingsTab: "general",
     settingsAnchor: null,

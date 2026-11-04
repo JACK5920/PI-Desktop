@@ -8222,3 +8222,27 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
 - Coverage: shared/Host/Renderer settings tests, config-sync tests, and
   `E2E-GOAL-budget-editor` for default settings, custom snapshots, and existing
   Goal immutability. See ADR 0345 and the runtime/UX Goal budget specs.
+
+## 2026-11-04 — Restore selection references, annotations, and docked side chats (D686)
+
+- Restore a captured-selection toolbar for eligible local writable transcript
+  rows. Copy uses the captured excerpt; selected user text appends as an editable
+  quote, while selected assistant text can become a numbered annotation or a
+  docked side-chat context. Keep context-menu copy and the ordinary
+  Ask-about-selection activated fork distinct.
+- Pending annotations are transient and JSON-serialized into ordinary prompts;
+  user-visible request projections hide the generated envelope. Exact
+  `:codex-annotation{index="N"}` citations open a safe text-only reference card.
+- A side-chat draft creates no child or request until explicit non-empty Send.
+  The first send creates a normal non-activating session fork and uses existing
+  session-scoped streaming, permission, and AskTool paths. Closing a sent tab
+  releases only its renderer projection; its ordinary child session remains.
+- No new Host protocol, IPC/RPC, database migration, permission, or plugin
+  contract is introduced. Unsent drafts and annotations are not restored after
+  restart. ADR 0346 amends ADR 0268 and ADR 0342; all retired decision and E2E
+  identifiers remain retired.
+- Coverage: selection helper and annotation/side-chat store tests plus the
+  isolated Chromium selection-reference workflow. See ADR 0346, the component
+  and interaction specifications, and E2E-CHAT-selection-capture-v2,
+  E2E-CHAT-annotation-citation-flow-v2, and
+  E2E-CHAT-docked-follow-up-tab-v2.

@@ -1,3 +1,5 @@
+import { requestTextWithoutAnnotations } from "./response-annotations.js";
+
 /**
  * Text readings of a transcript, for the right-click menu's clipboard actions.
  *
@@ -32,7 +34,7 @@ export function conversationPlainText(
   const blocks: string[] = [];
   for (const message of messages) {
     if (message.role !== "user" && message.role !== "assistant") continue;
-    const text = (message.content ?? "").trim();
+    const text = requestTextWithoutAnnotations(message.content ?? "").trim();
     if (!text) continue;
     const speaker =
       message.role === "user" ? labels.user : labels.assistant;

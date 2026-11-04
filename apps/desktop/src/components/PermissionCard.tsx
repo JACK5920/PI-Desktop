@@ -9,10 +9,13 @@ import { Button } from "./ui";
 export function PermissionCard({
   permission,
   queued = 0,
+  focusTarget,
 }: {
   permission: PendingPermission;
   /** Requests waiting behind this one; the user answers them in order. */
   queued?: number;
+  /** Optional owner-specific focus destination (e.g. a docked side-chat composer). */
+  focusTarget?: () => HTMLElement | null;
 }) {
   const { t } = useTranslation();
   const resolvePermission = useAppStore((state) => state.resolvePermission);
@@ -24,7 +27,10 @@ export function PermissionCard({
 
   const restoreComposerFocus = () => {
     window.requestAnimationFrame(() => {
-      document.querySelector<HTMLTextAreaElement>(".composer-input")?.focus();
+      const target = focusTarget
+        ? focusTarget()
+        : document.querySelector<HTMLTextAreaElement>(".composer-input");
+      target?.focus();
     });
   };
 

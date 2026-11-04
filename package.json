@@ -45,6 +45,7 @@
     "test:e2e:composer-model-selection": "node scripts/e2e-composer-model-selection.mjs",
     "test:e2e:composer-paste": "node scripts/e2e-composer-paste.mjs",
     "test:e2e:transcript": "node scripts/e2e-transcript-render.mjs",
+    "test:e2e:selection-references": "node scripts/e2e-selection-reference-workflow.mjs",
     "test:e2e:gen-ui": "node scripts/e2e-gen-ui.mjs",
     "test:e2e:renderer-responsiveness": "node scripts/e2e-renderer-responsiveness.mjs",
     "test:e2e:transcript-minimap-jump": "node scripts/e2e-transcript-minimap-jump.mjs",

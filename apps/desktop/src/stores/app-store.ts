@@ -56,6 +56,8 @@ import { createProjectSlice } from "./slices/project-slice";
 import { createCatalogSlice } from "./slices/catalog-slice";
 import { createEventsSlice } from "./slices/events-slice";
 import { createInteractionSlice } from "./slices/interaction-slice";
+import { createAnnotationSlice } from "./slices/annotation-slice";
+import { createSideChatSlice } from "./slices/side-chat-slice";
 import {
   createCatalogRuntime,
   type CatalogRuntime,
@@ -190,6 +192,12 @@ export const useAppStore = create<AppState>((set, get) => {
     materializeDraftSession: materializeDraftSessionInternal,
   }),
 
+  ...createSideChatSlice({
+    get,
+    set,
+    getCachedTranscript: (sessionId) => sessionRuntime.sessionTranscriptCache.get(sessionId) ?? [],
+  }),
+
   ...createTranscriptSlice({
     get,
     set,
@@ -239,6 +247,8 @@ export const useAppStore = create<AppState>((set, get) => {
     runtime: sessionRuntime,
     interactionRuntime,
   }),
+
+  ...createAnnotationSlice({ get, set }),
 
   bootstrap: async () => {
     // Only the newest attempt may publish; an older in-flight one returns

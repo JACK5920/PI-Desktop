@@ -24,6 +24,7 @@ import { useDisclosureAnchorNotifier } from "../../../lib/disclosure-anchor-cont
 import { isThinkingActive } from "../../../lib/turn-process";
 import { resolveShowThinking } from "../../../lib/thinking-visibility";
 import { TranscriptSearchContext } from "../../../lib/transcript-search-context";
+import { useSlotSessionId } from "../../../plugins/renderer-slots/use-slots";
 import { disclosureKey, useAutomaticDisclosure } from "./disclosure";
 export { useAutomaticDisclosure } from "./disclosure";
 import { messageThinking as thinkingText } from "../../../lib/assistant-turns";
@@ -211,6 +212,7 @@ export function MessageMeta({
 
 export function AssistantErrorMessage({ message }: { message: UiMessage }) {
   const { t } = useTranslation();
+  const paneSessionId = useSlotSessionId();
   const [open, setOpen] = useState(true);
   const detailsToggleRef = useRef<HTMLButtonElement | null>(null);
   const notifyDisclosureAnchor = useDisclosureAnchorNotifier();
@@ -287,7 +289,7 @@ export function AssistantErrorMessage({ message }: { message: UiMessage }) {
             onClick={() =>
               void useAppStore
                 .getState()
-                .sendPrompt(t("chat.continueCurrentTaskPrompt"))
+                .sendPrompt(t("chat.continueCurrentTaskPrompt"), undefined, paneSessionId || undefined)
             }
           >
             {t("errors.action.continue")}

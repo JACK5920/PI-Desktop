@@ -2763,15 +2763,48 @@ MainChat 弥补了缺口。 Maximized/fullscreen 调用保留最新的
 
 - **前提条件**：会话中有一条完成的用户提示和一条完成的助手回答；对话面板已聚焦。
 - **步骤**：1）右键用户板。2）选择复制，再选择选中消息文本。3）在用户板里选中一段文字，再右键该板并选择复制；收起选区后再右键复制一次。4）右键助手回合并选择复制。5）右键最后一回合下方空白处，选择复制整个对话。6）在打开的菜单上按 Escape，再按 Tab。7）右键回答里的 markdown 链接。8）编辑用户消息、替换内容、选中一段草稿并右键复制；再验证无选区复制、选中消息文本和取消编辑后的复制。
-- **预期**：用户菜单列出复制、选中消息文本、编辑，以及分隔后的删除；助手菜单列出复制、选中消息文本、重新生成和分叉。复制写入打开菜单时该行内的选中文本；光标折叠或选区在行外时退回整段。复制整个对话仍写入带说话人标签的整段对话。两者都显示 toast。选中文本会高亮气泡。Escape 和 Tab 关闭菜单且不执行项。链接仍提供在默认浏览器打开、在工作面板打开、复制链接地址。引用、批注、打开侧边聊天不出现（ADR 0268）。表面是视口固定的文档级层，不会改变记录高度。
+- **预期**：用户菜单列出复制、选中消息文本、编辑，以及分隔后的删除；助手菜单列出复制、选中消息文本、重新生成和分叉。复制写入打开菜单时该行内的选中文本；光标折叠或选区在行外时退回整段。复制整个对话仍写入带说话人标签的整段对话。两者都显示 toast。选中文本会高亮气泡。Escape 和 Tab 关闭菜单且不执行项。链接仍提供在默认浏览器打开、在工作面板打开、复制链接地址。右键菜单不直接提供引用、批注或侧边聊天；选中文本后由独立工具栏提供这些操作（ADR 0346）。表面是视口固定的文档级层，不会改变记录高度。
 - **链接规格**：`04-ux/08-component-spec.md` §8.3 / §8.5，
   `04-ux/09-interaction-patterns.md`（浮动下拉表面），
-  ADR 0268
+  ADR 0346
 - **验收**：C（聊天流），质量
 - **里程碑**：M5
 - **状态**：单位覆盖（`chat-context-menu.test.mjs`、
   `chat-context-menu-items.test.mjs`、`chat-context-menu-surface.test.mjs`）；
   完整 UI 场景草稿
+
+#### E2E-CHAT-selection-capture-v2：捕获、复制并追加对话选区
+
+- **前提条件**：可编辑的本地会话中有已完成的用户消息和助手消息，且输入框已有未发送草稿。
+- **步骤**：1）选中一段用户消息文本，从选区工具栏复制。2）再次选中并追加到输入框。3）选中已完成助手回答的一段文本并打开评论编辑器，然后改变浏览器选区再保存。4）工具栏打开时折叠或移动选区，确认操作仍使用最初捕获的来源。
+- **预期**：复制得到精确的已捕获摘录；追加到输入框会附带来源说明，以本地化引用块追加，不覆盖原草稿或已有引用。助手评论编辑器保存最初捕获的摘录，而不是后来改变的浏览器选区。空选区、跨消息选区、不符合条件的消息及远程会话不显示无效操作；长度限制为 2,000 个 Unicode 码点且不拆分字符。右键菜单复制、消息行复制、选中文本及普通的“询问所选内容”仍各自保持原有语义。
+- **覆盖范围**：`node scripts/e2e-selection-reference-workflow.mjs` 在 Chromium 中覆盖选区、复制、追加和来源捕获；`node --test apps/desktop/test/transcript-selection.test.mjs apps/desktop/test/selection-draft-append.test.mjs apps/desktop/test/selected-text-followup.test.mjs` 覆盖规范化、来源归属和既有分叉行为。
+- **关联规格**：`04-ux/08-component-spec.md` §7、`04-ux/09-interaction-patterns.md` §7.6、ADR 0346。
+- **验收**：C（聊天流）、质量。
+- **里程碑**：维护。
+- **状态**：Chromium 自动化夹具和辅助逻辑覆盖；完整桌面视觉验收另行执行。
+
+#### E2E-CHAT-annotation-citation-flow-v2：为摘录添加评论并在回答中引用
+
+- **前提条件**：有已完成的助手回答和可写的本地输入框。
+- **步骤**：1）选中助手摘录并选择“添加到聊天”。2）添加评论、附加并查看输入框中的引用。3）编辑评论、移除或清空待发送批注，再次附加摘录。4）发送非空普通请求，检查用户气泡、编辑草稿和排队预览。5）渲染包含精确引用指令的回答并打开引用。
+- **预期**：输入框显示有序、可编辑和可移除的引用；取消编辑不会附加，重复选择相同来源和摘录会重新打开编辑器，无评论的引用也有效。模型收到显式 JSON 序列化的批注信封，而用户可见的请求投影只显示用户请求。接收成功后仅消费未变化的已提交引用；拒绝时保留它们；只有批注而没有请求文本时不接受提交。编辑排队请求会先恢复其隐藏批注，再放到较新的输入框批注之前；排队接收失败时保留原批注。有效引用打开安全的纯文本摘录、评论和来源卡片；未知序号及恶意文本保持惰性普通文本。
+- **覆盖范围**：`node scripts/e2e-selection-reference-workflow.mjs` 覆盖附加、编辑、提示序列化和引用渲染；`node --test apps/desktop/test/response-annotations.test.mjs apps/desktop/test/response-annotation-slice.test.mjs apps/desktop/test/response-annotation-citations.test.mjs apps/desktop/test/queue-pending-actions.test.mjs apps/desktop/test/composer-submit-race.test.mjs apps/desktop/test/session-title-prompt-fallback.test.mjs` 覆盖序列化、显示精简、顺序、精确快照确认和拒绝处理。
+- **关联规格**：`04-ux/08-component-spec.md` §7 / §11、`04-ux/09-interaction-patterns.md` §7.6、ADR 0346。
+- **验收**：C（聊天流）、质量、安全。
+- **里程碑**：维护。
+- **状态**：Chromium、Store 和辅助逻辑自动覆盖；不包含真实模型提供方验收。
+
+#### E2E-CHAT-docked-follow-up-tab-v2：在父会话旁保留子会话追问
+
+- **前提条件**：可分叉本地会话中有已完成的助手回答，且用户有权打开并向子会话发送提示。
+- **步骤**：1）选中助手文本并打开“在侧聊中询问”；发送前确认尚未创建子会话或提交提示。2）输入非空提示并发送。3）子会话流式运行期间检查其记录，并处理仅属于该子会话的权限请求和 AskTool 卡片。4）将结果添加到主输入框。5）把一个子会话作为普通会话打开；再打开并发送另一个侧聊后关闭其标签。6）在子记录中选中用户文本并追加到紧凑草稿，选中助手文本并附加/查看批注；确认不提供嵌套侧聊，且停靠时隐藏历史修改操作。确认子会话错误卡片的“继续”明确发往子会话。7）在首次发送等待期间请求提升，随后拒绝发送并确认未发送文本保留在子会话输入框；再测试重试以及关闭/切换会话的竞态。
+- **预期**：只有用户明确发送才会分叉并提交，且使用选中的助手消息作为分叉锚点。父会话仍是活动会话，并保留原记录位置和草稿。子会话事件、权限处理和 AskTool 回答按子会话 id 隔离，并沿用 Host 权限路径。添加到主聊天时追加而不覆盖父草稿；提升为普通会话时激活子会话并仅释放侧聊投影；若发送仍在进行，提升会等待结果，发送被拒绝时将保留的侧聊草稿并入子会话输入框且不覆盖其已有草稿；关闭已发送的标签时保留持久子会话，不停止任务。提示被拒绝后保留可重试的子会话；并发首次发送只创建一个子会话；迟到的分叉/发送完成不能重新打开已关闭标签或覆盖其他会话草稿。子记录中的选区操作只影响子草稿和批注列表；不会把嵌套侧聊创建到不可见的工作面板上下文。
+- **覆盖范围**：`node scripts/e2e-selection-reference-workflow.mjs` 在真实 Chromium 中使用确定性的 Host/Store 夹具，覆盖首次分叉/发送、子会话流式输出、权限与 AskTool 界面/处理、父会话仍选中、追加到主输入框、提升以及关闭后保留。该夹具还覆盖子记录选区追加到紧凑草稿、附加/查看子批注以及不显示嵌套侧聊。`side-chat-store.test.mjs` 验证提升会等待首次发送结果，并在发送被拒绝时将草稿并入子会话已有输入内容。`node --test apps/desktop/test/side-chat-lifecycle.test.mjs apps/desktop/test/side-chat-store.test.mjs apps/desktop/test/session-fork-running.test.mjs apps/desktop/test/work-panel-tabs.test.mjs apps/desktop/test/session-runtime-updates.test.mjs apps/desktop/test/session-message-presentation.test.mjs apps/desktop/test/plugin-action-slots.test.mjs apps/desktop/test/chat-context-menu-surface.test.mjs apps/desktop/test/chat-error-message.test.mjs` 覆盖生命周期竞态、重试、标签清理、会话隔离的历史/错误操作和事件投影。
+- **关联规格**：`04-ux/08-component-spec.md` §7、`04-ux/09-interaction-patterns.md` §7.6、ADR 0346。
+- **验收**：C（聊天流）、E（工具和权限）、质量。
+- **里程碑**：维护。
+- **状态**：Chromium/Store 自动覆盖；完整桌面视觉验收及真实 Host/模型提供方验收另行执行。
 
 - **完整历史回归**：打开包含 140 条消息的会话，不向上翻页，选择复制整个对话；剪贴板必须包含第 1–140 条消息。从搜索上下文窗口和长消息截断预览重复验证。保留当前可见的生成中文字；读取失败时提示错误，剪贴板保持不变。仅在选择复制后读取完整历史，不改变阅读位置。运行 `node scripts/e2e-copy-conversation.mjs`。
 - 编辑时复制应使用草稿选区，无选区时复制整份草稿；选中消息文本应选中草稿。菜单不提供编辑、删除或版本切换；取消后原消息及其菜单保持不变。自动化验证：`node scripts/e2e-message-edit-copy.mjs`。
@@ -5967,6 +6000,8 @@ eleven-tool-round desktop paths are verified by
 | A — 应用程序启动 | E2E-001、E2E-002、E2E-003、E2E-004、E2E-067、E2E-076、E2E-079、E2E-092、E2E-097、E2E-143、E2E-150、E2E-168、E2E-204、E2E-217 |
 | B——模型配置 | E2E-005、E2E-005G、E2E-006、E2E-007、E2E-038、E2E-050、E2E-052、E2E-055、E2E-066、E2E-080、E2E-082、E2E-151、E2E-005J、E2E-199、E2E-201、E2E-202、E2E-203、E2E-209、E2E-166 |
 | C — 对话和直播 | E2E-CHAT-running-status-survives-output-pauses、E2E-008、E2E-008d、E2E-008a、E2E-009、E2E-010、E2E-011、E2E-011a、E2E-011b、E2E-031、E2E-040、E2E-047、E2E-048、E2E-048c、E2E-048A、E2E-049、E2E-052、 E2E-053、E2E-054、E2E-055、E2E-059、E2E-059a、E2E-060c、E2E-060d、E2E-061、E2E-061a、E2E-062、E2E-064、E2E-065、E2E-068、E2E-071、 E2E-073、E2E-074、E2E-075、E2E-081、E2E-083、E2E-084、E2E-086、E2E-087、E2E-088、E2E-088b、E2E-089、E2E-090、E2E-094、E2E-095、E2E-096、 E2E-097、E2E-098、E2E-099、E2E-102、E2E-102a、E2E-102b、E2E-106、E2E-109、E2E-111、E2E-114、E2E-116、E2E-117、E2E-118、E2E-119、 E2E-120、E2E-121、E2E-代理-001、E2E-142、E2E-144、E2E-145、E2E-146、E2E-147、E2E-151、E2E-199、E2E-250、E2E-166、E2E-SUBAGENT-resume-a-settled-delegation |
+| C / Quality — 对话文本选区引用 | E2E-CHAT-selection-capture-v2、E2E-CHAT-annotation-citation-flow-v2 |
+| C / E / Quality — 停靠式侧聊追问 | E2E-CHAT-docked-follow-up-tab-v2 |
 | C — 对话和直播（输入框草稿） | E2E-011c、E2E-011c-1、E2E-011c-2 |
 | C / F / 安全 / 品质 — Goal 生命周期 | E2E-GOAL-lifecycle |
 | C / F / 品质 — Goal 预算编辑 | E2E-GOAL-lifecycle、E2E-GOAL-budget-editor |

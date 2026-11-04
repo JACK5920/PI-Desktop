@@ -3,6 +3,7 @@ export type WorkPanelTabKind =
   | "review"
   | "branch-review"
   | "github-pr-review"
+  | "side-chat"
   | "file"
   | "plugin"
   | "subagent";
@@ -141,6 +142,11 @@ export function subagentWorkPanelTab(
   };
 }
 
+/** A transient follow-up transcript that leaves its parent chat selected. */
+export function sideChatWorkPanelTab(sideChatId: string): WorkPanelTab {
+  return { id: sideChatId, kind: "side-chat", resource: sideChatId };
+}
+
 export const BROWSER_PLUGIN_TAB = {
   pluginId: "pi.browser",
   viewId: "browser",
@@ -251,6 +257,7 @@ export function isKnownWorkPanelTab(tab: WorkPanelTab): boolean {
     (tab.kind === "new" || tab.kind === "review" ||
       tab.kind === "branch-review" ||
       tab.kind === "github-pr-review" ||
+      tab.kind === "side-chat" ||
       tab.kind === "file" || tab.kind === "plugin" ||
       tab.kind === "subagent")
   );

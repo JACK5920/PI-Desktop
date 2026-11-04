@@ -373,6 +373,115 @@
   display: none;
 }
 
+/* ---------- Docked side chat ------------------------------------------- */
+
+.side-chat-tab {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.side-chat-header {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid var(--ds-border-subtle);
+  padding: 9px 12px;
+}
+
+.side-chat-heading {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.side-chat-heading span {
+  overflow: hidden;
+  color: var(--ds-text-muted);
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.side-chat-header-actions,
+.side-chat-composer-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.side-chat-excerpt {
+  flex: none;
+  max-height: 92px;
+  overflow: auto;
+  border-bottom: 1px solid var(--ds-border-subtle);
+  padding: 8px 12px;
+  color: var(--ds-text-secondary);
+  font-size: var(--text-sm);
+}
+
+.side-chat-excerpt blockquote {
+  margin: 0;
+  border-inline-start: 2px solid var(--ds-border-strong);
+  padding-inline-start: 9px;
+  white-space: pre-wrap;
+}
+
+.side-chat-transcript {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.side-chat-transcript > .thread-wrap {
+  min-height: 0;
+  flex: 1;
+}
+
+.side-chat-transcript .thread-content {
+  width: 100%;
+}
+
+.side-chat-transcript .conversation-minimap {
+  display: none;
+}
+
+.side-chat-composer {
+  display: grid;
+  flex: none;
+  gap: 8px;
+  border-top: 1px solid var(--ds-border-subtle);
+  padding: 10px 12px;
+}
+
+.side-chat-composer textarea {
+  display: block;
+  width: 100%;
+  max-height: 180px;
+  resize: vertical;
+  font-size: var(--text-base);
+  line-height: var(--leading-chat);
+}
+
+.side-chat-composer-actions {
+  flex-wrap: wrap;
+}
+
+.side-chat-error {
+  flex: none;
+  padding: 7px 12px;
+  color: var(--ds-error);
+  font-size: var(--text-sm);
+}
+
 /* ---------- Subagent transcript tab ------------------------------------- */
 
 /*

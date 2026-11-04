@@ -403,5 +403,6 @@ Each ADR includes:
 | 0343 | [Goal uses fixed Auto permission before approval](0343-goal-fixed-auto-permission-before-approval.md) | Accepted for implementation (D683) |
 | 0344 | [Configure per-cycle Goal budgets](0344-configurable-goal-cycle-budgets.md) | Accepted for implementation (D684; defaults amended by ADR 0345) |
 | 0345 | [Configure Goal budget defaults in AI Settings](0345-goal-budget-defaults-in-system-settings.md) | Accepted for implementation (D685; amends ADR 0344) |
+| 0346 | [Restore selection references, annotations, and docked side chats](0346-selection-references-annotations-and-docked-side-chats.md) | Accepted for implementation (D686; amends ADR 0268 / ADR 0342) |
 
 | model-reasoning-effort-override | [Model reasoning effort override](model-reasoning-effort-override.md) | Proposed |

@@ -58,6 +58,7 @@ import { ActionSlotSide } from "./ActionBarSlots";
 import { EntryExtraStack } from "./EntryExtraStack";
 import { TurnChangesCard } from "./TurnChangesCard";
 import { slotMessage } from "../../../plugins/renderer-slots/slot-message";
+import { useTranscriptHistoryActionsAllowed } from "./transcript-action-scope";
 
 type AssistantTurnProps = {
   entry: AssistantTurnEntry;
@@ -284,8 +285,10 @@ export const AssistantTurn = memo(function AssistantTurn({
   const retryAssistantMessage = useAppStore((s) => s.retryAssistantMessage);
   const forkAssistantMessage = useAppStore((s) => s.forkAssistantMessage);
   const paneSessionId = useSlotSessionId();
+  const historyActionsAllowed = useTranscriptHistoryActionsAllowed();
   const session = useAppStore((s) => s.sessions.find((item) => item.id === paneSessionId));
   const canEditMessages = sessionAllows(session ?? (paneSessionId.startsWith("remote:") ? { id: paneSessionId } : undefined), "canEditMessages");
+  const canMutateHistory = canEditMessages && historyActionsAllowed;
   const summary = getAssistantTurnSummary(entry);
   const { actionMessage, metaMessage, latestUsageMessage, usage, responseDurationMs, responseOutputTokens } = summary;
   const modelId = metaMessage?.modelId ?? latestUsageMessage?.modelId;
@@ -321,7 +324,7 @@ export const AssistantTurn = memo(function AssistantTurn({
               ".message-bubble",
             ),
           ].at(-1) ?? null,
-        complete: complete && Boolean(actionMessage) && canEditMessages,
+        complete: complete && Boolean(actionMessage) && canMutateHistory,
         actions: { copyText, selectText },
         onRegenerate: () => {
           if (actionMessage) void retryAssistantMessage(actionMessage.id);
@@ -447,7 +450,7 @@ export const AssistantTurn = memo(function AssistantTurn({
             <MessageTimestamp createdAt={actionMessage.createdAt} />
             <ActionSlotSide slot="assistantAction" side="left" message={slotReply} />
             <CopyButton text={content} label={t("chat.copy")} />
-            {canEditMessages ? <TooltipButton
+            {canMutateHistory ? <TooltipButton
               className="copy-btn icon"
               tooltip={t("chat.forkResponse")}
               ariaLabel={t("chat.forkResponse")}
@@ -455,7 +458,7 @@ export const AssistantTurn = memo(function AssistantTurn({
             >
               <IconBranch size={13} />
             </TooltipButton> : null}
-            {canEditMessages ? <TooltipButton
+            {canMutateHistory ? <TooltipButton
               className="copy-btn icon"
               tooltip={t("chat.retry")}
               ariaLabel={t("chat.retry")}
