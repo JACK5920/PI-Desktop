@@ -433,6 +433,7 @@ export const ptBR = {
     sideChatSource: "Da mensagem {{messageId}}",
     sideChatExcerpt: "Trecho selecionado",
     sideChatPrompt: "Mensagem do chat lateral",
+    stop: "Parar",
     sideChatPlaceholder: "Pergunte sobre este trecho…",
     sideChatStarting: "Iniciando o chat lateral…",
     sideChatOpenConversation: "Abrir como conversa",

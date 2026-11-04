@@ -446,6 +446,7 @@ export const ko = {
     sideChatSource: "메시지 {{messageId}}에서 가져옴",
     sideChatExcerpt: "선택한 발췌문",
     sideChatPrompt: "사이드 채팅 메시지",
+    stop: "중지",
     sideChatPlaceholder: "이 발췌문에 대해 질문하세요…",
     sideChatStarting: "사이드 채팅 시작 중…",
     sideChatOpenConversation: "대화로 열기",

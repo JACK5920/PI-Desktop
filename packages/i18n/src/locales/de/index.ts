@@ -434,6 +434,7 @@ export const de = {
     "sideChatSource": "Aus Nachricht {{messageId}}",
     "sideChatExcerpt": "Ausgewählter Ausschnitt",
     "sideChatPrompt": "Seitenchat-Nachricht",
+    "stop": "Stoppen",
     "sideChatPlaceholder": "Frage zu diesem Ausschnitt…",
     "sideChatStarting": "Seitenchat wird gestartet…",
     "sideChatOpenConversation": "Als Unterhaltung öffnen",

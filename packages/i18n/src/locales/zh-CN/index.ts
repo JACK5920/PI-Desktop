@@ -439,6 +439,7 @@ export const zhCN = {
     sideChatSource: "引用自消息 {{messageId}}",
     sideChatExcerpt: "选中的文本",
     sideChatPrompt: "侧聊消息",
+    stop: "停止",
     sideChatPlaceholder: "针对这段内容提问…",
     sideChatStarting: "正在创建侧聊…",
     sideChatOpenConversation: "作为对话打开",

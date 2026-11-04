@@ -439,6 +439,7 @@ export const zhTW = {
     sideChatSource: "引用自訊息 {{messageId}}",
     sideChatExcerpt: "選取的文字",
     sideChatPrompt: "側邊聊天訊息",
+    stop: "停止",
     sideChatPlaceholder: "針對這段內容提問…",
     sideChatStarting: "正在建立側邊聊天…",
     sideChatOpenConversation: "以對話開啟",

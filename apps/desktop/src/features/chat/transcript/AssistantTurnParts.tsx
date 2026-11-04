@@ -1,4 +1,4 @@
-import { memo, useMemo } from "react";
+import { memo } from "react";
 import type { AgentActivity, UiMessage } from "@pi-desktop/shared";
 import type { AssistantTurnPart } from "../../../lib/assistant-turns";
 import type { SubagentOutcome, SubagentTiming } from "../../../lib/subagent-topology";
@@ -36,10 +36,11 @@ const SmoothMessageBubble = memo(function SmoothMessageBubble({ message, streami
   // Cards load the pane session's own copy, never the session a path names.
   const sessionId = useSlotSessionId();
   const session = useAppStore((s) => s.sessions.find((item) => item.id === sessionId));
-  const transcript = useAppStore((s) => transcriptMessagesForSession(s, sessionId));
-  const responseAnnotations = useMemo(
-    () => annotationsForAssistantMessage(transcript, message.id),
-    [message.id, transcript],
+  const responseAnnotations = useAppStore((s) =>
+    annotationsForAssistantMessage(
+      transcriptMessagesForSession(s, sessionId),
+      message.id,
+    ),
   );
   const remote = isGenUiRemoteOwner(sessionId, session);
   const selectionEligible = selectable && !streaming && sessionAllows(session, "canEditMessages");

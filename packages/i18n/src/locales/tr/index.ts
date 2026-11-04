@@ -446,6 +446,7 @@ export const tr = {
     sideChatSource: "{{messageId}} numaralı mesajdan",
     sideChatExcerpt: "Seçilen alıntı",
     sideChatPrompt: "Yan sohbet mesajı",
+    stop: "Durdur",
     sideChatPlaceholder: "Bu alıntı hakkında soru sorun…",
     sideChatStarting: "Yan sohbet başlatılıyor…",
     sideChatOpenConversation: "Sohbet olarak aç",

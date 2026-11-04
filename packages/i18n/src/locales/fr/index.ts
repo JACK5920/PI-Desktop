@@ -434,6 +434,7 @@ export const fr = {
     "sideChatSource": "Depuis le message {{messageId}}",
     "sideChatExcerpt": "Extrait sélectionné",
     "sideChatPrompt": "Message du chat latéral",
+    "stop": "Arrêter",
     "sideChatPlaceholder": "Poser une question sur cet extrait…",
     "sideChatStarting": "Démarrage du chat latéral…",
     "sideChatOpenConversation": "Ouvrir comme conversation",

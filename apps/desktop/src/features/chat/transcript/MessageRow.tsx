@@ -48,6 +48,8 @@ import {
 } from "../../../lib/response-annotations";
 import { useTranscriptHistoryActionsAllowed } from "./transcript-action-scope";
 
+const EMPTY_RESPONSE_ANNOTATIONS: readonly ParsedResponseAnnotation[] = [];
+
 function SkillInvocationText({ message }: { message: UiMessage }) {
   const command = message.command ?? "";
   const mentions = message.skillMentions ?? [];
@@ -96,10 +98,13 @@ export const MessageRow = memo(function MessageRow({
   const paneSessionId = useSlotSessionId();
   const historyActionsAllowed = useTranscriptHistoryActionsAllowed();
   const isUser = message.role === "user";
-  const transcript = useAppStore((s) => transcriptMessagesForSession(s, paneSessionId));
-  const responseAnnotations = useMemo(
-    () => !isUser ? annotationsForAssistantMessage(transcript, message.id) : [],
-    [isUser, message.id, transcript],
+  const responseAnnotations = useAppStore((s) =>
+    isUser
+      ? EMPTY_RESPONSE_ANNOTATIONS
+      : annotationsForAssistantMessage(
+        transcriptMessagesForSession(s, paneSessionId),
+        message.id,
+      ),
   );
   const session = useAppStore((s) => s.sessions.find((item) => item.id === paneSessionId));
   const canEditMessages = sessionAllows(session ?? (paneSessionId.startsWith("remote:") ? { id: paneSessionId } : undefined), "canEditMessages");

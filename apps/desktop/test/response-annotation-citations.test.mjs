@@ -142,6 +142,43 @@ test("citations resolve against the nearest preceding user prompt for the same a
   assert.deepEqual(annotationsForAssistantMessage(messages, "missing"), []);
 });
 
+test("assistant annotation lookups reuse unchanged prompt content across transcript snapshots", () => {
+  const annotation = { sourceMessageId: "source-1", excerpt: "First source" };
+  const encodedPrompt = buildAnnotatedPrompt("Compare", [annotation]);
+  let contentReads = 0;
+  const prompt = {
+    id: "u1",
+    role: "user",
+    get content() {
+      contentReads += 1;
+      return encodedPrompt;
+    },
+  };
+  const answer = { id: "a1", role: "assistant", content: "First answer" };
+  const initialSnapshot = [prompt, answer];
+  const initialAnnotations = annotationsForAssistantMessage(initialSnapshot, "a1");
+  assert.deepEqual(initialAnnotations, [annotation]);
+
+  contentReads = 0;
+  const nextSnapshot = [...initialSnapshot, { id: "a2", role: "assistant", content: "Streaming" }];
+  const updatedAnnotations = annotationsForAssistantMessage(nextSnapshot, "a1");
+
+  assert.strictEqual(updatedAnnotations, initialAnnotations);
+  assert.equal(contentReads, 0);
+});
+
+test("unannotated assistant turns return a stable empty value across transcript snapshots", () => {
+  const prompt = { id: "u1", role: "user", content: "A regular prompt" };
+  const answer = { id: "a1", role: "assistant", content: "A regular answer" };
+  const firstSnapshot = [prompt, answer];
+  const first = annotationsForAssistantMessage(firstSnapshot, "a1");
+  const nextSnapshot = [...firstSnapshot, { id: "a2", role: "assistant", content: "Streaming" }];
+  const next = annotationsForAssistantMessage(nextSnapshot, "a1");
+
+  assert.deepEqual(first, []);
+  assert.strictEqual(next, first);
+});
+
 test("session transcript lookup reads the child snapshot owned by an open side chat", () => {
   const childAnnotation = {
     id: "child-annotation",
@@ -166,6 +203,13 @@ test("session transcript lookup reads the child snapshot owned by an open side c
     annotationsForAssistantMessage(transcriptMessagesForSession(state, "child"), "child-answer"),
     [{ sourceMessageId: "child-source", excerpt: "quoted child source", comment: "Keep the child association." }],
   );
+});
+
+test("a missing transcript lookup returns a stable empty snapshot for React selectors", () => {
+  const state = { messages: [], retainedTranscripts: {}, sideChats: {} };
+  const first = transcriptMessagesForSession(state, "not-loaded");
+  const second = transcriptMessagesForSession(state, "not-loaded");
+  assert.strictEqual(first, second);
 });
 
 test("Markdown recognizes citation plugin without rendering arbitrary HTML", async () => {

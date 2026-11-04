@@ -434,6 +434,7 @@ export const es = {
     "sideChatSource": "Del mensaje {{messageId}}",
     "sideChatExcerpt": "Fragmento seleccionado",
     "sideChatPrompt": "Mensaje del chat lateral",
+    "stop": "Detener",
     "sideChatPlaceholder": "Pregunta sobre este fragmento…",
     "sideChatStarting": "Iniciando el chat lateral…",
     "sideChatOpenConversation": "Abrir como conversación",

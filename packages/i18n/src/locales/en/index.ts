@@ -446,6 +446,7 @@ export const en = {
     sideChatSource: "From message {{messageId}}",
     sideChatExcerpt: "Selected excerpt",
     sideChatPrompt: "Side-chat prompt",
+    stop: "Stop",
     sideChatPlaceholder: "Ask about this excerpt…",
     sideChatStarting: "Starting side chat…",
     sideChatOpenConversation: "Open as a conversation",

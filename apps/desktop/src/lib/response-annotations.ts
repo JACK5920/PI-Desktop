@@ -23,6 +23,18 @@ export type AnnotationSourceMessage = {
   content?: string;
 };
 
+const EMPTY_TRANSCRIPT_MESSAGES: readonly AnnotationSourceMessage[] = [];
+const EMPTY_RESPONSE_ANNOTATIONS: ParsedResponseAnnotation[] = [];
+
+const precedingUserMessagesByTranscript = new WeakMap<
+  readonly AnnotationSourceMessage[],
+  ReadonlyMap<string, AnnotationSourceMessage | null>
+>();
+const responseAnnotationsByPromptMessage = new WeakMap<
+  AnnotationSourceMessage,
+  ParsedResponseAnnotation[]
+>();
+
 export type SessionTranscriptLookup = {
   activeSessionId?: string | null;
   messages: readonly AnnotationSourceMessage[];
@@ -167,7 +179,7 @@ export function transcriptMessagesForSession(
   state: SessionTranscriptLookup,
   sessionId: string | undefined,
 ): readonly AnnotationSourceMessage[] {
-  if (!sessionId) return [];
+  if (!sessionId) return EMPTY_TRANSCRIPT_MESSAGES;
   if (state.activeSessionId === sessionId) return state.messages;
   const sideChatTranscript = Object.values(state.sideChats).find(
     (sideChat) => sideChat.childSessionId === sessionId,
@@ -175,7 +187,7 @@ export function transcriptMessagesForSession(
   if (sideChatTranscript?.length) return sideChatTranscript;
   const retained = state.retainedTranscripts[sessionId];
   if (retained) return retained;
-  return sideChatTranscript ?? [];
+  return sideChatTranscript ?? EMPTY_TRANSCRIPT_MESSAGES;
 }
 
 function parsePayload(value: unknown): ParsedResponseAnnotation[] | null {
@@ -258,16 +270,29 @@ export function annotationsForAssistantMessage(
   messages: readonly AnnotationSourceMessage[],
   assistantMessageId: string,
 ): ParsedResponseAnnotation[] {
-  const assistantIndex = messages.findIndex(
-    (message) => message.id === assistantMessageId && message.role === "assistant",
-  );
-  if (assistantIndex < 0) return [];
-  for (let index = assistantIndex - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (message?.role !== "user") continue;
-    return parseAnnotatedPrompt(message.content ?? "")?.annotations ?? [];
+  let precedingUsers = precedingUserMessagesByTranscript.get(messages);
+  if (!precedingUsers) {
+    const next = new Map<string, AnnotationSourceMessage | null>();
+    let precedingUser: AnnotationSourceMessage | null = null;
+    for (const message of messages) {
+      if (message.role === "user") {
+        precedingUser = message;
+      } else if (message.role === "assistant" && !next.has(message.id)) {
+        next.set(message.id, precedingUser);
+      }
+    }
+    precedingUsers = next;
+    precedingUserMessagesByTranscript.set(messages, precedingUsers);
   }
-  return [];
+
+  const prompt = precedingUsers.get(assistantMessageId);
+  if (!prompt) return EMPTY_RESPONSE_ANNOTATIONS;
+  const cached = responseAnnotationsByPromptMessage.get(prompt);
+  if (cached) return cached;
+  const annotations =
+    parseAnnotatedPrompt(prompt.content ?? "")?.annotations ?? EMPTY_RESPONSE_ANNOTATIONS;
+  responseAnnotationsByPromptMessage.set(prompt, annotations);
+  return annotations;
 }
 
 /** Promote only the exact citation directive in prose text nodes. */
