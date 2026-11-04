@@ -5591,14 +5591,17 @@ window; opening a normal panel afterward must still work.
 #### E2E-CHAT-selection-capture-v2: Capture, copy, and append transcript selections
 
 - **Preconditions**: An editable local session contains completed user and
-  assistant messages, with a non-empty draft and the transcript selection
-  toolbar enabled.
+  assistant messages and a streaming assistant answer, with a non-empty draft
+  and the transcript selection toolbar enabled.
 - **Steps**: 1) Select part of a user message and copy it from the selection
   toolbar. 2) Repeat and append it to chat. 3) Select text from a completed
   assistant answer, open the comment editor, then change the browser selection
   before saving. 4) Collapse or move the selection while the toolbar is open and
   verify actions still use the captured source.
-- **Expected**: Copy writes the exact captured excerpt; Add to chat appends a
+- **Expected**: Copy writes the exact captured excerpt; changing a completed
+  transcript selection updates the toolbar to the new stable excerpt, while an
+  open comment editor retains its captured source; visible prose in the active
+  streaming answer can also be selected. Add to chat appends a
   localized quote with attribution without replacing the existing draft or
   references. The assistant comment editor saves the originally captured
   excerpt, not the later browser selection. Empty, cross-message, ineligible, or
@@ -5632,7 +5635,9 @@ window; opening a normal panel afterward must still work.
   cancelled edits do not attach, duplicate source/excerpt reopens its editor,
   and a reference without a comment is valid. The model receives an explicit
   JSON-serialized annotation envelope, while visible request projections show
-  only the user's request. Acceptance consumes only unchanged submitted
+  only the user's request and the admitted user-message row offers a separate
+  collapsed disclosure whose expanded content shows safe excerpts and
+  comments. Acceptance consumes only unchanged submitted
   attachments; rejection preserves them, and annotation-only submit is not
   admitted. Editing a queued prompt restores its hidden annotation attachments
   ahead of any newer pending Composer attachments, and a failed queue admission

@@ -41,11 +41,13 @@ import { getExtraMessageAttachments } from "./extra-attachments";
 import {
   annotationsForAssistantMessage,
   buildAnnotatedPrompt,
+  parseAnnotatedPrompt,
   prepareAnnotatedPromptEdit,
   requestTextWithoutAnnotations,
   transcriptMessagesForSession,
   type ParsedResponseAnnotation,
 } from "../../../lib/response-annotations";
+import { MessageAnnotationSummary } from "./MessageAnnotationSummary";
 import { useTranscriptHistoryActionsAllowed } from "./transcript-action-scope";
 
 const EMPTY_RESPONSE_ANNOTATIONS: readonly ParsedResponseAnnotation[] = [];
@@ -124,6 +126,10 @@ export const MessageRow = memo(function MessageRow({
   // Slash prompts are stored expanded; editing works on the typed form so the
   // resent turn re-expands the template (D123).
   const displayContent = requestTextWithoutAnnotations(message.content || "");
+  const sentAnnotations = useMemo(
+    () => isUser ? parseAnnotatedPrompt(message.content ?? "")?.annotations ?? [] : [],
+    [isUser, message.content],
+  );
   const editSeed =
     (editableUserMessage && message.command) || displayContent;
   const [editing, setEditing] = useState(false);
@@ -393,6 +399,9 @@ export const MessageRow = memo(function MessageRow({
               </div>
             )}
           </div>
+        ) : null}
+        {!editing && isUser && sentAnnotations.length > 0 ? (
+          <MessageAnnotationSummary annotations={sentAnnotations} />
         ) : null}
         {!editing && (hasAnswer || showRevisionPager) ? (
           <div className="message-actions">

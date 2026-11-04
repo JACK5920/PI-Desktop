@@ -435,6 +435,7 @@ export const ko = {
     annotationCommentPlaceholder: "어시스턴트가 무엇에 집중해야 하나요?",
     saveAnnotation: "발췌문 첨부",
     annotationAttachments: "참조 ({{count}})",
+    sentAnnotationReferences: "사용된 참조 ({{count}})",
     reviewAnnotations: "참조 검토",
     editAnnotation: "메모 수정",
     removeAnnotation: "참조 삭제",

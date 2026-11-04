@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { register } from "node:module";
 import test from "node:test";
 import * as React from "react";
 import * as jsxRuntime from "react/jsx-runtime";
@@ -9,7 +10,16 @@ import ts from "typescript";
 import { getExtraMessageAttachments } from "../src/features/chat/transcript/extra-attachments.ts";
 import { isRemoteSession, safeSessionSummary, sessionAllows } from "../src/lib/remote-session-safety.ts";
 
-const t = (key, values) => values?.name ? `${key}: ${values.name}` : key;
+register(new URL("./helpers/ts-import-hooks.mjs", import.meta.url));
+const {
+  buildAnnotatedPrompt,
+  parseAnnotatedPrompt,
+  requestTextWithoutAnnotations,
+} = await import("../src/lib/response-annotations.ts");
+
+const t = (key, values) => values?.name
+  ? `${key}: ${values.name}`
+  : values?.count !== undefined ? `${key}:${values.count}` : key;
 let paneSessionId = "local-session";
 let historyActionsAllowed = true;
 const store = {
@@ -48,7 +58,9 @@ function loadComponent(name, extras = {}) {
     "../../../lib/remote-session-safety": { isRemoteSession, safeSessionSummary, sessionAllows },
     "../../../lib/response-annotations": {
       annotationsForAssistantMessage: () => [],
-      requestTextWithoutAnnotations: (content) => content,
+      buildAnnotatedPrompt,
+      parseAnnotatedPrompt,
+      requestTextWithoutAnnotations,
       transcriptMessagesForSession: () => [],
     },
     "./transcript-action-scope": {
@@ -81,7 +93,9 @@ function loadComponent(name, extras = {}) {
 }
 
 const origin = loadComponent("SessionMessageOrigin");
+const { MessageAnnotationSummary } = loadComponent("MessageAnnotationSummary");
 const { MessageRow } = loadComponent("MessageRow", {
+  "./MessageAnnotationSummary": { MessageAnnotationSummary },
   "./SessionMessageOrigin": origin,
   "./extra-attachments": { getExtraMessageAttachments },
 });
@@ -113,6 +127,26 @@ test("a human message keeps editing, deletion and regenerate navigation", () => 
   assert.match(html, /aria-label="chat.editMessage"/);
   assert.match(html, /aria-label="chat.deleteMessage"/);
   assert.match(html, /aria-label="chat.revisions"/);
+});
+
+test("a sent annotated request shows a separate expandable reference summary", () => {
+  const content = buildAnnotatedPrompt("Review this claim", [
+    { sourceMessageId: "assistant-source", excerpt: "Quoted assistant text", comment: "Check this detail" },
+  ]);
+  const html = render({ ...userMessage, content });
+  assert.match(html, /Review this claim/);
+  assert.match(html, /data-testid="message-annotation-summary"/);
+  assert.match(html, /sentAnnotationReferences:1/);
+  assert.match(html, /Quoted assistant text/);
+  assert.match(html, /Check this detail/);
+  assert.doesNotMatch(html, /<response-annotations>|sourceMessageId/);
+});
+
+test("an invalid annotation envelope is not rendered as a reference summary", () => {
+  const content = "# Response annotations:\nnot a valid envelope";
+  const html = render({ ...userMessage, content });
+  assert.match(html, /# Response annotations:/);
+  assert.doesNotMatch(html, /data-testid="message-annotation-summary"/);
 });
 
 test("a docked child transcript keeps selection and copy but hides history mutations", () => {

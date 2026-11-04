@@ -1358,11 +1358,14 @@ Running turns and pending approvals continue to gate the controls.
   Copy keep their existing full-message / live-selection semantics, and
   **Ask about selection** remains the ordinary activated-fork context-menu path.
 - The Composer's annotation review exposes edit, remove, and clear-all actions.
+  After admission, the user message retains a collapsed reference disclosure
+  whose expanded summary shows only the saved excerpt/comment data.
   Ordinary send and queued admission serialize the exact attachment snapshot as
   JSON before the user's request text; only unchanged attachments are consumed
   after Host admission. Rejected submissions keep the attachment, and an
   annotation alone does not qualify as a prompt. Transcript, edit, queue, and
-  title projections show only the user's request text. A citation is recognized
+  title projections show only the user's request text; a sent user message may
+  separately expand its reference summary. A citation is recognized
   only for exact `:codex-annotation{index="N"}` syntax associated with that
   assistant turn's preceding request; activation opens a safe text-only
   excerpt/comment/source card. Unknown citations remain ordinary text.

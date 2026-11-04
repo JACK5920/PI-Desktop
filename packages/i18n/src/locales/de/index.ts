@@ -423,6 +423,7 @@ export const de = {
     "annotationCommentPlaceholder": "Worauf soll sich der Assistent konzentrieren?",
     "saveAnnotation": "Ausschnitt anhängen",
     "annotationAttachments": "Referenzen ({{count}})",
+    "sentAnnotationReferences": "Verwendete Referenzen ({{count}})",
     "reviewAnnotations": "Referenzen prüfen",
     "editAnnotation": "Notiz bearbeiten",
     "removeAnnotation": "Referenz entfernen",

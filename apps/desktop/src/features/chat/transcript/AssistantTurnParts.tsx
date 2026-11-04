@@ -43,7 +43,7 @@ const SmoothMessageBubble = memo(function SmoothMessageBubble({ message, streami
     ),
   );
   const remote = isGenUiRemoteOwner(sessionId, session);
-  const selectionEligible = selectable && !streaming && sessionAllows(session, "canEditMessages");
+  const selectionEligible = selectable && sessionAllows(session, "canEditMessages");
   return (
     <div
       className={`message-bubble assistant-turn-fragment${streaming ? " streaming" : ""}${showCursor ? " smooth-cursor" : ""}`}
@@ -120,7 +120,7 @@ const TurnPartBlock = memo(function TurnPartBlock({
       key={part.message.id}
       message={part.message}
       streaming={isActive && part.message.status === "streaming"}
-      selectable={!isActive}
+      selectable={!isActive || part.message.status === "streaming"}
     />
   ))}</>;
 });

@@ -428,6 +428,7 @@ export const zhTW = {
     annotationCommentPlaceholder: "你希望助理著重於什麼？",
     saveAnnotation: "附加引用",
     annotationAttachments: "引用（{{count}}）",
+    sentAnnotationReferences: "本則訊息引用（{{count}}）",
     reviewAnnotations: "檢視引用",
     editAnnotation: "編輯備註",
     removeAnnotation: "移除引用",

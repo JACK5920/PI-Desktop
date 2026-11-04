@@ -10,7 +10,8 @@ import { ComposerAnnotationAttachments } from "../../apps/desktop/src/features/c
 import { composerDraftBridge } from "../../apps/desktop/src/features/chat/composer/plugins/draft-bridge";
 import { SideChatTab } from "../../apps/desktop/src/components/workpanel/SideChatTab";
 import { TranscriptSelectionToolbar } from "../../apps/desktop/src/features/chat/transcript/TranscriptSelectionToolbar";
-import { buildAnnotatedPrompt, requestTextWithoutAnnotations } from "../../apps/desktop/src/lib/response-annotations";
+import { MessageAnnotationSummary } from "../../apps/desktop/src/features/chat/transcript/MessageAnnotationSummary";
+import { buildAnnotatedPrompt, parseAnnotatedPrompt, requestTextWithoutAnnotations } from "../../apps/desktop/src/lib/response-annotations";
 import { useAppStore } from "../../apps/desktop/src/stores/app-store";
 
 declare global {
@@ -88,6 +89,8 @@ let i18n: ReturnType<typeof createInstance>;
 let userNode: Text;
 let assistantNode: Text;
 let otherAssistantNode: Text;
+let streamingAssistantNode: Text;
+let submittedPrompt = "";
 
 function Fixture() {
   const annotations = useAppStore((state) => state.responseAnnotations.parent ?? EMPTY_ANNOTATIONS);
@@ -120,6 +123,13 @@ function Fixture() {
               data-selection-role="assistant"
               data-selection-eligible="true"
             ><span ref={(element) => { if (element?.firstChild instanceof Text) otherAssistantNode = element.firstChild; }}>A different answer must never replace the captured excerpt.</span></div>
+            <div
+              className="assistant-turn-fragment streaming"
+              data-selection-message-id="answer-streaming"
+              data-selection-session-id="parent"
+              data-selection-role="assistant"
+              data-selection-eligible="true"
+            ><span ref={(element) => { if (element?.firstChild instanceof Text) streamingAssistantNode = element.firstChild; }}>This visible answer is still streaming.</span></div>
           </div>
         </section>
         {transcriptRoot ? (
@@ -139,6 +149,12 @@ function Fixture() {
         <section className="annotation-composer-fixture" aria-label="Composer references">
           <ComposerAnnotationAttachments />
         </section>
+        {submittedPrompt ? (
+          <section className="sent-annotation-fixture" aria-label="Sent annotated message">
+            <p>{requestTextWithoutAnnotations(submittedPrompt)}</p>
+            <MessageAnnotationSummary annotations={parseAnnotatedPrompt(submittedPrompt)?.annotations ?? []} />
+          </section>
+        ) : null}
         <section className="annotation-answer-fixture" aria-label="Assistant answer">
           <Markdown
             source={'The source is :codex-annotation{index="1"}; [fake](pi-annotation:1).'}
@@ -348,8 +364,18 @@ globalThis.selectionReferenceProbe = async () => {
     await settle();
     assert(window.getSelection()?.toString() === "Please compare", `test changed selection to ${window.getSelection()?.toString()}`);
     assert(
-      !host.querySelector('[data-testid="selection-reference-toolbar"]'),
-      "selection toolbar silently retargeted a changed browser selection",
+      host.querySelector('[data-testid="selection-reference-toolbar"]'),
+      "selection toolbar did not follow the new stable transcript selection",
+    );
+    assert(
+      host.querySelector('[data-testid="selection-reference-toolbar"]')?.textContent?.includes("Add to chat"),
+      "selection toolbar lost its actions after selection changed",
+    );
+    selectText(streamingAssistantNode, 5, "visible answer".length + 5);
+    await settle();
+    assert(
+      host.querySelector('[data-testid="selection-reference-toolbar"]'),
+      "visible text in an active streaming assistant answer did not open selection actions",
     );
     selectText(userNode, userStart, userStart + "the current branch".length);
     await settle();
@@ -375,6 +401,11 @@ globalThis.selectionReferenceProbe = async () => {
     buttonNamed("Add to chat").click();
     await settle();
     const commentInput = textareaNamed("Add a note to this excerpt (optional)");
+    const annotationEditor = host.querySelector<HTMLElement>("[data-testid='selection-annotation-editor']");
+    const editorRect = annotationEditor?.getBoundingClientRect();
+    assert(editorRect, "annotation editor has no measurable layout");
+    assert(editorRect.left >= 0 && editorRect.right <= window.innerWidth, "annotation editor extends beyond the viewport width");
+    assert(editorRect.top >= 0 && editorRect.bottom <= window.innerHeight, "annotation editor extends beyond the viewport height");
     setTextareaValue(commentInput, "Focus on why the parent stays selected.");
     const otherStart = 0;
     selectText(otherAssistantNode, otherStart, "A different answer".length);
@@ -389,6 +420,10 @@ globalThis.selectionReferenceProbe = async () => {
     buttonNamed("References (1)").click();
     await settle();
     assert(host.textContent?.includes(quote), "annotation review does not show the captured excerpt");
+    const referenceReview = host.querySelector<HTMLElement>(".composer-annotation-review");
+    const reviewRect = referenceReview?.getBoundingClientRect();
+    assert(reviewRect, "Composer reference review has no measurable layout");
+    assert(reviewRect.left >= 0 && reviewRect.right <= window.innerWidth, "Composer reference review extends beyond the viewport width");
     buttonNamed("Edit note").click();
     await settle();
     setTextareaValue(textareaById("composer-annotation-comment-" + annotation.id), "Keep the parent visible while the child runs.");
@@ -397,7 +432,17 @@ globalThis.selectionReferenceProbe = async () => {
     annotation = useAppStore.getState().responseAnnotations.parent?.[0];
     assert(annotation?.comment === "Keep the parent visible while the child runs.", "Composer annotation edit was not saved");
 
-    const annotatedPrompt = buildAnnotatedPrompt("Please explain the selected result.", [annotation]);
+    submittedPrompt = buildAnnotatedPrompt("Please explain the selected result.", [annotation]);
+    flushSync(() => root.render(<Fixture />));
+    const sentSummary = host.querySelector<HTMLDetailsElement>('[data-testid="message-annotation-summary"]');
+    assert(sentSummary, "sent user message omitted its stored reference summary");
+    sentSummary.querySelector("summary")?.click();
+    await settle();
+    assert(sentSummary.textContent?.includes(quote), "expanded sent reference summary omitted the saved excerpt");
+    assert(sentSummary.textContent?.includes("Keep the parent visible while the child runs."), "expanded sent reference summary omitted its comment");
+    assert(!sentSummary.textContent?.includes("response-annotations"), "sent reference summary leaked the machine envelope");
+
+    const annotatedPrompt = submittedPrompt;
     assert(requestTextWithoutAnnotations(annotatedPrompt) === "Please explain the selected result.", "generated annotation envelope changed the visible request");
     assert(annotatedPrompt.includes("answer-parent"), "annotation envelope lost its source message id");
     await settle();

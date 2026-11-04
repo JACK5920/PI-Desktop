@@ -37,9 +37,11 @@ migrations for drafts that have not been sent.
    distinct.
 2. Keep annotations renderer-owned and transient until an ordinary prompt is
    admitted. Serialize the pending excerpts, optional comments, and source
-   message ids as JSON in a generated prompt section. Display projections,
-   edit seeds, queue previews, and prompt-derived titles show only the user's
-   request. An assistant may cite a pending annotation with the exact
+    message ids as JSON in a generated prompt section. Transcript, edit-seed,
+    queue-preview, and title projections show only the user's request text; a
+    sent user-message row separately offers a collapsed, expandable summary of
+    the safe excerpt and optional comment, never the raw JSON envelope. An
+    assistant may cite a pending annotation with the exact
    `:codex-annotation{index="N"}` directive; the citation opens a safe text-only
    excerpt/comment/source card. Unknown directives stay ordinary text.
 3. Restore **Ask in side chat** as a docked WorkPanel tab. Opening it creates

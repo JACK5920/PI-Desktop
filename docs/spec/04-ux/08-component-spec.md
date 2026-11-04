@@ -2065,11 +2065,14 @@ Single message render — either user (plaintext) or assistant (markdown streami
   Pending annotation excerpts/comments attach to the next ordinary prompt as a
   JSON payload and remain reviewable, editable, removable, and clearable from
   the Composer; only unchanged attachments are consumed after Host admission.
+  A sent user message with a valid annotation envelope shows a collapsed,
+  localized reference summary; expanding it reveals the quoted excerpts and
+  optional comments without exposing the serialized envelope or source ids.
   An assistant's exact `:codex-annotation{index="N"}` directive renders as a
   keyboard-operable reference when it resolves against that user request; it
   opens a text-only excerpt/comment/source card. Unknown indices remain ordinary
   text. Prompt display, edit, queue, and title projections omit the generated
-  envelope.
+  envelope; the sent-message reference summary remains available separately.
   **Ask in side chat** opens a WorkPanel draft without a child session or send.
   The first explicit non-empty Send forks at the selected assistant message
   without activating the child. The parent transcript and Composer stay active;

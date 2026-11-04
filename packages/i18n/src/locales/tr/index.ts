@@ -435,6 +435,7 @@ export const tr = {
     annotationCommentPlaceholder: "Asistanın neye odaklanmasını istersiniz?",
     saveAnnotation: "Alıntıyı ekle",
     annotationAttachments: "Referanslar ({{count}})",
+    sentAnnotationReferences: "Kullanılan referanslar ({{count}})",
     reviewAnnotations: "Referansları gözden geçir",
     editAnnotation: "Notu düzenle",
     removeAnnotation: "Referansı kaldır",

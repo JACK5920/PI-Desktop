@@ -422,6 +422,7 @@ export const ptBR = {
     annotationCommentPlaceholder: "No que o assistente deve se concentrar?",
     saveAnnotation: "Anexar trecho",
     annotationAttachments: "Referências ({{count}})",
+    sentAnnotationReferences: "Referências usadas ({{count}})",
     reviewAnnotations: "Revisar referências",
     editAnnotation: "Editar nota",
     removeAnnotation: "Remover referência",

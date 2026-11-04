@@ -91,11 +91,7 @@ export function TranscriptSelectionToolbar({
       return;
     }
     const previous = selectionRef.current;
-    if (previous && !sameSelection(previous, next)) {
-      if (editingComment) return;
-      dismiss(false, next);
-      return;
-    }
+    if (previous && !sameSelection(previous, next) && editingComment) return;
     const dismissedSelection = dismissedSelectionRef.current;
     if (!previous && dismissedSelection && sameSelection(dismissedSelection, next)) return;
     dismissedSelectionRef.current = null;
@@ -190,11 +186,14 @@ export function TranscriptSelectionToolbar({
   };
 
   if (!selection) return null;
-  const estimatedWidth = editingComment ? 360 : selection.role === "assistant" ? 430 : 250;
+  const estimatedWidth = editingComment ? 380 : selection.role === "assistant" ? 430 : 250;
   const left = Math.max(8, Math.min(selection.rect.left, window.innerWidth - estimatedWidth - 8));
-  const top = selection.rect.top >= 56
-    ? selection.rect.top - (editingComment ? 210 : 48)
+  const estimatedHeight = editingComment ? 230 : 48;
+  const maxTop = Math.max(8, window.innerHeight - estimatedHeight - 8);
+  const preferredTop = selection.rect.top >= estimatedHeight + 16
+    ? selection.rect.top - estimatedHeight - 8
     : selection.rect.bottom + 8;
+  const top = Math.max(8, Math.min(preferredTop, maxTop));
 
   return (
     <div
@@ -203,7 +202,7 @@ export function TranscriptSelectionToolbar({
       data-testid="selection-reference-toolbar"
       role="toolbar"
       aria-label={t("chat.selectionToolbar")}
-      style={{ left, top: Math.max(8, top) }}
+      style={{ left, top }}
       onPointerDown={(event) => {
         if ((event.target as HTMLElement).closest("button")) event.preventDefault();
       }}

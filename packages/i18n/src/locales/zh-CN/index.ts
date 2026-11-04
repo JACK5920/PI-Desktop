@@ -428,6 +428,7 @@ export const zhCN = {
     annotationCommentPlaceholder: "你希望助手重点关注什么？",
     saveAnnotation: "附加引用",
     annotationAttachments: "引用（{{count}}）",
+    sentAnnotationReferences: "本条消息引用（{{count}}）",
     reviewAnnotations: "查看引用",
     editAnnotation: "编辑备注",
     removeAnnotation: "移除引用",
