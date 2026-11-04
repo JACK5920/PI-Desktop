@@ -39,6 +39,7 @@ pub(crate) const PORTABLE_APPLICATION_FIELDS: &[&str] = &[
     "keepCommandsExpanded",
     "enterToSend",
     "largePasteThreshold",
+    "goalBudgetDefaults",
     "defaultProviderId",
     "defaultModelId",
     "defaultMode",
@@ -105,6 +106,7 @@ pub const DOMAIN_ADAPTERS: &[DomainAdapterSpec] = &[
             "transcriptDisplayMode",
             "enterToSend",
             "keepCommandsExpanded",
+            "goalBudgetDefaults",
             "keybindings",
             "display bindings",
             "provider/model bindings",
@@ -637,6 +639,7 @@ mod tests {
         assert!(PORTABLE_APPLICATION_FIELDS.contains(&"transcriptDisplayMode"));
         assert!(PORTABLE_APPLICATION_FIELDS.contains(&"thinkingDisplayMode"));
         assert!(PORTABLE_APPLICATION_FIELDS.contains(&"keepCommandsExpanded"));
+        assert!(PORTABLE_APPLICATION_FIELDS.contains(&"goalBudgetDefaults"));
         let application = adapter_for(DOMAIN_APPLICATION).expect("application adapter");
         assert!(application.exportable_fields.contains(&"showThinking"));
         assert!(application
@@ -648,6 +651,9 @@ mod tests {
         assert!(application
             .exportable_fields
             .contains(&"keepCommandsExpanded"));
+        assert!(application
+            .exportable_fields
+            .contains(&"goalBudgetDefaults"));
         for domain in ALL_DOMAINS {
             let adapter = adapter_for(domain).expect("portable domain adapter");
             assert_eq!(adapter.schema_version, 1);

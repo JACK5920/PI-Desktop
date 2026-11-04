@@ -3,10 +3,7 @@ import type { TFunction } from "i18next";
 import type { FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  GOAL_MAX_DURATION_MS_PER_CYCLE,
-  GOAL_MAX_ROUNDS_PER_CYCLE,
-  GOAL_MIN_DURATION_MS_PER_CYCLE,
-  type GoalBudget,
+  GOAL_BUDGET_LIMITS,
   type GoalControlAction,
   type GoalLifecycle,
   type GoalProgressEvent,
@@ -16,42 +13,13 @@ import {
   goalElapsedMs,
   goalTokensUsed,
 } from "../lib/goal-lifecycle-state";
+import {
+  goalBudgetDraftFromBudget,
+  validateGoalBudgetDraft,
+  type GoalBudgetDraft,
+} from "../lib/goal-budget-form";
 import { useAppStore } from "../stores/app-store";
 import { Badge, Button, Field, Input, SettingsToggle } from "./ui";
-
-type GoalBudgetDraft = {
-  maxRounds: string;
-  maxTokens: string;
-  maxDurationMinutes: string;
-  tokenBudgetUnlimited: boolean;
-};
-
-type GoalBudgetDraftValidation = {
-  budget: GoalBudget | null;
-  valid: boolean;
-};
-
-function validateBudgetDraft(draft: GoalBudgetDraft): GoalBudgetDraftValidation {
-  const maxRounds = Number(draft.maxRounds);
-  const maxTokens = Number(draft.maxTokens);
-  const maxDurationMinutes = Number(draft.maxDurationMinutes);
-  const valid =
-    Number.isInteger(maxRounds) && maxRounds >= 1 && maxRounds <= GOAL_MAX_ROUNDS_PER_CYCLE &&
-    Number.isSafeInteger(maxTokens) && maxTokens >= 1 &&
-    Number.isInteger(maxDurationMinutes) &&
-    maxDurationMinutes * 60_000 >= GOAL_MIN_DURATION_MS_PER_CYCLE &&
-    maxDurationMinutes * 60_000 <= GOAL_MAX_DURATION_MS_PER_CYCLE;
-  if (!valid) return { budget: null, valid };
-  return {
-    valid,
-    budget: {
-      maxRounds,
-      maxTokens,
-      maxDurationMs: maxDurationMinutes * 60_000,
-      tokenBudgetUnlimited: draft.tokenBudgetUnlimited,
-    },
-  };
-}
 
 function statusTone(
   status: GoalLifecycle["status"],
@@ -149,16 +117,18 @@ export function GoalLifecycleBar({
   const elapsedMs = goalElapsedMs(goal, nowMs);
   const tokensUsed = goalTokensUsed(goal, liveProgress);
   const elapsed = formatGoalElapsed(elapsedMs, i18n.resolvedLanguage || i18n.language);
-  const budgetValidation = budgetDraft ? validateBudgetDraft(budgetDraft) : null;
+  const budgetValidation = budgetDraft ? validateGoalBudgetDraft(budgetDraft) : null;
 
   const startBudgetEdit = () => {
     setBudgetError(false);
-    setBudgetDraft({
-      maxRounds: String(goal.maxRounds),
-      maxTokens: String(goal.maxTokens),
-      maxDurationMinutes: String(Math.ceil(goal.maxDurationMs / 60_000)),
-      tokenBudgetUnlimited: goal.tokenBudgetUnlimited === true,
-    });
+    setBudgetDraft(
+      goalBudgetDraftFromBudget({
+        maxRounds: goal.maxRounds,
+        maxTokens: goal.maxTokens,
+        maxDurationMs: goal.maxDurationMs,
+        tokenBudgetUnlimited: goal.tokenBudgetUnlimited === true,
+      }),
+    );
   };
 
   const saveBudget = async (event: FormEvent<HTMLFormElement>) => {
@@ -248,8 +218,8 @@ export function GoalLifecycleBar({
               aria-label={t("goal.lifecycle.roundBudgetLabel")}
               data-testid="goal-budget-rounds"
               type="number"
-              min={1}
-              max={GOAL_MAX_ROUNDS_PER_CYCLE}
+              min={GOAL_BUDGET_LIMITS.minRounds}
+              max={GOAL_BUDGET_LIMITS.maxRounds}
               step={1}
               value={budgetDraft.maxRounds}
               disabled={busy !== null}
@@ -261,8 +231,8 @@ export function GoalLifecycleBar({
               aria-label={t("goal.lifecycle.tokenBudgetLabel")}
               data-testid="goal-budget-tokens"
               type="number"
-              min={1}
-              max={Number.MAX_SAFE_INTEGER}
+              min={GOAL_BUDGET_LIMITS.minTokens}
+              max={GOAL_BUDGET_LIMITS.maxTokens}
               step={1}
               value={budgetDraft.maxTokens}
               disabled={busy !== null}
@@ -274,8 +244,8 @@ export function GoalLifecycleBar({
               aria-label={t("goal.lifecycle.timeBudgetLabel")}
               data-testid="goal-budget-minutes"
               type="number"
-              min={1}
-              max={24 * 60}
+              min={GOAL_BUDGET_LIMITS.minDurationMs / 60_000}
+              max={GOAL_BUDGET_LIMITS.maxDurationMs / 60_000}
               step={1}
               value={budgetDraft.maxDurationMinutes}
               disabled={busy !== null}

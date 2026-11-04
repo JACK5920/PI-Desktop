@@ -8329,24 +8329,29 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
   isolated Electron `test:e2e:plan-ui` path verifies the active elapsed tick and
   pause freeze without a provider; live provider acceptance remains optional.
 
-#### E2E-GOAL-budget-editor: Edit and restore persisted Goal cycle limits
+#### E2E-GOAL-budget-editor: Configure future Goal defaults and edit a persisted cycle
 
 - **Preconditions**: Isolated Electron profile, project, and Host; the gated
-  Main-only Plan UI probe seeds and approves a Goal directly through the live
+  Main-only Plan UI probe creates and approves Goals directly through the live
   Host. No model/provider credentials are required, and no execution is
   dispatched by the probe.
-- **Steps**: Reload the renderer and select the approved Goal. Open Edit limits,
-  change rounds, finite token value above one million, and time to 1,440 minutes;
-  enable unlimited tokens, then change the finite token value while unlimited
-  from 1,250,000 to 1,500,000. Save, reload the renderer, reopen the editor,
-  and verify all limits and unlimited mode were restored from Host state.
-  Disable unlimited, confirm the edited retained token value remains, save, and
-  verify the visible finite budget.
-- **Expected**: The user-facing edit/save path updates the Host through the
-  normal preload/Main/Host bridge; unlimited mode keeps the finite token value
-  editable and persists it for later finite use. Renderer reload rehydrates the
-  persisted state. The new UI never calls a model or alters the Goal
-  execution/cycle while updating its budgets.
+- **Steps**: Open Settings → AI and verify the new-profile defaults are 8
+  rounds, 250,000 retained tokens, 60 minutes, and unlimited tokens enabled.
+  Approve a probe Goal and verify the Host snapshot. Through the rendered AI
+  settings controls, save custom defaults of 12 rounds, 1,250,000 tokens, 90
+  minutes, and unlimited enabled; approve another probe Goal and verify its
+  snapshot. Change the global defaults again, select the second Goal, and verify
+  its approval-time snapshot did not change. Open its Edit limits UI, set rounds
+  and duration to 16 and 1,440 minutes, edit the retained finite token value to
+  1,500,000 while unlimited, save, reload, and verify it rehydrates. Disable
+  unlimited, confirm the retained finite value remains, save, and verify the
+  visible finite budget.
+- **Expected**: The rendered AI Settings save path persists Host-owned
+  `AppSettings.goalBudgetDefaults`, and Goal approval snapshots that value from
+  the Host at approval time. Changing defaults never mutates existing Goals.
+  The per-Goal edit/save path remains separate, unlimited mode keeps the finite
+  token value editable, and renderer reload rehydrates Goal state. The probe
+  never calls a model or alters the Goal execution/cycle while updating budgets.
 - **Coverage**: `pnpm test:e2e:plan-ui` runs the isolated Electron path;
   `apps/desktop/test/plan-ui-probe-contract.test.mjs` guards the live-Host probe
   and case wiring. The full user path is environment-gated on the candidate

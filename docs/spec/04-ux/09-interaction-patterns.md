@@ -1146,10 +1146,11 @@ or post-approval Goal Agent Bash under its selected Ask or Accept edits mode)
    Each completed execution round reports all criteria through `GoalReport`;
    the Host saves the Agent-reported evidence and automatically queues another
    round only for `continue`, up to the configured round limit (8 by default,
-   1–32 per cycle). The finite token ceiling defaults to 250,000 reported
-   tokens and may be edited to any positive safe integer; the user may instead
-   select unlimited tokens, which skips only the token cutoff while continuing
-   usage accounting. The elapsed-time ceiling defaults to 60 minutes and is
+   1–32 per cycle). Approval snapshots Goal defaults from AI Settings; the
+   initial default is a retained finite value of 250,000 reported tokens with
+   unlimited mode enabled. A finite token ceiling may be any positive safe
+   integer; unlimited mode skips only the token cutoff while continuing usage
+   accounting. The elapsed-time ceiling defaults to 60 minutes and is
    configurable from 1 to 1,440 minutes. The Host checks current limits after
    the round settles; a running round may exceed a budget but is never
    terminated at the boundary. During an active execution, the Composer's token
@@ -1175,6 +1176,14 @@ or post-approval Goal Agent Bash under its selected Ask or Accept edits mode)
    transcript's stopped label refers to that specific historical turn (“This
    run stopped”), not the current Goal lifecycle; a resumed Goal can be active
    while its earlier turn remains stopped.
+
+The AI Settings Goal budget defaults card accepts a future-default budget and
+keeps the finite token value editable while unlimited mode is on. Saving
+affects only Goals approved afterward: host-core snapshots the latest saved
+preference atomically with approval, and existing Goal bars keep their prior
+budget until edited through their own per-Goal controls. Settings sync carries
+the preference as portable application configuration; the lifecycle and
+approval RPC contracts do not change.
 
 The approval card is session-scoped. Background sessions may retain a pending
 approval or queued/running execution state in `plan_approvals`, but opening

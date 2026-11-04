@@ -215,3 +215,65 @@ test("settings write round-trips command folding through the preload boundary", 
     else globalThis.window = previousWindow;
   }
 });
+
+test("Goal budget defaults normalize to unlimited and validate as one portable setting", () => {
+  const previousWindow = globalThis.window;
+  globalThis.window = { piDesktop: { platform: "win32" } };
+  try {
+    const base = { defaultMode: "agent", theme: "light", enterToSend: true };
+    const defaults = {
+      maxRounds: 8,
+      maxTokens: 250_000,
+      maxDurationMs: 3_600_000,
+      tokenBudgetUnlimited: true,
+    };
+    assert.deepEqual(renderer.normalizeSettings(base).goalBudgetDefaults, defaults);
+    assert.deepEqual(main.normalizeSettings(base).goalBudgetDefaults, defaults);
+
+    const finite = {
+      maxRounds: 32,
+      maxTokens: Number.MAX_SAFE_INTEGER,
+      maxDurationMs: 86_400_000,
+      tokenBudgetUnlimited: false,
+    };
+    assert.deepEqual(
+      renderer.validateSettingsWrite({ ...base, goalBudgetDefaults: finite }).goalBudgetDefaults,
+      finite,
+    );
+    assert.deepEqual(
+      main.validateSettingsWrite({ ...base, goalBudgetDefaults: finite }).goalBudgetDefaults,
+      finite,
+    );
+
+    for (const invalid of [
+      null,
+      {},
+      { ...defaults, maxRounds: 0 },
+      { ...defaults, maxRounds: 33 },
+      { ...defaults, maxTokens: 0 },
+      { ...defaults, maxTokens: Number.MAX_SAFE_INTEGER + 1 },
+      { ...defaults, maxDurationMs: 59_999 },
+      { ...defaults, tokenBudgetUnlimited: 1 },
+    ]) {
+      assert.deepEqual(
+        renderer.normalizeSettings({ ...base, goalBudgetDefaults: invalid }).goalBudgetDefaults,
+        defaults,
+      );
+      assert.deepEqual(
+        main.normalizeSettings({ ...base, goalBudgetDefaults: invalid }).goalBudgetDefaults,
+        defaults,
+      );
+      assert.throws(
+        () => renderer.validateSettingsWrite({ goalBudgetDefaults: invalid }),
+        /goalBudgetDefaults is invalid/,
+      );
+      assert.throws(
+        () => main.validateSettingsWrite({ goalBudgetDefaults: invalid }),
+        /goalBudgetDefaults is invalid/,
+      );
+    }
+  } finally {
+    if (previousWindow === undefined) delete globalThis.window;
+    else globalThis.window = previousWindow;
+  }
+});

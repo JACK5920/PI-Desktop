@@ -821,15 +821,17 @@ are Agent-reported claims, not Host-certified test results; the Composer labels
 them accordingly.
 
 Only a completed round that saved `continue` may automatically queue another
-round. Each cycle defaults to eight execution rounds total, including the
-initial approved round, and a user may configure 1–32 rounds. The default
-reported-token ceiling is 250,000; a finite ceiling may be any positive safe
-integer through `Number.MAX_SAFE_INTEGER`, or the user may explicitly choose
-unlimited tokens. Usage is still tracked in unlimited mode, but only the token
-cutoff is skipped. Elapsed wall-clock time defaults to 60 minutes and may be
-configured from 1 to 1,440 minutes. The Host evaluates the round and time
-ceilings, and a finite token ceiling when enabled, after the current execution
-round settles; it never terminates an in-flight round at a budget boundary.
+round. At approval, the Host snapshots normalized `AppSettings.goalBudgetDefaults`
+into the new Goal lifecycle; the AI Settings defaults affect future approvals
+only and do not rewrite existing Goals. If the preference is missing, it
+normalizes to eight execution rounds total (including the initial approved
+round), a retained finite token value of 250,000, 60 minutes, and unlimited
+tokens enabled. A user may configure 1–32 rounds, 1–1,440 minutes, and any
+positive safe-integer finite token ceiling through `Number.MAX_SAFE_INTEGER`.
+Usage is still tracked in unlimited mode, but only the token cutoff is skipped.
+The Host evaluates the round and time ceilings, and a finite token ceiling
+when enabled, after the current execution round settles; it never terminates
+an in-flight round at a budget boundary.
 Editing limits for an active, paused, blocked, or interrupted Goal does not
 reset usage, change cycle/execution identity, or cancel the current round.
 Manual resume starts a new cycle and resets cycle usage while retaining the

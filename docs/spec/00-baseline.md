@@ -1,6 +1,6 @@
 # PI-Desktop Baseline Freeze
 
-- Baseline Version: `0.4.25`
+- Baseline Version: `0.4.26`
 - Date: `2026-11-04`
 - Status: `Frozen for implementation details (indefinite local permission approvals + Plan checkpoint artifact + approval/execution startup fence + protocol v11 + schema v30 + host-owned plugin session import/read/update/delete + plugin-managed native transcripts + encrypted per-plugin secrets + session-scoped agent events + bounded plugin renderer shell contributions + categorized plugin providers in Add Service)`
 - Language policy: **English-first**
@@ -60,8 +60,11 @@
 > storage schema changes. `0.4.25` makes per-cycle Goal budgets editable
 > without interrupting the current round, and adds an explicit unlimited-token
 > mode while retaining the finite token limit (D684 / ADR 0344). Schema v30
-> defaults existing Goals to their saved finite token limit; protocol remains
-> v11.
+> preserves existing Goals' saved finite token limit; protocol remains v11.
+> `0.4.26` moves future Goal budget defaults to AI Settings, defaults new Goals
+> to unlimited tokens while retaining a 250,000 finite value, and snapshots
+> saved defaults only when a new Goal is approved (D685 / ADR 0345); no schema
+> or RPC version changes.
 > `0.4.10` replaces destructive work-panel clearing on conversation switches
 > with runtime session-scoped contexts through D142 / ADR 0028.
 > `0.4.11` adopts turn-boundary model-context checkpoint compaction through

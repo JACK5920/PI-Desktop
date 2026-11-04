@@ -43,6 +43,7 @@ pub(crate) use artifact::{
     plan_filename, publish_artifact, safe_artifact_path, title_slug, verify_artifact,
 };
 pub(crate) use execution::{execution_from_proposal, resolution_from_proposal};
+pub(crate) use goals::{is_valid_goal_budget_defaults, normalize_goal_budget_defaults};
 pub(crate) use repository::{
     get_proposal, history_for_tool_calls, live_turn_belongs_to_session, proposal_from_row,
     session_submit_kind, PROPOSAL_COLUMNS,

@@ -170,6 +170,8 @@ import type {
 } from "@pi-desktop/shared";
 import {
   defaultCommandShellForPlatform,
+  isGoalBudget,
+  normalizeGoalBudgetDefaults,
   IPC,
   isCommandShellId,
   normalizeLargePasteThreshold,
@@ -448,6 +450,7 @@ export function normalizeSettings(settings: AppSettings): AppSettings {
     sidebarRunningRail: settings.sidebarRunningRail === true,
     keepCommandsExpanded: settings.keepCommandsExpanded !== false,
     scheduledTasksEnabled: settings.scheduledTasksEnabled !== false,
+    goalBudgetDefaults: normalizeGoalBudgetDefaults(settings.goalBudgetDefaults),
     transcriptDisplayMode: isTranscriptDisplayModeValue(settings.transcriptDisplayMode)
       ? settings.transcriptDisplayMode
       : "fully-folded",
@@ -498,6 +501,14 @@ export function validateSettingsWrite(settings: AppSettings): AppSettings {
     !isTranscriptDisplayModeValue(settings.transcriptDisplayMode)
   ) {
     throw Object.assign(new Error("transcriptDisplayMode is invalid"), {
+      errorCode: "INVALID_PARAMS",
+    });
+  }
+  if (
+    Object.prototype.hasOwnProperty.call(settings, "goalBudgetDefaults") &&
+    !isGoalBudget(settings.goalBudgetDefaults)
+  ) {
+    throw Object.assign(new Error("goalBudgetDefaults is invalid"), {
       errorCode: "INVALID_PARAMS",
     });
   }

@@ -853,6 +853,11 @@ fn prompt_enhancement_template_error(field: &str, value: &Value) -> Option<Strin
 
 fn normalize_settings_value(mut value: Value) -> Value {
     if let Some(object) = value.as_object_mut() {
+        let goal_budget_defaults =
+            crate::plans::normalize_goal_budget_defaults(object.get("goalBudgetDefaults"));
+        object.insert("goalBudgetDefaults".into(), goal_budget_defaults);
+    }
+    if let Some(object) = value.as_object_mut() {
         object.remove("planApprovalPermissionMode");
         if object.get("defaultMode").and_then(Value::as_str) == Some("chat") {
             object.insert("defaultMode".into(), Value::String("plan".into()));
@@ -1015,6 +1020,16 @@ fn validate_settings_value(value: &Value) -> Result<(), JsonRpcError> {
     let Some(object) = value.as_object() else {
         return Ok(());
     };
+    if object
+        .get("goalBudgetDefaults")
+        .is_some_and(|budget| !crate::plans::is_valid_goal_budget_defaults(budget))
+    {
+        return Err(rpc_err(
+            1002,
+            "goalBudgetDefaults is invalid",
+            "INVALID_PARAMS",
+        ));
+    }
     if object
         .get("scheduledTasksEnabled")
         .is_some_and(|enabled| !enabled.is_boolean())
@@ -11454,5 +11469,127 @@ mod update_settings_tests {
         ] {
             assert!(validate_settings_value(&value).is_err(), "{value}");
         }
+    }
+}
+
+#[cfg(test)]
+mod goal_budget_settings_tests {
+    use super::*;
+
+    fn default_goal_budget() -> Value {
+        json!({
+            "maxRounds": 8,
+            "maxTokens": 250_000,
+            "maxDurationMs": 3_600_000,
+            "tokenBudgetUnlimited": true
+        })
+    }
+
+    #[test]
+    fn missing_or_malformed_goal_defaults_use_the_unlimited_defaults() {
+        assert_eq!(
+            normalize_settings_value(json!({}))["goalBudgetDefaults"],
+            default_goal_budget()
+        );
+        for malformed in [
+            json!(null),
+            json!({}),
+            json!({"maxRounds": 8}),
+            json!({"maxRounds": 8, "maxTokens": 250_000, "maxDurationMs": 3_600_000, "tokenBudgetUnlimited": "true"}),
+        ] {
+            assert_eq!(
+                normalize_settings_value(json!({"goalBudgetDefaults": malformed}))
+                    ["goalBudgetDefaults"],
+                default_goal_budget()
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn settings_get_returns_unlimited_goal_defaults_for_missing_or_invalid_values() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let mut app_state = AppState::open(data_dir.path()).unwrap();
+        app_state.handshook = true;
+        let state = Arc::new(Mutex::new(app_state));
+        let tx = mpsc::unbounded_channel().0;
+
+        let defaults = handle_request(state.clone(), "settings.get", json!({}), tx.clone())
+            .await
+            .unwrap();
+        assert_eq!(defaults["goalBudgetDefaults"], default_goal_budget());
+
+        state
+            .lock()
+            .await
+            .db
+            .set_setting("app", &json!({"goalBudgetDefaults": {"maxRounds": 0}}))
+            .unwrap();
+        let repaired = handle_request(state, "settings.get", json!({}), tx)
+            .await
+            .unwrap();
+        assert_eq!(repaired["goalBudgetDefaults"], default_goal_budget());
+    }
+    #[test]
+    fn validates_goal_budget_boundaries_and_rejects_malformed_values() {
+        for budget in [
+            json!({"maxRounds": 1, "maxTokens": 1, "maxDurationMs": 60_000, "tokenBudgetUnlimited": false}),
+            json!({"maxRounds": 32, "maxTokens": 9_007_199_254_740_991u64, "maxDurationMs": 86_400_000, "tokenBudgetUnlimited": true}),
+        ] {
+            assert!(validate_settings_value(&json!({"goalBudgetDefaults": budget})).is_ok());
+        }
+
+        for budget in [
+            json!(null),
+            json!(false),
+            json!({}),
+            json!({"maxRounds": 0, "maxTokens": 250_000, "maxDurationMs": 3_600_000, "tokenBudgetUnlimited": true}),
+            json!({"maxRounds": 33, "maxTokens": 250_000, "maxDurationMs": 3_600_000, "tokenBudgetUnlimited": true}),
+            json!({"maxRounds": 1.5, "maxTokens": 250_000, "maxDurationMs": 3_600_000, "tokenBudgetUnlimited": true}),
+            json!({"maxRounds": 8, "maxTokens": 0, "maxDurationMs": 3_600_000, "tokenBudgetUnlimited": true}),
+            json!({"maxRounds": 8, "maxTokens": -1, "maxDurationMs": 3_600_000, "tokenBudgetUnlimited": true}),
+            json!({"maxRounds": 8, "maxTokens": 1.5, "maxDurationMs": 3_600_000, "tokenBudgetUnlimited": true}),
+            json!({"maxRounds": 8, "maxTokens": 9_007_199_254_740_992u64, "maxDurationMs": 3_600_000, "tokenBudgetUnlimited": true}),
+            json!({"maxRounds": 8, "maxTokens": 250_000, "maxDurationMs": 59_999, "tokenBudgetUnlimited": true}),
+            json!({"maxRounds": 8, "maxTokens": 250_000, "maxDurationMs": 86_400_001, "tokenBudgetUnlimited": true}),
+            json!({"maxRounds": 8, "maxTokens": 250_000, "maxDurationMs": 3_600_000, "tokenBudgetUnlimited": 1}),
+        ] {
+            assert!(
+                validate_settings_value(&json!({"goalBudgetDefaults": budget})).is_err(),
+                "accepted invalid budget: {budget}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn rejected_goal_budget_write_preserves_the_last_valid_settings() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let mut app_state = AppState::open(data_dir.path()).unwrap();
+        app_state.handshook = true;
+        let state = Arc::new(Mutex::new(app_state));
+        let tx = mpsc::unbounded_channel().0;
+        let valid = json!({
+            "goalBudgetDefaults": {
+                "maxRounds": 12,
+                "maxTokens": 500_000,
+                "maxDurationMs": 7_200_000,
+                "tokenBudgetUnlimited": false
+            }
+        });
+
+        handle_request(state.clone(), "settings.set", valid.clone(), tx.clone())
+            .await
+            .unwrap();
+        let rejected = handle_request(
+            state.clone(),
+            "settings.set",
+            json!({"goalBudgetDefaults": {"maxRounds": 33}}),
+            tx.clone(),
+        )
+        .await;
+        assert!(rejected.is_err());
+        let stored = handle_request(state, "settings.get", json!({}), tx)
+            .await
+            .unwrap();
+        assert_eq!(stored["goalBudgetDefaults"], valid["goalBudgetDefaults"]);
     }
 }

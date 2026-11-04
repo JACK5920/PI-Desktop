@@ -1,6 +1,7 @@
 use super::*;
 use crate::plans::execution::execution_from_proposal;
-use rusqlite::{types::Type, Transaction};
+use rusqlite::{types::Type, OptionalExtension, Transaction};
+use serde_json::Value;
 
 pub const GOAL_DEFAULT_ROUNDS_PER_CYCLE: i64 = 8;
 pub const GOAL_MAX_ROUNDS_PER_CYCLE: i64 = 32;
@@ -9,6 +10,39 @@ pub const GOAL_DEFAULT_DURATION_MS_PER_CYCLE: i64 = 60 * 60 * 1_000;
 pub const GOAL_MIN_DURATION_MS_PER_CYCLE: i64 = 60 * 1_000;
 pub const GOAL_MAX_DURATION_MS_PER_CYCLE: i64 = 24 * 60 * 60 * 1_000;
 const GOAL_MAX_SAFE_TOKEN_BUDGET: i64 = 9_007_199_254_740_991;
+
+pub(crate) fn default_goal_budget_defaults() -> Value {
+    json!({
+        "maxRounds": GOAL_DEFAULT_ROUNDS_PER_CYCLE,
+        "maxTokens": GOAL_DEFAULT_TOKENS_PER_CYCLE,
+        "maxDurationMs": GOAL_DEFAULT_DURATION_MS_PER_CYCLE,
+        "tokenBudgetUnlimited": true
+    })
+}
+
+pub(crate) fn is_valid_goal_budget_defaults(value: &Value) -> bool {
+    let Some(object) = value.as_object() else {
+        return false;
+    };
+    let max_rounds = object.get("maxRounds").and_then(Value::as_i64);
+    let max_tokens = object.get("maxTokens").and_then(Value::as_i64);
+    let max_duration_ms = object.get("maxDurationMs").and_then(Value::as_i64);
+    let token_budget_unlimited = object.get("tokenBudgetUnlimited").and_then(Value::as_bool);
+
+    max_rounds.is_some_and(|value| (1..=GOAL_MAX_ROUNDS_PER_CYCLE).contains(&value))
+        && max_tokens.is_some_and(|value| (1..=GOAL_MAX_SAFE_TOKEN_BUDGET).contains(&value))
+        && max_duration_ms.is_some_and(|value| {
+            (GOAL_MIN_DURATION_MS_PER_CYCLE..=GOAL_MAX_DURATION_MS_PER_CYCLE).contains(&value)
+        })
+        && token_budget_unlimited.is_some()
+}
+
+pub(crate) fn normalize_goal_budget_defaults(value: Option<&Value>) -> Value {
+    value
+        .filter(|value| is_valid_goal_budget_defaults(value))
+        .cloned()
+        .unwrap_or_else(default_goal_budget_defaults)
+}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -181,19 +215,37 @@ pub(crate) fn create_goal_tx(
     if has_open_goal_tx(tx, session_id)? {
         return Err(plan_error("GOAL_ALREADY_ACTIVE"));
     }
+    let settings_json: Option<String> = tx
+        .query_row(
+            "SELECT value_json FROM kv WHERE ns = 'app' AND key = 'app'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let settings = settings_json
+        .map(|raw| serde_json::from_str::<Value>(&raw))
+        .transpose()?;
+    let budget_value = normalize_goal_budget_defaults(
+        settings
+            .as_ref()
+            .and_then(|settings| settings.get("goalBudgetDefaults")),
+    );
+    let budget: GoalBudget = serde_json::from_value(budget_value)?;
     tx.execute(
         "INSERT INTO goal_lifecycles (
            proposal_id, session_id, status, current_execution_id, cycle,
            round_in_cycle, run_count, max_rounds, max_tokens, max_duration_ms,
-           tokens_used, elapsed_ms, cycle_started_at, created_at, updated_at
-         ) VALUES (?1, ?2, 'active', ?3, 1, 1, 1, ?4, ?5, ?6, 0, 0, ?7, ?7, ?7)",
+           token_budget_unlimited, tokens_used, elapsed_ms, cycle_started_at,
+           created_at, updated_at
+         ) VALUES (?1, ?2, 'active', ?3, 1, 1, 1, ?4, ?5, ?6, ?7, 0, 0, ?8, ?8, ?8)",
         params![
             proposal_id,
             session_id,
             execution_id,
-            GOAL_DEFAULT_ROUNDS_PER_CYCLE,
-            GOAL_DEFAULT_TOKENS_PER_CYCLE,
-            GOAL_DEFAULT_DURATION_MS_PER_CYCLE,
+            budget.max_rounds,
+            budget.max_tokens,
+            budget.max_duration_ms,
+            budget.token_budget_unlimited,
             now
         ],
     )?;

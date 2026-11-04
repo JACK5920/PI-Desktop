@@ -1,6 +1,6 @@
 # ADR 0344: Configure per-cycle Goal budgets
 
-- Status: Accepted for implementation
+- Status: Accepted for implementation (default-token mode and settings scope amended by ADR 0345)
 - Date: 2026-11-04
 - Deciders: PI-Desktop maintainers
 - Related: ADR 0338 (persisted Goal lifecycle), ADR 0053 (no-replay recovery),
@@ -19,9 +19,11 @@ round.
 
 ## Decision
 
-1. Keep defaults at eight rounds, 250,000 reported tokens, and 60 minutes.
-   Allow 1–32 rounds, 1–1,440 minutes, and any positive safe-integer finite
-   token cap through `Number.MAX_SAFE_INTEGER`.
+1. The original finite-token defaults are amended by ADR 0345. The current
+   default is eight rounds, a retained finite value of 250,000 tokens, 60
+   minutes, and unlimited-token mode enabled. Allow 1–32 rounds, 1–1,440
+   minutes, and any positive safe-integer finite token cap through
+   `Number.MAX_SAFE_INTEGER`.
 2. Add an explicit unlimited-token mode per Goal cycle. Continue tracking
    reported token usage, but skip only the token cutoff while unlimited is
    selected. Round and elapsed-time limits still apply. Keep the last finite
