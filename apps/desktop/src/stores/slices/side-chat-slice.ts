@@ -14,10 +14,13 @@ import {
 } from "../../lib/composer-draft-cache";
 import { sideChatWorkPanelTab } from "../../lib/work-panel-tabs";
 import type { AppState, SideChatState } from "../app-state";
+import type { SessionDetail } from "@pi-desktop/shared";
 import type { StoreAccess } from "./types";
 
 export type SideChatSliceDependencies = StoreAccess & {
   getCachedTranscript: (sessionId: string) => AppState["messages"];
+  getSessionDetail: (sessionId: string) => Promise<SessionDetail | null>;
+  promoteSideChat: (sessionId: string) => Promise<{ ok: boolean }>;
 };
 
 function quotedDraft(excerpt: string): string {
@@ -39,9 +42,10 @@ function updateSideChat(
   };
 }
 
-export function createSideChatSlice({ get, set, getCachedTranscript }: SideChatSliceDependencies): Pick<
+export function createSideChatSlice({ get, set, getCachedTranscript, getSessionDetail, promoteSideChat }: SideChatSliceDependencies): Pick<
   AppState,
   | "openSideChat"
+  | "reopenSideChat"
   | "setSideChatDraft"
   | "sendSideChatPrompt"
   | "closeSideChat"
@@ -93,6 +97,36 @@ export function createSideChatSlice({ get, set, getCachedTranscript }: SideChatS
       return sideChatId;
     },
 
+    reopenSideChat: async (childSessionId) => {
+      const detail = await getSessionDetail(childSessionId);
+      const origin = detail?.sideChat;
+      if (!detail || !origin || origin.promoted) return;
+      const latest = get();
+      const parent = latest.sessions.find((session) => session.id === origin.parentSessionId);
+      if (!parent || !sessionAllows(parent, "canPrompt")) return;
+      if (latest.activeSessionId !== origin.parentSessionId) {
+        await latest.selectSession(origin.parentSessionId);
+        if (!get().sessions.some((session) => session.id === origin.parentSessionId)) return;
+      }
+      const sideChatId = `side-chat:${childSessionId}`;
+      const sideChat: SideChatState = {
+        id: sideChatId,
+        parentSessionId: origin.parentSessionId,
+        sourceMessageId: origin.sourceMessageId,
+        excerpt: origin.excerpt,
+        childSessionId,
+        messages: detail.messages,
+        operationId: 0,
+        status: "ready",
+        draftText: "",
+      };
+      set((state) => ({
+        sideChats: { ...state.sideChats, [sideChatId]: sideChat },
+        sessions: [detail, ...state.sessions.filter((session) => session.id !== childSessionId)],
+      }));
+      get().openWorkPanelTabForSession(origin.parentSessionId, sideChatWorkPanelTab(sideChatId));
+    },
+
     setSideChatDraft: (sideChatId, text) => {
       set((state) => updateSideChat(state, sideChatId, (sideChat) => ({
         ...sideChat,
@@ -119,6 +153,7 @@ export function createSideChatSlice({ get, set, getCachedTranscript }: SideChatS
             childSessionId = await get().forkAssistantMessageInSession(
               before.parentSessionId,
               before.sourceMessageId,
+              before.excerpt,
             ) ?? undefined;
           } catch (error) {
             const current = get().sideChats[sideChatId];
@@ -211,6 +246,23 @@ export function createSideChatSlice({ get, set, getCachedTranscript }: SideChatS
       const current = get().sideChats[sideChatId];
       if (!current?.childSessionId) return;
       const { childSessionId, draftText } = current;
+      const childSummary = get().sessions.find((session) => session.id === childSessionId);
+      if (childSummary?.sideChat && !childSummary.sideChat.promoted) {
+        let promoted: { ok: boolean };
+        try {
+          promoted = await promoteSideChat(childSessionId);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          set((state) => updateSideChat(state, sideChatId, (sideChat) => ({ ...sideChat, error: message })));
+          return;
+        }
+        if (!promoted.ok) return;
+        set((state) => ({
+          sessions: state.sessions.map((session) => session.id === childSessionId && session.sideChat
+            ? { ...session, sideChat: { ...session.sideChat, promoted: true } }
+            : session),
+        }));
+      }
       if (draftText.trim()) {
         const draftKey = draftKeyForSession(childSessionId);
         const state = get();

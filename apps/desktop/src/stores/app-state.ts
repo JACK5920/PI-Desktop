@@ -220,6 +220,7 @@ export type AppState = {
     sourceMessageId: string,
     excerpt: string,
   ) => string | null;
+  reopenSideChat: (childSessionId: string) => Promise<void>;
   setSideChatDraft: (sideChatId: string, text: string) => void;
   sendSideChatPrompt: (sideChatId: string, content: string) => Promise<boolean>;
   closeSideChat: (sideChatId: string) => void;
@@ -280,6 +281,7 @@ export type AppState = {
   forkAssistantMessageInSession: (
     sessionId: string,
     messageId: string,
+    sideChatExcerpt?: string,
   ) => Promise<string | null>;
   configureActiveSession: (config: {
     mode: Mode;

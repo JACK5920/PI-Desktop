@@ -1383,7 +1383,12 @@ Running turns and pending approvals continue to gate the controls.
   session's newer draft. Selection copy, quote-to-draft, and annotations also
   work in the child transcript; child quotes append to its compact input and
   pending annotations are reviewable there. Nested Ask in side chat is not
-  offered from a docked child; promote it to a normal conversation first.
+  offered from a docked child; promote it to a normal conversation first. Sent,
+  unpromoted side chats stay discoverable under the parent and are hidden from
+  ordinary session lists and global search. Reopening restores the saved
+  excerpt and transcript without activating a fork; promotion makes the child
+  listable. Deleting the parent releases its side-chat children as ordinary
+  conversations without deleting their transcripts.
 
 ## 8. Drag / drop
 

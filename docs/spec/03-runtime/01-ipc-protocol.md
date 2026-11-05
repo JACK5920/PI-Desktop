@@ -1080,7 +1080,13 @@ Minimal interface:
 - `session/open(sessionId)` — validate and select an existing durable session
   through the reviewed desktop-control path; it does not create or mutate the
   session
-- `session/fork({ sessionId, title?, throughMessageId? }) -> { session: SessionDetail }`
+- `session/fork({ sessionId, title?, throughMessageId?, sideChatExcerpt? }) -> { session: SessionDetail }`;
+  `sideChatExcerpt` is reserved for a selected-text side chat and atomically
+  stores its parent, anchor, and excerpt on the child. Omitting it preserves
+  ordinary fork behavior.
+- `session/promoteSideChat({ sessionId }) -> { ok: true }` persists the
+  side-chat child's visibility as an ordinary conversation without changing
+  its transcript or active execution.
 - `session/get({ id, messageBefore?, messageAround?, messageLimit?, contentLimit? })` — without
   read-window options returns the complete UI projection; with them returns a
   bounded newest/older page plus `messageStart` and `hasMoreBefore`. The

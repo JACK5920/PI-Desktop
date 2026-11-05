@@ -31,7 +31,8 @@ export function useSessionSearch(open: boolean, query: string) {
     // Owned transcripts are reached from their dedicated navigation.
     hits:
       state.query === normalized
-        ? state.hits.filter((hit) => !isAutomationSession(hit.session) && !hit.session.managedByPlugin)
+        ? state.hits.filter((hit) => !isAutomationSession(hit.session) && !hit.session.managedByPlugin &&
+          !(hit.session.sideChat && !hit.session.sideChat.promoted))
         : [],
     nextOffset: state.query === normalized ? state.nextOffset : null,
     error: state.query === normalized ? state.error : undefined,

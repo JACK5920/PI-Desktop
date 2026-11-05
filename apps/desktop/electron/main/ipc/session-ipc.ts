@@ -252,7 +252,7 @@ export function registerSessionIpc({
   handle(
     IPC.invoke.sessionFork,
     async (
-      input: { sessionId?: string; title?: string; throughMessageId?: string } = {},
+      input: { sessionId?: string; title?: string; throughMessageId?: string; sideChatExcerpt?: string } = {},
     ) => {
       const sessionId = String(input.sessionId ?? "").trim();
       if (sessionId.startsWith("native-pi:")) {
@@ -302,6 +302,9 @@ export function registerSessionIpc({
           title: String(input.title ?? "").trim() || undefined,
           throughMessageId:
             String(input.throughMessageId ?? "").trim() || undefined,
+          ...(typeof input.sideChatExcerpt === "string"
+            ? { sideChatExcerpt: input.sideChatExcerpt }
+            : {}),
         });
       } catch (error: any) {
         if (error?.data?.errorCode === ErrorCodes.CONFLICT) {
@@ -322,6 +325,16 @@ export function registerSessionIpc({
       };
     },
   );
+  handle(IPC.invoke.sessionPromoteSideChat, async (input: { sessionId?: string } = {}) => {
+    const sessionId = String(input.sessionId ?? "").trim();
+    if (!host) throw new Error("host unavailable");
+    if (!sessionId) {
+      throw Object.assign(new Error("sessionId required"), {
+        errorCode: ErrorCodes.INVALID_ARGUMENT,
+      });
+    }
+    return host.call("session.promoteSideChat", { sessionId });
+  });
   handle(
     IPC.invoke.sessionGet,
     async (

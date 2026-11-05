@@ -804,12 +804,20 @@ export const api = {
     invoke<{ command: string | null }>(IPC.invoke.worktreeSetupCommandGet, { projectPath }),
   setWorktreeSetupCommand: (projectPath: string, command: string | null) =>
     invoke<{ ok: boolean }>(IPC.invoke.worktreeSetupCommandSet, { projectPath, command }),
-  forkSession: (sessionId: string, title?: string, throughMessageId?: string) =>
+  forkSession: (
+    sessionId: string,
+    title?: string,
+    throughMessageId?: string,
+    sideChatExcerpt?: string,
+  ) =>
     invoke<{ session: SessionDetail }>(IPC.invoke.sessionFork, {
       sessionId,
       title,
       throughMessageId,
+      sideChatExcerpt,
     }).then((result) => ({ ...result, session: normalizeSessionDetail(result.session)! })),
+  promoteSideChat: (sessionId: string) =>
+    invoke<{ ok: boolean }>(IPC.invoke.sessionPromoteSideChat, { sessionId }),
   searchSessions: (query: string, offset = 0) =>
     invoke<SessionSearchPage>(IPC.invoke.sessionSearch, { query, offset }),
   getSearchContext: (request: SessionSearchContextRequest) =>

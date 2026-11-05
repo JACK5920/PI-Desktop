@@ -19920,3 +19920,21 @@ their separate platform acceptance.
   ordinary and imported session behavior unchanged.
 - **Milestone:** M6+ (plugin API). **Status:** Unit/process/Host coverage;
   packaged-Electron acceptance is pending.
+
+## E2E-CHAT-side-chat-session-visibility-v1
+
+- **Path:** Select assistant text, open a side chat, send a prompt, close its
+  WorkPanel tab, and verify the child is absent from top-level session lists
+  and global search. From the parent row, reopen the side chat and verify its
+  saved excerpt and transcript. Choose “Open as a conversation” and verify the
+  child becomes listable/searchable without changing its transcript. Delete a
+  separate parent with a sent side chat and verify the child becomes an
+  ordinary conversation rather than disappearing.
+- **Coverage:** `side-chat-store.test.mjs`, `scheduled-workspace.test.mjs`,
+  Host side-chat migration, parent-delete, and global-search tests, plus the
+  isolated Chromium selection-reference workflow.
+- **Acceptance:** Ordinary forks remain top-level; schema-v30 sessions remain
+  ordinary after migration; closing/reopening never creates a second child or
+  loses the saved transcript; promotion changes visibility only.
+- **Milestone:** M6+ (side-chat follow-up). **Status:** Implementation complete;
+  targeted Node, Host, and isolated Chromium workflow checks pass locally.

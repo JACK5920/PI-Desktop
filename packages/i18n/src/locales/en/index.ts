@@ -444,6 +444,7 @@ export const en = {
     annotationCitationTitle: "Reference {{index}}",
     annotationSourceMessage: "Source message",
     sideChatTitle: "Side chat",
+    sideChatReopenFromParent: "Reopen side chat",
     sideChatSource: "From message {{messageId}}",
     sideChatExcerpt: "Selected excerpt",
     sideChatPrompt: "Side-chat prompt",

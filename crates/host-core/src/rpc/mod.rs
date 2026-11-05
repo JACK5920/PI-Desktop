@@ -2811,24 +2811,54 @@ async fn handle_request(
             let title = params.get("title").and_then(|v| v.as_str());
             let through_message_id = params.get("throughMessageId").and_then(|v| v.as_str());
             let st = state.lock().await;
-            let session =
-                match sessions::fork_session_through(&st.db, session_id, title, through_message_id)
-                    .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?
-                {
-                    sessions::ForkSessionResult::Created(session) => session,
-                    sessions::ForkSessionResult::NotFound => {
-                        return Err(rpc_err(1007, "session not found", "NOT_FOUND"))
-                    }
-                    sessions::ForkSessionResult::Busy => {
-                        return Err(rpc_err(1008, "session is running", "CONFLICT"))
-                    }
+            let fork = if let Some(excerpt) = params.get("sideChatExcerpt").and_then(|v| v.as_str())
+            {
+                let Some(anchor) = through_message_id else {
+                    return Err(rpc_err(
+                        1002,
+                        "side-chat fork requires throughMessageId",
+                        "INVALID_PARAMS",
+                    ));
                 };
+                sessions::fork_side_chat_through(&st.db, session_id, anchor, excerpt)
+            } else {
+                sessions::fork_session_through(&st.db, session_id, title, through_message_id)
+            };
+            let session = match fork.map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))? {
+                sessions::ForkSessionResult::Created(session) => session,
+                sessions::ForkSessionResult::NotFound => {
+                    return Err(rpc_err(1007, "session not found", "NOT_FOUND"))
+                }
+                sessions::ForkSessionResult::Busy => {
+                    return Err(rpc_err(1008, "session is running", "CONFLICT"))
+                }
+            };
             let session = remote_tools::decorate_session(
                 &st.db,
                 serde_json::to_value(session)
                     .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?,
             )?;
             Ok(json!({ "session": session }))
+        }
+        "session.promoteSideChat" => {
+            let session_id = params
+                .get("sessionId")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| rpc_err(1002, "sessionId required", "INVALID_PARAMS"))?;
+            let st = state.lock().await;
+            let updated = sessions::promote_side_chat(&st.db, session_id)
+                .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?;
+            let exists: bool = st.db.conn().query_row(
+                "SELECT EXISTS(SELECT 1 FROM sessions WHERE id = ?1 AND side_chat_parent_id IS NOT NULL)",
+                [session_id],
+                |row| row.get(0),
+            ).map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?;
+            if !updated && !exists {
+                return Err(rpc_err(1007, "side chat not found", "NOT_FOUND"));
+            }
+            Ok(json!({ "ok": true }))
         }
         "session.moveProject" => {
             let session_id = params

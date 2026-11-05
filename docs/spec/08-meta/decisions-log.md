@@ -8237,10 +8237,11 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
   The first send creates a normal non-activating session fork and uses existing
   session-scoped streaming, permission, and AskTool paths. Closing a sent tab
   releases only its renderer projection; its ordinary child session remains.
-- No new Host protocol, IPC/RPC, database migration, permission, or plugin
-  contract is introduced. Unsent drafts and annotations are not restored after
-  restart. ADR 0346 amends ADR 0268 and ADR 0342; all retired decision and E2E
-  identifiers remain retired.
+- Unsent drafts and annotations are not restored after restart. ADR 0346 amends
+  ADR 0268 and ADR 0342; all retired decision and E2E identifiers remain
+  retired. ADR 0347 adds Host-owned side-chat provenance and promotion state so
+  sent follow-ups stay out of ordinary lists/search while remaining reopenable
+  from their parent; existing conversations remain ordinary.
 - Coverage: selection helper and annotation/side-chat store tests plus the
   isolated Chromium selection-reference workflow. See ADR 0346, the component
   and interaction specifications, and E2E-CHAT-selection-capture-v2,

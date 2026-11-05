@@ -820,7 +820,7 @@ export function createSessionSlice({
       }
     },
 
-    forkAssistantMessageInSession: async (sessionId, messageId) => {
+    forkAssistantMessageInSession: async (sessionId, messageId, sideChatExcerpt) => {
       const state = get();
       if (!sessionId || !messageId || state.selectingSessionId === sessionId) return null;
       const source = state.sessions.find((session) => session.id === sessionId);
@@ -837,6 +837,7 @@ export function createSessionSlice({
         sessionId,
         i18n.t("nav.branchTitle", { title: sourceTitle }),
         messageId,
+        sideChatExcerpt,
       );
       // A side chat is a separate reading surface. Persist the new child in
       // the session inventory/cache, but never let this action navigate away

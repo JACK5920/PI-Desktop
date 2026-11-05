@@ -196,6 +196,8 @@ export const useAppStore = create<AppState>((set, get) => {
     get,
     set,
     getCachedTranscript: (sessionId) => sessionRuntime.sessionTranscriptCache.get(sessionId) ?? [],
+    getSessionDetail: async (sessionId) => (await api.getSession(sessionId)).session,
+    promoteSideChat: (sessionId) => api.promoteSideChat(sessionId),
   }),
 
   ...createTranscriptSlice({

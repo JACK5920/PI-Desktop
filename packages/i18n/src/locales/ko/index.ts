@@ -444,6 +444,7 @@ export const ko = {
     annotationCitationTitle: "참조 {{index}}",
     annotationSourceMessage: "출처 메시지",
     sideChatTitle: "사이드 채팅",
+    sideChatReopenFromParent: "사이드 채팅 다시 열기",
     sideChatSource: "메시지 {{messageId}}에서 가져옴",
     sideChatExcerpt: "선택한 발췌문",
     sideChatPrompt: "사이드 채팅 메시지",

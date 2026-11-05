@@ -20,6 +20,7 @@ Each ADR includes:
 
 | ID | Title | Status |
 |---|---|---|
+| 0347 | [Side-chat session visibility](0347-side-chat-session-visibility.md) | Accepted for implementation |
 | plugin-managed-native-transcripts | [Plugin-managed native transcripts and private storage](plugin-managed-native-transcripts.md) | Accepted for implementation |
 | plugin-projects-list | [Read-only durable project enumeration for plugins](plugin-projects-list.md) | Accepted |
 | append-only-review-state | [Append-only review state](append-only-review-state.md) | Implemented candidate |

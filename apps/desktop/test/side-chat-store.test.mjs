@@ -35,8 +35,8 @@ function fixture() {
     sideChats: {},
     openWorkPanelTabForSession: (sessionId, tab) => { opened.push({ sessionId, tab }); },
     closeWorkPanelTab: (tabId, sessionId) => { closed.push({ tabId, sessionId }); },
-    forkAssistantMessageInSession: async (sessionId, messageId) => {
-      forkCalls.push({ sessionId, messageId });
+    forkAssistantMessageInSession: async (sessionId, messageId, excerpt) => {
+      forkCalls.push({ sessionId, messageId, excerpt });
       return fork.promise;
     },
     sendPrompt: async (...args) => {
@@ -44,12 +44,14 @@ function fixture() {
       return sendResults.shift() ?? true;
     },
     selectSession: async (id) => { selected.push(id); },
+    promoteSideChat: async (id) => { promoted.push(id); return { ok: true }; },
   };
   const opened = [];
   const closed = [];
   const forkCalls = [];
   const sendCalls = [];
   const selected = [];
+  const promoted = [];
   const sendResults = [];
   const access = {
     get: () => state,
@@ -58,9 +60,37 @@ function fixture() {
       state = { ...state, ...next };
     },
   };
-  const slice = createSideChatSlice({ ...access, getCachedTranscript: () => [assistant] });
-  return { slice, get: access.get, opened, closed, forkCalls, sendCalls, selected, sendResults, set: access.set, fork };
+  const slice = createSideChatSlice({
+    ...access,
+    getCachedTranscript: () => [assistant],
+    getSessionDetail: async (id) => id === "child-restore" ? {
+        id,
+        title: "Child",
+        mode: "default",
+        sideChat: { parentSessionId: "parent", sourceMessageId: "answer-1", excerpt: "persisted quote", promoted: false },
+      messages: [{ id: "child-message", role: "assistant", content: "saved answer" }],
+    } : null,
+    promoteSideChat: state.promoteSideChat,
+  });
+  return { slice, get: access.get, opened, closed, forkCalls, sendCalls, selected, promoted, sendResults, set: access.set, fork };
 }
+
+test("reopening a persisted side chat restores its transcript under the parent", async () => {
+  const h = fixture();
+  await h.slice.reopenSideChat("child-restore");
+  const restored = h.get().sideChats["side-chat:child-restore"];
+  assert.equal(restored.parentSessionId, "parent");
+  assert.equal(restored.childSessionId, "child-restore");
+  assert.equal(restored.excerpt, "persisted quote");
+  assert.equal(restored.messages[0].id, "child-message");
+  assert.equal(h.opened[0].sessionId, "parent");
+  assert.deepEqual(h.opened[0].tab, {
+    id: "side-chat:child-restore",
+    kind: "side-chat",
+    resource: "side-chat:child-restore",
+  });
+  assert.equal(h.get().activeSessionId, "parent");
+});
 
 test("opening a side chat creates only a transient work-panel draft", () => {
   const h = fixture();
@@ -85,6 +115,11 @@ test("concurrent first sends fork once and use the child while keeping the paren
   assert.equal(first, duplicate);
   await Promise.resolve();
   assert.equal(h.forkCalls.length, 1);
+  assert.deepEqual(h.forkCalls[0], {
+    sessionId: "parent",
+    messageId: "answer-1",
+    excerpt: "quote",
+  });
   h.fork.resolve("child-1");
   assert.equal(await first, true);
   assert.equal(h.sendCalls.length, 1);
@@ -130,10 +165,15 @@ test("promoting a side chat closes its transient tab and selects the durable chi
   const h = fixture();
   const sideChatId = h.slice.openSideChat("parent", "answer-1", "quote");
   assert.ok(sideChatId);
+  h.set((state) => ({ sessions: [...state.sessions, {
+    id: "child-1",
+    sideChat: { parentSessionId: "parent", sourceMessageId: "answer-1", excerpt: "quote", promoted: false },
+  }] }));
   h.set((state) => ({ sideChats: { ...state.sideChats, [sideChatId]: {
     ...state.sideChats[sideChatId], childSessionId: "child-1",
   } } }));
   await h.slice.promoteSideChatToConversation(sideChatId);
+  assert.deepEqual(h.promoted, ["child-1"]);
   assert.equal(h.get().sideChats[sideChatId], undefined);
   assert.deepEqual(h.selected, ["child-1"]);
 });

@@ -431,6 +431,7 @@ export const ptBR = {
     annotationCitationTitle: "Referência {{index}}",
     annotationSourceMessage: "Mensagem de origem",
     sideChatTitle: "Chat lateral",
+    sideChatReopenFromParent: "Reabrir chat lateral",
     sideChatSource: "Da mensagem {{messageId}}",
     sideChatExcerpt: "Trecho selecionado",
     sideChatPrompt: "Mensagem do chat lateral",

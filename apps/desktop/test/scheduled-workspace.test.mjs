@@ -308,11 +308,13 @@ test("the session list and search both consume the ownership rule", async () => 
     /listableSessions\(sessions\)/,
     "the sidebar drops automation transcripts before grouping",
   );
+  assert.match(sidebar, /candidate\.sideChat\?\.parentSessionId === session\.id/);
+  assert.match(sidebar, /reopenSideChat\(child\.id\)/);
   const search = await readFile(new URL("../src/hooks/use-session-search.ts", import.meta.url), "utf8");
   assert.match(
     search,
-    /state\.hits\.filter\(\(hit\) => !isAutomationSession\(hit\.session\) && !hit\.session\.managedByPlugin\)/,
-    "search never offers one as a conversation to open",
+    /state\.hits\.filter\(\(hit\) => !isAutomationSession\(hit\.session\) && !hit\.session\.managedByPlugin &&[\s\S]*?!hit\.session\.sideChat\.promoted\)/,
+    "search never offers an unpromoted side chat as a conversation to open",
   );
   const palette = await readFile(
     new URL("../src/components/SearchDialog.tsx", import.meta.url),
@@ -475,13 +477,15 @@ test("every session list the user can enter drops a run's transcript", async () 
       { id: "plain" },
       { id: "automation", scheduledRun: true },
       { id: "managed", managedByPlugin: "fixture.owner" },
+      { id: "hidden-side-chat", sideChat: { parentSessionId: "plain", sourceMessageId: "m1", excerpt: "quote", promoted: false } },
+      { id: "promoted-side-chat", sideChat: { parentSessionId: "plain", sourceMessageId: "m1", excerpt: "quote", promoted: true } },
       { id: "legacy" },
       { id: "explicit-false", scheduledRun: false },
     ];
     assert.deepEqual(
       origin.listableSessions(listed).map((session) => session.id),
-      ["plain", "legacy", "explicit-false"],
-      "owned transcripts leave ordinary lists, including disabled plugin owners",
+      ["plain", "promoted-side-chat", "legacy", "explicit-false"],
+      "owned transcripts and unpromoted side chats leave ordinary lists",
     );
     assert.deepEqual(origin.listableSessions([]), []);
 

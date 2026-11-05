@@ -2145,9 +2145,12 @@ export function Sidebar({
           i18n.resolvedLanguage ?? i18n.language,
         )
       : "";
+    const childSideChats = sessions.filter((candidate) =>
+      candidate.sideChat?.parentSessionId === session.id && !candidate.sideChat.promoted,
+    );
     return (
+      <div key={session.id}>
       <div
-        key={session.id}
         className={`thread-item ${active ? "active" : ""} ${archived ? "archived" : ""} ${draggingSessionId === session.id ? "is-dragging" : ""} ${selectedIds.has(session.id) ? "selected" : ""}`}
         data-sidebar-session-row={session.id}
         draggable={!running && !isRemoteSession(session)}
@@ -2257,6 +2260,21 @@ export function Sidebar({
             <IconMore size={14} />
           </TooltipButton>
         </div>
+      </div>
+      {childSideChats.map((child) => (
+        <button
+          key={`side-chat:${child.id}`}
+          type="button"
+          className="thread-item-side-chat"
+          data-testid="sidebar-side-chat-reopen"
+          aria-label={t("chat.sideChatReopenFromParent", { defaultValue: "Reopen side chat" })}
+          title={child.sideChat?.excerpt}
+          onClick={() => void useAppStore.getState().reopenSideChat(child.id)}
+        >
+          <span aria-hidden="true">↳</span>
+          <span>{t("chat.sideChatTitle")}: {taskTitle(child.title)}</span>
+        </button>
+      ))}
       </div>
     );
   });
