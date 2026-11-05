@@ -486,6 +486,7 @@ globalThis.selectionReferenceProbe = async () => {
 
     const annotatedPrompt = submittedPrompt;
     assert(requestTextWithoutAnnotations(annotatedPrompt) === "Please explain the selected result.", "generated annotation envelope changed the visible request");
+    assert(annotatedPrompt.includes("selected excerpts are included in your model-visible context"), "annotation envelope does not explicitly tell the model the selected excerpt is present");
     assert(annotatedPrompt.includes("answer-parent"), "annotation envelope lost its source message id");
     await settle();
     const citation = host.querySelector<HTMLButtonElement>('[data-testid="response-annotation-citation"]');
