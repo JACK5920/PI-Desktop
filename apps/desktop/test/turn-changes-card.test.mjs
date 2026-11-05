@@ -7,6 +7,7 @@ import { summarizeTurnChanges } from "../src/lib/turn-changed-files.ts";
 import {
   currentReviewFocusRequest,
   requestReviewFocus,
+  scrollReviewToAnchor,
 } from "../src/lib/review-focus-request.ts";
 
 /*
@@ -107,6 +108,22 @@ test("a focus request carries its snapshots, expansion, and a fresh sequence", (
   assert.notEqual(first, before, "an empty request is ignored, a real one replaces it");
   requestReviewFocus(["s1"], { expand: false });
   assert.ok(currentReviewFocusRequest().seq > first.seq);
+});
+
+test("review focus scrolls only the review list, not ancestor containers", () => {
+  const anchor = { getBoundingClientRect: () => ({ top: 180 }) };
+  const scroller = {
+    scrollTop: 100,
+    getBoundingClientRect: () => ({ top: 50 }),
+    querySelector: (selector) => selector === "[data-snapshot-id=\"snap-1\"]" ? anchor : null,
+  };
+  scrollReviewToAnchor(scroller, "[data-snapshot-id=\"snap-1\"]");
+  assert.equal(scroller.scrollTop, 230);
+
+  const unchanged = { scrollTop: 7, getBoundingClientRect: () => ({ top: 0 }), querySelector: () => null };
+  scrollReviewToAnchor(unchanged, "[data-missing]");
+  assert.equal(unchanged.scrollTop, 7);
+  scrollReviewToAnchor(null, "[data-missing]");
 });
 
 function turnMessages(tools, replyOverrides = {}) {
@@ -211,5 +228,6 @@ test("the card stays borderless and the Review tab honors focus requests", async
   );
   assert.match(reviewTab, /useReviewFocusRequest\(\)/);
   assert.match(reviewTab, /openRequest=\{/);
-  assert.match(reviewTab, /scrollIntoView/);
+  assert.match(reviewTab, /scrollReviewToAnchor\(\s*scrollRef\.current,/);
+  assert.doesNotMatch(reviewTab, /scrollIntoView/);
 });

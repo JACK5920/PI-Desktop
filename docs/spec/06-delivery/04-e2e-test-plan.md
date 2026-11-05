@@ -1428,6 +1428,12 @@ identify the platform validation still needed.
 #### E2E-003: Rust host healthcheck responds
 
 - **Preconditions**: App is running; Rust host-core sidecar started.
+- **Cold-start timeout**: Let the first handshake time out, then allow a fresh
+  host to answer. Verify the shell opens in the same desktop process. Repeat
+  with both handshakes timing out and with quit during the first attempt.
+  Verify the recovery surface stays available after two attempts and quit
+  prevents a second child. The startup-host-retry tests inject these outcomes
+  at the Main lifecycle boundary.
 - **Steps**: 1) Electron handshakes with protocol version 11. 2) Call the host
   healthcheck RPC. 3) Repeat boot with mismatched older and newer protocol
   fixtures.
@@ -5217,7 +5223,8 @@ window; opening a normal panel afterward must still work.
   its merged status letter and counts; up to four files use relaxed rows,
   more use dense rows with a directory count, and rows past 12 fold into
   `+N more`. A row click opens the session's Review tab scrolled to that file
-  with its changes expanded; the link opens Review without expanding. The
+  inside the Review list without moving the app shell, with its changes
+  expanded; the link opens Review without expanding. The
   rolled-back file stays listed, struck through. Every earlier finished turn
   keeps its own card, a turn without writes has none, and a session switch
   fetches nothing extra. The per-call review rows are unchanged.
