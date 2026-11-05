@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { TooltipButton, Textarea } from "../../../components/ui";
+import { Button, TooltipButton, Textarea } from "../../../components/ui";
 import { IconCopy } from "../../../components/icons";
 import type { ResponseAnnotation } from "../../../lib/response-annotations";
 import {
@@ -227,24 +227,22 @@ export function TranscriptSelectionToolbar({
             }}
           />
           <div className="transcript-selection-annotation-actions">
-            <TooltipButton
+            <Button
               type="button"
-              className="composer-queued-prompt-action"
-              tooltip={t("chat.cancelEdit")}
-              ariaLabel={t("chat.cancelEdit")}
+              variant="ghost"
+              size="sm"
               onClick={() => dismiss(true)}
             >
               {t("chat.cancelEdit")}
-            </TooltipButton>
-            <TooltipButton
+            </Button>
+            <Button
               type="button"
-              className="send-btn"
-              tooltip={t("chat.saveAnnotation")}
-              ariaLabel={t("chat.saveAnnotation")}
+              variant="primary"
+              size="sm"
               onClick={saveAnnotation}
             >
               {t("chat.saveAnnotation")}
-            </TooltipButton>
+            </Button>
           </div>
         </div>
       ) : (

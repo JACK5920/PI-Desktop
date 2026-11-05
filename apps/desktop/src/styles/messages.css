@@ -158,7 +158,7 @@
 
 .transcript-selection-annotation-editor {
   display: grid;
-  width: min(350px, calc(100vw - 48px));
+  width: min(320px, calc(100vw - 48px));
   min-width: 0;
   gap: 8px;
   padding: 8px;
@@ -185,8 +185,9 @@
 }
 
 .transcript-selection-annotation-actions > * {
-  flex: 0 1 auto;
-  min-width: 0;
+  flex: 0 0 auto;
+  min-width: 64px;
+  white-space: nowrap;
 }
 
 .message-annotation-summary {

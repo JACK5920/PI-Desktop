@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { IconPencil, IconTrash } from "../../../components/icons";
 import { Textarea, TooltipButton } from "../../../components/ui";
 import { useAppStore } from "../../../stores/app-store";
 
@@ -84,7 +85,7 @@ export function ComposerAnnotationAttachments({ sessionId: requestedSessionId }:
                   <div className="composer-annotation-actions">
                     <TooltipButton
                       type="button"
-                      className="composer-queued-prompt-action"
+                      className="icon-btn icon-btn-square"
                       tooltip={t("chat.editAnnotation")}
                       ariaLabel={t("chat.editAnnotation")}
                       onClick={() => {
@@ -92,16 +93,16 @@ export function ComposerAnnotationAttachments({ sessionId: requestedSessionId }:
                         setEditingId(annotation.id);
                       }}
                     >
-                      {t("chat.editAnnotation")}
+                      <IconPencil size={14} aria-hidden />
                     </TooltipButton>
                     <TooltipButton
                       type="button"
-                      className="composer-queued-prompt-action"
+                      className="icon-btn icon-btn-square"
                       tooltip={t("chat.removeAnnotation")}
                       ariaLabel={t("chat.removeAnnotation")}
                       onClick={() => removeAnnotation(sessionId, annotation.id)}
                     >
-                      {t("chat.removeAnnotation")}
+                      <IconTrash size={14} aria-hidden />
                     </TooltipButton>
                   </div>
                 )}

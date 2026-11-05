@@ -5633,7 +5633,10 @@ window; opening a normal panel afterward must still work.
   its reference.
 - **Expected**: The Composer exposes ordered, editable, removable references;
   cancelled edits do not attach, duplicate source/excerpt reopens its editor,
-  and a reference without a comment is valid. The model receives an explicit
+  and a reference without a comment is valid. Comment-editor actions retain
+  readable text-button widths, while reference-review edit/remove actions are
+  compact icon buttons with accessible names and do not wrap into vertical
+  labels. The model receives an explicit
   JSON-serialized annotation envelope, while visible request projections show
   only the user's request and the admitted user-message row offers a separate
   collapsed disclosure whose expanded content shows safe excerpts and

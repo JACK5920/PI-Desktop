@@ -279,16 +279,15 @@
 
 .composer-annotation-actions {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  align-items: center;
   min-width: 0;
   justify-content: flex-end;
   gap: 6px;
 }
 
 .composer-annotation-actions > * {
-  flex: 0 1 auto;
-  min-width: 0;
-  white-space: normal;
+  flex: 0 0 auto;
 }
 
 .composer-annotation-edit {
