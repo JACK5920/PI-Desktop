@@ -1,7 +1,7 @@
 # ADR 0347: Side-chat session visibility
 
-**Status:** Accepted for implementation
-**Date:** 2026-11-05
+- Status: Accepted for implementation
+- Date: 2026-11-05
 
 ## Context
 
