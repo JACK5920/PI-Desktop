@@ -5637,7 +5637,11 @@ window; opening a normal panel afterward must still work.
   readable text-button widths, while reference-review edit/remove actions are
   compact icon buttons with accessible names and do not wrap into vertical
   labels. The model receives an explicit
-  JSON-serialized annotation envelope, while visible request projections show
+  JSON-serialized annotation envelope whose instructions state that selected
+  excerpts are present in the model-visible context and must not be reported
+  missing when included. A provider-boundary runtime fixture confirms the
+  excerpt survives into the final user message passed to the model, while
+  visible request projections show
   only the user's request and the admitted user-message row offers a separate
   collapsed disclosure whose expanded content shows safe excerpts and
   comments. Acceptance consumes only unchanged submitted
@@ -5648,7 +5652,9 @@ window; opening a normal panel afterward must still work.
   excerpt/comment/source card; unknown indices and hostile reference text stay
   inert ordinary text.
 - **Coverage**: `node scripts/e2e-selection-reference-workflow.mjs` covers attach,
-  edit, prompt serialization, and citation rendering. `node --test
+  edit, prompt serialization, and citation rendering. The AgentRuntime provider
+  message test verifies the excerpt and request reach the model-facing user
+  message. `node --test
   apps/desktop/test/response-annotations.test.mjs
   apps/desktop/test/response-annotation-slice.test.mjs
   apps/desktop/test/response-annotation-citations.test.mjs
