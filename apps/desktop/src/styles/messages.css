@@ -185,8 +185,9 @@
 }
 
 .transcript-selection-annotation-actions > * {
-  flex: 0 1 auto;
-  min-width: 0;
+  flex: 0 0 auto;
+  min-width: 64px;
+  white-space: nowrap;
 }
 
 .message-annotation-summary {

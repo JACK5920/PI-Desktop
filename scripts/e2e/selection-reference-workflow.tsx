@@ -421,6 +421,12 @@ globalThis.selectionReferenceProbe = async () => {
     assert(editorRect, "annotation editor has no measurable layout");
     assert(editorRect.left >= 0 && editorRect.right <= window.innerWidth, "annotation editor extends beyond the viewport width");
     assert(editorRect.top >= 0 && editorRect.bottom <= window.innerHeight, "annotation editor extends beyond the viewport height");
+    const annotationEditorActions = [...annotationEditor.querySelectorAll<HTMLButtonElement>(".transcript-selection-annotation-actions button")];
+    assert(annotationEditorActions.length === 2, "annotation editor does not show both cancel and save actions");
+    assert(
+      annotationEditorActions.every((button) => button.getBoundingClientRect().width >= 52),
+      "annotation editor text actions are squeezed into icon-sized controls",
+    );
     setTextareaValue(commentInput, "Focus on why the parent stays selected.");
     const otherStart = 0;
     selectText(otherAssistantNode, otherStart, "A different answer".length);
@@ -439,8 +445,29 @@ globalThis.selectionReferenceProbe = async () => {
     const reviewRect = referenceReview?.getBoundingClientRect();
     assert(reviewRect, "Composer reference review has no measurable layout");
     assert(reviewRect.left >= 0 && reviewRect.right <= window.innerWidth, "Composer reference review extends beyond the viewport width");
+    const annotationReviewActions = [...referenceReview.querySelectorAll<HTMLButtonElement>(".composer-annotation-actions > button")];
+    assert(annotationReviewActions.length === 2, "Composer reference review does not expose edit and remove controls");
+    assert(
+      annotationReviewActions.every((button) => {
+        const rect = button.getBoundingClientRect();
+        return button.textContent?.trim() === "" &&
+          button.querySelector("svg") !== null &&
+          Boolean(button.getAttribute("aria-label")) &&
+          rect.width >= rect.height * 0.9 &&
+          rect.width <= rect.height * 1.2;
+      }),
+      "Composer reference review actions should be compact icon controls with accessible labels",
+    );
     buttonNamed("Edit note").click();
     await settle();
+    const annotationEditActions = [
+      ...referenceReview.querySelectorAll<HTMLButtonElement>(".composer-annotation-edit .composer-annotation-actions button"),
+    ];
+    assert(annotationEditActions.length === 2, "Composer annotation editor does not show cancel and save actions");
+    assert(
+      annotationEditActions.every((button) => button.getBoundingClientRect().width >= 52),
+      "Composer annotation editor text actions are squeezed into icon-sized controls",
+    );
     setTextareaValue(textareaById("composer-annotation-comment-" + annotation.id), "Keep the parent visible while the child runs.");
     buttonNamed("Attach excerpt").click();
     await settle();

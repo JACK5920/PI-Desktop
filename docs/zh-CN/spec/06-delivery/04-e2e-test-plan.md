@@ -2788,7 +2788,7 @@ MainChat 弥补了缺口。 Maximized/fullscreen 调用保留最新的
 
 - **前提条件**：有已完成的助手回答和可写的本地输入框。
 - **步骤**：1）选中助手摘录并选择“添加到聊天”。2）添加评论、附加并查看输入框中的引用。3）编辑评论、移除或清空待发送批注，再次附加摘录。4）发送非空普通请求，检查用户气泡、编辑草稿和排队预览。5）渲染包含精确引用指令的回答并打开引用。
-- **预期**：输入框显示有序、可编辑和可移除的引用；取消编辑不会附加，重复选择相同来源和摘录会重新打开编辑器，无评论的引用也有效。模型收到显式 JSON 序列化的批注信封，而用户可见的请求投影只显示用户请求。接收成功后仅消费未变化的已提交引用；拒绝时保留它们；只有批注而没有请求文本时不接受提交。编辑排队请求会先恢复其隐藏批注，再放到较新的输入框批注之前；排队接收失败时保留原批注。有效引用打开安全的纯文本摘录、评论和来源卡片；未知序号及恶意文本保持惰性普通文本。
+- **预期**：输入框显示有序、可编辑和可移除的引用；取消编辑不会附加，重复选择相同来源和摘录会重新打开编辑器，无评论的引用也有效。选区批注和输入框内编辑批注的操作按钮保持可读宽度；输入框引用审阅中的编辑/移除操作使用带可访问名称的紧凑图标按钮，不会挤成竖排文字。模型收到显式 JSON 序列化的批注信封，而用户可见的请求投影只显示用户请求。接收成功后仅消费未变化的已提交引用；拒绝时保留它们；只有批注而没有请求文本时不接受提交。编辑排队请求会先恢复其隐藏批注，再放到较新的输入框批注之前；排队接收失败时保留原批注。有效引用打开安全的纯文本摘录、评论和来源卡片；未知序号及恶意文本保持惰性普通文本。
 - **覆盖范围**：`node scripts/e2e-selection-reference-workflow.mjs` 覆盖附加、编辑、提示序列化和引用渲染；`node --test apps/desktop/test/response-annotations.test.mjs apps/desktop/test/response-annotation-slice.test.mjs apps/desktop/test/response-annotation-citations.test.mjs apps/desktop/test/queue-pending-actions.test.mjs apps/desktop/test/composer-submit-race.test.mjs apps/desktop/test/session-title-prompt-fallback.test.mjs` 覆盖序列化、显示精简、顺序、精确快照确认和拒绝处理。
 - **关联规格**：`04-ux/08-component-spec.md` §7 / §11、`04-ux/09-interaction-patterns.md` §7.6、ADR 0346。
 - **验收**：C（聊天流）、质量、安全。
