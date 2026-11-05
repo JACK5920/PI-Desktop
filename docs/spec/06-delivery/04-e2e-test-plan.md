@@ -5223,7 +5223,8 @@ window; opening a normal panel afterward must still work.
   its merged status letter and counts; up to four files use relaxed rows,
   more use dense rows with a directory count, and rows past 12 fold into
   `+N more`. A row click opens the session's Review tab scrolled to that file
-  with its changes expanded; the link opens Review without expanding. The
+  inside the Review list without moving the app shell, with its changes
+  expanded; the link opens Review without expanding. The
   rolled-back file stays listed, struck through. Every earlier finished turn
   keeps its own card, a turn without writes has none, and a session switch
   fetches nothing extra. The per-call review rows are unchanged.

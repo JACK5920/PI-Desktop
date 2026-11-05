@@ -1014,6 +1014,9 @@ pending action cards remain reachable outside a hidden process. See
 
 ### 4.5 Accessibility
 
+- A Review focus request scrolls its target inside the Review list only; it must
+  not scroll ancestor containers such as the app shell or hide window chrome.
+
 - `role="log"` for transcript container
 - `aria-live="polite"` on transcript for new message announcements
 - Scroll-to-bottom button appears when user scrolls up during stream
