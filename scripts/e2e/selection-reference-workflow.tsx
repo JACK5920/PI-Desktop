@@ -460,6 +460,14 @@ globalThis.selectionReferenceProbe = async () => {
     );
     buttonNamed("Edit note").click();
     await settle();
+    const annotationEditActions = [
+      ...referenceReview.querySelectorAll<HTMLButtonElement>(".composer-annotation-edit .composer-annotation-actions button"),
+    ];
+    assert(annotationEditActions.length === 2, "Composer annotation editor does not show cancel and save actions");
+    assert(
+      annotationEditActions.every((button) => button.getBoundingClientRect().width >= 52),
+      "Composer annotation editor text actions are squeezed into icon-sized controls",
+    );
     setTextareaValue(textareaById("composer-annotation-comment-" + annotation.id), "Keep the parent visible while the child runs.");
     buttonNamed("Attach excerpt").click();
     await settle();

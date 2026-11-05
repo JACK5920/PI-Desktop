@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { IconPencil, IconTrash } from "../../../components/icons";
-import { Textarea, TooltipButton } from "../../../components/ui";
+import { Button, Textarea, TooltipButton } from "../../../components/ui";
 import { useAppStore } from "../../../stores/app-store";
 
 const EMPTY_ANNOTATIONS: never[] = [];
@@ -58,27 +58,25 @@ export function ComposerAnnotationAttachments({ sessionId: requestedSessionId }:
                       onChange={(event) => setComment(event.currentTarget.value)}
                     />
                     <div className="composer-annotation-actions">
-                      <TooltipButton
+                      <Button
                         type="button"
-                        className="composer-queued-prompt-action"
-                        tooltip={t("chat.cancelEdit")}
-                        ariaLabel={t("chat.cancelEdit")}
+                        variant="ghost"
+                        size="sm"
                         onClick={() => setEditingId(null)}
                       >
                         {t("chat.cancelEdit")}
-                      </TooltipButton>
-                      <TooltipButton
+                      </Button>
+                      <Button
                         type="button"
-                        className="send-btn"
-                        tooltip={t("chat.saveAnnotation")}
-                        ariaLabel={t("chat.saveAnnotation")}
+                        variant="primary"
+                        size="sm"
                         onClick={() => {
                           editAnnotation(sessionId, annotation.id, comment);
                           setEditingId(null);
                         }}
                       >
                         {t("chat.saveAnnotation")}
-                      </TooltipButton>
+                      </Button>
                     </div>
                   </div>
                 ) : (

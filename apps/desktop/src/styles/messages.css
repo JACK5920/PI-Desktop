@@ -158,7 +158,7 @@
 
 .transcript-selection-annotation-editor {
   display: grid;
-  width: min(320px, calc(100vw - 48px));
+  width: min(350px, calc(100vw - 48px));
   min-width: 0;
   gap: 8px;
   padding: 8px;
