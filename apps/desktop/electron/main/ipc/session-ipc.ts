@@ -302,8 +302,9 @@ export function registerSessionIpc({
           title: String(input.title ?? "").trim() || undefined,
           throughMessageId:
             String(input.throughMessageId ?? "").trim() || undefined,
-          sideChatExcerpt:
-            typeof input.sideChatExcerpt === "string" ? input.sideChatExcerpt : undefined,
+          ...(typeof input.sideChatExcerpt === "string"
+            ? { sideChatExcerpt: input.sideChatExcerpt }
+            : {}),
         });
       } catch (error: any) {
         if (error?.data?.errorCode === ErrorCodes.CONFLICT) {
