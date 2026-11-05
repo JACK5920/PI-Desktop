@@ -30,9 +30,10 @@ export function isAutomationSession(
  * persists while disabled, keeping the ordinary lists free of duplicate entries.
  */
 export function listableSessions<
-  T extends Pick<SessionSummary, "scheduledRun" | "managedByPlugin">,
+  T extends Pick<SessionSummary, "id"> & Partial<Pick<SessionSummary, "scheduledRun" | "managedByPlugin" | "sideChat">>,
 >(sessions: readonly T[]): T[] {
   return sessions.filter(
-    (session) => !isAutomationSession(session) && !session.managedByPlugin,
+    (session) => !isAutomationSession(session) && !session.managedByPlugin &&
+      !(session.sideChat && !session.sideChat.promoted && session.sideChat.parentSessionId),
   );
 }

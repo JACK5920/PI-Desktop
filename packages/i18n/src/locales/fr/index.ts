@@ -432,6 +432,7 @@ export const fr = {
     "annotationCitationTitle": "Référence {{index}}",
     "annotationSourceMessage": "Message source",
     "sideChatTitle": "Chat latéral",
+    "sideChatReopenFromParent": "Rouvrir le chat latéral",
     "sideChatSource": "Depuis le message {{messageId}}",
     "sideChatExcerpt": "Extrait sélectionné",
     "sideChatPrompt": "Message du chat latéral",

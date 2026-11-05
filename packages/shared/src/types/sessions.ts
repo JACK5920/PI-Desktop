@@ -77,6 +77,13 @@ export type SessionSummary = {
    * Older hosts omit it, so `undefined` means an ordinary conversation.
    */
   scheduledRun?: boolean;
+  /** Durable provenance for a side-chat child; absent on legacy and ordinary sessions. */
+  sideChat?: {
+    parentSessionId: string;
+    sourceMessageId: string;
+    excerpt: string;
+    promoted: boolean;
+  };
   /**
    * Present only for an isolated session (ADR 0329): its tools run in its own
    * git worktree. Older hosts and ordinary sessions omit it.

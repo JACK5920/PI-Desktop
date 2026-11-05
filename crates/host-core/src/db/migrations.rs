@@ -1058,3 +1058,53 @@ pub(crate) fn migrate_v29_to_v30(conn: &Connection, path: &Path) -> Result<()> {
     })?;
     Ok(())
 }
+
+/// v31 stores the parent, source excerpt, and promotion state for side chats.
+/// Existing sessions receive no side-chat metadata and remain ordinary chats.
+pub(crate) fn migrate_v30_to_v31_tx(tx: &rusqlite::Transaction<'_>) -> Result<()> {
+    for (column, definition) in [
+        (
+            "side_chat_parent_id",
+            "TEXT REFERENCES sessions(id) ON DELETE SET NULL",
+        ),
+        ("side_chat_source_message_id", "TEXT"),
+        ("side_chat_excerpt", "TEXT"),
+        (
+            "side_chat_promoted",
+            "INTEGER NOT NULL DEFAULT 0 CHECK (side_chat_promoted IN (0, 1))",
+        ),
+    ] {
+        let exists: bool = tx.query_row(
+            "SELECT EXISTS(
+               SELECT 1 FROM pragma_table_info('sessions') WHERE name = ?1
+             )",
+            [column],
+            |row| row.get(0),
+        )?;
+        if !exists {
+            tx.execute_batch(&format!(
+                "ALTER TABLE sessions ADD COLUMN {column} {definition};"
+            ))?;
+        }
+    }
+    tx.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_sessions_side_chat_parent
+           ON sessions(side_chat_parent_id, updated_at DESC)
+           WHERE side_chat_parent_id IS NOT NULL AND side_chat_promoted = 0;",
+    )?;
+    tx.pragma_update(None, "user_version", 31i64)?;
+    Ok(())
+}
+
+pub(crate) fn migrate_v30_to_v31(conn: &Connection, path: &Path) -> Result<()> {
+    let backup = create_migration_backup(conn, path, 30)?;
+    let tx = conn.unchecked_transaction()?;
+    migrate_v30_to_v31_tx(&tx)?;
+    tx.commit().with_context(|| {
+        format!(
+            "commit schema v30 to v31 migration; backup {} remains",
+            backup.display()
+        )
+    })?;
+    Ok(())
+}

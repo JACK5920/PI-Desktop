@@ -444,6 +444,7 @@ export const tr = {
     annotationCitationTitle: "Referans {{index}}",
     annotationSourceMessage: "Kaynak mesaj",
     sideChatTitle: "Yan sohbet",
+    sideChatReopenFromParent: "Yan sohbeti yeniden aç",
     sideChatSource: "{{messageId}} numaralı mesajdan",
     sideChatExcerpt: "Seçilen alıntı",
     sideChatPrompt: "Yan sohbet mesajı",

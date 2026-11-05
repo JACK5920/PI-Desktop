@@ -13,6 +13,8 @@ import { TranscriptSelectionToolbar } from "../../apps/desktop/src/features/chat
 import { MessageAnnotationSummary } from "../../apps/desktop/src/features/chat/transcript/MessageAnnotationSummary";
 import { buildAnnotatedPrompt, parseAnnotatedPrompt, requestTextWithoutAnnotations } from "../../apps/desktop/src/lib/response-annotations";
 import { useAppStore } from "../../apps/desktop/src/stores/app-store";
+import { api } from "../../apps/desktop/src/lib/api";
+import { listableSessions } from "../../apps/desktop/src/lib/session-origin";
 
 declare global {
   var selectionReferenceProbe: () => Promise<unknown>;
@@ -211,6 +213,8 @@ globalThis.selectionReferenceProbe = async () => {
     write: (value, references) => { liveDraft = { ...liveDraft, text: value, references }; },
     stage: async () => { throw new Error("File staging is outside this text-only fixture"); },
   });
+  const originalPromoteSideChat = api.promoteSideChat;
+  api.promoteSideChat = async () => ({ ok: true });
 
   let forkCount = 0;
   const sends: Array<{ content: string; childSessionId: string }> = [];
@@ -226,13 +230,23 @@ globalThis.selectionReferenceProbe = async () => {
     responseAnnotations: {},
     sideChats: {},
     showToast: () => undefined,
-    forkAssistantMessageInSession: (async (parentSessionId, messageId) => {
+    forkAssistantMessageInSession: (async (parentSessionId, messageId, excerpt) => {
       assert(parentSessionId === "parent", "side chat fork used a different parent session");
       assert(messageId.startsWith("answer-"), "side chat fork did not use an assistant message anchor");
       forkCount += 1;
       const childSessionId = `side-chat-child-${forkCount}`;
       useAppStore.setState((state) => ({
-        sessions: [...state.sessions, { id: childSessionId, source: "local", title: `Side chat ${forkCount}` } as AppState["sessions"][number]],
+        sessions: [...state.sessions, {
+          id: childSessionId,
+          source: "local",
+          title: `Side chat ${forkCount}`,
+          sideChat: {
+            parentSessionId,
+            sourceMessageId: messageId,
+            excerpt: excerpt ?? quote,
+            promoted: false,
+          },
+        } as AppState["sessions"][number]],
         retainedTranscripts: { ...state.retainedTranscripts, [childSessionId]: [] },
       }));
       return childSessionId;
@@ -321,6 +335,7 @@ globalThis.selectionReferenceProbe = async () => {
       selectedSessions.push(id);
       useAppStore.setState({ activeSessionId: id });
     }) as AppState["selectSession"],
+    promoteSideChat: async () => ({ ok: true }),
     resolvePermission: (async (sessionId, requestId, decision) => {
       permissionResolutions.push({ sessionId, requestId, decision });
       useAppStore.setState((state) => ({
@@ -482,6 +497,10 @@ globalThis.selectionReferenceProbe = async () => {
     buttonNamed("Send").click();
     for (let index = 0; index < 120 && sends.length === 0; index += 1) await settle();
     assert(forkCount === 1 && sends.length === 1, "explicit side-chat Send did not create exactly one fork and prompt");
+    assert(
+      !listableSessions(useAppStore.getState().sessions).some((session) => session.sideChat?.parentSessionId === "parent"),
+      "an unpromoted sent side chat appeared in the ordinary session list",
+    );
     assert(useAppStore.getState().activeSessionId === "parent", "side-chat send navigated away from the parent");
     await settle();
     assert(host.textContent?.includes("Streaming side answer"), "side-chat transcript did not react to the streaming child update");
@@ -566,6 +585,10 @@ globalThis.selectionReferenceProbe = async () => {
     for (let index = 0; index < 120 && useAppStore.getState().activeSessionId === "parent"; index += 1) await settle();
     assert(firstChildId && selectedSessions.at(-1) === firstChildId, "Open as a conversation did not select the ordinary child session");
     assert(!useAppStore.getState().sideChats[firstSideChat.id], "promotion did not release the transient side-chat tab");
+    assert(
+      listableSessions(useAppStore.getState().sessions).some((session) => session.id === firstChildId),
+      "promoted side chat did not become an ordinary list entry",
+    );
 
     useAppStore.setState({ activeSessionId: "parent", messages: parentMessages as AppState["messages"] });
     flushSync(() => root.render(<Fixture />));
@@ -584,10 +607,41 @@ globalThis.selectionReferenceProbe = async () => {
     pendingResolvers.shift()?.(true);
     for (let index = 0; index < 120 && !host.textContent?.includes("Side result for the selected excerpt."); index += 1) await settle();
     const secondChildId = useAppStore.getState().sideChats[secondSideChat.id]?.childSessionId;
+    const persistedSecondChat = useAppStore.getState().sideChats[secondSideChat.id];
     buttonNamed("Close Side chat").click();
     await settle();
     assert(!useAppStore.getState().sideChats[secondSideChat.id], "closing the side-chat tab retained its transient projection");
-    assert(secondChildId && useAppStore.getState().sessions.some((session) => session.id === secondChildId), "closing the tab deleted the ordinary child session");
+    assert(secondChildId && useAppStore.getState().sessions.some((session) => session.id === secondChildId), "closing the tab deleted the durable child session");
+    const originalGetSession = api.getSession;
+    api.getSession = async (sessionId) => {
+      const detail = sessionId === secondChildId && persistedSecondChat?.childSessionId
+        ? {
+            id: secondChildId,
+            title: "Side chat 2",
+            mode: "default",
+            sideChat: {
+              parentSessionId: secondSideChat.parentSessionId,
+              sourceMessageId: secondSideChat.sourceMessageId,
+              excerpt: secondSideChat.excerpt,
+              promoted: false,
+            },
+            messages: persistedSecondChat.messages,
+          } as NonNullable<Awaited<ReturnType<typeof api.getSession>>["session"]>
+        : null;
+      return { session: detail };
+    };
+    try {
+      await useAppStore.getState().reopenSideChat(secondChildId!);
+      const reopened = Object.values(useAppStore.getState().sideChats).find(
+        (item) => item.childSessionId === secondChildId,
+      );
+      assert(reopened, "parent could not reopen the persisted side chat");
+      assert(reopened.excerpt.includes(quote), "reopened side chat lost its saved excerpt");
+      assert(reopened.messages.some((message) => message.content?.includes("Side result")), "reopened side chat lost its transcript");
+      assert(useAppStore.getState().activeSessionId === "parent", "reopening a side chat changed the parent session");
+    } finally {
+      api.getSession = originalGetSession;
+    }
 
     return {
       ok: true,
@@ -603,6 +657,7 @@ globalThis.selectionReferenceProbe = async () => {
       closedChildRetained: secondChildId,
     };
   } finally {
+    api.promoteSideChat = originalPromoteSideChat;
     unregisterDraft();
     flushSync(() => root.unmount());
     host.remove();

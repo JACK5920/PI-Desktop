@@ -110,10 +110,14 @@ pub fn search(db: &Database, query: &str, offset: i64, limit: i64) -> Result<Sea
                 EXISTS (SELECT 1 FROM task_runs r WHERE r.session_id = s.id) AS scheduled_run,
                 s.fast_mode,
             (SELECT oi.plugin_id FROM session_import_origins oi
-             WHERE oi.session_id = s.id AND json_extract(oi.origin_json, '$.managed') = 1) AS managed_by_plugin
+             WHERE oi.session_id = s.id AND json_extract(oi.origin_json, '$.managed') = 1) AS managed_by_plugin,
+            s.side_chat_parent_id, s.side_chat_source_message_id, s.side_chat_excerpt,
+            s.side_chat_promoted
          FROM sessions s LEFT JOIN projects p ON p.id = s.project_id
          LEFT JOIN matched ON matched.session_id = s.id
-         WHERE s.deleted_at IS NULL AND (matched.count > 0 OR metadata_match)
+         WHERE s.deleted_at IS NULL
+           AND (s.side_chat_parent_id IS NULL OR s.side_chat_promoted = 1)
+           AND (matched.count > 0 OR metadata_match)
          ORDER BY s.updated_at DESC, s.id ASC LIMIT ?4 OFFSET ?3"
     );
     let mut hits = db
@@ -604,6 +608,36 @@ mod tests {
             .unwrap()
             .hits
             .is_empty());
+    }
+
+    #[test]
+    fn global_search_hides_unpromoted_side_chats_until_promoted() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open(&dir.path().join("test.sqlite")).unwrap();
+        let parent = sessions::create_session(&db, None, None, None, None, None).unwrap();
+        let mut anchor = message("anchor", "side-chat-search-needle");
+        anchor.role = "assistant".into();
+        sessions::append_message(&db, &parent.id, &anchor, None).unwrap();
+        let fork =
+            sessions::fork_side_chat_through(&db, &parent.id, "anchor", "side-chat-search-needle")
+                .unwrap();
+        let sessions::ForkSessionResult::Created(child) = fork else {
+            panic!("expected side-chat fork");
+        };
+
+        let before = search(&db, "side-chat-search-needle", 0, SEARCH_PAGE_SIZE).unwrap();
+        assert!(before.hits.iter().any(|hit| hit.session.id == parent.id));
+        assert!(!before
+            .hits
+            .iter()
+            .any(|hit| hit.session.id == child.summary.id));
+
+        assert!(sessions::promote_side_chat(&db, &child.summary.id).unwrap());
+        let after = search(&db, "side-chat-search-needle", 0, SEARCH_PAGE_SIZE).unwrap();
+        assert!(after
+            .hits
+            .iter()
+            .any(|hit| hit.session.id == child.summary.id));
     }
 
     #[test]

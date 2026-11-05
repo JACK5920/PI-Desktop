@@ -145,6 +145,7 @@ export const IPC = {
     sessionList: "pi-desktop/session/list",
     sessionCreate: "pi-desktop/session/create",
     sessionFork: "pi-desktop/session/fork",
+    sessionPromoteSideChat: "pi-desktop/session/promote-side-chat",
     sessionMoveProject: "pi-desktop/session/moveProject",
     sessionSearch: "pi-desktop/session/search",
     sessionSearchContext: "pi-desktop/session/searchContext",

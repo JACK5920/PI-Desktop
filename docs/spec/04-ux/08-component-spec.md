@@ -2089,7 +2089,11 @@ Single message render — either user (plaintext) or assistant (markdown streami
   that child explicitly rather than the still-active parent. A stale
   fork/send cannot reopen a closed tab,
   switch the active parent, or overwrite a newer draft. The ordinary Ask-about-
-  selection fork remains a distinct context-menu path (ADR 0346).
+  selection fork remains a distinct context-menu path (ADR 0346). Unpromoted
+  sent side chats are omitted from top-level session lists and global search;
+  the parent session lists them as reopenable entries using the durable child
+  transcript and excerpt. “Open as a conversation” persists promotion before
+  navigating to the child. Existing ordinary forks are not reclassified.
   Opening a user-message editor must hydrate canonical history before seeding the
   draft when the loaded transcript is partial or display-limited. Never seed an
   editable draft from clipped display text. Failed reads keep the editor closed

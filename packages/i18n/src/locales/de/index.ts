@@ -432,6 +432,7 @@ export const de = {
     "annotationCitationTitle": "Referenz {{index}}",
     "annotationSourceMessage": "Quellnachricht",
     "sideChatTitle": "Seitenchat",
+    "sideChatReopenFromParent": "Seitenchat erneut öffnen",
     "sideChatSource": "Aus Nachricht {{messageId}}",
     "sideChatExcerpt": "Ausgewählter Ausschnitt",
     "sideChatPrompt": "Seitenchat-Nachricht",

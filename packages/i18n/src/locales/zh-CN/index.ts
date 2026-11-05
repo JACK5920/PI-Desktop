@@ -437,6 +437,7 @@ export const zhCN = {
     annotationCitationTitle: "引用 {{index}}",
     annotationSourceMessage: "来源消息",
     sideChatTitle: "侧聊",
+    sideChatReopenFromParent: "重新打开侧聊",
     sideChatSource: "引用自消息 {{messageId}}",
     sideChatExcerpt: "选中的文本",
     sideChatPrompt: "侧聊消息",

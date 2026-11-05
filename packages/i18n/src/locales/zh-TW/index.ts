@@ -437,6 +437,7 @@ export const zhTW = {
     annotationCitationTitle: "引用 {{index}}",
     annotationSourceMessage: "來源訊息",
     sideChatTitle: "側邊聊天",
+    sideChatReopenFromParent: "重新開啟側聊",
     sideChatSource: "引用自訊息 {{messageId}}",
     sideChatExcerpt: "選取的文字",
     sideChatPrompt: "側邊聊天訊息",

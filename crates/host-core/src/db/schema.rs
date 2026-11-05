@@ -132,12 +132,19 @@ CREATE TABLE sessions (
   last_seq    INTEGER NOT NULL DEFAULT 0,
   todo_revision INTEGER NOT NULL DEFAULT 0,
   todo_updated_at INTEGER,
+  side_chat_parent_id TEXT REFERENCES sessions(id) ON DELETE SET NULL,
+  side_chat_source_message_id TEXT,
+  side_chat_excerpt TEXT,
+  side_chat_promoted INTEGER NOT NULL DEFAULT 0 CHECK (side_chat_promoted IN (0, 1)),
   created_at  INTEGER NOT NULL,
   updated_at  INTEGER NOT NULL
 );
 CREATE INDEX idx_sessions_updated_id ON sessions(updated_at DESC, id DESC);
 CREATE INDEX idx_sessions_project ON sessions(project_id) WHERE project_id IS NOT NULL;
 CREATE INDEX idx_sessions_deleted ON sessions(deleted_at) WHERE deleted_at IS NOT NULL;
+CREATE INDEX idx_sessions_side_chat_parent
+  ON sessions(side_chat_parent_id, updated_at DESC)
+  WHERE side_chat_parent_id IS NOT NULL AND side_chat_promoted = 0;
 
 "#,
     session_todo_ddl!(),
