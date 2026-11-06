@@ -28,11 +28,16 @@ migrations for drafts that have not been sent.
 ## Decision
 
 1. Restore a small transcript-selection toolbar for eligible local writable
-   conversations. Capture the source session, message, excerpt, and range
-   before moving focus. Copy writes only that captured excerpt; selected user
-   text can be appended as an editable quote to the current draft; selected
-   assistant text can be attached as a numbered response annotation or used to
-   open a docked side-chat draft. Keep the existing message Copy, context-menu
+   conversations. Capture the source session, ordered source messages, excerpt,
+   and range before moving focus. A range may span multiple transcript message
+   rows only when every participating owner is eligible and all rows belong to
+   the same session and role; cross-session, mixed-role, and ineligible ranges
+   remain rejected. `messageId` remains the first source in transcript order
+   and is the stable side-chat fork anchor. Copy writes only that captured
+   excerpt; selected user text can be appended as an editable quote to the
+   current draft with all source ids in its attribution; selected assistant
+   text can be attached as a numbered response annotation or used to open a
+   docked side-chat draft. Keep the existing message Copy, context-menu
    Copy, Select message text, Fork, and **Ask about selection** behavior
    distinct.
    During a pointer drag, keep the toolbar hidden and capture on pointer-up;
@@ -42,7 +47,9 @@ migrations for drafts that have not been sent.
    ambiguous offsets use a message-level marker rather than a guessed range.
 2. Keep annotations renderer-owned and transient until an ordinary prompt is
    admitted. Serialize the pending excerpts, optional comments, and source
-    message ids as JSON in a generated prompt section. Transcript, edit-seed,
+   message ids as JSON in a generated prompt section. `sourceMessageId` remains
+   the required primary id for compatibility; multi-source annotations add an
+   optional ordered `sourceMessageIds` list. Transcript, edit-seed,
     queue-preview, and title projections show only the user's request text; a
     sent user-message row separately offers a collapsed, expandable summary of
     the safe excerpt and optional comment, never the raw JSON envelope. An
@@ -92,6 +99,14 @@ migrations for drafts that have not been sent.
 
 - Users can keep the parent transcript and Composer in place while inspecting
   a cited excerpt or asking a follow-up in a child session.
+- Visible assistant fragments remain selectable while their containing turn is
+  active. If streaming DOM updates clear the browser's native range, the
+  toolbar retains the already captured excerpt until explicit dismissal.
+- A captured same-role multi-message annotation and user quote preserve the
+  ordered source ids; the first source remains the backward-compatible primary
+  citation/fork anchor. The docked side-chat action is withheld while any
+  selected assistant source is still streaming because Host forks require a
+  stable completed message.
 - A child transcript can continue the selection/reference workflow within its
   compact draft. Nested docked side chats are intentionally deferred; promotion
   to a normal conversation is the supported transition before another docked

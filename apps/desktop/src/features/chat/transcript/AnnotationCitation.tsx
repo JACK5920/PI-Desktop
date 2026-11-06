@@ -95,7 +95,9 @@ export function AnnotationCitation({
           ) : null}
           <span className="annotation-citation-source">
             <span className="annotation-citation-section-label">{t("chat.annotationSourceMessage")}</span>
-            <span className="annotation-citation-source-id">{annotation.sourceMessageId}</span>
+            <span className="annotation-citation-source-id">
+              {(annotation.sourceMessageIds ?? [annotation.sourceMessageId]).join(", ")}
+            </span>
             {sourceText ? <span className="annotation-citation-source-text">{sourceText}</span> : null}
           </span>
         </span>

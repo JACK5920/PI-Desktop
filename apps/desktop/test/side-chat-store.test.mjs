@@ -106,6 +106,34 @@ test("opening a side chat creates only a transient work-panel draft", () => {
   assert.match(h.get().sideChats[sideChatId].draftText, /> quote/);
 });
 
+test("multi-message side-chat selections keep every source while using the first as fork anchor", () => {
+  const h = fixture();
+  h.set((state) => ({
+    messages: [...state.messages, {
+      id: "answer-2",
+      role: "assistant",
+      status: "complete",
+      content: "second answer",
+    }],
+  }));
+  const sideChatId = h.slice.openSideChat(
+    "parent",
+    "answer-1",
+    "quote spanning both answers",
+    ["answer-1", "answer-2"],
+  );
+  assert.ok(sideChatId);
+  assert.deepEqual(h.get().sideChats[sideChatId].sourceMessageIds, ["answer-1", "answer-2"]);
+  const sending = h.slice.sendSideChatPrompt(sideChatId, "question");
+  assert.deepEqual(h.forkCalls[0], {
+    sessionId: "parent",
+    messageId: "answer-1",
+    excerpt: "quote spanning both answers",
+  });
+  h.fork.resolve("child-multi");
+  return sending;
+});
+
 test("concurrent first sends fork once and use the child while keeping the parent selected", async () => {
   const h = fixture();
   const sideChatId = h.slice.openSideChat("parent", "answer-1", "quote");

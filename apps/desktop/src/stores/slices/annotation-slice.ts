@@ -8,6 +8,11 @@ import type { StoreAccess } from "./types";
 function sameAnnotation(left: ResponseAnnotation, right: ResponseAnnotation): boolean {
   return left.id === right.id &&
     left.sourceMessageId === right.sourceMessageId &&
+    (left.sourceMessageIds ?? [left.sourceMessageId]).length ===
+      (right.sourceMessageIds ?? [right.sourceMessageId]).length &&
+    (left.sourceMessageIds ?? [left.sourceMessageId]).every(
+      (messageId, index) => messageId === (right.sourceMessageIds ?? [right.sourceMessageId])[index],
+    ) &&
     left.excerpt === right.excerpt &&
     left.comment === right.comment &&
     left.anchorStart === right.anchorStart &&
@@ -28,15 +33,20 @@ export function createAnnotationSlice({ get, set }: StoreAccess): Pick<
   | "consumeAcceptedAnnotations"
 > {
   return {
-    addResponseAnnotation: (sessionId, sourceMessageId, rawExcerpt, anchor) => {
+    addResponseAnnotation: (sessionId, sourceMessageId, rawExcerpt, anchor, sourceMessageIds) => {
       const state = get();
       const session = state.sessions.find((item) => item.id === sessionId);
       if (!sessionAllows(session, "canEditMessages")) return null;
       const excerpt = normalizeTranscriptExcerpt(rawExcerpt);
       if (!excerpt) return null;
       const sourceMessages = transcriptMessagesForSession(state, sessionId);
-      const sourceMessage = sourceMessages.find((message) => message.id === sourceMessageId);
-      if (sourceMessage?.role !== "assistant") return null;
+      const normalizedSourceIds = sourceMessageIds?.length
+        ? [...new Set(sourceMessageIds)]
+        : [sourceMessageId];
+      if (normalizedSourceIds[0] !== sourceMessageId) return null;
+      if (normalizedSourceIds.some((id) =>
+        sourceMessages.find((message) => message.id === id)?.role !== "assistant",
+      )) return null;
       const current = state.responseAnnotations[sessionId] ?? [];
       const validAnchor = anchor &&
         Number.isSafeInteger(anchor.anchorStart) &&
@@ -48,6 +58,10 @@ export function createAnnotationSlice({ get, set }: StoreAccess): Pick<
       const existing = current.find((item) =>
         item.sourceMessageId === sourceMessageId &&
         item.excerpt === excerpt &&
+        (item.sourceMessageIds ?? [item.sourceMessageId]).length === normalizedSourceIds.length &&
+        (item.sourceMessageIds ?? [item.sourceMessageId]).every(
+          (id, index) => id === normalizedSourceIds[index],
+        ) &&
         item.anchorStart === validAnchor?.anchorStart &&
         item.anchorEnd === validAnchor?.anchorEnd,
       );
@@ -55,6 +69,7 @@ export function createAnnotationSlice({ get, set }: StoreAccess): Pick<
       const annotation: ResponseAnnotation = {
         id: crypto.randomUUID(),
         sourceMessageId,
+        ...(normalizedSourceIds.length > 1 ? { sourceMessageIds: normalizedSourceIds } : {}),
         excerpt,
         ...(validAnchor ?? {}),
       };

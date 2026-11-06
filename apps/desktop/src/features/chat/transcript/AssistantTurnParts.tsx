@@ -14,6 +14,7 @@ import {
   annotationsForAssistantMessage,
   transcriptMessagesForSession,
 } from "../../../lib/response-annotations";
+import { isAssistantFragmentSelectable } from "../../../lib/transcript-selection";
 import { ActivityGroup } from "./ActivityGroup";
 import { AssistantErrorMessage } from "./shared";
 import { useRenderBlocks, type RenderBlock } from "./render-blocks";
@@ -52,6 +53,7 @@ const SmoothMessageBubble = memo(function SmoothMessageBubble({ message, streami
       data-selection-session-id={sessionId || undefined}
       data-selection-role="assistant"
       data-selection-eligible={selectionEligible ? "true" : "false"}
+      data-selection-streaming={streaming ? "true" : "false"}
     >
       {genUi.content ? <div className="prose-chat"><Markdown
         source={genUi.content}
@@ -120,7 +122,7 @@ const TurnPartBlock = memo(function TurnPartBlock({
       key={part.message.id}
       message={part.message}
       streaming={isActive && part.message.status === "streaming"}
-      selectable={!isActive || part.message.status === "streaming"}
+      selectable={isAssistantFragmentSelectable(isActive, part.message.status)}
     />
   ))}</>;
 });

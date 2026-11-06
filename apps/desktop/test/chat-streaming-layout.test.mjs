@@ -33,7 +33,7 @@ test("streaming prose chat stabilizes line wrapping against orphan-rebalancing r
 test("visible text in the active streaming assistant turn remains selectable", () => {
   assert.match(
     assistantTurnPartsSource,
-    /selectable=\{!isActive \|\| part\.message\.status === "streaming"\}/,
+    /selectable=\{isAssistantFragmentSelectable\(isActive, part\.message\.status\)\}/,
   );
   assert.doesNotMatch(
     assistantTurnPartsSource,

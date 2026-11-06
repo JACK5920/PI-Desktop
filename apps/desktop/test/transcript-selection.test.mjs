@@ -4,9 +4,11 @@ import test from "node:test";
 
 register(new URL("./helpers/ts-import-hooks.mjs", import.meta.url));
 const {
+  isAssistantFragmentSelectable,
   normalizeTranscriptExcerpt,
   resolveTranscriptSelection,
   resolveTranscriptTextAnchor,
+  transcriptSelectionSourceAttribution,
 } = await import(
   "../src/lib/transcript-selection.ts"
 );
@@ -45,6 +47,7 @@ test("selection capture retains one eligible source message and its anchor recta
     {
       sessionId: "session-a",
       messageId: "message-1",
+      messageIds: ["message-1"],
       role: "assistant",
       excerpt: "quoted text",
       rect,
@@ -70,6 +73,22 @@ test("selection capture rejects collapsed, cross-message, cross-session, and ine
       `expected rejection for ${JSON.stringify(candidate)}`,
     );
   }
+});
+
+test("same-role multi-message ranges preserve every source in transcript order", () => {
+  const first = owner({ messageId: "message-1" });
+  const second = owner({ messageId: "message-2" });
+  const captured = resolveTranscriptSelection({
+    anchorOwner: first,
+    focusOwner: second,
+    sourceOwners: [first, second],
+    excerpt: "text spanning rows",
+    rect,
+  });
+  assert.deepEqual(captured?.messageIds, ["message-1", "message-2"]);
+  assert.equal(captured?.messageId, "message-1");
+  assert.equal(transcriptSelectionSourceAttribution(["message-1", "message-2"], "Source"), "Source (message-1, message-2)");
+  assert.equal(isAssistantFragmentSelectable(true, "streaming"), true);
 });
 
 test("source anchors resolve half-open UTF-16 offsets across Unicode text", () => {

@@ -65,7 +65,7 @@ export function createSideChatSlice({ get, set, getCachedTranscript, getSessionD
   };
 
   return {
-    openSideChat: (parentSessionId, sourceMessageId, excerpt) => {
+    openSideChat: (parentSessionId, sourceMessageId, excerpt, sourceMessageIds) => {
       const state = get();
       const session = state.sessions.find((candidate) => candidate.id === parentSessionId);
       if (
@@ -77,7 +77,16 @@ export function createSideChatSlice({ get, set, getCachedTranscript, getSessionD
         ? state.messages
         : state.retainedTranscripts[parentSessionId] ?? getCachedTranscript(parentSessionId);
       const source = transcript.find((message) => message.id === sourceMessageId);
-      if (!source || source.role !== "assistant" || source.status === "streaming" || !excerpt.trim()) {
+      const normalizedSourceIds = sourceMessageIds?.length
+        ? [...new Set(sourceMessageIds)]
+        : [sourceMessageId];
+      if (
+        normalizedSourceIds[0] !== sourceMessageId ||
+        normalizedSourceIds.some((id) =>
+          transcript.find((message) => message.id === id)?.role !== "assistant",
+        ) ||
+        !source || source.status === "streaming" || !excerpt.trim()
+      ) {
         return null;
       }
 
@@ -86,6 +95,7 @@ export function createSideChatSlice({ get, set, getCachedTranscript, getSessionD
         id: sideChatId,
         parentSessionId,
         sourceMessageId,
+        ...(normalizedSourceIds.length > 1 ? { sourceMessageIds: normalizedSourceIds } : {}),
         excerpt: excerpt.trim(),
         messages: [],
         operationId: 0,
@@ -113,6 +123,7 @@ export function createSideChatSlice({ get, set, getCachedTranscript, getSessionD
         id: sideChatId,
         parentSessionId: origin.parentSessionId,
         sourceMessageId: origin.sourceMessageId,
+        sourceMessageIds: [origin.sourceMessageId],
         excerpt: origin.excerpt,
         childSessionId,
         messages: detail.messages,

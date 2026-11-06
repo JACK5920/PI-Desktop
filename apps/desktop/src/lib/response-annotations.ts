@@ -3,6 +3,8 @@ import { normalizeTranscriptExcerpt } from "./transcript-selection";
 export type ResponseAnnotation = {
   id: string;
   sourceMessageId: string;
+  /** Ordered source set for selections spanning multiple transcript messages. */
+  sourceMessageIds?: string[];
   excerpt: string;
   comment?: string;
   anchorStart?: number;
@@ -11,7 +13,7 @@ export type ResponseAnnotation = {
 
 export type ParsedResponseAnnotation = Pick<
   ResponseAnnotation,
-  "sourceMessageId" | "excerpt" | "comment" | "anchorStart" | "anchorEnd"
+  "sourceMessageId" | "sourceMessageIds" | "excerpt" | "comment" | "anchorStart" | "anchorEnd"
 >;
 
 export type IndexedSourceResponseAnnotation = ParsedResponseAnnotation & {
@@ -209,10 +211,20 @@ function parsePayload(value: unknown): ParsedResponseAnnotation[] | null {
   if (value.annotations.length === 0) return null;
   const parsed: ParsedResponseAnnotation[] = [];
   for (const item of value.annotations) {
+    const sourceMessageIds = isRecord(item) && item.sourceMessageIds !== undefined
+      ? item.sourceMessageIds
+      : undefined;
     if (
       !isRecord(item) ||
       typeof item.sourceMessageId !== "string" ||
       !item.sourceMessageId.trim() ||
+      (sourceMessageIds !== undefined && (
+        !Array.isArray(sourceMessageIds) ||
+        sourceMessageIds.length < 2 ||
+        sourceMessageIds[0] !== item.sourceMessageId ||
+        sourceMessageIds.some((id) => typeof id !== "string" || !id.trim()) ||
+        new Set(sourceMessageIds).size !== sourceMessageIds.length
+      )) ||
       typeof item.excerpt !== "string" ||
       !normalizeTranscriptExcerpt(item.excerpt) ||
       (item.comment !== undefined && typeof item.comment !== "string") ||
@@ -231,6 +243,7 @@ function parsePayload(value: unknown): ParsedResponseAnnotation[] | null {
     }
     parsed.push({
       sourceMessageId: item.sourceMessageId,
+      ...(Array.isArray(sourceMessageIds) ? { sourceMessageIds: [...sourceMessageIds] } : {}),
       excerpt: item.excerpt,
       ...(typeof item.comment === "string" ? { comment: item.comment } : {}),
       ...(typeof item.anchorStart === "number" && typeof item.anchorEnd === "number"
@@ -249,8 +262,9 @@ export function buildAnnotatedPrompt(
   if (annotations.length === 0) return requestText;
   const payload = {
     version: 1,
-    annotations: annotations.map(({ sourceMessageId, excerpt, comment, anchorStart, anchorEnd }) => ({
+    annotations: annotations.map(({ sourceMessageId, sourceMessageIds, excerpt, comment, anchorStart, anchorEnd }) => ({
       sourceMessageId,
+      ...(sourceMessageIds && sourceMessageIds.length > 1 ? { sourceMessageIds } : {}),
       excerpt,
       ...(comment === undefined ? {} : { comment }),
       ...(anchorStart === undefined || anchorEnd === undefined
@@ -338,9 +352,11 @@ export function annotationsForSourceMessage(
         parseAnnotatedPrompt(message.content ?? "")?.annotations ?? EMPTY_RESPONSE_ANNOTATIONS;
       responseAnnotationsByPromptMessage.set(message, annotations);
       for (const [index, annotation] of annotations.entries()) {
-        const found = next.get(annotation.sourceMessageId) ?? [];
-        found.push({ ...annotation, referenceIndex: index + 1, promptMessageId: message.id });
-        next.set(annotation.sourceMessageId, found);
+        for (const sourceMessageId of annotation.sourceMessageIds ?? [annotation.sourceMessageId]) {
+          const found = next.get(sourceMessageId) ?? [];
+          found.push({ ...annotation, referenceIndex: index + 1, promptMessageId: message.id });
+          next.set(sourceMessageId, found);
+        }
       }
     }
     annotationsBySource = next;
@@ -356,9 +372,10 @@ export function pendingSourceAnnotationsForMessage(
 ): IndexedSourceResponseAnnotation[] {
   if (!sourceMessageId || annotations.length === 0) return EMPTY_INDEXED_SOURCE_ANNOTATIONS;
   return annotations.flatMap((annotation, index) =>
-    annotation.sourceMessageId === sourceMessageId
+    (annotation.sourceMessageIds ?? [annotation.sourceMessageId]).includes(sourceMessageId)
       ? [{
           sourceMessageId: annotation.sourceMessageId,
+          ...(annotation.sourceMessageIds === undefined ? {} : { sourceMessageIds: annotation.sourceMessageIds }),
           excerpt: annotation.excerpt,
           ...(annotation.comment === undefined ? {} : { comment: annotation.comment }),
           ...(annotation.anchorStart === undefined ? {} : { anchorStart: annotation.anchorStart }),

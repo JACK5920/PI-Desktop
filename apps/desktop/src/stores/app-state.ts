@@ -97,6 +97,7 @@ export type SideChatState = SideChatLifecycle & {
   id: string;
   parentSessionId: string;
   sourceMessageId: string;
+  sourceMessageIds?: string[];
   excerpt: string;
   messages: UiMessage[];
 };
@@ -219,6 +220,7 @@ export type AppState = {
     parentSessionId: string,
     sourceMessageId: string,
     excerpt: string,
+    sourceMessageIds?: string[],
   ) => string | null;
   reopenSideChat: (childSessionId: string) => Promise<void>;
   setSideChatDraft: (sideChatId: string, text: string) => void;
@@ -230,6 +232,7 @@ export type AppState = {
     sourceMessageId: string,
     excerpt: string,
     anchor?: { anchorStart: number; anchorEnd: number },
+    sourceMessageIds?: string[],
   ) => string | null;
   editResponseAnnotation: (
     sessionId: string,
