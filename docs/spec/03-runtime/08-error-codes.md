@@ -388,7 +388,8 @@ exceeds max length`, xAI `maximum prompt length is`, Groq, llama.cpp, and
 Bedrock `Input is too long for requested model`. `CONTEXT_TOO_LARGE` is never
 replayed by either retry budget, and a delegate reports it as
 `SUBAGENT_CONTEXT_OVERFLOW`. Explicit billing/account exhaustion codes and
-messages (including `insufficient_quota`, `credit_balance_exhausted`,
+messages (including OpenCode Zen's `FreeUsageLimitError`,
+`insufficient_quota`, `credit_balance_exhausted`,
 organization/project spend-limit codes, `insufficient credits`, and
 `requires more credits`) map to terminal `PROVIDER_ERROR` even when the HTTP
 status is 429, and HTTP 402 is terminal `PROVIDER_ERROR` even when the body
@@ -397,8 +398,13 @@ Bedrock's `Throttling error: Too many tokens, please wait before trying again.`,
 stays `PROVIDER_RATE_LIMITED`. An unprefixed JSON error body that carries an
 HTTP status in `error.code` (Gemini's `@google/genai` `ApiError.message`) is
 classified from that 400-599 code the same way as a `<status>:` message:
-400/422 stay terminal unless they report a context overflow, 404 is
-`MODEL_NOT_CONFIGURED`, and 429 / 5xx stay retryable.
+400/422 stay terminal unless they report a context overflow or explicitly
+reject the API key (`invalid api key`, `api key not valid`, or
+`API_KEY_INVALID`), 404 is `MODEL_NOT_CONFIGURED`, and 429 / 5xx stay
+retryable except that a 5xx context overflow is terminal `CONTEXT_TOO_LARGE`.
+Rate-limit wording remains retryable even if it also mentions token counts;
+generic `unauthorized` or `permission denied` in a 400/422 body does not by
+itself prove that the API key was rejected.
 
 An exact `terminated` provider message and equivalent premature stream-close
 messages map to `STREAM_FAILED`. A message is `TURN_ABORTED` only for a

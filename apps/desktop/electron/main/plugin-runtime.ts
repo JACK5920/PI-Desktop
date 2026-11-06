@@ -1359,7 +1359,9 @@ export function readDevPluginDeclaration(pluginPath: string): {
  */
 function realpathOrSelf(path: string): string {
   try {
-    return realpathSync(resolve(path));
+    // Use the native implementation so Windows returns the same canonical
+    // long-path spelling as fs.promises.realpath used by the host resolver.
+    return realpathSync.native(resolve(path));
   } catch {
     return resolve(path);
   }
@@ -5342,7 +5344,9 @@ export class PluginRuntime {
       // with a typo that they tried to escape the workspace is a lie that costs
       // them an afternoon.
       const lexical = !options.create && resolveWithinRoot(root, requestPath);
-      const missing = Boolean(lexical) && !existsSync(lexical as string);
+      const missing = lexical
+        ? !existsSync(lexical)
+        : isAbsolute(requestPath) && !existsSync(requestPath);
       const code = missing ? "NOT_FOUND" : "INVALID_ARGUMENT";
       this.auditFs(loaded, mode, requestPath, code);
       throw apiError(

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { hydrateAttachmentHistory } from "./attachment-history.js";
 import type { UiMessage } from "@pi-desktop/shared";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import os from "node:os";
 
@@ -76,7 +76,10 @@ describe("hydrateAttachmentHistory", () => {
       });
 
       expect(hydrated[0]?.attachments?.[0]?.data).toBeUndefined();
-      expect(hydrated[0]?.content).toContain(imgPath);
+      // realpath may return Windows' short 8.3 alias even though imgPath was
+      // constructed with the long profile path. Compare against the same
+      // canonical spelling used by hydrateAttachmentHistory.
+      expect(hydrated[0]?.content).toContain(await realpath(imgPath));
     });
   });
 

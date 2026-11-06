@@ -50,7 +50,6 @@ test("windows directories that are not roots stay contained", () => {
 });
 
 test("a posix filesystem root contains a relative path", () => {
-  assert.equal(resolveWithinRoot("/", REL), `/${REL}`);
   assert.equal(resolveWithinRoot("/", REL, posix), `/${REL}`);
   assert.equal(resolveWithinRoot("/srv/app", "../app-evil/x", posix), null);
 });

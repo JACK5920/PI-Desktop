@@ -60,13 +60,15 @@ const path = require("node:path");
 app.setPath("userData", path.join(__dirname, "profile"));
 app.whenReady().then(async () => {
   const window = new BrowserWindow({
-    show: false,
+    // The probe asserts cancellation between browser-owned smooth-scroll
+    // frames. A never-shown Chromium window can complete that animation before
+    // the test's next input handler runs.
+    show: true,
     webPreferences: {
       sandbox: true,
       contextIsolation: true,
       nodeIntegration: false,
-      // A hidden window still has to deliver ResizeObserver callbacks and
-      // animation frames, because that is what the product scroll logic uses.
+      // The product scroll logic needs ResizeObserver and animation frames.
       backgroundThrottling: false,
     },
   });
