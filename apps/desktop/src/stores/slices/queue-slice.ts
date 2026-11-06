@@ -61,6 +61,11 @@ export type QueueSliceDependencies = StoreAccess & {
 
 function sameAnnotationContent(left: ResponseAnnotation, right: ResponseAnnotation): boolean {
   return left.sourceMessageId === right.sourceMessageId &&
+    (left.sourceMessageIds ?? [left.sourceMessageId]).length ===
+      (right.sourceMessageIds ?? [right.sourceMessageId]).length &&
+    (left.sourceMessageIds ?? [left.sourceMessageId]).every(
+      (messageId, index) => messageId === (right.sourceMessageIds ?? [right.sourceMessageId])[index],
+    ) &&
     left.excerpt === right.excerpt &&
     left.comment === right.comment;
 }

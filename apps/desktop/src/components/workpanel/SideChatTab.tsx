@@ -11,6 +11,7 @@ import {
   appendSideChatDraftText,
   formatSideChatResultQuote,
 } from "../../lib/side-chat-lifecycle";
+import { transcriptSelectionSourceAttribution } from "../../lib/transcript-selection";
 import { composerDraftBridge } from "../../features/chat/composer/plugins/draft-bridge";
 import { ComposerAnnotationAttachments } from "../../features/chat/composer/ComposerAnnotationAttachments";
 import { useAppStore } from "../../stores/app-store";
@@ -76,7 +77,9 @@ export function SideChatTab({ sideChatId }: { sideChatId: string }) {
       <header className="side-chat-header">
         <div className="side-chat-heading">
           <strong>{t("chat.sideChatTitle")}</strong>
-          <span>{t("chat.sideChatSource", { messageId: sideChat.sourceMessageId })}</span>
+          <span>{t("chat.sideChatSource", {
+            messageId: (sideChat.sourceMessageIds ?? [sideChat.sourceMessageId]).join(", "),
+          })}</span>
         </div>
         <div className="side-chat-header-actions">
           {sideChat.childSessionId ? (
@@ -122,7 +125,10 @@ export function SideChatTab({ sideChatId }: { sideChatId: string }) {
                 appendSideChatDraftText(
                   current.draftText,
                   selection.excerpt,
-                  t("chat.selectionSourceUser"),
+                  transcriptSelectionSourceAttribution(
+                    selection.messageIds,
+                    t("chat.selectionSourceUser"),
+                  ),
                 ),
               );
             }}

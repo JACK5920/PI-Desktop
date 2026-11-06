@@ -5685,7 +5685,8 @@ window; opening a normal panel afterward must still work.
   excerpt/comment/source card; unknown indices and hostile reference text stay
   inert ordinary text.
 - **Coverage**: `node scripts/e2e-selection-reference-workflow.mjs` covers stable
-  selection capture, source-marker placement, Composer/citation preview, attach,
+  selection capture including a range spanning multiple same-role transcript
+  messages, source-marker placement, Composer/citation preview, attach,
   edit, prompt serialization, and the no-auto-send path. The AgentRuntime provider
   message test verifies the excerpt and request reach the model-facing user
   message. `node --test

@@ -85,6 +85,42 @@ test("annotation attachment retains source anchors and distinguishes repeated pa
   );
 });
 
+test("multi-message annotations validate and retain every same-session assistant source", () => {
+  const { actions, state } = fixture({
+    messages: [
+      { id: "assistant-a", role: "assistant", content: "First answer" },
+      { id: "assistant-a2", role: "assistant", content: "Second answer" },
+      { id: "assistant-a3", role: "assistant", content: "Third answer" },
+      { id: "user-a", role: "user", content: "Question" },
+    ],
+  });
+  const id = actions.addResponseAnnotation(
+    "session-a",
+    "assistant-a",
+    "excerpt across both answers",
+    undefined,
+    ["assistant-a", "assistant-a2"],
+  );
+  assert.ok(id);
+  assert.deepEqual(state().responseAnnotations["session-a"][0].sourceMessageIds, ["assistant-a", "assistant-a2"]);
+  const differentSources = actions.addResponseAnnotation(
+    "session-a",
+    "assistant-a",
+    "excerpt across both answers",
+    undefined,
+    ["assistant-a", "assistant-a3"],
+  );
+  assert.ok(differentSources);
+  assert.notEqual(differentSources, id, "the same excerpt with different sources is a distinct annotation");
+  assert.equal(actions.addResponseAnnotation(
+    "session-a",
+    "assistant-a",
+    "invalid cross-role range",
+    undefined,
+    ["assistant-a", "user-a"],
+  ), null);
+});
+
 test("a visible side-chat child can own annotations for its assistant messages", () => {
   const childMessage = { id: "child-answer", role: "assistant", content: "Child answer" };
   const { actions, state } = fixture({

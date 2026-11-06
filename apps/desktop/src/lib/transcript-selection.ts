@@ -17,6 +17,17 @@ export function formatUserSelectionQuote(
   return attribution ? `${quote}\n\n— ${attribution}` : quote;
 }
 
+/** Keep every selected user-message source visible in an appended quote. */
+export function transcriptSelectionSourceAttribution(
+  messageIds: readonly string[],
+  singleMessageLabel: string,
+): string {
+  const uniqueIds = [...new Set(messageIds)];
+  return uniqueIds.length > 1
+    ? `${singleMessageLabel} (${uniqueIds.join(", ")})`
+    : singleMessageLabel;
+}
+
 export type TranscriptSelectionRole = "assistant" | "user";
 
 export type TranscriptTextAnchor = {
@@ -31,6 +42,7 @@ export type TranscriptSelectionOwner = {
   messageId: string;
   role: TranscriptSelectionRole;
   eligible: boolean;
+  streaming?: boolean;
 };
 
 export type TranscriptSelectionRect = Pick<
@@ -39,11 +51,21 @@ export type TranscriptSelectionRect = Pick<
 >;
 
 export type TranscriptSelection = Omit<TranscriptSelectionOwner, "eligible"> & {
+  /** All eligible source messages intersecting the selected range, in transcript order. */
+  messageIds: string[];
   excerpt: string;
   rect: TranscriptSelectionRect;
   anchorStart?: number;
   anchorEnd?: number;
 };
+
+/** Visible assistant fragments remain selectable while a later turn fragment is active. */
+export function isAssistantFragmentSelectable(
+  _isActiveTurn: boolean,
+  _messageStatus: string | undefined,
+): boolean {
+  return true;
+}
 
 /** Normalize browser text and cap toolbar excerpts without splitting emoji. */
 export function normalizeTranscriptExcerpt(
@@ -86,12 +108,14 @@ export function resolveTranscriptTextAnchor(
 export function resolveTranscriptSelection({
   anchorOwner,
   focusOwner,
+  sourceOwners,
   excerpt,
   rect,
   anchor,
 }: {
   anchorOwner: TranscriptSelectionOwner | null;
   focusOwner: TranscriptSelectionOwner | null;
+  sourceOwners?: readonly TranscriptSelectionOwner[];
   excerpt: string;
   rect: TranscriptSelectionRect;
   anchor?: { anchorStart: number; anchorEnd: number };
@@ -99,34 +123,46 @@ export function resolveTranscriptSelection({
   if (!anchorOwner || !focusOwner || !anchorOwner.eligible || !focusOwner.eligible) {
     return null;
   }
+  const owners = sourceOwners?.length ? sourceOwners : [anchorOwner, focusOwner];
   if (
     anchorOwner.sessionId !== focusOwner.sessionId ||
-    anchorOwner.messageId !== focusOwner.messageId ||
-    anchorOwner.role !== focusOwner.role
-  ) {
-    return null;
-  }
+    anchorOwner.role !== focusOwner.role ||
+    (!sourceOwners && anchorOwner.messageId !== focusOwner.messageId)
+  ) return null;
+  const uniqueOwners = owners.filter((owner, index) =>
+    owners.findIndex((candidate) => candidate.messageId === owner.messageId) === index,
+  );
+  if (
+    uniqueOwners.length === 0 ||
+    !uniqueOwners.some((owner) => owner.messageId === anchorOwner.messageId) ||
+    !uniqueOwners.some((owner) => owner.messageId === focusOwner.messageId) ||
+    uniqueOwners.some((owner) =>
+      !owner.eligible ||
+      owner.sessionId !== anchorOwner.sessionId ||
+      owner.role !== anchorOwner.role,
+    )
+  ) return null;
   const normalizedExcerpt = normalizeTranscriptExcerpt(excerpt);
   if (!normalizedExcerpt) return null;
+  const primary = uniqueOwners[0];
   return {
-    sessionId: anchorOwner.sessionId,
-    messageId: anchorOwner.messageId,
-    role: anchorOwner.role,
+    sessionId: primary.sessionId,
+    messageId: primary.messageId,
+    messageIds: uniqueOwners.map((owner) => owner.messageId),
+    role: primary.role,
+    ...(uniqueOwners.some((owner) => owner.streaming) ? { streaming: true } : {}),
     excerpt: normalizedExcerpt,
     rect: { ...rect },
     ...(anchor ? anchor : {}),
   };
 }
 
-function selectionOwnerForNode(
+function selectionOwnerForElement(
+  ownerElement: HTMLElement | null,
   transcriptRoot: HTMLElement,
-  node: Node | null,
 ): TranscriptSelectionOwner | null {
-  if (!node || !transcriptRoot.contains(node)) return null;
-  const element = node instanceof Element ? node : node.parentElement;
-  const ownerElement = element?.closest<HTMLElement>("[data-selection-message-id]");
   if (!ownerElement || !transcriptRoot.contains(ownerElement)) return null;
-  const { selectionMessageId, selectionSessionId, selectionRole, selectionEligible } =
+  const { selectionMessageId, selectionSessionId, selectionRole, selectionEligible, selectionStreaming } =
     ownerElement.dataset;
   if (
     !selectionMessageId ||
@@ -140,7 +176,20 @@ function selectionOwnerForNode(
     messageId: selectionMessageId,
     role: selectionRole,
     eligible: selectionEligible === "true",
+    streaming: selectionStreaming === "true",
   };
+}
+
+function selectionOwnerForNode(
+  transcriptRoot: HTMLElement,
+  node: Node | null,
+): TranscriptSelectionOwner | null {
+  if (!node || !transcriptRoot.contains(node)) return null;
+  const element = node instanceof Element ? node : node.parentElement;
+  return selectionOwnerForElement(
+    element?.closest<HTMLElement>("[data-selection-message-id]") ?? null,
+    transcriptRoot,
+  );
 }
 
 function ownerElementForNode(
@@ -224,14 +273,31 @@ export function captureTranscriptSelection(
   }
   const range = selection.getRangeAt(0);
   const rect = range.getBoundingClientRect();
+  const sourceOwners = Array.from(
+    transcriptRoot.querySelectorAll<HTMLElement>("[data-selection-message-id]"),
+  ).flatMap((element) => {
+    try {
+      return range.intersectsNode(element) ? [selectionOwnerForElement(element, transcriptRoot)] : [];
+    } catch {
+      return [];
+    }
+  }).filter((owner): owner is TranscriptSelectionOwner => owner !== null);
   const anchorOwner = selectionOwnerForNode(transcriptRoot, selection.anchorNode);
   const focusOwner = selectionOwnerForNode(transcriptRoot, selection.focusNode);
+  for (const endpointOwner of [anchorOwner, focusOwner]) {
+    if (endpointOwner && !sourceOwners.some((owner) => owner.messageId === endpointOwner.messageId)) {
+      sourceOwners.push(endpointOwner);
+    }
+  }
   const anchorElement = ownerElementForNode(transcriptRoot, selection.anchorNode);
   const excerpt = texClipboardPayload(selection) ?? selection.toString();
-  const capturedAnchor = anchorElement ? anchorForRange(anchorElement, range, excerpt) : undefined;
+  const capturedAnchor = sourceOwners.length === 1 && anchorElement
+    ? anchorForRange(anchorElement, range, excerpt)
+    : undefined;
   const captured = resolveTranscriptSelection({
     anchorOwner,
     focusOwner,
+    sourceOwners,
     excerpt,
     ...(capturedAnchor ? { anchor: capturedAnchor } : {}),
     rect: {

@@ -6,6 +6,7 @@ import type { ResponseAnnotation } from "../../../lib/response-annotations";
 import {
   captureTranscriptSelection,
   formatUserSelectionQuote,
+  transcriptSelectionSourceAttribution,
   type TranscriptSelection,
 } from "../../../lib/transcript-selection";
 import { composerDraftBridge } from "../composer/plugins/draft-bridge";
@@ -22,7 +23,8 @@ const EMPTY_RESPONSE_ANNOTATIONS: ResponseAnnotation[] = [];
 
 function sameSelection(left: TranscriptSelection, right: TranscriptSelection): boolean {
   return left.sessionId === right.sessionId &&
-    left.messageId === right.messageId &&
+    left.messageIds.length === right.messageIds.length &&
+    left.messageIds.every((messageId, index) => messageId === right.messageIds[index]) &&
     left.role === right.role &&
     left.excerpt === right.excerpt &&
     left.anchorStart === right.anchorStart &&
@@ -56,6 +58,10 @@ export function TranscriptSelectionToolbar({
     ? responseAnnotations.find((item) =>
       item.sourceMessageId === selection.messageId &&
       item.excerpt === selection.excerpt &&
+      (item.sourceMessageIds ?? [item.sourceMessageId]).length === selection.messageIds.length &&
+      (item.sourceMessageIds ?? [item.sourceMessageId]).every(
+        (messageId, index) => messageId === selection.messageIds[index],
+      ) &&
       item.anchorStart === selection.anchorStart &&
       item.anchorEnd === selection.anchorEnd,
     )
@@ -227,7 +233,10 @@ export function TranscriptSelectionToolbar({
         }
         composerDraftBridge.appendTextForSession(
           selection.sessionId,
-          formatUserSelectionQuote(selection.excerpt, t("chat.selectionSourceUser")),
+          formatUserSelectionQuote(
+            selection.excerpt,
+            transcriptSelectionSourceAttribution(selection.messageIds, t("chat.selectionSourceUser")),
+          ),
         );
         dismiss(true);
       } catch {
@@ -248,6 +257,7 @@ export function TranscriptSelectionToolbar({
       selection.anchorStart === undefined || selection.anchorEnd === undefined
         ? undefined
         : { anchorStart: selection.anchorStart, anchorEnd: selection.anchorEnd },
+      selection.messageIds,
     );
     if (!annotationId) {
       showToast(t("chat.selectionAddFailed"), { variant: "error" });
@@ -339,7 +349,7 @@ export function TranscriptSelectionToolbar({
           >
             <span>{t("chat.addSelectionToChat")}</span>
           </TooltipButton>
-          {selection.role === "assistant" && onAskInSideChat ? (
+          {selection.role === "assistant" && !selection.streaming && onAskInSideChat ? (
             <TooltipButton
               type="button"
               className="transcript-selection-action"

@@ -170,7 +170,12 @@ test("the sanitized Markdown pipeline preserves only generated citation provenan
 });
 
 test("citations resolve against the nearest preceding user prompt for the same answer", () => {
-  const first = [{ id: "a1", sourceMessageId: "source-1", excerpt: "First source" }];
+  const first = [{
+    id: "a1",
+    sourceMessageId: "source-1",
+    sourceMessageIds: ["source-1", "source-2"],
+    excerpt: "First source",
+  }];
   const second = [{ id: "a2", sourceMessageId: "source-2", excerpt: "Second source" }];
   const messages = [
     { id: "u1", role: "user", content: buildAnnotatedPrompt("Compare", first) },
@@ -179,7 +184,7 @@ test("citations resolve against the nearest preceding user prompt for the same a
     { id: "a2", role: "assistant", content: "Second answer" },
   ];
   assert.deepEqual(annotationsForAssistantMessage(messages, "a1"), [
-    { sourceMessageId: "source-1", excerpt: "First source" },
+    { sourceMessageId: "source-1", sourceMessageIds: ["source-1", "source-2"], excerpt: "First source" },
   ]);
   assert.deepEqual(annotationsForAssistantMessage(messages, "a2"), [
     { sourceMessageId: "source-2", excerpt: "Second source" },

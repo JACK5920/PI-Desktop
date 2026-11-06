@@ -76,6 +76,32 @@ test("annotation prompt explains safe one-based citation syntax to the model", (
   assert.match(envelopeInstructions, /Do not invent indices/);
 });
 
+test("multi-message annotation source ids survive serialization and edit round-trips", () => {
+  const multiSource = [{
+    sourceMessageId: "assistant-1",
+    sourceMessageIds: ["assistant-1", "assistant-2"],
+    excerpt: "A selection spanning two assistant messages.",
+    comment: "Keep both origins attached.",
+  }];
+  const serialized = buildAnnotatedPrompt("Explain this range.", multiSource);
+  const expected = {
+    annotations: multiSource,
+    requestText: "Explain this range.",
+  };
+  assert.deepEqual(parseAnnotatedPrompt(serialized), expected);
+  assert.deepEqual(prepareAnnotatedPromptEdit(serialized), expected);
+});
+
+test("invalid multi-message source metadata keeps the envelope inert", () => {
+  const serialized = buildAnnotatedPrompt("Review", [{
+    sourceMessageId: "assistant-1",
+    sourceMessageIds: ["assistant-2", "assistant-1"],
+    excerpt: "Quoted passage",
+  }]);
+  assert.equal(parseAnnotatedPrompt(serialized), null);
+  assert.equal(requestTextWithoutAnnotations(serialized), serialized);
+});
+
 test("only a complete generated envelope is removed from display text", () => {
   const raw = "# Response annotations:\nnot a valid generated envelope";
   assert.equal(parseAnnotatedPrompt(raw), null);

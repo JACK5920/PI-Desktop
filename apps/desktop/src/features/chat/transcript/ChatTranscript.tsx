@@ -588,6 +588,7 @@ function TranscriptBody({
                 selection.sessionId,
                 selection.messageId,
                 selection.excerpt,
+                selection.messageIds,
               );
               if (!sideChatId) {
                 showToast(t("chat.sideChatOpenFailed"), { variant: "error" });

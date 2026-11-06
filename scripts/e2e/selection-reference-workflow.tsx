@@ -194,6 +194,7 @@ function Fixture() {
                 selection.sessionId,
                 selection.messageId,
                 selection.excerpt,
+                selection.messageIds,
               );
               if (id) setSideChatId(id);
             }}
@@ -453,11 +454,20 @@ globalThis.selectionReferenceProbe = async () => {
       host.querySelector('[data-testid="selection-reference-toolbar"]'),
       "visible text in an active streaming assistant answer did not open selection actions",
     );
+    selectRange(assistantNode, 0, otherAssistantNode, "A different answer".length);
+    await waitForToolbar();
+    assert(
+      host.querySelector('[data-testid="selection-reference-toolbar"]'),
+      "a selection spanning two assistant messages did not open transcript actions",
+    );
+    buttonNamed("Copy selection").click();
+    await settle();
+    assert(copied.at(-1)?.includes("A different answer"), "cross-message selection lost text from its later source");
     selectText(userNode, userStart, userStart + "the current branch".length);
     await waitForToolbar();
     buttonNamed("Copy selection").click();
     await settle();
-    assert(copied[0] === "the current branch", "selection Copy did not write the exact captured excerpt");
+    assert(copied.at(-1) === "the current branch", "selection Copy did not write the exact captured excerpt");
 
     clearSelection();
     selectText(userNode, userStart, userStart + "the current branch".length);
