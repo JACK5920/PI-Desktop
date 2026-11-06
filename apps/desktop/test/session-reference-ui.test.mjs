@@ -158,6 +158,7 @@ const { MessageRow } = load(new URL("../src/features/chat/transcript/MessageRow.
   "../../../lib/response-annotations": {
     annotationsForAssistantMessage: () => [],
     parseAnnotatedPrompt,
+    pendingSourceAnnotationsForMessage: () => [],
     requestTextWithoutAnnotations,
     transcriptMessagesForSession: () => [],
   },
@@ -167,6 +168,7 @@ const { MessageRow } = load(new URL("../src/features/chat/transcript/MessageRow.
   "./ActionBarSlots": { ActionSlotSide: () => null },
   "./SessionMessageOrigin": { SessionMessageOrigin: () => null },
   "./MessageAnnotationSummary": messageAnnotationSummary,
+  "./SourceAnnotationMarkers": { SourceAnnotationMarkers: () => null },
   "./extra-attachments": { getExtraMessageAttachments },
   "./TranscriptMenu": {
     useTranscriptMenu: () => () => {},
