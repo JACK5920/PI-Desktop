@@ -84,7 +84,6 @@ MCP 服务器、常驻服务和消息总线集成。
 - 远程 Gateway / 浏览器远程控制；本地回环 MCP 控制是 ADR 0203 描述的有界例外
 - 云账户同步
 - 完整的IDE体验
-- 私有 GitHub 仓库认证、PR 评论、审查和审批（当前 PR 面板仅支持公开只读访问）
 - 值得信赖的插件 provenance/signatures 和原始插件的功能沙箱
   Node API
 - 移动客户端
