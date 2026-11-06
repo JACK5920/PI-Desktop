@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { chmod, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -11,6 +11,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 register(pathToFileURL(join(here, "helpers/ts-import-hooks.mjs")));
+const hasPosixShell = spawnSync("sh", ["-c", "exit 0"], { stdio: "ignore" }).status === 0;
+const shellTest = hasPosixShell ? test : test.skip;
 
 const { buildBootstrapScript, parseBootstrapOutput, shellQuote } = await import(
   "../electron/main/remote/pi-host-bootstrap-script.ts"
@@ -196,7 +198,7 @@ test("buildBootstrapScript interpolates every input as a quoted literal", () => 
   assert.deepEqual(interpolations, ["HOME:-"]);
 });
 
-test("the generated script is valid POSIX shell, even with hostile inputs", async () => {
+shellTest("the generated script is valid POSIX shell, even with hostile inputs", async () => {
   const { dir, cleanup } = await tempDir("pi-host-script-syntax-");
   try {
     const plain = join(dir, "plain.sh");
@@ -223,7 +225,7 @@ test("the generated script is valid POSIX shell, even with hostile inputs", asyn
   }
 });
 
-test("a hostile version stays one literal value when the assignments run", async () => {
+shellTest("a hostile version stays one literal value when the assignments run", async () => {
   const { dir, cleanup } = await tempDir("pi-host-script-quote-");
   try {
     const hostileVersion = "1.0.0'; touch \"$HOME/pwned\"; echo '";
@@ -245,7 +247,7 @@ test("a hostile version stays one literal value when the assignments run", async
   }
 });
 
-test("the generated script installs, starts, and prints the ready/pairing lines", async () => {
+shellTest("the generated script installs, starts, and prints the ready/pairing lines", async () => {
   const { dir, cleanup } = await tempDir("pi-host-script-run-");
   try {
     const sandbox = await prepareSandbox(dir);
@@ -272,7 +274,7 @@ test("the generated script installs, starts, and prints the ready/pairing lines"
   }
 });
 
-test("a checksum mismatch fails the script before anything is installed", async () => {
+shellTest("a checksum mismatch fails the script before anything is installed", async () => {
   const { dir, cleanup } = await tempDir("pi-host-script-digest-");
   try {
     const sandbox = await prepareSandbox(dir);
@@ -391,7 +393,7 @@ async function seedVerifiedInstall(root, sandbox) {
   return { base, current };
 }
 
-test("a fully verified release is reused without a download", async () => {
+shellTest("a fully verified release is reused without a download", async () => {
   const { dir, cleanup } = await tempDir("pi-host-reuse-");
   try {
     const sandbox = await prepareSandbox(dir);
@@ -409,7 +411,7 @@ test("a fully verified release is reused without a download", async () => {
 });
 
 for (const kind of ["damaged", "different-release", "changed-manifest"]) {
-  test(`refuses ${kind} reuse and preserves installed contents on download failure`, async () => {
+  shellTest(`refuses ${kind} reuse and preserves installed contents on download failure`, async () => {
     const { dir, cleanup } = await tempDir("pi-host-reuse-refused-");
     try {
       const sandbox = await prepareSandbox(dir);

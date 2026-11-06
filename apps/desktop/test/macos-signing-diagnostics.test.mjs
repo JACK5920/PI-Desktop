@@ -4,6 +4,8 @@ import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
+
+const platformTest = process.platform === "win32" ? test.skip : test;
 import { fileURLToPath } from "node:url";
 
 // Both scripts are plain bash / node CLI tools with no dependencies, so these
@@ -239,7 +241,7 @@ async function writeBundleFixture(release) {
   return app;
 }
 
-test("diagnostics report an available Developer ID identity", async (t) => {
+platformTest("diagnostics report an available Developer ID identity", async (t) => {
   const root = await tempRoot(t, "pi-desktop-signing-diagnostics-");
   const bin = join(root, "bin");
   await writeDiagnosticsShims(bin, { identities: MATCHING_IDENTITY });
@@ -262,7 +264,7 @@ test("diagnostics report an available Developer ID identity", async (t) => {
   assert.doesNotMatch(result.stdout, /is not available/);
 });
 
-test("diagnostics fail closed when --require-identity finds no identity", async (t) => {
+platformTest("diagnostics fail closed when --require-identity finds no identity", async (t) => {
   const root = await tempRoot(t, "pi-desktop-signing-required-");
   const bin = join(root, "bin");
   await writeDiagnosticsShims(bin, { identities: NO_IDENTITIES });
@@ -279,7 +281,7 @@ test("diagnostics fail closed when --require-identity finds no identity", async 
   );
 });
 
-test("diagnostics treat a missing identity as a warning by default", async (t) => {
+platformTest("diagnostics treat a missing identity as a warning by default", async (t) => {
   const root = await tempRoot(t, "pi-desktop-signing-optional-");
   const bin = join(root, "bin");
   await writeDiagnosticsShims(bin, { identities: NO_IDENTITIES });
@@ -296,7 +298,7 @@ test("diagnostics treat a missing identity as a warning by default", async (t) =
   assert.doesNotMatch(result.stdout, /Developer ID identity available/);
 });
 
-test("diagnostics refuse to run off macOS", async (t) => {
+platformTest("diagnostics refuse to run off macOS", async (t) => {
   const root = await tempRoot(t, "pi-desktop-signing-linux-");
   const bin = join(root, "bin");
   await writeDiagnosticsShims(bin, { unameSystem: "Linux" });
@@ -307,7 +309,7 @@ test("diagnostics refuse to run off macOS", async (t) => {
   assert.match(result.stderr, /must run on macOS/);
 });
 
-test("diagnostics never echo signing secrets", async (t) => {
+platformTest("diagnostics never echo signing secrets", async (t) => {
   const root = await tempRoot(t, "pi-desktop-signing-redaction-");
   const bin = join(root, "bin");
   await writeDiagnosticsShims(bin, { leaky: true });
@@ -336,7 +338,7 @@ test("diagnostics never echo signing secrets", async (t) => {
   }
 });
 
-test("inventory counts the signing payload of a release directory", async (t) => {
+platformTest("inventory counts the signing payload of a release directory", async (t) => {
   const root = await tempRoot(t, "pi-desktop-bundle-inventory-");
   const release = join(root, "release");
   const app = await writeBundleFixture(release);
@@ -395,7 +397,7 @@ test("inventory counts the signing payload of a release directory", async (t) =>
   assert.equal(json.resources["models.dev"], null);
 });
 
-test("inventory counts binary-looking resources as signing candidates", async (t) => {
+platformTest("inventory counts binary-looking resources as signing candidates", async (t) => {
   const root = await tempRoot(t, "pi-desktop-bundle-binary-resources-");
   const release = join(root, "release");
   const app = appFixturePath(release);
@@ -437,7 +439,7 @@ test("inventory counts binary-looking resources as signing candidates", async (t
   assert.deepEqual(json.warnings, []);
 });
 
-test("inventory does not double count native-extension files as binary resources", async (t) => {
+platformTest("inventory does not double count native-extension files as binary resources", async (t) => {
   const root = await tempRoot(t, "pi-desktop-bundle-native-extensions-");
   const release = join(root, "release");
   const app = appFixturePath(release);
@@ -477,7 +479,7 @@ test("inventory does not double count native-extension files as binary resources
   assert.equal(json.signingCandidates, 2);
 });
 
-test("inventory requires exactly one app bundle under the given path", async (t) => {
+platformTest("inventory requires exactly one app bundle under the given path", async (t) => {
   const root = await tempRoot(t, "pi-desktop-bundle-selection-");
 
   const empty = join(root, "empty-release");
@@ -508,7 +510,7 @@ test("inventory requires exactly one app bundle under the given path", async (t)
   assert.match(fileResult.stderr, /not a directory/);
 });
 
-test("inventory survives a symlink cycle without hanging or double counting", async (t) => {
+platformTest("inventory survives a symlink cycle without hanging or double counting", async (t) => {
   const root = await tempRoot(t, "pi-desktop-bundle-symlink-");
   const release = join(root, "release");
   const app = appFixturePath(release);
@@ -536,7 +538,7 @@ test("inventory survives a symlink cycle without hanging or double counting", as
   assert.equal(json.entries, 6);
 });
 
-test("inventory warns about oversized bundles without failing", async (t) => {
+platformTest("inventory warns about oversized bundles without failing", async (t) => {
   const root = await tempRoot(t, "pi-desktop-bundle-thresholds-");
   const release = join(root, "release");
   const app = appFixturePath(release);
@@ -561,7 +563,7 @@ test("inventory warns about oversized bundles without failing", async (t) => {
   assert.ok(json.warnings.length >= 2);
 });
 
-test("inventory flags Mach-O files outside the expected locations", async (t) => {
+platformTest("inventory flags Mach-O files outside the expected locations", async (t) => {
   const root = await tempRoot(t, "pi-desktop-bundle-misplaced-");
   const release = join(root, "release");
   const app = appFixturePath(release);

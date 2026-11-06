@@ -83,8 +83,16 @@ function pluginPackage(t) {
     mkdirSync(dirname(join(root, path)), { recursive: true });
     writeFileSync(join(root, path), content);
   }
-  symlinkSync(join(root, "secret.js"), join(dir, "renderer", "escape.js"));
-  symlinkSync(join(dir, "renderer", "lib", "chart.js"), join(dir, "renderer", "alias.js"));
+  try {
+    symlinkSync(join(root, "secret.js"), join(dir, "renderer", "escape.js"));
+    symlinkSync(join(dir, "renderer", "lib", "chart.js"), join(dir, "renderer", "alias.js"));
+  } catch (error) {
+    if (["EPERM", "EACCES", "ENOTSUP"].includes(error?.code)) {
+      t.skip(`symbolic links are unavailable on this platform: ${error.code}`);
+      return null;
+    }
+    throw error;
+  }
   return { root, dir };
 }
 
@@ -130,7 +138,9 @@ test("a running plugin with the grant and a renderer entry gets a descriptor sta
 });
 
 test("the source resolver serves the current load's regular files from inside the package only", (t) => {
-  const { root, dir } = pluginPackage(t);
+  const pkg = pluginPackage(t);
+  if (!pkg) return;
+  const { root, dir } = pkg;
   const plugin = loadedPlugin({ dir });
   const real = (path) => realpathSync(join(dir, path));
 
@@ -381,7 +391,9 @@ function assertNotFound(response, label) {
 }
 
 test("plugin-renderer:// answers GET for module files the resolver allows, and 404 for anything else", async (t) => {
-  const { dir } = pluginPackage(t);
+  const pkg = pluginPackage(t);
+  if (!pkg) return;
+  const { dir } = pkg;
   const stale = rendererDescriptorFor(loadedPlugin({ dir })).generation;
   const plugin = loadedPlugin({ dir });
   const { generation } = rendererDescriptorFor(plugin);

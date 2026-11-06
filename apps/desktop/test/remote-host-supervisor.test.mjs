@@ -11,6 +11,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 register(pathToFileURL(join(here, "helpers/ts-import-hooks.mjs")));
 const { buildRemoteHostSupervisorScript, parseRemoteHostReady, ensureRemoteHostReady } = await import("../electron/main/remote/remote-host-supervisor.ts");
 const VERSION = "0.15.1-beta.5";
+const posixTest = process.platform === "win32" ? test.skip : test;
 const ready = { hostId: "durable-host", host: "127.0.0.1", port: 45678, version: VERSION };
 const line = value => `PI_HOST_READY ${JSON.stringify(value)}\n`;
 
@@ -75,7 +76,7 @@ server.listen(0, '127.0.0.1', () => console.log('PI_HOST_READY ' + JSON.stringif
   return { home, base, work, credentials, run };
 }
 
-test("stopped installed Host starts at a fresh port, then running reuse preserves PID and credentials", async t => {
+posixTest("stopped installed Host starts at a fresh port, then running reuse preserves PID and credentials", async t => {
   const f = await fixture(t);
   await writeFile(join(f.work, "pi-host.pid"), "99999999\n");
   await writeFile(join(f.work, "pi-host.log"), line(ready) + "PI_HOST_PAIRING_TOKEN historic-secret\n");
@@ -94,14 +95,14 @@ test("stopped installed Host starts at a fresh port, then running reuse preserve
   assert.ok((await readFile(join(f.work, "pi-host.log"), "utf8")).includes("historic-secret"));
 });
 
-test("legacy installed bundle can use system Node without installing", async t => {
+posixTest("legacy installed bundle can use system Node without installing", async t => {
   const f = await fixture(t, { legacy: true });
   const result = await f.run();
   assert.equal(result.code, 0, result.stderr);
   parseRemoteHostReady(result.stdout, { version: VERSION });
 });
 
-test("unrelated live PID is neither killed nor mistaken for an installed Host", async t => {
+posixTest("unrelated live PID is neither killed nor mistaken for an installed Host", async t => {
   const f = await fixture(t);
   await writeFile(join(f.work, "pi-host.pid"), String(process.pid));
   await writeFile(join(f.work, "pi-host.log"), line(ready));
@@ -111,7 +112,7 @@ test("unrelated live PID is neither killed nor mistaken for an installed Host", 
   assert.equal(await readFile(join(f.work, "pi-host.log"), "utf8"), line(ready));
 });
 
-test("symlinked stale log is rejected without truncating its target", async t => {
+posixTest("symlinked stale log is rejected without truncating its target", async t => {
   const f = await fixture(t);
   await symlink(f.credentials, join(f.work, "pi-host.log"));
   const result = await f.run();

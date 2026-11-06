@@ -85,6 +85,10 @@
 - **Expected:** Input stops the old browser animation at the current offset;
   later frames cannot move the reader toward its stale destination. Streaming,
   disclosure anchoring, pinned follow, and long-history work budgets still pass.
+- When the host OS requests reduced motion, the probe explicitly skips only
+  the in-flight smooth-animation assertions; the browser otherwise completes
+  `scrollTo({ behavior: "smooth" })` immediately, so there is no animation to
+  interrupt. Disclosure geometry and the remaining probe still run.
 - Repeat owned wheel, scroll-key, scrollbar-surface and touch inputs in the
   main and delegated scrollers. Observe real browser calls to distinguish
   application cancellation from Chromium's own pointer behavior. Button Space,
@@ -273,6 +277,13 @@
   future and proves a conflicting write cannot acquire until that body finishes.
   Closing/abandoning metadata must not release running work. Snapshot/finalize
   and later rollback participate in the same Host file domain.
+- Independent identified writes with validated tickets may use two session
+  slots. Per-file native gates must observe both blocking bodies before either
+  is released, and retain the cancelled body's lease. Budget regressions cover
+  legacy/coordinated admission in both orders, conservative waiter draining,
+  reversed source order, global limits and cancellation after reservation.
+  Runtime E2E must preserve distinct snapshots and rollback for both writes;
+  this is correctness evidence, not a wall-clock throughput claim.
 - Runtime/pi integration tests cover parent/delegate registration, preparation
   order, validation/mode failures, Stop and model result order. Protocol adapter
   tests cover sealing, cleanup, remote/legacy fallback and equal provider IDs in
@@ -2845,18 +2856,22 @@ identify the platform validation still needed.
 - **Steps**: 1) Click New Task (sidebar, top bar, or Cmd/Ctrl+N). 2) Observe
   the chat surface on the next frame, before the new sidebar row is required
   to exist. 3) Type in the composer during that interval. 4) Wait for the new
-  row and send.
+  row and send. Also send while creation is still pending, and overlap two
+  first-input materialization requests with the host response delayed.
 - **Expected**: A's transcript is gone on the first frame (empty home, idle
   Send). The composer does not stay on A's draft. After `session.create` the
   same empty session is selected, any text typed during the wait belongs to
   that session, and sending does not create a second row. Repeating New Task
   before sending reuses the row. The host is not asked to `session.list` or
-  `session.get` before the empty destination is visible.
+  `session.get` before the empty destination is visible. Overlapping inputs
+  share one creation and its session id; the first send does not invalidate
+  New Task navigation. Superseded creation returns no target to waiting inputs,
+  and a failed create releases the slot so retry can succeed.
 - **Specs linked**: `04-ux/09-interaction-patterns.md` (§1.6),
   `04-ux/08-component-spec.md` (§11), ADR 0154
 - **Acceptance**: C (session creation), Quality
 - **Milestone**: M2
-- **Status**: Source-level regression covered (`session-create.test.mjs`,
+- **Status**: Source-level regression covered (`session-draft-materialization.test.mjs`, `session-create.test.mjs`,
   `session-switch-performance.test.mjs`); full UI scenario Draft
 
 
@@ -8073,9 +8088,10 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
   6. If the task uses a dedicated worktree outside the advertised workspace,
      verify its guarded Bash edit and resulting `git diff`.
 - **Expected**:
-  - Read/search calls may overlap, but only one `Write`/`Edit` executes for a
-    session at a time; queued mutations do not consume another global
-    mutation slot while waiting.
+  - Read/search calls may overlap. A session may execute two independent
+    identified local writes with validated batch tickets; conservative writes
+    remain exclusive within the session. Queued mutations consume no global
+    mutation capacity while waiting; total running writes stay bounded by two.
   - The stale-tag edit fails without changing the file and returns
     `EDIT_TAG_MISMATCH` carrying the live tag and current content at the
     anchors; the overlapping-range payload fails with `EDIT_RANGE_INVALID`
@@ -13644,6 +13660,13 @@ This test plan spec is accepted when:
 - **Acceptance**: C (conversation), Quality
 
 #### E2E-155: Subagent lifetime is parent-judged; runtime delivers reports
+
+- Abort the parent while it is waiting for a provider response and while it is
+  idle waiting for two delegates. Hold delegate teardown at the provider edge;
+  retire the parent and one child first. Abort must remain pending, status must
+  remain busy and a new prompt must be rejected until the last child retires.
+  Concurrent abort requests share cleanup. A follow-up prompt is accepted after
+  abort resolves, with no old-turn continuation or tool execution.
 
 - **Preconditions**: A project-bound Agent session with a Bash-capable
   `explorer` definition and a mocked provider stream.

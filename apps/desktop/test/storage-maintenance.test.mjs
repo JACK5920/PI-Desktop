@@ -81,6 +81,18 @@ async function exists(path) {
   try { await lstat(path); return true; }
   catch (error) { if (error.code === "ENOENT") return false; throw error; }
 }
+async function symlinkOrSkip(t, target, path, type) {
+  try {
+    await symlink(target, path, type);
+    return true;
+  } catch (error) {
+    if (["EPERM", "EACCES", "ENOTSUP"].includes(error?.code)) {
+      t.skip(`symbolic links are unavailable on this platform: ${error.code}`);
+      return false;
+    }
+    throw error;
+  }
+}
 const hash = (buffer) => createHash("sha256").update(buffer).digest("hex");
 // Chromium names the single-instance lock `lockfile` on Windows and
 // `SingletonLock` elsewhere, so a real installation anchor holds whichever name
@@ -246,8 +258,10 @@ test("cold migration copies real data, verifies hashes, preserves secret permiss
   const events = []; const relocations = [];
   const next = await migrate(value, { progress: (event) => events.push(event), relocate: async (...roots) => relocations.push(roots) });
   assert.equal(hash(await readFile(join(next.data, "sessions/chat.jsonl"))), hash(payload));
-  assert.equal((await lstat(join(next.data, "secrets.json"))).mode & 0o777, 0o600);
-  assert.equal((await lstat(next.data)).mode & 0o777, 0o700);
+  if (process.platform !== "win32") {
+    assert.equal((await lstat(join(next.data, "secrets.json"))).mode & 0o777, 0o600);
+    assert.equal((await lstat(next.data)).mode & 0o777, 0o700);
+  }
   assert.equal(await readFile(join(next.browser, "Local Storage/leveldb/test.ldb"), "utf8"), "browser state");
   assert.equal(await exists(join(next.browser, storage.STORAGE_PREFERENCE_FILE)), false);
   for (const name of installLockNames) assert.equal(await exists(join(next.browser, name)), false);
@@ -275,8 +289,8 @@ test("migration detects changed copy content before relocating persistent paths"
 test("migration relocates internal absolute links and preserves external links", { timeout: 60_000 }, async (t) => {
   const value = await fixture(t); await put(join(value.roots.data, "sessions/current"), "session");
   await put(join(value.root, "outside"), "outside");
-  await symlink(join(value.roots.data, "sessions/current"), join(value.roots.data, "absolute-link"));
-  await symlink(join(value.root, "outside"), join(value.roots.data, "external-link"));
+  if (!(await symlinkOrSkip(t, join(value.roots.data, "sessions/current"), join(value.roots.data, "absolute-link")))) return;
+  if (!(await symlinkOrSkip(t, join(value.root, "outside"), join(value.roots.data, "external-link")))) return;
   const next = await migrate(value);
   assert.equal(await readlink(join(next.data, "absolute-link")), join(next.data, "sessions/current"));
   assert.equal(await readlink(join(next.data, "external-link")), join(value.root, "outside"));
@@ -285,7 +299,7 @@ test("migration relocates internal absolute links and preserves external links",
 test("relative links spanning data and browser roots retain their target after relocation", { timeout: 60_000 }, async (t) => {
   const value = await fixture(t);
   await put(join(value.roots.browser, "Local Storage/profile"), "linked browser data");
-  await symlink(relative(value.roots.data, join(value.roots.browser, "Local Storage/profile")), join(value.roots.data, "browser-link"));
+  if (!(await symlinkOrSkip(t, relative(value.roots.data, join(value.roots.browser, "Local Storage/profile")), join(value.roots.data, "browser-link")))) return;
   const next = await migrate(value);
   assert.equal(await realpath(join(next.data, "browser-link")), join(next.browser, "Local Storage/profile"));
 });
@@ -293,7 +307,7 @@ test("relative links spanning data and browser roots retain their target after r
 test("migration preserves external relative links and read-only files", { timeout: 60_000 }, async (t) => {
   const value = await fixture(t);
   const external = await put(join(value.root, "external-document"), "outside");
-  await symlink(relative(value.roots.data, external), join(value.roots.data, "external-relative"));
+  if (!(await symlinkOrSkip(t, relative(value.roots.data, external), join(value.roots.data, "external-relative")))) return;
   await put(join(value.roots.data, "plugins/installed/read-only.js"), "plugin source", 0o444);
   const next = await migrate(value);
   assert.equal(await realpath(join(next.data, "external-relative")), external);
@@ -339,7 +353,8 @@ test("target validation rejects nonempty, overlapping and symbolic-link director
   const nested = join(value.roots.data, "nested"); await mkdir(nested);
   await assert.rejects(storage.validateTarget(nested, value.roots, value.anchor), /separate/);
   await assert.rejects(storage.validateTarget(value.root, value.roots, value.anchor), /separate/);
-  const alias = join(value.root, "alias"); await symlink(value.target, alias);
+  const alias = join(value.root, "alias");
+  if (!(await symlinkOrSkip(t, value.target, alias))) return;
   await assert.rejects(storage.validateTarget(alias, value.roots, value.anchor), /symbolic link/);
   assert.equal(await readFile(join(value.target, "unrelated"), "utf8"), "preserve this data");
 });
@@ -354,7 +369,7 @@ test("migration copies a symbolic-link source root without keeping the old root 
   const value = await fixture(t);
   await put(join(value.roots.data, "sessions/current"), "source conversation");
   const alias = join(value.root, "data-alias");
-  await symlink(value.roots.data, alias);
+  if (!(await symlinkOrSkip(t, value.roots.data, alias))) return;
   value.roots = { ...value.roots, data: alias };
   const next = await migrate(value);
   assert.equal((await lstat(next.data)).isDirectory(), true);
@@ -385,10 +400,10 @@ test("cache cleanup does not follow plugin, partition or leaf cache links outsid
   const value = await fixture(t); const external = join(value.root, "external");
   await put(join(external, "cache/download/pkg"), "external");
   await put(join(external, "Cache/response"), "external");
-  await symlink(external, join(value.roots.data, "plugins"));
-  await symlink(join(external, "Cache"), join(value.roots.data, "cache"));
+  if (!(await symlinkOrSkip(t, external, join(value.roots.data, "plugins")))) return;
+  if (!(await symlinkOrSkip(t, join(external, "Cache"), join(value.roots.data, "cache")))) return;
   await mkdir(join(value.roots.browser, "Partitions"));
-  await symlink(external, join(value.roots.browser, "Partitions/plugin-link"));
+  if (!(await symlinkOrSkip(t, external, join(value.roots.browser, "Partitions/plugin-link")))) return;
   assert.equal(await storage.cacheSize(value.roots), 0);
   await storage.clearCaches(value.roots);
   assert.equal(await readFile(join(external, "cache/download/pkg"), "utf8"), "external");
@@ -399,7 +414,7 @@ test("cache cleanup rejects intermediate links into durable data even inside the
   const value = await fixture(t);
   await put(join(value.roots.data, "sessions/download/current.jsonl"), "durable conversation");
   await mkdir(join(value.roots.data, "plugins"));
-  await symlink(join(value.roots.data, "sessions"), join(value.roots.data, "plugins/cache"));
+  if (!(await symlinkOrSkip(t, join(value.roots.data, "sessions"), join(value.roots.data, "plugins/cache")))) return;
   await storage.clearCaches(value.roots);
   assert.equal(await readFile(join(value.roots.data, "sessions/download/current.jsonl"), "utf8"), "durable conversation");
   assert.equal(await storage.cacheSize(value.roots), 0);
@@ -408,7 +423,7 @@ test("cache cleanup rejects intermediate links into durable data even inside the
 test("cache cleanup refuses a leaf cache link that redirects to durable data in the same profile", { timeout: 60_000 }, async (t) => {
   const value = await fixture(t);
   await put(join(value.roots.data, "sessions/download/current.jsonl"), "durable conversation");
-  await symlink(join(value.roots.data, "sessions"), join(value.roots.data, "cache"));
+  if (!(await symlinkOrSkip(t, join(value.roots.data, "sessions"), join(value.roots.data, "cache")))) return;
   assert.equal(await storage.cacheSize(value.roots), 0);
   await storage.clearCaches(value.roots);
   assert.equal(await readFile(join(value.roots.data, "sessions/download/current.jsonl"), "utf8"), "durable conversation");
@@ -436,7 +451,7 @@ test("backup deletion canonicalizes active roots before checking overlaps", { ti
   const value = await fixture(t);
   const alias = join(value.root, "active-data-alias");
   await put(join(value.roots.data, "sessions/current"), "active conversation");
-  await symlink(value.roots.data, alias);
+  if (!(await symlinkOrSkip(t, value.roots.data, alias))) return;
   const active = { data: alias, browser: value.target };
   await assert.rejects(storage.removeBackups([{ data: value.roots.data, browser: value.roots.browser }], active, value.anchor), /active storage/);
   assert.equal(await readFile(join(alias, "sessions/current"), "utf8"), "active conversation");
@@ -457,7 +472,7 @@ test("storage preferences round-trip pending work atomically and reject malforme
   const preferences = { version: 1, roots: value.roots, backups: [], pending: { id: randomUUID(), kind: "migrate", target: value.target, language: "en" } };
   storage.writeStoragePreferences(file, preferences);
   assert.deepEqual(storage.readStoragePreferences(file, value.roots), preferences);
-  assert.equal((await lstat(file)).mode & 0o777, 0o600);
+  if (process.platform !== "win32") assert.equal((await lstat(file)).mode & 0o777, 0o600);
   await writeFile(file, JSON.stringify({ ...preferences, roots: { data: "relative", browser: value.anchor } }));
   assert.throws(() => storage.readStoragePreferences(file, value.roots), /Invalid storage preferences/);
 });
