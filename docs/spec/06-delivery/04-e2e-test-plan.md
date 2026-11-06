@@ -1,5 +1,6 @@
 # 04. E2E Test Plan
 
+<<<<<<< HEAD
 > Scope: MVP acceptance scenarios plus current shipped product increments for PI-Desktop
 > Status: Accepted (protocol/Electron automation is active; full desktop Playwright remains planned)
 > Cross-references: [acceptance-criteria](02-acceptance-criteria.md) · [milestones](01-mvp-milestones.md) · [ai-development-workflow](03-ai-development-workflow.md) · [change-checklist](05-change-checklist.md)
@@ -23,6 +24,8 @@
 - **Specs:** `03-runtime/08-error-codes.md` §3.2.
 
 
+=======
+>>>>>>> 28d5d07de (fix(composer): isolate task dock tab content)
 ## E2E-TASK-DOCK-tab-content-isolation
 
 - **Preconditions:** Isolated Electron renderer with synthetic todos and a running
