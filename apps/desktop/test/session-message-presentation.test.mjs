@@ -60,6 +60,7 @@ function loadComponent(name, extras = {}) {
       annotationsForAssistantMessage: () => [],
       buildAnnotatedPrompt,
       parseAnnotatedPrompt,
+      pendingSourceAnnotationsForMessage: () => [],
       requestTextWithoutAnnotations,
       transcriptMessagesForSession: () => [],
     },
@@ -78,6 +79,7 @@ function loadComponent(name, extras = {}) {
       useTranscriptMenu: () => () => {},
       useChatTextActions: () => ({ copyText: () => {}, selectText: () => {} }),
     },
+    "./SourceAnnotationMarkers": { SourceAnnotationMarkers: () => null },
     "./ActionBarSlots": { ActionSlotSide: () => null },
     "../../../plugins/renderer-slots/slot-message": { slotMessage: () => undefined },
     // The row renders the user's own order through the shared placement helper.

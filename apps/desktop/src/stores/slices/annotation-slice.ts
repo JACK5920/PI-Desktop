@@ -9,7 +9,9 @@ function sameAnnotation(left: ResponseAnnotation, right: ResponseAnnotation): bo
   return left.id === right.id &&
     left.sourceMessageId === right.sourceMessageId &&
     left.excerpt === right.excerpt &&
-    left.comment === right.comment;
+    left.comment === right.comment &&
+    left.anchorStart === right.anchorStart &&
+    left.anchorEnd === right.anchorEnd;
 }
 
 function normalizeComment(comment: string | undefined): string | undefined {
@@ -26,7 +28,7 @@ export function createAnnotationSlice({ get, set }: StoreAccess): Pick<
   | "consumeAcceptedAnnotations"
 > {
   return {
-    addResponseAnnotation: (sessionId, sourceMessageId, rawExcerpt) => {
+    addResponseAnnotation: (sessionId, sourceMessageId, rawExcerpt, anchor) => {
       const state = get();
       const session = state.sessions.find((item) => item.id === sessionId);
       if (!sessionAllows(session, "canEditMessages")) return null;
@@ -36,14 +38,25 @@ export function createAnnotationSlice({ get, set }: StoreAccess): Pick<
       const sourceMessage = sourceMessages.find((message) => message.id === sourceMessageId);
       if (sourceMessage?.role !== "assistant") return null;
       const current = state.responseAnnotations[sessionId] ?? [];
+      const validAnchor = anchor &&
+        Number.isSafeInteger(anchor.anchorStart) &&
+        Number.isSafeInteger(anchor.anchorEnd) &&
+        anchor.anchorStart >= 0 &&
+        anchor.anchorEnd > anchor.anchorStart
+        ? anchor
+        : undefined;
       const existing = current.find((item) =>
-        item.sourceMessageId === sourceMessageId && item.excerpt === excerpt,
+        item.sourceMessageId === sourceMessageId &&
+        item.excerpt === excerpt &&
+        item.anchorStart === validAnchor?.anchorStart &&
+        item.anchorEnd === validAnchor?.anchorEnd,
       );
       if (existing) return existing.id;
       const annotation: ResponseAnnotation = {
         id: crypto.randomUUID(),
         sourceMessageId,
         excerpt,
+        ...(validAnchor ?? {}),
       };
       set((latest) => ({
         responseAnnotations: {

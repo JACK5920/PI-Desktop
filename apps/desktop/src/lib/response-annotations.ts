@@ -5,12 +5,19 @@ export type ResponseAnnotation = {
   sourceMessageId: string;
   excerpt: string;
   comment?: string;
+  anchorStart?: number;
+  anchorEnd?: number;
 };
 
 export type ParsedResponseAnnotation = Pick<
   ResponseAnnotation,
-  "sourceMessageId" | "excerpt" | "comment"
+  "sourceMessageId" | "excerpt" | "comment" | "anchorStart" | "anchorEnd"
 >;
+
+export type IndexedSourceResponseAnnotation = ParsedResponseAnnotation & {
+  referenceIndex: number;
+  promptMessageId: string;
+};
 
 export type ParsedAnnotatedPrompt = {
   annotations: ParsedResponseAnnotation[];
@@ -25,6 +32,7 @@ export type AnnotationSourceMessage = {
 
 const EMPTY_TRANSCRIPT_MESSAGES: readonly AnnotationSourceMessage[] = [];
 const EMPTY_RESPONSE_ANNOTATIONS: ParsedResponseAnnotation[] = [];
+const EMPTY_INDEXED_SOURCE_ANNOTATIONS: IndexedSourceResponseAnnotation[] = [];
 
 const precedingUserMessagesByTranscript = new WeakMap<
   readonly AnnotationSourceMessage[],
@@ -33,6 +41,10 @@ const precedingUserMessagesByTranscript = new WeakMap<
 const responseAnnotationsByPromptMessage = new WeakMap<
   AnnotationSourceMessage,
   ParsedResponseAnnotation[]
+>();
+const annotationsBySourceMessageByTranscript = new WeakMap<
+  readonly AnnotationSourceMessage[],
+  ReadonlyMap<string, IndexedSourceResponseAnnotation[]>
 >();
 
 export type SessionTranscriptLookup = {
@@ -203,7 +215,17 @@ function parsePayload(value: unknown): ParsedResponseAnnotation[] | null {
       !item.sourceMessageId.trim() ||
       typeof item.excerpt !== "string" ||
       !normalizeTranscriptExcerpt(item.excerpt) ||
-      (item.comment !== undefined && typeof item.comment !== "string")
+      (item.comment !== undefined && typeof item.comment !== "string") ||
+      ((item.anchorStart === undefined) !== (item.anchorEnd === undefined)) ||
+      (item.anchorStart !== undefined &&
+        (typeof item.anchorStart !== "number" ||
+          !Number.isSafeInteger(item.anchorStart) || item.anchorStart < 0)) ||
+      (item.anchorEnd !== undefined &&
+        (typeof item.anchorEnd !== "number" ||
+          !Number.isSafeInteger(item.anchorEnd) ||
+          typeof item.anchorStart !== "number" ||
+          !Number.isSafeInteger(item.anchorStart) ||
+          item.anchorEnd <= item.anchorStart))
     ) {
       return null;
     }
@@ -211,6 +233,9 @@ function parsePayload(value: unknown): ParsedResponseAnnotation[] | null {
       sourceMessageId: item.sourceMessageId,
       excerpt: item.excerpt,
       ...(typeof item.comment === "string" ? { comment: item.comment } : {}),
+      ...(typeof item.anchorStart === "number" && typeof item.anchorEnd === "number"
+        ? { anchorStart: item.anchorStart, anchorEnd: item.anchorEnd }
+        : {}),
     });
   }
   return parsed;
@@ -224,10 +249,13 @@ export function buildAnnotatedPrompt(
   if (annotations.length === 0) return requestText;
   const payload = {
     version: 1,
-    annotations: annotations.map(({ sourceMessageId, excerpt, comment }) => ({
+    annotations: annotations.map(({ sourceMessageId, excerpt, comment, anchorStart, anchorEnd }) => ({
       sourceMessageId,
       excerpt,
       ...(comment === undefined ? {} : { comment }),
+      ...(anchorStart === undefined || anchorEnd === undefined
+        ? {}
+        : { anchorStart, anchorEnd }),
     })),
   };
   return `${ENVELOPE_PREFIX}${JSON.stringify(payload)}${ENVELOPE_SUFFIX}${requestText}`;
@@ -294,6 +322,54 @@ export function annotationsForAssistantMessage(
   responseAnnotationsByPromptMessage.set(prompt, annotations);
   return annotations;
 }
+
+/** Find references in user prompts that point to one assistant source message. */
+export function annotationsForSourceMessage(
+  messages: readonly AnnotationSourceMessage[],
+  sourceMessageId: string,
+): IndexedSourceResponseAnnotation[] {
+  if (!sourceMessageId) return EMPTY_INDEXED_SOURCE_ANNOTATIONS;
+  let annotationsBySource = annotationsBySourceMessageByTranscript.get(messages);
+  if (!annotationsBySource) {
+    const next = new Map<string, IndexedSourceResponseAnnotation[]>();
+    for (const message of messages) {
+      if (message.role !== "user") continue;
+      const annotations = responseAnnotationsByPromptMessage.get(message) ??
+        parseAnnotatedPrompt(message.content ?? "")?.annotations ?? EMPTY_RESPONSE_ANNOTATIONS;
+      responseAnnotationsByPromptMessage.set(message, annotations);
+      for (const [index, annotation] of annotations.entries()) {
+        const found = next.get(annotation.sourceMessageId) ?? [];
+        found.push({ ...annotation, referenceIndex: index + 1, promptMessageId: message.id });
+        next.set(annotation.sourceMessageId, found);
+      }
+    }
+    annotationsBySource = next;
+    annotationsBySourceMessageByTranscript.set(messages, annotationsBySource);
+  }
+  return annotationsBySource.get(sourceMessageId) ?? EMPTY_INDEXED_SOURCE_ANNOTATIONS;
+}
+
+/** Index unsent Composer references so their source markers stay visible in the transcript. */
+export function pendingSourceAnnotationsForMessage(
+  annotations: readonly ResponseAnnotation[],
+  sourceMessageId: string,
+): IndexedSourceResponseAnnotation[] {
+  if (!sourceMessageId || annotations.length === 0) return EMPTY_INDEXED_SOURCE_ANNOTATIONS;
+  return annotations.flatMap((annotation, index) =>
+    annotation.sourceMessageId === sourceMessageId
+      ? [{
+          sourceMessageId: annotation.sourceMessageId,
+          excerpt: annotation.excerpt,
+          ...(annotation.comment === undefined ? {} : { comment: annotation.comment }),
+          ...(annotation.anchorStart === undefined ? {} : { anchorStart: annotation.anchorStart }),
+          ...(annotation.anchorEnd === undefined ? {} : { anchorEnd: annotation.anchorEnd }),
+          referenceIndex: index + 1,
+          promptMessageId: "draft",
+        }]
+      : [],
+  );
+}
+
 
 /** Promote only the exact citation directive in prose text nodes. */
 export function remarkResponseAnnotationCitations() {

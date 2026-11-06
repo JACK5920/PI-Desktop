@@ -3,7 +3,11 @@ import { register } from "node:module";
 import test from "node:test";
 
 register(new URL("./helpers/ts-import-hooks.mjs", import.meta.url));
-const { normalizeTranscriptExcerpt, resolveTranscriptSelection } = await import(
+const {
+  normalizeTranscriptExcerpt,
+  resolveTranscriptSelection,
+  resolveTranscriptTextAnchor,
+} = await import(
   "../src/lib/transcript-selection.ts"
 );
 
@@ -66,4 +70,21 @@ test("selection capture rejects collapsed, cross-message, cross-session, and ine
       `expected rejection for ${JSON.stringify(candidate)}`,
     );
   }
+});
+
+test("source anchors resolve half-open UTF-16 offsets across Unicode text", () => {
+  const source = "before 😀 selected text after";
+  const start = source.indexOf("selected");
+  assert.deepEqual(resolveTranscriptTextAnchor(source, start, start + 13, "selected text"), {
+    start,
+    end: start + 13,
+  });
+});
+
+test("source anchors reject invalid ranges and text that no longer matches the excerpt", () => {
+  assert.equal(resolveTranscriptTextAnchor("source text", undefined, undefined, "source"), null);
+  assert.equal(resolveTranscriptTextAnchor("source text", -1, 6, "source"), null);
+  assert.equal(resolveTranscriptTextAnchor("source text", 6, 6, ""), null);
+  assert.equal(resolveTranscriptTextAnchor("source text", 0, 99, "source"), null);
+  assert.equal(resolveTranscriptTextAnchor("changed text", 0, 6, "source"), null);
 });

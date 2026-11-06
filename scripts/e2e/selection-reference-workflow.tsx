@@ -11,7 +11,13 @@ import { composerDraftBridge } from "../../apps/desktop/src/features/chat/compos
 import { SideChatTab } from "../../apps/desktop/src/components/workpanel/SideChatTab";
 import { TranscriptSelectionToolbar } from "../../apps/desktop/src/features/chat/transcript/TranscriptSelectionToolbar";
 import { MessageAnnotationSummary } from "../../apps/desktop/src/features/chat/transcript/MessageAnnotationSummary";
-import { buildAnnotatedPrompt, parseAnnotatedPrompt, requestTextWithoutAnnotations } from "../../apps/desktop/src/lib/response-annotations";
+import { SourceAnnotationMarkers } from "../../apps/desktop/src/features/chat/transcript/SourceAnnotationMarkers";
+import {
+  buildAnnotatedPrompt,
+  parseAnnotatedPrompt,
+  pendingSourceAnnotationsForMessage,
+  requestTextWithoutAnnotations,
+} from "../../apps/desktop/src/lib/response-annotations";
 import { useAppStore } from "../../apps/desktop/src/stores/app-store";
 import { api } from "../../apps/desktop/src/lib/api";
 import { listableSessions } from "../../apps/desktop/src/lib/session-origin";
@@ -34,6 +40,48 @@ function selectText(node: Text, start: number, end: number): void {
   selection.removeAllRanges();
   selection.addRange(range);
   document.dispatchEvent(new Event("selectionchange"));
+}
+
+function selectRange(startNode: Text, start: number, endNode: Text, end: number): void {
+  const range = document.createRange();
+  range.setStart(startNode, start);
+  range.setEnd(endNode, end);
+  const selection = window.getSelection();
+  if (!selection) throw new Error("Chromium selection is unavailable");
+  selection.removeAllRanges();
+  selection.addRange(range);
+  document.dispatchEvent(new Event("selectionchange"));
+}
+
+function beginSelectionDrag(target: Element): void {
+  target.dispatchEvent(new PointerEvent("pointerdown", {
+    bubbles: true,
+    pointerId: 1,
+    pointerType: "mouse",
+    button: 0,
+    buttons: 1,
+  }));
+}
+
+function finishSelectionDrag(target: Element): void {
+  target.dispatchEvent(new PointerEvent("pointerup", {
+    bubbles: true,
+    pointerId: 1,
+    pointerType: "mouse",
+    button: 0,
+    buttons: 0,
+  }));
+}
+
+async function waitForToolbar(expectedExcerpt?: string): Promise<void> {
+  const deadline = performance.now() + 2_000;
+  const expected = expectedExcerpt ?? window.getSelection()?.toString().trim();
+  while (performance.now() < deadline) {
+    const toolbar = document.querySelector<HTMLElement>('[data-testid="selection-reference-toolbar"]');
+    if (toolbar && (!expected || toolbar.dataset.selectionExcerpt === expected)) return;
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  }
+  throw new Error(`Selection toolbar did not appear after the selection settled; expected=${expected}; selected=${window.getSelection()?.toString()}`);
 }
 
 function clearSelection(): void {
@@ -90,6 +138,7 @@ async function settle(): Promise<void> {
 let i18n: ReturnType<typeof createInstance>;
 let userNode: Text;
 let assistantNode: Text;
+let assistantAnchorNode: Text;
 let otherAssistantNode: Text;
 let streamingAssistantNode: Text;
 let submittedPrompt = "";
@@ -97,6 +146,7 @@ let submittedPrompt = "";
 function Fixture() {
   const annotations = useAppStore((state) => state.responseAnnotations.parent ?? EMPTY_ANNOTATIONS);
   const [transcriptRoot, setLocalTranscriptRoot] = useState<HTMLElement | null>(null);
+  const [sourceHost, setSourceHost] = useState<HTMLElement | null>(null);
   const [sideChatId, setSideChatId] = useState<string | null>(null);
   const captureTranscriptRoot = useCallback((element: HTMLElement | null) => {
     if (element) setLocalTranscriptRoot(element);
@@ -114,11 +164,12 @@ function Fixture() {
               data-selection-eligible="true"
             ><span ref={(element) => { if (element?.firstChild instanceof Text) userNode = element.firstChild; }}>Please compare the current branch with the accepted result.</span></div>
             <div
+              className="message-row assistant"
               data-selection-message-id="answer-parent"
               data-selection-session-id="parent"
               data-selection-role="assistant"
               data-selection-eligible="true"
-            ><span ref={(element) => { if (element?.firstChild instanceof Text) assistantNode = element.firstChild; }}>The accepted branch keeps the original session active while review stays beside it.</span></div>
+            ><div className="message-bubble" ref={setSourceHost}><div className="prose-chat"><span ref={(element) => { if (element?.firstChild instanceof Text) assistantNode = element.firstChild; }}>The accepted branch keeps the </span><strong ref={(element) => { if (element?.firstChild instanceof Text) assistantAnchorNode = element.firstChild; }}>original session active</strong><span> while review stays beside it.</span></div><SourceAnnotationMarkers annotations={pendingSourceAnnotationsForMessage(annotations, "answer-parent")} contentHost={sourceHost} /></div></div>
             <div
               data-selection-message-id="answer-other"
               data-selection-session-id="parent"
@@ -372,35 +423,45 @@ globalThis.selectionReferenceProbe = async () => {
   try {
     const userStart = "Please compare ".length;
     clearSelection();
+    beginSelectionDrag(userNode.parentElement ?? userNode);
     selectText(userNode, userStart, userStart + "the current branch".length);
+    await settle();
+    assert(!host.querySelector('[data-testid="selection-reference-toolbar"]'), "selection toolbar covered the transcript during pointer drag");
+    finishSelectionDrag(userNode.parentElement ?? userNode);
+    await waitForToolbar("the current branch");
     await settle();
     assert(host.querySelector('[data-testid="selection-reference-toolbar"]'), "user text selection did not show the toolbar");
     selectText(userNode, 0, "Please compare".length);
-    await settle();
-    assert(window.getSelection()?.toString() === "Please compare", `test changed selection to ${window.getSelection()?.toString()}`);
+    selectText(userNode, 0, "Please compare the".length);
+    await waitForToolbar("Please compare the");
+    assert(window.getSelection()?.toString() === "Please compare the", `test changed selection to ${window.getSelection()?.toString()}`);
     assert(
       host.querySelector('[data-testid="selection-reference-toolbar"]'),
       "selection toolbar did not follow the new stable transcript selection",
+    );
+    assert(
+      host.querySelector<HTMLElement>('[data-testid="selection-reference-toolbar"]')?.dataset.selectionExcerpt === "Please compare the",
+      "selection toolbar retained a stale excerpt after rapid keyboard selection changes",
     );
     assert(
       host.querySelector('[data-testid="selection-reference-toolbar"]')?.textContent?.includes("Add to chat"),
       "selection toolbar lost its actions after selection changed",
     );
     selectText(streamingAssistantNode, 5, "visible answer".length + 5);
-    await settle();
+    await waitForToolbar();
     assert(
       host.querySelector('[data-testid="selection-reference-toolbar"]'),
       "visible text in an active streaming assistant answer did not open selection actions",
     );
     selectText(userNode, userStart, userStart + "the current branch".length);
-    await settle();
+    await waitForToolbar();
     buttonNamed("Copy selection").click();
     await settle();
     assert(copied[0] === "the current branch", "selection Copy did not write the exact captured excerpt");
 
     clearSelection();
     selectText(userNode, userStart, userStart + "the current branch".length);
-    await settle();
+    await waitForToolbar();
     buttonNamed("Add to chat").click();
     await settle();
     assert(liveDraft.text.includes("> the current branch"), "selected user text was not appended as a quote");
@@ -408,9 +469,8 @@ globalThis.selectionReferenceProbe = async () => {
     assert(liveDraft.text.startsWith("Existing main draft"), "selected text replaced the existing Composer draft");
 
     const quote = "The accepted branch keeps the original session active";
-    const quoteStart = assistantNode.data.indexOf(quote);
-    selectText(assistantNode, quoteStart, quoteStart + quote.length);
-    await settle();
+    selectRange(assistantNode, 0, assistantAnchorNode, assistantAnchorNode.length);
+    await waitForToolbar();
     assert(buttonNamed("Ask in side chat"), "completed assistant selection lacks the side-chat action");
     buttonNamed("Add to chat").focus();
     buttonNamed("Add to chat").click();
@@ -435,11 +495,81 @@ globalThis.selectionReferenceProbe = async () => {
     await settle();
     let annotation = useAppStore.getState().responseAnnotations.parent?.[0];
     assert(annotation, "annotation disappeared before citation rendering");
-    assert(annotation?.excerpt === quote, "comment editor used a later selection instead of its captured excerpt");
+    assert(annotation?.excerpt === quote, `comment editor used a later selection instead of its captured excerpt; expected=${quote}; actual=${annotation?.excerpt}`);
+    const sourceRow = host.querySelector<HTMLElement>('[data-selection-message-id="answer-parent"]');
+    const expectedAnchorStart = sourceRow?.textContent?.indexOf(quote);
+    assert(annotation.anchorStart === expectedAnchorStart, "annotation did not retain the exact source offset across inline formatting");
+    assert(annotation.anchorEnd === (expectedAnchorStart ?? 0) + quote.length, "annotation did not retain the exact source range end");
     assert(annotation.comment === "Focus on why the parent stays selected.", "saved annotation comment is missing");
 
-    buttonNamed("References (1)").click();
     await settle();
+    const sourceMarker = host.querySelector<HTMLButtonElement>('[data-testid="source-annotation-marker"]');
+    assert(sourceMarker, "pending Composer annotation has no marker at its source message before sending");
+    assert(sourceMarker.parentElement?.classList.contains("is-anchored"), "exact source offsets did not position the marker at the quoted passage");
+    sourceMarker.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
+    await settle();
+    assert(host.querySelector(".source-annotation-popover")?.textContent?.includes(quote), "hovering the source marker did not preview the referenced text");
+    sourceMarker.focus();
+    await settle();
+    assert(sourceMarker.getAttribute("aria-expanded") === "true", "keyboard focus did not open the source marker preview");
+    sourceMarker.blur();
+    const savedAnnotations = useAppStore.getState().responseAnnotations.parent ?? [];
+    useAppStore.setState((state) => ({
+      responseAnnotations: {
+        ...state.responseAnnotations,
+        parent: [{ ...annotation, comment: "<img src=x onerror=alert(1)>" }],
+      },
+    }));
+    await settle();
+    const hostileMarker = host.querySelector<HTMLButtonElement>('[data-testid="source-annotation-marker"]');
+    hostileMarker?.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
+    await settle();
+    const hostilePreview = host.querySelector<HTMLElement>(".source-annotation-popover");
+    assert(hostilePreview?.textContent?.includes("<img src=x onerror=alert(1)>"), "source preview did not retain hostile-looking comment text literally");
+    assert(!hostilePreview?.querySelector("img"), "source preview interpreted an annotation comment as HTML");
+    useAppStore.setState((state) => ({
+      responseAnnotations: {
+        ...state.responseAnnotations,
+        parent: [{ sourceMessageId: annotation.sourceMessageId, excerpt: annotation.excerpt, comment: annotation.comment, id: annotation.id }],
+      },
+    }));
+    await settle();
+    assert(
+      host.querySelector('[data-testid="source-annotation-marker"]')?.parentElement?.classList.contains("is-message-level"),
+      "a legacy reference without offsets did not use the message-level marker",
+    );
+    useAppStore.setState((state) => ({
+      responseAnnotations: {
+        ...state.responseAnnotations,
+        parent: [{ ...annotation, anchorStart: (annotation.anchorStart ?? 0) + 1 }],
+      },
+    }));
+    await settle();
+    assert(
+      host.querySelector('[data-testid="source-annotation-marker"]')?.parentElement?.classList.contains("is-message-level"),
+      "a stale source anchor was guessed instead of falling back to the message-level rail",
+    );
+    useAppStore.setState((state) => ({ responseAnnotations: { ...state.responseAnnotations, parent: savedAnnotations } }));
+    await settle();
+
+    const referencesChip = buttonNamed("References (1)");
+    referencesChip.focus();
+    referencesChip.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+    await settle();
+    assert(host.querySelector('[data-testid="composer-annotation-preview"]')?.textContent?.includes(quote), "keyboard focus did not preview the pending reference in the Composer");
+    referencesChip.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
+    await settle();
+    const composerPreview = host.querySelector<HTMLElement>('[data-testid="composer-annotation-preview"]');
+    assert(composerPreview, "hovering the Composer reference control did not open its preview");
+    composerPreview.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
+    await settle();
+    assert(host.querySelector('[data-testid="composer-annotation-preview"]'), "moving the pointer into the Composer preview dismissed it");
+    const composerHoverBridge = getComputedStyle(referencesChip.parentElement!, "::before");
+    assert(composerHoverBridge.pointerEvents !== "none" && Number.parseFloat(composerHoverBridge.height) >= 8, "Composer hover preview has no hit-test bridge across the trigger gap");
+    referencesChip.click();
+    await settle();
+    assert(!host.querySelector('[data-testid="composer-annotation-preview"]'), "opening the reference manager left the hover preview open underneath it");
+    assert(host.querySelector(".composer-annotation-review"), "clicking the reference control did not open the reference manager");
     assert(host.textContent?.includes(quote), "annotation review does not show the captured excerpt");
     const referenceReview = host.querySelector<HTMLElement>(".composer-annotation-review");
     const reviewRect = referenceReview?.getBoundingClientRect();
@@ -502,16 +632,29 @@ globalThis.selectionReferenceProbe = async () => {
       !fakeCitationLink.matches('[data-testid="response-annotation-citation"]'),
       "an ordinary pi-annotation Markdown link impersonated a citation",
     );
-    citation.click();
+    citation.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
     await settle();
-    const citationDialog = host.querySelector('[role="dialog"][aria-label="Reference 1"]');
+    const citationDialog = host.querySelector(".annotation-citation-popover");
     assert(citationDialog?.textContent?.includes(quote), "citation popover does not show its excerpt");
     assert(citationDialog?.textContent?.includes("Keep the parent visible while the child runs."), "citation popover does not show its comment");
     assert(citationDialog?.textContent?.includes("answer-parent"), "citation popover does not retain source-message context");
+    assert(citation.getAttribute("aria-expanded") === "true", "citation hover did not expose its expanded state");
+    const citationHoverBridge = getComputedStyle(citation.parentElement!, "::after");
+    assert(citationHoverBridge.pointerEvents !== "none" && Number.parseFloat(citationHoverBridge.height) >= 8, "citation hover preview has no hit-test bridge across the trigger gap");
+    citation.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
+    citationDialog.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
+    await settle();
+    assert(host.querySelector(".annotation-citation-popover"), "moving the pointer into the citation preview dismissed it");
+    citation.focus();
+    citation.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+    citation.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    await settle();
+    assert(!host.querySelector(".annotation-citation-popover"), "Escape did not dismiss the citation preview");
+    assert(document.activeElement === citation, "Escape did not return focus to the citation control");
 
     clearSelection();
-    selectText(assistantNode, quoteStart, quoteStart + quote.length);
-    await settle();
+    selectRange(assistantNode, 0, assistantAnchorNode, assistantAnchorNode.length);
+    await waitForToolbar(quote);
     buttonNamed("Ask in side chat").click();
     await settle();
     const firstSideChat = Object.values(useAppStore.getState().sideChats)[0];
@@ -621,8 +764,8 @@ globalThis.selectionReferenceProbe = async () => {
     useAppStore.setState({ activeSessionId: "parent", messages: parentMessages as AppState["messages"] });
     flushSync(() => root.render(<Fixture />));
     clearSelection();
-    selectText(assistantNode, quoteStart, quoteStart + quote.length);
-    await settle();
+    selectRange(assistantNode, 0, assistantAnchorNode, assistantAnchorNode.length);
+    await waitForToolbar(quote);
     buttonNamed("Ask in side chat").click();
     await settle();
     const secondSideChat = Object.values(useAppStore.getState().sideChats).find((item) => item.id !== firstSideChat.id);

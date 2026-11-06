@@ -180,6 +180,17 @@
   min-width: 0;
 }
 
+.composer-annotation-attachments::before {
+  position: absolute;
+  z-index: 71;
+  top: -8px;
+  inset-inline-start: 0;
+  width: min(360px, calc(100vw - 32px));
+  height: 8px;
+  pointer-events: auto;
+  content: "";
+}
+
 .composer-annotation-chip {
   display: inline-flex;
   align-items: center;
@@ -198,6 +209,50 @@
 .composer-annotation-chip:focus-visible {
   color: var(--ds-text-primary);
   background: var(--ds-bg-hover);
+}
+
+.composer-annotation-hover-preview {
+  position: absolute;
+  z-index: 71;
+  inset-inline-start: 0;
+  bottom: calc(100% + 8px);
+  display: grid;
+  width: min(360px, calc(100vw - 32px));
+  box-sizing: border-box;
+  max-height: min(320px, calc(100vh - 48px));
+  gap: 9px;
+  overflow: auto;
+  padding: 11px 12px;
+  border: 1px solid var(--ds-border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--ds-bg-elevated-opaque);
+  box-shadow: var(--ds-shadow-dialog);
+  color: var(--ds-text-primary);
+  font-size: var(--text-sm);
+}
+
+.composer-annotation-hover-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 8px;
+  min-width: 0;
+}
+
+.composer-annotation-hover-excerpt,
+.composer-annotation-hover-comment {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.composer-annotation-hover-comment {
+  grid-column: 2;
+  color: var(--ds-text-tertiary);
+  font-size: var(--text-xs);
+}
+
+.composer-annotation-hover-more {
+  color: var(--ds-text-tertiary);
+  font-size: var(--text-xs);
 }
 
 .composer-annotation-review {

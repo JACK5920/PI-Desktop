@@ -11,11 +11,56 @@ import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 register(new URL("./helpers/ts-import-hooks.mjs", import.meta.url));
 const {
   annotationsForAssistantMessage,
+  annotationsForSourceMessage,
   buildAnnotatedPrompt,
   isResponseAnnotationCitationNode,
+  pendingSourceAnnotationsForMessage,
   remarkResponseAnnotationCitations,
   transcriptMessagesForSession,
 } = await import("../src/lib/response-annotations.ts");
+
+test("source lookup collects only annotations anchored to that assistant message", () => {
+  const first = { sourceMessageId: "source-1", excerpt: "First passage", anchorStart: 4, anchorEnd: 17 };
+  const second = { sourceMessageId: "source-1", excerpt: "Second passage", comment: "Compare" };
+  const unrelated = { sourceMessageId: "source-2", excerpt: "Elsewhere" };
+  const messages = [
+    { id: "u1", role: "user", content: buildAnnotatedPrompt("Question", [first, unrelated]) },
+    { id: "a1", role: "assistant", content: "Answer" },
+    { id: "u2", role: "user", content: buildAnnotatedPrompt("Follow-up", [second]) },
+  ];
+  const sourceOne = annotationsForSourceMessage(messages, "source-1");
+  assert.deepEqual(sourceOne, [
+    { ...first, referenceIndex: 1, promptMessageId: "u1" },
+    { ...second, referenceIndex: 1, promptMessageId: "u2" },
+  ]);
+  assert.deepEqual(annotationsForSourceMessage(messages, "source-2"), [
+    { ...unrelated, referenceIndex: 2, promptMessageId: "u1" },
+  ]);
+  assert.strictEqual(annotationsForSourceMessage(messages, "source-1"), sourceOne);
+  assert.deepEqual(annotationsForSourceMessage(messages, "missing"), []);
+});
+
+test("pending Composer references expose source markers before the prompt is sent", () => {
+  const pending = [
+    { id: "draft-a", sourceMessageId: "source-1", excerpt: "First passage" },
+    { id: "draft-b", sourceMessageId: "source-2", excerpt: "Second passage", anchorStart: 4, anchorEnd: 17 },
+  ];
+  assert.deepEqual(pendingSourceAnnotationsForMessage(pending, "source-2"), [{
+    sourceMessageId: "source-2",
+    excerpt: "Second passage",
+    anchorStart: 4,
+    anchorEnd: 17,
+    referenceIndex: 2,
+    promptMessageId: "draft",
+  }]);
+  assert.deepEqual(pendingSourceAnnotationsForMessage(pending, "source-1"), [{
+    sourceMessageId: "source-1",
+    excerpt: "First passage",
+    referenceIndex: 1,
+    promptMessageId: "draft",
+  }]);
+  assert.deepEqual(pendingSourceAnnotationsForMessage(pending, "missing"), []);
+});
 
 function collectCitationLinks(node, links = []) {
   if (Array.isArray(node)) {

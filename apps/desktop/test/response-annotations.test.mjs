@@ -39,6 +39,32 @@ test("annotation prompt envelopes round-trip Unicode, JSON syntax, and directive
   assert.equal(requestTextWithoutAnnotations(serialized), requestText);
 });
 
+test("annotation anchors round-trip while legacy annotation payloads remain valid", () => {
+  const anchored = [
+    { sourceMessageId: "assistant-1", excerpt: "selected 😀 text", anchorStart: 4, anchorEnd: 20 },
+  ];
+  const serialized = buildAnnotatedPrompt("Review this excerpt.", anchored);
+  assert.deepEqual(parseAnnotatedPrompt(serialized), {
+    annotations: anchored,
+    requestText: "Review this excerpt.",
+  });
+
+  const legacy = buildAnnotatedPrompt("Review this excerpt.", [
+    { sourceMessageId: "assistant-legacy", excerpt: "old reference" },
+  ]);
+  assert.deepEqual(parseAnnotatedPrompt(legacy)?.annotations, [
+    { sourceMessageId: "assistant-legacy", excerpt: "old reference" },
+  ]);
+});
+
+test("malformed optional annotation anchors leave the generated envelope inert", () => {
+  const serialized = buildAnnotatedPrompt("Review.", [
+    { sourceMessageId: "assistant-1", excerpt: "source", anchorStart: 1, anchorEnd: 7 },
+  ]);
+  assert.equal(parseAnnotatedPrompt(serialized.replace('"anchorEnd":7', '"anchorEnd":-1')), null);
+  assert.equal(parseAnnotatedPrompt(serialized.replace('"anchorStart":1', '"anchorStart":1.5')), null);
+});
+
 test("annotation prompt explains safe one-based citation syntax to the model", () => {
   const serialized = buildAnnotatedPrompt("Please explain these references.", annotations);
   const envelopeInstructions = serialized.slice(0, serialized.indexOf("<response-annotations>"));

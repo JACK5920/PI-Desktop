@@ -19,6 +19,13 @@ export function formatUserSelectionQuote(
 
 export type TranscriptSelectionRole = "assistant" | "user";
 
+export type TranscriptTextAnchor = {
+  /** Inclusive UTF-16 offset in the source message's eligible text stream. */
+  start: number;
+  /** Exclusive UTF-16 offset in the source message's eligible text stream. */
+  end: number;
+};
+
 export type TranscriptSelectionOwner = {
   sessionId: string;
   messageId: string;
@@ -34,6 +41,8 @@ export type TranscriptSelectionRect = Pick<
 export type TranscriptSelection = Omit<TranscriptSelectionOwner, "eligible"> & {
   excerpt: string;
   rect: TranscriptSelectionRect;
+  anchorStart?: number;
+  anchorEnd?: number;
 };
 
 /** Normalize browser text and cap toolbar excerpts without splitting emoji. */
@@ -49,17 +58,43 @@ export function normalizeTranscriptExcerpt(
   return normalized || null;
 }
 
+/** Resolve a persisted half-open UTF-16 range only when it still names its excerpt. */
+export function resolveTranscriptTextAnchor(
+  sourceText: string,
+  anchorStart: number | undefined,
+  anchorEnd: number | undefined,
+  expectedExcerpt: string,
+): TranscriptTextAnchor | null {
+  if (
+    typeof anchorStart !== "number" ||
+    typeof anchorEnd !== "number" ||
+    !Number.isSafeInteger(anchorStart) ||
+    !Number.isSafeInteger(anchorEnd) ||
+    anchorStart < 0 ||
+    anchorEnd <= anchorStart ||
+    anchorEnd > sourceText.length
+  ) {
+    return null;
+  }
+  const excerpt = normalizeTranscriptExcerpt(expectedExcerpt);
+  if (!excerpt) return null;
+  const actual = normalizeTranscriptExcerpt(sourceText.slice(anchorStart, anchorEnd));
+  return actual === excerpt ? { start: anchorStart, end: anchorEnd } : null;
+}
+
 /** Resolve a range only when both endpoints belong to the same eligible row. */
 export function resolveTranscriptSelection({
   anchorOwner,
   focusOwner,
   excerpt,
   rect,
+  anchor,
 }: {
   anchorOwner: TranscriptSelectionOwner | null;
   focusOwner: TranscriptSelectionOwner | null;
   excerpt: string;
   rect: TranscriptSelectionRect;
+  anchor?: { anchorStart: number; anchorEnd: number };
 }): TranscriptSelection | null {
   if (!anchorOwner || !focusOwner || !anchorOwner.eligible || !focusOwner.eligible) {
     return null;
@@ -79,6 +114,7 @@ export function resolveTranscriptSelection({
     role: anchorOwner.role,
     excerpt: normalizedExcerpt,
     rect: { ...rect },
+    ...(anchor ? anchor : {}),
   };
 }
 
@@ -107,6 +143,70 @@ function selectionOwnerForNode(
   };
 }
 
+function ownerElementForNode(
+  transcriptRoot: HTMLElement,
+  node: Node | null,
+): HTMLElement | null {
+  if (!node || !transcriptRoot.contains(node)) return null;
+  const element = node instanceof Element ? node : node.parentElement;
+  const ownerElement = element?.closest<HTMLElement>("[data-selection-message-id]");
+  return ownerElement && transcriptRoot.contains(ownerElement) ? ownerElement : null;
+}
+
+/** Capture offsets across rendered text nodes without changing their source markup. */
+function anchorForRange(
+  ownerElement: HTMLElement,
+  range: Range,
+  excerpt: string,
+): { anchorStart: number; anchorEnd: number } | undefined {
+  const rangeElement = range.commonAncestorContainer instanceof Element
+    ? range.commonAncestorContainer
+    : range.commonAncestorContainer.parentElement;
+  const candidateRoot = rangeElement?.closest<HTMLElement>(".prose-chat, .message-user-text");
+  const contentRoot = candidateRoot && ownerElement.contains(candidateRoot)
+    ? candidateRoot
+    : ownerElement;
+  const view = contentRoot.ownerDocument.defaultView;
+  if (!view) return undefined;
+  const walker = contentRoot.ownerDocument.createTreeWalker(contentRoot, view.NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      const parent = node.parentElement;
+      if (!node.textContent || !parent || parent.closest(
+        '[aria-hidden="true"], [data-selection-anchor-ignore="true"], script, style',
+      )) {
+        return view.NodeFilter.FILTER_REJECT;
+      }
+      return view.NodeFilter.FILTER_ACCEPT;
+    },
+  });
+  const textNodes: Text[] = [];
+  while (walker.nextNode()) {
+    if (walker.currentNode.nodeType === view.Node.TEXT_NODE) textNodes.push(walker.currentNode as Text);
+  }
+  const startNode = range.startContainer.nodeType === view.Node.TEXT_NODE
+    ? range.startContainer as Text
+    : null;
+  const endNode = range.endContainer.nodeType === view.Node.TEXT_NODE
+    ? range.endContainer as Text
+    : null;
+  if (!startNode || !endNode) return undefined;
+  const startIndex = textNodes.indexOf(startNode);
+  const endIndex = textNodes.indexOf(endNode);
+  if (startIndex < 0 || endIndex < startIndex || range.startOffset > startNode.length || range.endOffset > endNode.length) {
+    return undefined;
+  }
+  let anchorStart = range.startOffset;
+  let anchorEnd = range.endOffset;
+  let sourceText = "";
+  for (const [index, node] of textNodes.entries()) {
+    if (index < startIndex) anchorStart += node.length;
+    if (index < endIndex) anchorEnd += node.length;
+    sourceText += node.data;
+  }
+  if (!resolveTranscriptTextAnchor(sourceText, anchorStart, anchorEnd, excerpt)) return undefined;
+  return { anchorStart, anchorEnd };
+}
+
 /** Snapshot source identity, formula-aware text, and geometry before toolbar focus. */
 export function captureTranscriptSelection(
   selection: Selection | null,
@@ -124,10 +224,16 @@ export function captureTranscriptSelection(
   }
   const range = selection.getRangeAt(0);
   const rect = range.getBoundingClientRect();
+  const anchorOwner = selectionOwnerForNode(transcriptRoot, selection.anchorNode);
+  const focusOwner = selectionOwnerForNode(transcriptRoot, selection.focusNode);
+  const anchorElement = ownerElementForNode(transcriptRoot, selection.anchorNode);
+  const excerpt = texClipboardPayload(selection) ?? selection.toString();
+  const capturedAnchor = anchorElement ? anchorForRange(anchorElement, range, excerpt) : undefined;
   const captured = resolveTranscriptSelection({
-    anchorOwner: selectionOwnerForNode(transcriptRoot, selection.anchorNode),
-    focusOwner: selectionOwnerForNode(transcriptRoot, selection.focusNode),
-    excerpt: texClipboardPayload(selection) ?? selection.toString(),
+    anchorOwner,
+    focusOwner,
+    excerpt,
+    ...(capturedAnchor ? { anchor: capturedAnchor } : {}),
     rect: {
       top: rect.top,
       right: rect.right,
