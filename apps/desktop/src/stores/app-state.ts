@@ -229,6 +229,7 @@ export type AppState = {
     sessionId: string,
     sourceMessageId: string,
     excerpt: string,
+    anchor?: { anchorStart: number; anchorEnd: number },
   ) => string | null;
   editResponseAnnotation: (
     sessionId: string,

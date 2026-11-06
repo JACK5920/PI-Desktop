@@ -2068,6 +2068,22 @@ Single message render — either user (plaintext) or assistant (markdown streami
   Pending annotation excerpts/comments attach to the next ordinary prompt as a
   JSON payload and remain reviewable, editable, removable, and clearable from
   the Composer; only unchanged attachments are consumed after Host admission.
+  The floating toolbar stays hidden during pointer dragging and appears after
+  pointer-up; keyboard selections must settle before capture. Newly captured
+  assistant references retain optional half-open UTF-16 offsets in the
+  rendered source text. A source marker is placed beside the excerpt only when
+  those offsets still resolve to that exact excerpt; legacy, stale, or
+  ambiguous anchors fall back to a message-level marker rather than guessing.
+  Pending Composer references show an excerpt preview on hover/focus while
+  the pointer can move from the trigger into the preview without dismissing it;
+  click remains the explicit review/edit action and opens that manager instead
+  of stacking both surfaces. Unsent references also place a numbered source
+  marker beside their excerpt immediately, before the prompt is sent. Assistant
+  citation controls and source markers preview on hover, keyboard focus, or
+  activation. Popovers
+  render excerpt/comment text inertly, remain usable when pointer/focus moves
+  into them, and dismiss through Escape or an outside press. These previews
+  never submit a prompt.
   A sent user message with a valid annotation envelope shows a collapsed,
   localized reference summary; expanding it reveals the quoted excerpts and
   optional comments without exposing the serialized envelope or source ids.

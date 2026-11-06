@@ -51,6 +51,40 @@ test("annotation attachment is deduplicated by source excerpt and isolated by se
   assert.deepEqual(state().responseAnnotations["session-b"].map((item) => item.excerpt), ["selected"]);
 });
 
+test("annotation attachment retains source anchors and distinguishes repeated passages", () => {
+  const { actions, state } = fixture();
+  const first = actions.addResponseAnnotation(
+    "session-a",
+    "assistant-a",
+    "selected",
+    { anchorStart: 4, anchorEnd: 12 },
+  );
+  const samePassage = actions.addResponseAnnotation(
+    "session-a",
+    "assistant-a",
+    "selected",
+    { anchorStart: 4, anchorEnd: 12 },
+  );
+  const secondPassage = actions.addResponseAnnotation(
+    "session-a",
+    "assistant-a",
+    "selected",
+    { anchorStart: 30, anchorEnd: 38 },
+  );
+
+  assert.ok(first);
+  assert.equal(samePassage, first);
+  assert.ok(secondPassage);
+  assert.notEqual(secondPassage, first);
+  assert.deepEqual(
+    state().responseAnnotations["session-a"].map(({ anchorStart, anchorEnd }) => ({ anchorStart, anchorEnd })),
+    [
+      { anchorStart: 4, anchorEnd: 12 },
+      { anchorStart: 30, anchorEnd: 38 },
+    ],
+  );
+});
+
 test("a visible side-chat child can own annotations for its assistant messages", () => {
   const childMessage = { id: "child-answer", role: "assistant", content: "Child answer" };
   const { actions, state } = fixture({

@@ -24,7 +24,9 @@ function sameSelection(left: TranscriptSelection, right: TranscriptSelection): b
   return left.sessionId === right.sessionId &&
     left.messageId === right.messageId &&
     left.role === right.role &&
-    left.excerpt === right.excerpt;
+    left.excerpt === right.excerpt &&
+    left.anchorStart === right.anchorStart &&
+    left.anchorEnd === right.anchorEnd;
 }
 
 export function TranscriptSelectionToolbar({
@@ -37,6 +39,8 @@ export function TranscriptSelectionToolbar({
   const toolbarRef = useRef<HTMLDivElement>(null);
   const selectionRef = useRef<TranscriptSelection | null>(null);
   const dismissedSelectionRef = useRef<TranscriptSelection | null>(null);
+  const pointerGestureRef = useRef(false);
+  const keyboardSelectionTimerRef = useRef<number | null>(null);
   const [selection, setSelection] = useState<TranscriptSelection | null>(null);
   const [editingComment, setEditingComment] = useState(false);
   const [comment, setComment] = useState("");
@@ -50,7 +54,10 @@ export function TranscriptSelectionToolbar({
   const showToast = useAppStore((state) => state.showToast);
   const duplicate = useMemo(() => selection?.role === "assistant"
     ? responseAnnotations.find((item) =>
-      item.sourceMessageId === selection.messageId && item.excerpt === selection.excerpt,
+      item.sourceMessageId === selection.messageId &&
+      item.excerpt === selection.excerpt &&
+      item.anchorStart === selection.anchorStart &&
+      item.anchorEnd === selection.anchorEnd,
     )
     : undefined, [responseAnnotations, selection]);
 
@@ -79,6 +86,7 @@ export function TranscriptSelectionToolbar({
   }, [transcriptRoot]);
 
   const refreshSelection = useCallback(() => {
+    if (pointerGestureRef.current) return;
     const next = captureTranscriptSelection(
       window.getSelection(),
       transcriptRoot,
@@ -104,12 +112,65 @@ export function TranscriptSelectionToolbar({
       dismiss();
       return;
     }
-    const selectionChange = () => refreshSelection();
-    const reposition = () => {
-      if (selectionRef.current) refreshSelection();
+    const selectionChange = () => {
+      if (pointerGestureRef.current || editingComment) return;
+      if (window.getSelection()?.isCollapsed !== false) {
+        dismissedSelectionRef.current = null;
+      }
+      if (!toolbarRef.current?.contains(document.activeElement)) {
+        selectionRef.current = null;
+        setSelection(null);
+      }
+      if (keyboardSelectionTimerRef.current !== null) {
+        window.clearTimeout(keyboardSelectionTimerRef.current);
+      }
+      keyboardSelectionTimerRef.current = window.setTimeout(() => {
+        keyboardSelectionTimerRef.current = null;
+        refreshSelection();
+      }, 180);
     };
-    const outsidePress = (event: PointerEvent) => {
-      if (!toolbarRef.current?.contains(event.target as Node)) dismiss();
+    const pointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Element && transcriptRoot.contains(target)) {
+        if (editingComment) return;
+        const owner = target.closest<HTMLElement>("[data-selection-message-id]");
+        const interactive = target.closest("button, a, input, textarea, [role='button'], [contenteditable='true']");
+        if (owner && !interactive) {
+          pointerGestureRef.current = true;
+          if (keyboardSelectionTimerRef.current !== null) {
+            window.clearTimeout(keyboardSelectionTimerRef.current);
+            keyboardSelectionTimerRef.current = null;
+          }
+          selectionRef.current = null;
+          dismissedSelectionRef.current = null;
+          setSelection(null);
+          setEditingComment(false);
+          setComment("");
+          return;
+        }
+      }
+      if (!toolbarRef.current?.contains(target as Node)) dismiss();
+    };
+    const pointerUp = () => {
+      if (!pointerGestureRef.current) return;
+      pointerGestureRef.current = false;
+      requestAnimationFrame(() => requestAnimationFrame(refreshSelection));
+    };
+    const pointerCancel = () => {
+      pointerGestureRef.current = false;
+      selectionRef.current = null;
+      setSelection(null);
+    };
+    const reposition = () => {
+      const current = selectionRef.current;
+      if (!current || pointerGestureRef.current || editingComment) return;
+      const next = captureTranscriptSelection(window.getSelection(), transcriptRoot, sessionId);
+      if (next && sameSelection(current, next)) {
+        selectionRef.current = next;
+        setSelection(next);
+      } else if (!toolbarRef.current?.contains(document.activeElement)) {
+        dismiss();
+      }
     };
     const keyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape" && selectionRef.current) {
@@ -119,18 +180,26 @@ export function TranscriptSelectionToolbar({
       }
     };
     document.addEventListener("selectionchange", selectionChange);
-    document.addEventListener("pointerdown", outsidePress, true);
+    document.addEventListener("pointerdown", pointerDown, true);
+    document.addEventListener("pointerup", pointerUp, true);
+    document.addEventListener("pointercancel", pointerCancel, true);
     document.addEventListener("keydown", keyDown, true);
     window.addEventListener("scroll", reposition, true);
     window.addEventListener("resize", reposition);
     return () => {
+      if (keyboardSelectionTimerRef.current !== null) {
+        window.clearTimeout(keyboardSelectionTimerRef.current);
+        keyboardSelectionTimerRef.current = null;
+      }
       document.removeEventListener("selectionchange", selectionChange);
-      document.removeEventListener("pointerdown", outsidePress, true);
+      document.removeEventListener("pointerdown", pointerDown, true);
+      document.removeEventListener("pointerup", pointerUp, true);
+      document.removeEventListener("pointercancel", pointerCancel, true);
       document.removeEventListener("keydown", keyDown, true);
       window.removeEventListener("scroll", reposition, true);
       window.removeEventListener("resize", reposition);
     };
-  }, [dismiss, refreshSelection, sessionId, transcriptRoot]);
+  }, [dismiss, editingComment, refreshSelection, sessionId, transcriptRoot]);
 
   useEffect(() => {
     if (selectionRef.current?.sessionId !== sessionId) dismiss();
@@ -176,6 +245,9 @@ export function TranscriptSelectionToolbar({
       selection.sessionId,
       selection.messageId,
       selection.excerpt,
+      selection.anchorStart === undefined || selection.anchorEnd === undefined
+        ? undefined
+        : { anchorStart: selection.anchorStart, anchorEnd: selection.anchorEnd },
     );
     if (!annotationId) {
       showToast(t("chat.selectionAddFailed"), { variant: "error" });
@@ -200,6 +272,7 @@ export function TranscriptSelectionToolbar({
       ref={toolbarRef}
       className={`transcript-selection-toolbar${editingComment ? " is-editing-comment" : ""}`}
       data-testid="selection-reference-toolbar"
+      data-selection-excerpt={selection.excerpt}
       role="toolbar"
       aria-label={t("chat.selectionToolbar")}
       style={{ left, top }}

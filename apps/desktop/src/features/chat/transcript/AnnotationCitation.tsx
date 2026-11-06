@@ -53,7 +53,16 @@ export function AnnotationCitation({
     : "";
 
   return (
-    <span className="annotation-citation-wrap">
+    <span
+      className="annotation-citation-wrap"
+      onPointerEnter={() => setOpen(true)}
+      onPointerLeave={() => {
+        if (!buttonRef.current?.matches(":focus")) setOpen(false);
+      }}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node)) setOpen(false);
+      }}
+    >
       <button
         ref={buttonRef}
         type="button"
@@ -62,7 +71,8 @@ export function AnnotationCitation({
         aria-haspopup="dialog"
         aria-expanded={open}
         data-testid="response-annotation-citation"
-        onClick={() => setOpen((value) => !value)}
+        onFocus={() => setOpen(true)}
+        onClick={() => setOpen(true)}
       >
         {index}
       </button>

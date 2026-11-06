@@ -40,17 +40,24 @@ import {
 import { getExtraMessageAttachments } from "./extra-attachments";
 import {
   annotationsForAssistantMessage,
+  annotationsForSourceMessage,
   buildAnnotatedPrompt,
   parseAnnotatedPrompt,
+  pendingSourceAnnotationsForMessage,
   prepareAnnotatedPromptEdit,
   requestTextWithoutAnnotations,
   transcriptMessagesForSession,
   type ParsedResponseAnnotation,
+  type ResponseAnnotation,
+  type IndexedSourceResponseAnnotation,
 } from "../../../lib/response-annotations";
 import { MessageAnnotationSummary } from "./MessageAnnotationSummary";
+import { SourceAnnotationMarkers } from "./SourceAnnotationMarkers";
 import { useTranscriptHistoryActionsAllowed } from "./transcript-action-scope";
 
 const EMPTY_RESPONSE_ANNOTATIONS: readonly ParsedResponseAnnotation[] = [];
+const EMPTY_SOURCE_RESPONSE_ANNOTATIONS: readonly IndexedSourceResponseAnnotation[] = [];
+const EMPTY_PENDING_RESPONSE_ANNOTATIONS: readonly ResponseAnnotation[] = [];
 
 function SkillInvocationText({ message }: { message: UiMessage }) {
   const command = message.command ?? "";
@@ -108,6 +115,23 @@ export const MessageRow = memo(function MessageRow({
         message.id,
       ),
   );
+  const savedSourceAnnotations = useAppStore((s) =>
+    isUser
+      ? EMPTY_SOURCE_RESPONSE_ANNOTATIONS
+      : annotationsForSourceMessage(transcriptMessagesForSession(s, paneSessionId), message.id),
+  );
+  const pendingAnnotations = useAppStore((s) =>
+    isUser || !paneSessionId
+      ? EMPTY_PENDING_RESPONSE_ANNOTATIONS
+      : s.responseAnnotations[paneSessionId] ?? EMPTY_PENDING_RESPONSE_ANNOTATIONS,
+  );
+  const sourceAnnotations = useMemo(
+    () => [
+      ...savedSourceAnnotations,
+      ...pendingSourceAnnotationsForMessage(pendingAnnotations, message.id),
+    ],
+    [message.id, pendingAnnotations, savedSourceAnnotations],
+  );
   const session = useAppStore((s) => s.sessions.find((item) => item.id === paneSessionId));
   const canEditMessages = sessionAllows(session ?? (paneSessionId.startsWith("remote:") ? { id: paneSessionId } : undefined), "canEditMessages");
   const canMutateHistory = canEditMessages && historyActionsAllowed;
@@ -133,6 +157,7 @@ export const MessageRow = memo(function MessageRow({
   const editSeed =
     (editableUserMessage && message.command) || displayContent;
   const [editing, setEditing] = useState(false);
+  const [annotationHost, setAnnotationHost] = useState<HTMLElement | null>(null);
   const [loadingEdit, setLoadingEdit] = useState(false);
   const editRequest = useRef<AbortController | null>(null);
   const editAnnotations = useRef<ParsedResponseAnnotation[]>([]);
@@ -308,7 +333,7 @@ export const MessageRow = memo(function MessageRow({
         {message.id.startsWith("plugin:") && message.agentName ? <span className="muted">{message.agentName}</span> : null}
         {message.sessionMessage ? <SessionMessageOrigin origin={message.sessionMessage} /> : null}
         {isUser || displayed ? (
-          <div className="message-bubble">
+          <div className="message-bubble" ref={isUser ? undefined : setAnnotationHost}>
             {editing && editableUserMessage ? (
               <form
                 className="message-edit"
@@ -399,6 +424,9 @@ export const MessageRow = memo(function MessageRow({
               </div>
             )}
           </div>
+        ) : null}
+        {!isUser && sourceAnnotations.length > 0 ? (
+          <SourceAnnotationMarkers annotations={sourceAnnotations} contentHost={annotationHost} />
         ) : null}
         {!editing && isUser && sentAnnotations.length > 0 ? (
           <MessageAnnotationSummary annotations={sentAnnotations} />
