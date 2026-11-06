@@ -168,6 +168,11 @@ jobs:
       - name: Build host-core
         run: cargo build -p host-core --locked
 
+      - name: Run local Agent remote workspace-tools Host/process E2E
+        env:
+          PI_HOST_CORE_BINARY: target/debug/pi-desktop-host-core
+        run: node scripts/e2e-local-agent-remote-tools.mjs
+
       - name: Run plugin project enumeration Host/process E2E
         run: pnpm test:e2e:plugin-projects
 
