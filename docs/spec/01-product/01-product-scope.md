@@ -92,14 +92,11 @@ across devices without synchronizing conversation history or source files.
 - Remote Gateway / browser remote control; local loopback MCP control is the
   explicitly bounded exception described by ADR 0203
 - Full IDE experience
-- Private GitHub repository authentication, PR comments, reviews, and approvals (the current PR panel is public and read-only)
 - Trusted plugin provenance/signatures and a capability sandbox for raw plugin
   Node APIs
 - Mobile clients
 - Billing systems
 - Computer Use browser takeover
-- Private GitHub repository authentication, PR comments, reviews, and approvals (the current PR panel is public and read-only)
-
 ## 6. Operating modes
 
 | Product selector | Behavior |
