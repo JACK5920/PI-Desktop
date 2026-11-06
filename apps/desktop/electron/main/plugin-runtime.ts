@@ -5344,9 +5344,11 @@ export class PluginRuntime {
       // with a typo that they tried to escape the workspace is a lie that costs
       // them an afternoon.
       const lexical = !options.create && resolveWithinRoot(root, requestPath);
-      const missing = lexical
-        ? !existsSync(lexical)
-        : isAbsolute(requestPath) && !existsSync(requestPath);
+      const missing = isAbsolute(requestPath)
+        ? !existsSync(requestPath)
+        : lexical
+          ? !existsSync(lexical)
+          : false;
       const code = missing ? "NOT_FOUND" : "INVALID_ARGUMENT";
       this.auditFs(loaded, mode, requestPath, code);
       throw apiError(
