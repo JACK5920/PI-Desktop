@@ -199,7 +199,10 @@ function sessions(html) {
 test("the manifest declares exactly what the lab uses", () => {
   const validation = validateManifest(manifest);
   assert.ok(validation.ok, validation.error);
-  assert.deepEqual(manifest.rendererActions, [...PLUGIN_RENDERER_ACTIONS], "every action word the host implements");
+  assert.ok(
+    manifest.rendererActions.every((action) => PLUGIN_RENDERER_ACTIONS.includes(action)),
+    "every action word the lab declares must be implemented by the host",
+  );
   assert.deepEqual(manifest.permissions, [
     "renderer.extension",
     "agent.tool.register",

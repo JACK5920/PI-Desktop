@@ -3,9 +3,9 @@
 > **翻译说明：** 本页是与 [英文源规格](/spec/00-baseline) 一一对应的机器辅助翻译。代码、协议字段和标识符保持原文；如翻译与英文源事实有歧义，以英文版本为准。
 
 
-- 基线版本：`0.4.21`
-- 日期：`2026-10-04`
-- 状态：`Frozen for implementation details (Plan checkpoint artifact + approval/execution startup fence + protocol v11 + schema v15 + host-owned plugin session import/read/update/delete P0/P1 + selectable shell catalog + icon-free composer prompt row + turn-boundary context checkpoint compaction + session-scoped work panel + pi-owned model metadata + provider/runtime safety + M5 hardening + settings IA + project archive + sidebar organization + app update delivery + three-platform release + Extensions page density and theme-readable actions + custom global UI font)`
+- 基线版本：`0.4.23`
+- 日期：`2026-11-03`
+- 状态：`Frozen for implementation details (Plan checkpoint artifact + approval/execution startup fence + protocol v11 + schema v29 + host-owned plugin session import/read/update/delete + plugin-managed native transcripts + encrypted per-plugin secrets + session-scoped agent events + bounded plugin renderer shell contributions + project/archive/sidebar and release capabilities)`
 - 语言政策：**英语优先**
 - 后端策略：**Rust 主机核心 + pi 代理 sidecar**
 
@@ -93,6 +93,10 @@
 > `0.4.21` 移除了独立的设置「导入」目的地。模型、技能和 MCP 扫描
 > 内嵌在各自的设置页面中；会话导入继续通过现有插件 API 提供
 >（D645 / ADR 0319）。
+> `0.4.23` 新增显式授权的插件托管原生会话、插件私有加密密钥、按会话过滤的
+> 智能体事件订阅及受限的渲染器主壳页面扩展。schema v29 仅记录由宿主验证的
+> 附件来源；迁移不会为已有附件引用补授访问权限（D682 / ADR
+> `plugin-managed-native-transcripts`）。
 > D679 / ADR 0338 为获批 Goal 增加 Host 所有、有界的持久生命周期（schema v28），
 > 保留重启不重放规则：重启后 Goal 显示为中断，只有用户明确恢复并获得新的执行身份后才会继续。
 

@@ -5,8 +5,10 @@ import i18n from "i18next";
 import { I18nextProvider } from "react-i18next";
 import { en } from "../../packages/i18n/src/index";
 import { MessageRow } from "../../apps/desktop/src/features/chat/transcript/MessageRow";
-import { TranscriptMenuProvider } from "../../apps/desktop/src/features/chat/transcript/TranscriptMenu";
+import { assistantTurnMenuItems } from "../../apps/desktop/src/features/chat/transcript/menu-items";
+import { TranscriptMenuProvider, useTranscriptMenu } from "../../apps/desktop/src/features/chat/transcript/TranscriptMenu";
 import { useAppStore } from "../../apps/desktop/src/stores/app-store";
+import { useTranslation } from "react-i18next";
 
 const check = (ok: boolean, label: string) => { if (!ok) throw new Error(label); };
 const settle = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -33,6 +35,28 @@ const waitForTextarea = async () => {
   }
   throw new Error("Missing textarea");
 };
+
+function AssistantSelectionMenuProbe({ onSelection }: { onSelection: (selection: string) => void }) {
+  const { t } = useTranslation();
+  const openTranscriptMenu = useTranscriptMenu();
+  return <div
+    id="assistant-selection-probe"
+    role="article"
+    onContextMenu={(event) => openTranscriptMenu(event, {
+      label: t("chat.messageMenu"),
+      items: assistantTurnMenuItems({
+        t,
+        answer: "Alpha selected excerpt Omega",
+        selectTarget: event.currentTarget,
+        complete: true,
+        actions: { copyText: () => {}, selectText: () => {} },
+        onRegenerate: () => {},
+        onBranch: () => {},
+        onAskAboutSelection: onSelection,
+      }),
+    })}
+  ><span>Alpha selected excerpt Omega</span></div>;
+}
 
 Object.assign(globalThis, { messageEditCopyProbe: async () => {
   await i18n.init({ lng: "en", resources: { en: { translation: en } } });
@@ -87,5 +111,28 @@ Object.assign(globalThis, { messageEditCopyProbe: async () => {
   await click('[data-context-menu-item="copy"]');
   check(copied === "Original saved message", "Cancel changed the saved message");
   root.unmount();
-  return "PASS: partial draft copy, whole draft copy, select text, editing actions, cancel and saved-message copy";
+
+  let selectedExcerpt = "";
+  const selectionRoot = createRoot(container);
+  flushSync(() => selectionRoot.render(<I18nextProvider i18n={i18n}><TranscriptMenuProvider>
+    <AssistantSelectionMenuProbe onSelection={(selection) => { selectedExcerpt = selection; }} />
+  </TranscriptMenuProvider></I18nextProvider>));
+  await menu(find("#assistant-selection-probe"));
+  check(!document.querySelector('[data-context-menu-item="ask-about-selection"]'), "Selection follow-up appeared without an excerpt");
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  await settle();
+  const paragraph = find("#assistant-selection-probe span").firstChild;
+  if (!paragraph || paragraph.nodeType !== Node.TEXT_NODE) throw new Error("Missing assistant reply text");
+  const range = document.createRange();
+  range.setStart(paragraph, "Alpha ".length);
+  range.setEnd(paragraph, "Alpha selected excerpt".length);
+  const selection = window.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+  await menu(find("#assistant-selection-probe"));
+  check(!!document.querySelector('[data-context-menu-item="ask-about-selection"]'), "Selection follow-up was missing for selected reply text");
+  await click('[data-context-menu-item="ask-about-selection"]');
+  check(selectedExcerpt === "selected excerpt", `Selection follow-up received ${JSON.stringify(selectedExcerpt)}`);
+  selectionRoot.unmount();
+  return "PASS: message copy/edit context menu and selection-gated assistant follow-up";
 } });

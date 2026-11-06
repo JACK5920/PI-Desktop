@@ -43,6 +43,29 @@
   white-space: nowrap;
 }
 
+.thread-item-side-chat {
+  display: flex;
+  width: calc(100% - 18px);
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  margin: 1px 0 2px 18px;
+  padding: 4px 8px;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  color: var(--ds-text-muted);
+  font-size: var(--text-sm);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thread-item-side-chat:hover,
+.thread-item-side-chat:focus-visible {
+  background: var(--ds-bg-hover);
+  color: var(--ds-text-primary);
+}
+
 .thread-item-meta {
   /* The action and date overlap in one slot; opacity keeps its width stable. */
   display: grid;

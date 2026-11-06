@@ -59,6 +59,7 @@ import { useComposerModelMenu } from "../features/chat/composer/hooks/useCompose
 import { useVoiceInput } from "../features/voice/useVoiceInput";
 import { ComposerToolbar } from "../features/chat/composer/ComposerToolbar";
 import { ComposerStatus } from "../features/chat/composer/ComposerStatus";
+import { ComposerAnnotationAttachments } from "../features/chat/composer/ComposerAnnotationAttachments";
 
 const EMPTY_QUEUED_PROMPTS: QueuedPrompt[] = [];
 
@@ -143,6 +144,9 @@ export function Composer({
   );
   const goalLifecycle = useAppStore((s) =>
     s.activeSessionId ? s.goalLifecycles[s.activeSessionId] : undefined,
+  );
+  const goalProgress = useAppStore((s) =>
+    s.activeSessionId ? s.goalProgress[s.activeSessionId] : undefined,
   );
   const pendingAsk = useAppStore((s) =>
     headAsk(s.pendingAsks, s.activeSessionId),
@@ -409,7 +413,11 @@ export function Composer({
     thinkingLevel,
     controlsBlocked,
   });
-  const modelReady = remoteSession ? promptAllowed : nativeSession
+  const modelReady = remoteSession
+    ? promptAllowed
+    : activeSessionSummary?.managedByPlugin
+    ? true
+    : nativeSession
     ? activeSessionSummary.capabilities?.canPrompt === true
     : !!provider &&
       provider.enabled &&
@@ -545,7 +553,7 @@ export function Composer({
           <PlanApprovalBar proposal={planCheckpoint} />
         ) : null}
         {goalLifecycle && goalLifecycle.status !== "cleared" && localToolsAllowed && !nativeSession ? (
-          <GoalLifecycleBar goal={goalLifecycle} />
+          <GoalLifecycleBar goal={goalLifecycle} liveProgress={goalProgress} />
         ) : null}
         {pendingAsk ? (
           <AskToolCard key={pendingAsk.requestId} request={pendingAsk} queued={queuedAsks} />
@@ -585,6 +593,7 @@ export function Composer({
               onAccept={completions.acceptCompletion}
             />
           ) : null}
+          <ComposerAnnotationAttachments />
           <ComposerInput
             imagePreview={draft.imagePreview}
             inputRef={ref}

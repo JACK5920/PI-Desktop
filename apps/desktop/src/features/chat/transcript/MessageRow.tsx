@@ -38,6 +38,19 @@ import {
   useTranscriptMenu,
 } from "./TranscriptMenu";
 import { getExtraMessageAttachments } from "./extra-attachments";
+import {
+  annotationsForAssistantMessage,
+  buildAnnotatedPrompt,
+  parseAnnotatedPrompt,
+  prepareAnnotatedPromptEdit,
+  requestTextWithoutAnnotations,
+  transcriptMessagesForSession,
+  type ParsedResponseAnnotation,
+} from "../../../lib/response-annotations";
+import { MessageAnnotationSummary } from "./MessageAnnotationSummary";
+import { useTranscriptHistoryActionsAllowed } from "./transcript-action-scope";
+
+const EMPTY_RESPONSE_ANNOTATIONS: readonly ParsedResponseAnnotation[] = [];
 
 function SkillInvocationText({ message }: { message: UiMessage }) {
   const command = message.command ?? "";
@@ -85,11 +98,26 @@ export const MessageRow = memo(function MessageRow({
   const activateMessageRevision = useAppStore((s) => s.activateMessageRevision);
   const deleteMessage = useAppStore((s) => s.deleteMessage);
   const paneSessionId = useSlotSessionId();
+  const historyActionsAllowed = useTranscriptHistoryActionsAllowed();
+  const isUser = message.role === "user";
+  const responseAnnotations = useAppStore((s) =>
+    isUser
+      ? EMPTY_RESPONSE_ANNOTATIONS
+      : annotationsForAssistantMessage(
+        transcriptMessagesForSession(s, paneSessionId),
+        message.id,
+      ),
+  );
   const session = useAppStore((s) => s.sessions.find((item) => item.id === paneSessionId));
   const canEditMessages = sessionAllows(session ?? (paneSessionId.startsWith("remote:") ? { id: paneSessionId } : undefined), "canEditMessages");
-  const isUser = message.role === "user";
+  const canMutateHistory = canEditMessages && historyActionsAllowed;
   const isSessionMessage = Boolean(message.sessionMessage);
-  const editableUserMessage = isUser && !isSessionMessage && canEditMessages;
+  const editableUserMessage = isUser && !isSessionMessage && !message.id.startsWith("plugin:") && canMutateHistory;
+  const selectionRole = !isSessionMessage &&
+    !message.id.startsWith("plugin:") &&
+    (message.role === "user" || message.role === "assistant")
+    ? message.role
+    : undefined;
   const localWorkspaceRoot = useAppStore((s) => s.workspace?.path);
   const workspaceRoot = sessionAllows(session, "canUseLocalTools") ? localWorkspaceRoot : undefined;
   const openFileRef = useOpenChatFileRef();
@@ -97,11 +125,17 @@ export const MessageRow = memo(function MessageRow({
   const slotUser = isUser ? slotMessage("user", message) : undefined;
   // Slash prompts are stored expanded; editing works on the typed form so the
   // resent turn re-expands the template (D123).
+  const displayContent = requestTextWithoutAnnotations(message.content || "");
+  const sentAnnotations = useMemo(
+    () => isUser ? parseAnnotatedPrompt(message.content ?? "")?.annotations ?? [] : [],
+    [isUser, message.content],
+  );
   const editSeed =
-    (editableUserMessage && message.command) || (message.content || "");
+    (editableUserMessage && message.command) || displayContent;
   const [editing, setEditing] = useState(false);
   const [loadingEdit, setLoadingEdit] = useState(false);
   const editRequest = useRef<AbortController | null>(null);
+  const editAnnotations = useRef<ParsedResponseAnnotation[]>([]);
   useEffect(() => () => editRequest.current?.abort(), []);
   const [editValue, setEditValue] = useState(editSeed);
   const [retryingEdit, setRetryingEdit] = useState(false);
@@ -110,23 +144,23 @@ export const MessageRow = memo(function MessageRow({
   const deleteLabel = t("chat.deleteMessage");
   // Runtime chunks are already progressive. Rendering that source directly
   // avoids a second per-frame state loop while Markdown memoizes stable blocks.
-  const displayed = message.content || "";
-  const hasAnswer = Boolean((message.content || "").trim());
+  const displayed = displayContent;
+  const hasAnswer = Boolean(displayed.trim());
   const revisionCount = message.revisionCount ?? 0;
   const activeRevision = message.activeRevision ?? revisionCount;
   const showRevisionPager = editableUserMessage && revisionCount > 1;
   const extraAttachments = useMemo(() => {
     return getExtraMessageAttachments(
-      String(message.content || ""),
+      displayed,
       message.attachments,
       workspaceRoot,
     );
-  }, [message.attachments, message.content, workspaceRoot]);
+  }, [displayed, message.attachments, workspaceRoot]);
   // The user's own order: an image chip the draft named inline renders between
   // the text runs it sat between, exactly where the Composer showed it.
   const userContentParts = useMemo(
-    () => splitInlineContent(String(message.content || ""), message.attachments ?? []).parts,
-    [message.attachments, message.content],
+    () => splitInlineContent(displayed, message.attachments ?? []).parts,
+    [displayed, message.attachments],
   );
   const renderContentPart = (
     part: (typeof userContentParts)[number],
@@ -195,7 +229,9 @@ export const MessageRow = memo(function MessageRow({
     try {
       const full = await prepareUserMessageEdit(message.id, request.signal);
       if (!full || request.signal.aborted || editRequest.current !== request) return;
-      setEditValue(full.command || full.content || "");
+      const preparedEdit = prepareAnnotatedPromptEdit(full.command || full.content || "");
+      editAnnotations.current = preparedEdit.annotations;
+      setEditValue(preparedEdit.requestText);
       setEditing(true);
     } finally {
       unsubscribe();
@@ -206,16 +242,24 @@ export const MessageRow = memo(function MessageRow({
     }
   };
   const cancelEdit = () => {
+    editAnnotations.current = [];
     setEditValue(editSeed);
     setEditing(false);
   };
   const retryEdit = async () => {
-    const next = editValue.trim();
-    if (!editableUserMessage || retryingEdit || (!next && !message.attachments?.length)) return;
+    const requestText = editValue.trim();
+    if (!editableUserMessage || retryingEdit || (!requestText && !message.attachments?.length)) return;
     setRetryingEdit(true);
-    const saved = await editUserMessage(message.id, next, message.attachments);
+    const saved = await editUserMessage(
+      message.id,
+      buildAnnotatedPrompt(requestText, editAnnotations.current),
+      message.attachments,
+    );
     setRetryingEdit(false);
-    if (saved) setEditing(false);
+    if (saved) {
+      editAnnotations.current = [];
+      setEditing(false);
+    }
   };
   /*
     The pointer path to the actions the hover row already offers. Only a human
@@ -229,7 +273,7 @@ export const MessageRow = memo(function MessageRow({
       label: t("chat.messageMenu"),
       items: userMessageMenuItems({
         t,
-        text: editing ? editValue : message.content || "",
+        text: editing ? editValue : displayed,
         selectTarget: event.currentTarget.querySelector<HTMLElement>(
           editing ? ".message-edit-input" : ".message-bubble",
         ),
@@ -251,12 +295,17 @@ export const MessageRow = memo(function MessageRow({
       className={`message-row ${isSessionMessage ? "session-message" : isUser ? "user" : message.role}`}
       data-minimap-id={message.id}
       data-message-id={message.id}
-      data-row-role={isSessionMessage ? undefined : "user"}
+      data-row-role={isSessionMessage ? undefined : message.role}
+      data-selection-message-id={selectionRole ? message.id : undefined}
+      data-selection-session-id={selectionRole ? paneSessionId : undefined}
+      data-selection-role={selectionRole}
+      data-selection-eligible={selectionRole && canEditMessages ? "true" : "false"}
       onContextMenu={onContextMenu}
       role="article"
       aria-label={isSessionMessage ? t("sessionCollaboration.agentMessage") : isUser ? t("chat.userMessage") : t("chat.assistantMessage")}
     >
       <div className="message-col">
+        {message.id.startsWith("plugin:") && message.agentName ? <span className="muted">{message.agentName}</span> : null}
         {message.sessionMessage ? <SessionMessageOrigin origin={message.sessionMessage} /> : null}
         {isUser || displayed ? (
           <div className="message-bubble">
@@ -310,7 +359,7 @@ export const MessageRow = memo(function MessageRow({
               </form>
             ) : isUser ? (
               <>
-                {message.content ? (
+                {displayed ? (
                   <div className="message-user-text selectable">
                     {editableUserMessage && message.command ? (
                       <>
@@ -321,8 +370,8 @@ export const MessageRow = memo(function MessageRow({
                           <code
                             className="chat-command-chip"
                             data-source-start={0}
-                            data-source-end={message.content.length}
-                            title={String(message.content || "")}
+                            data-source-end={displayed.length}
+                            title={displayed}
                           >
                             {message.command}
                           </code>
@@ -342,10 +391,17 @@ export const MessageRow = memo(function MessageRow({
               </>
             ) : (
               <div className="prose-chat">
-                <Markdown source={displayed} />
+                <Markdown
+                  source={displayed}
+                  responseAnnotations={responseAnnotations}
+                  annotationSessionId={paneSessionId}
+                />
               </div>
             )}
           </div>
+        ) : null}
+        {!editing && isUser && sentAnnotations.length > 0 ? (
+          <MessageAnnotationSummary annotations={sentAnnotations} />
         ) : null}
         {!editing && (hasAnswer || showRevisionPager) ? (
           <div className="message-actions">
@@ -386,7 +442,7 @@ export const MessageRow = memo(function MessageRow({
                 </TooltipButton>
               </div>
             ) : null}
-            {hasAnswer ? <CopyButton text={message.content} label={copyLabel} /> : null}
+            {hasAnswer ? <CopyButton text={displayed} label={copyLabel} /> : null}
             {editableUserMessage ? (
               <TooltipButton
                 className="copy-btn icon"

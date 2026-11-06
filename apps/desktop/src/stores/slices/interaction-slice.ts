@@ -1,6 +1,8 @@
 import i18n from "i18next";
 import type {
   AskToolResolution,
+  GoalBudget,
+  GoalBudgetUpdateResult,
   GoalControlAction,
   PlanResolveRequest,
 } from "@pi-desktop/shared";
@@ -51,6 +53,7 @@ export function createInteractionSlice({
   | "dropAskDraft"
   | "resolvePlan"
   | "controlGoal"
+  | "updateGoalBudget"
   | "showToast"
   | "dismissToast"
   | "dismissAssistantErrorMessage"
@@ -59,6 +62,7 @@ export function createInteractionSlice({
     string,
     { action: GoalControlAction; promise: Promise<void> }
   >();
+  const goalBudgetUpdateRequests = new Map<string, Promise<void>>();
   return {
     dismissAssistantErrorMessage: (messageId) => {
       if (!messageId) return;
@@ -261,6 +265,33 @@ export function createInteractionSlice({
       } finally {
         if (goalControlRequests.get(sessionId) === entry) {
           goalControlRequests.delete(sessionId);
+        }
+      }
+    },
+
+    updateGoalBudget: async (sessionId: string, proposalId: string, budget: GoalBudget) => {
+      const existing = goalBudgetUpdateRequests.get(sessionId);
+      if (existing) return existing;
+      const request = (async () => {
+        const result: GoalBudgetUpdateResult = await api.updateGoalBudget({
+          sessionId,
+          proposalId,
+          budget,
+        });
+        get().handlePlansChanged({
+          sessionId,
+          state: "inactive",
+          kind: "goal",
+          proposalId: result.goal.proposalId,
+          goal: result.goal,
+        });
+      })();
+      goalBudgetUpdateRequests.set(sessionId, request);
+      try {
+        await request;
+      } finally {
+        if (goalBudgetUpdateRequests.get(sessionId) === request) {
+          goalBudgetUpdateRequests.delete(sessionId);
         }
       }
     },

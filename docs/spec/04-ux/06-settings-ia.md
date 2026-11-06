@@ -308,6 +308,14 @@ Settings is a **full-window page** that replaces the app sidebar + main chrome (
   is remaining. The threshold controls when a text-only paste becomes a
   temporary session-scratch file; it defaults to 600 characters and accepts
   integer values from 1 through 1,000,000.
+- **Goal budget defaults** card: configure future approved Goals with a
+  default of eight rounds, a retained finite token value of 250,000, 60
+  minutes, and unlimited tokens enabled. Rounds accept 1–32, duration accepts
+  1–1,440 minutes, and a finite token value accepts any positive safe integer.
+  The token value remains editable while unlimited is enabled. Saving changes
+  only defaults for Goals approved afterward; it never rewrites an existing
+  Goal's Host-owned budget snapshot. The per-Goal lifecycle editor remains the
+  override surface. Settings search indexes the card and its controls.
 - Composer text actions are contributed by explicitly installed plugins and
   appear only while their plugin is enabled and its `composer.transform`
   permission is granted. The host does not include a prompt-enhancement card or
@@ -625,11 +633,14 @@ a usage tab.
     keys are written to the host secret store; subscription/OAuth logins are
     not imported. Re-importing an equivalent provider is skipped.
 
-The permission-mode selector remains available in the composer while the
-session is in Agent, Plan, or Goal. In Plan and Goal it controls Bash
-confirmation only: Ask and Accept edits prompt, while Auto may run a mutating
-Bash command without confirmation. The AI Defaults card must describe that both
-contract modes are intent boundaries, not strict read-only security profiles.
+The per-session permission-mode selector remains available in the composer in
+Agent and Plan. Goal shows a fixed Auto chip without a mode menu; its contract
+phase uses Host-enforced Auto regardless of the stored session preference or
+global default. The Goal approval card separately selects the permission mode
+for the post-approval Agent run. Plan Bash follows the effective session/global
+mode, while Goal contract Bash may mutate without a permission prompt. The AI
+Defaults card must describe that both contract modes are intent boundaries,
+not strict read-only security profiles.
 
 ### Jev classifier
 

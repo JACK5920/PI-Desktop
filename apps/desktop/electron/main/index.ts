@@ -62,7 +62,7 @@ import { registerApplicationActivation } from "./bootstrap/app-activation";
 import { createHostRuntime } from "./runtime/host";
 import { createSidecarRuntime } from "./runtime/sidecar";
 import { createEventPersistence } from "./runtime/event-persistence";
-import { createPlanRuntime } from "./runtime/plans";
+import { createPlanRuntime, type ApprovedExecutionTurn } from "./runtime/plans";
 import { createRuntimeLifecycle } from "./runtime/lifecycle";
 import {
   createProviderCatalogRuntime,
@@ -468,7 +468,14 @@ function setCurrentWorkspacePath(path: string | null): void {
 }
 
 /** Pull the user's MCP server records from host-core into the local runtime. */
-function sendToRenderer(channel: string, payload: unknown) {
+function sendToRenderer(
+  channel: string,
+  payload: unknown,
+  options: { pluginDelivery?: boolean } = {},
+) {
+  if (channel === IPC.event.agentMessage && options.pluginDelivery !== false) {
+    plugins.deliverAgentEvent(payload as AgentEventEnvelope);
+  }
   applicationLifecycle?.traySessions.observeEvent(channel, payload);
   applicationLifecycle?.taskbarUnreadBadge.observeEvent(channel, payload);
   if (channel === IPC.event.pluginChanged) {
@@ -603,7 +610,7 @@ const approvedExecutionIdsBySession = new Map<string, string>();
 /** executionId → durable execution turn identity. */
 const approvedExecutionTurns = new Map<
   string,
-  { sessionId: string; turnId: string }
+  ApprovedExecutionTurn
 >();
 /** Claimed executions remain tracked even before their durable turn exists. */
 const claimedExecutionSessions = new Map<string, string>();
@@ -745,6 +752,8 @@ const eventPersistence = createEventPersistence({
   inflightCheckpointer,
   persistenceOutbox,
   addActiveTurnUsage,
+  getActiveTurnUsage: (sessionId) => activeTurnUsages.get(sessionId),
+  emitGoalProgress: (event) => sendToRenderer(IPC.event.goalProgress, event),
   logger,
   finishTurn,
   isStaleTerminalEvent,

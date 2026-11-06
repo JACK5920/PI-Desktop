@@ -313,7 +313,13 @@ to later refresh and inference; the vendor picker does not collect them.
 
 ### Settings
 - `settings.get`
-- `settings.set` — optional `networkProxy` (`system` / `direct` / `custom`).
+- `settings.set` — optional `networkProxy` (`system` / `direct` / `custom`),
+  and optional `AppSettings.goalBudgetDefaults`. `settings.get` normalizes a
+  missing or malformed Goal budget default to 8 rounds, a retained finite
+  token value of 250,000, 60 minutes, and unlimited tokens enabled; writes
+  reject invalid rounds, finite tokens, duration, or unlimited flag values.
+  The setting is a portable application preference and uses no schema or RPC
+  version change.
   Custom requires an `http`/`https`/`socks5` URL. host-core uses the stored
   value for marketplace `curl --proxy` and does not put it on process env.
 
@@ -1017,15 +1023,15 @@ Before generic permission evaluation, host-core applies the mode policy:
   all permission modes and grants. The host reads the session's **durable** mode
   for this check, so a sidecar claiming `agent` in `tools.execute` cannot widen
   it, and the `*_IN_PLAN` error codes are shared by both kinds.
-- Plan and Goal `Bash` follows the resolved permission mode: `ask` and
-  `accept-edits`
-  emit `permissions.request`; `auto` executes without confirmation and may
-  mutate. The host re-resolves the effective shell ID/dialect and requires the
-  exact `expectedCommandShellId` and `expectedCommandShellDialect` before
-  permission evaluation and again before spawn; it streams stdout/stderr
-  separately. A configured shell may fall back to the first available platform
-  shell before the turn pin is created, but execution never changes shell
-  after the pin.
+- Plan `Bash` follows the resolved session/global permission mode. Goal
+  contract-phase `Bash` uses Host-enforced fixed Auto before approval, without
+  changing the stored session permission; the approval-selected mode governs
+  post-approval Agent execution. Admitted Auto Bash may mutate. The host
+  re-resolves the effective shell ID/dialect and requires the exact
+  `expectedCommandShellId` and `expectedCommandShellDialect` before permission
+  evaluation and again before spawn; it streams stdout/stderr separately. A
+  configured shell may fall back to the first available platform shell before
+  the turn pin is created, but execution never changes shell after the pin.
 - Agent applies the normal registered-tool and permission policy.
 
 The visible tool list is not the security boundary; a forged RPC call is
@@ -1233,7 +1239,7 @@ host emits `targetPermissionMode` and `execution` as JSON `null` when no value
 exists. Electron forwards this notification unchanged through
 the shared `IPC.event.plansChanged` renderer channel.
 
-Goal lifecycle is additive to protocol v11 and schema v28. `plans.pending` also
+Goal lifecycle is additive to protocol v11 and schema v30. `plans.pending` also
 returns the non-cleared lifecycle for a requested session as `goal`, or the
 latest non-cleared lifecycle per session as `goals` for a global query.
 `goals.report` accepts `{ sessionId, proposalId, executionId, turnId, report }`
@@ -1245,13 +1251,25 @@ execution descriptor. Clear removes the Goal from current tracking but retains
 historical reports and immutable artifacts. Goal reports are Agent-authored
 claims; the Host validates their structure and scope, not the truth of the
 evidence they cite. Automatic `continue` rounds are queued only after the
-previous turn settles and stop after eight execution rounds per cycle,
-including the initial approved round. Each cycle also has persistent ceilings
-of 250,000 reported tokens and 60 minutes of elapsed wall-clock time. These
-ceilings are evaluated when the current round settles; an in-flight round is
-not terminated at the boundary, but no further automatic round is queued once
-either ceiling is reached. Manual resume creates a new cycle and resets both
-counters. Dispatch waits while the session has
+previous turn settles. On approval, the Host reads the latest app-level
+`goalBudgetDefaults` in the same transaction that creates the lifecycle, then
+stores that budget as the Goal's snapshot. Missing defaults normalize to 8
+rounds, 250,000 retained finite tokens, 60 minutes, and unlimited tokens
+enabled. Settings changes affect later approvals only and do not rewrite any
+existing Goal; `goals.budget.update` remains the per-Goal override. It accepts
+`{ sessionId, proposalId, budget }` and updates the durable limits for the current
+Goal, where `budget` contains `maxRounds` (1–32), `maxTokens` (a positive safe
+integer through `Number.MAX_SAFE_INTEGER`), `maxDurationMs` (60,000–86,400,000),
+and `tokenBudgetUnlimited` (boolean). Setting the last field to `true` disables
+only the token cutoff: reported usage continues to accumulate, and round/time
+limits remain active. `maxTokens` remains the saved finite value while tokens
+are unlimited and can be edited for later finite mode. The Host rejects invalid
+budgets and stale, completed, or cleared Goals. Active, paused, blocked, and
+interrupted Goals may be edited. Updating a budget does not reset counters,
+change cycle/execution identity, cancel a current round, or resume a Goal. The
+Host checks new limits after the current round settles; it does not terminate
+in-flight work at a limit. Manual resume creates a new cycle and resets cycle
+usage while retaining the configured limits. Dispatch waits while the session has
 queued interactive input or a pending Plan/Goal approval, rather than jumping
 ahead of that work. A restart marks an
 active run interrupted and requires an explicit `resume`; it never queues a

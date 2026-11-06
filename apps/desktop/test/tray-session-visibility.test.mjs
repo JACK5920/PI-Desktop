@@ -18,17 +18,21 @@ const session = (id, scheduledRun) => ({
   ...(scheduledRun === undefined ? {} : { scheduledRun }),
 });
 
-test("the tray never offers a scheduled run's transcript", () => {
-  const listed = [session("plain"), session("automation", true), session("legacy")];
+test("the tray never offers owned transcripts or unpromoted side chats", () => {
+  const listed = [session("plain"), session("automation", true),
+    { ...session("managed"), managedByPlugin: "fixture.owner" },
+    { ...session("hidden-side-chat"), sideChat: { parentSessionId: "plain", sourceMessageId: "m1", excerpt: "quote", promoted: false } },
+    { ...session("promoted-side-chat"), sideChat: { parentSessionId: "plain", sourceMessageId: "m1", excerpt: "quote", promoted: true } },
+    session("legacy")];
 
   assert.deepEqual(
     trayVisibleSessions(listed).map((item) => item.id),
-    ["plain", "legacy"],
-    "a run's transcript leaves the tray's recents, a legacy summary without the flag stays",
+    ["plain", "promoted-side-chat", "legacy"],
+    "owned transcripts and unpromoted side chats leave recents; legacy summaries stay",
   );
   assert.deepEqual(trayVisibleSessions([]), []);
   assert.equal(
-    trayVisibleSessions(listed).some((item) => item.scheduledRun === true),
+    trayVisibleSessions(listed).some((item) => item.scheduledRun === true || (item.sideChat && !item.sideChat.promoted)),
     false,
   );
 });

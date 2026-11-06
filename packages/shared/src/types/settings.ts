@@ -1,16 +1,17 @@
 /** Shared public types grouped by the owning application domain. */
 import type { CommandShellId } from "../command-shells.js";
 import type { KeybindingOverrides } from "../keyboard-shortcuts.js";
-import type { NetworkProxySettings } from "../network-proxy.js";
 import type { NetworkPolicySettings } from "../network-policy.js";
-import type { ContextCompactionSettings } from "./sessions.js";
+import type { NetworkProxySettings } from "../network-proxy.js";
 import type { Mode } from "./common.js";
-import type { GlobalPermissionMode } from "./permissions.js";
-import type { PluginMarketSource } from "./plugins.js";
-import type { SpeechSettings } from "./speech.js";
-import type { ThinkingLevel } from "./models.js";
-import type { UpdatePreference } from "./platform.js";
 import type { LiveVoiceSettings } from "./live-voice.js";
+import type { ThinkingLevel } from "./models.js";
+import type { GlobalPermissionMode } from "./permissions.js";
+import type { GoalBudget } from "./plans.js";
+import type { UpdatePreference } from "./platform.js";
+import type { PluginMarketSource } from "./plugins.js";
+import type { ContextCompactionSettings } from "./sessions.js";
+import type { SpeechSettings } from "./speech.js";
 
 export type ThemePreference = "system" | "light" | "dark" | `plugin:${string}`;
 
@@ -49,6 +50,8 @@ export type AppSettings = {
   updatePreference?: UpdatePreference;
   /** Last manually announced release; kept local to avoid repeating notices. */
   lastNotifiedUpdateVersion?: string;
+  /** Default execution limits copied into each newly approved Goal. */
+  goalBudgetDefaults?: GoalBudget;
   /** Host speech bindings. Absent means voice actions stay disabled. */
   speech?: SpeechSettings;
   /** App-owned real-time voice bindings; separate from local dictation. */

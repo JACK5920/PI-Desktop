@@ -106,9 +106,13 @@ test("reject or interruption returns editable planning without changing durable 
   const sendPromptBlock =
     queueSource.slice(queueSource.indexOf("sendPrompt: async"));
   assert.match(sendPromptBlock, /get\(\)\.pendingPlans\[sessionId\]\?\.status === "pending"/);
+  assert.match(
+    sendPromptBlock,
+    /const submittedContent = buildAnnotatedPrompt\(content, annotationSnapshot\)/,
+  );
   assert.match(sendPromptBlock, /await api\.prompt\(\{/);
-  // The send ships the submitted content through the prompt call.
-  assert.match(sendPromptBlock, /sessionId,\s*content,/);
+  // The send keeps the requested session and submits the annotation envelope.
+  assert.match(sendPromptBlock, /sessionId,\s*content: submittedContent,/);
   assert.match(
     sendPromptBlock,
     /attachments: draft[\s\S]*promptAttachmentsFromDraft\(draft\.fileReferences\)/,

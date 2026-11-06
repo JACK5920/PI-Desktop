@@ -30,6 +30,17 @@ test("streaming prose chat stabilizes line wrapping against orphan-rebalancing r
   );
 });
 
+test("visible text in the active streaming assistant turn remains selectable", () => {
+  assert.match(
+    assistantTurnPartsSource,
+    /selectable=\{!isActive \|\| part\.message\.status === "streaming"\}/,
+  );
+  assert.doesNotMatch(
+    assistantTurnPartsSource,
+    /const selectionEligible = selectable && !streaming/,
+  );
+});
+
 test("streaming cursor attaches to inline leaf blocks and list items instead of container lists", () => {
   // List cursor must be placed on inline content, never on nested ul/ol containers.
   assert.match(

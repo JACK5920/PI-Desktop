@@ -1,10 +1,13 @@
 import type { ComposerDraftSnapshot } from "./composer-smart-stop";
+import type { ResponseAnnotation } from "./response-annotations";
 
 export type QueuedPrompt = {
   id: string;
   sessionId: string;
   content: string;
   draft: ComposerDraftSnapshot;
+  /** Transient Composer attachments encoded in the Host-owned prompt envelope. */
+  annotations?: ResponseAnnotation[];
   createdAt: number;
   /**
    * Set once the row was promoted with Send now. Promoted rows form the head

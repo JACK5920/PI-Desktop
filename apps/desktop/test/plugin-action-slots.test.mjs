@@ -54,13 +54,18 @@ async function bars(t) {
   const { MessageRow } = await ssr.load("/src/features/chat/transcript/MessageRow.tsx");
   const { AssistantTurn } = await ssr.load("/src/features/chat/transcript/AssistantTurn.tsx");
   const { buildTranscriptEntries } = await ssr.load("/src/lib/assistant-turns.ts");
+  const { TranscriptHistoryActionsContext } = await ssr.load("/src/features/chat/transcript/transcript-action-scope.tsx");
   return {
     ...ssr,
     row: (message = USER) => ssr.render(createElement(MessageRow, { message, isRunning: false })),
-    turn: (messages = conversation(), isActive = false) => {
+    turn: (messages = conversation(), isActive = false, { allowHistoryMutations = true } = {}) => {
       const { entries } = buildTranscriptEntries(messages);
       const entry = entries.find((candidate) => candidate.kind === "assistant-turn");
-      return ssr.render(createElement(AssistantTurn, { entry, isActive }));
+      return ssr.render(createElement(
+        TranscriptHistoryActionsContext.Provider,
+        { value: allowHistoryMutations },
+        createElement(AssistantTurn, { entry, isActive }),
+      ));
     },
   };
 }
@@ -191,6 +196,13 @@ test("a reply's items act on the answer message the host keys act on", async (t)
     [],
     "a reply still streaming has no bar to add to",
   );
+});
+
+test("a docked child reply keeps copy but hides history actions that target another session", async (t) => {
+  const ssr = await bars(t);
+  const html = ssr.turn(conversation(), false, { allowHistoryMutations: false });
+  assert.match(html, /aria-label="Copy"/);
+  assert.doesNotMatch(html, /Branch from this reply|Regenerate/);
 });
 
 test("a session message carries userAction around Copy; other rows keep a plugin-free bar", async (t) => {

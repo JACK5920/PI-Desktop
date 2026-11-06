@@ -133,6 +133,18 @@ export function createWorkPanelSlice({
     void api.pluginViewClose("pi.browser", "browser", { sessionId, tabId })
       .catch((error) => get().showToast(String(error), { variant: "error" }));
   };
+  const discardSideChatsForTabs = (
+    sideChats: AppState["sideChats"],
+    removedTabs: readonly WorkPanelTab[],
+  ): AppState["sideChats"] => {
+    const ids = removedTabs
+      .filter((tab) => tab.kind === "side-chat")
+      .map((tab) => tab.resource ?? tab.id);
+    if (ids.length === 0) return sideChats;
+    const next = { ...sideChats };
+    for (const id of ids) delete next[id];
+    return next;
+  };
 
   return {
   openSubagentTab: (delegationId, agentName) => {
@@ -236,6 +248,10 @@ export function createWorkPanelSlice({
         fileRequest,
       };
       return {
+        sideChats: discardSideChatsForTabs(
+          state.sideChats,
+          state.workPanelTabs.filter((item) => !next.tabs.some((nextTab) => nextTab.id === item.id)),
+        ),
         workPanelOpen: true,
         workPanelTabs: next.tabs,
         activeWorkPanelTabId: next.activeTabId,
@@ -306,39 +322,49 @@ export function createWorkPanelSlice({
       };
     });
   },
-  closeWorkPanelTab: (tabId) => {
+  closeWorkPanelTab: (tabId, requestedSessionId) => {
     const current = get();
-    const browserTab = current.workPanelTabs.find(
+    const sessionId = requestedSessionId ?? current.activeSessionId;
+    if (!sessionId) return;
+    const context = current.activeSessionId === sessionId
+      ? { tabs: current.workPanelTabs, activeTabId: current.activeWorkPanelTabId }
+      : current.workPanelContexts[sessionId] ?? emptyWorkPanelContext();
+    const browserTab = context.tabs.find(
       (tab) => tab.id === tabId && tab.resource === "pi.browser/browser",
     );
-    if (current.activeSessionId && browserTab) {
-      closeBrowserWorkPanelTab(current.activeSessionId, browserTab.id);
+    if (browserTab) {
+      closeBrowserWorkPanelTab(sessionId, browserTab.id);
     }
     set((state) => {
-      const sessionId = state.activeSessionId;
-      if (!sessionId) return {};
+      const visible = state.activeSessionId === sessionId && !isSessionSelectionPending(sessionId);
+      const currentContext: WorkPanelContext = visible
+        ? currentWorkPanelContext(state)
+        : state.workPanelContexts[sessionId] ?? emptyWorkPanelContext();
       const next = closeWorkPanelTabState(
-        {
-          tabs: state.workPanelTabs,
-          activeTabId: state.activeWorkPanelTabId,
-        },
+        currentContext,
         tabId,
       );
       const activeTab = next.tabs.find((tab) => tab.id === next.activeTabId);
-      const fileRequest = nextFileRequest(activeTab) ?? state.workPanelFileRequest;
+      const fileRequest = nextFileRequest(activeTab) ?? currentContext.fileRequest;
       const nextContext: WorkPanelContext = {
         // Closing the final tab leaves the panel open so the user can choose
         // another tool from the new-tab launcher instead of losing the dock.
-        open: state.workPanelOpen,
+        open: visible ? state.workPanelOpen : currentContext.open,
         tabs: next.tabs,
         activeTabId: next.activeTabId,
         fileRequest,
       };
       return {
-        workPanelTabs: next.tabs,
-        activeWorkPanelTabId: next.activeTabId,
-        workPanelOpen: state.workPanelOpen,
-        workPanelFileRequest: fileRequest,
+        sideChats: discardSideChatsForTabs(
+          state.sideChats,
+          currentContext.tabs.filter((item) => !next.tabs.some((nextTab) => nextTab.id === item.id)),
+        ),
+        ...(visible ? {
+          workPanelTabs: next.tabs,
+          activeWorkPanelTabId: next.activeTabId,
+          workPanelOpen: state.workPanelOpen,
+          workPanelFileRequest: fileRequest,
+        } : {}),
         workPanelContexts: {
           ...state.workPanelContexts,
           [sessionId]: nextContext,
@@ -370,6 +396,10 @@ export function createWorkPanelSlice({
       fileRequest,
     };
     set({
+      sideChats: discardSideChatsForTabs(
+        current.sideChats,
+        state.tabs.filter((tab) => !next.tabs.some((nextTab) => nextTab.id === tab.id)),
+      ),
       workPanelTabs: next.tabs,
       activeWorkPanelTabId: next.activeTabId,
       workPanelFileRequest: fileRequest,
@@ -401,6 +431,7 @@ export function createWorkPanelSlice({
       fileRequest: null,
     };
     set({
+      sideChats: discardSideChatsForTabs(current.sideChats, state.tabs),
       workPanelTabs: next.tabs,
       activeWorkPanelTabId: next.activeTabId,
       workPanelFileRequest: null,

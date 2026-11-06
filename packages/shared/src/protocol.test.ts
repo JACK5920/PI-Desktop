@@ -44,7 +44,11 @@ describe("Plan protocol contracts", () => {
     expect(IPC_WHITELIST.has(IPC.invoke.plansPending)).toBe(true);
     expect(IPC_WHITELIST.has(IPC.invoke.plansResolve)).toBe(true);
     expect(IPC_WHITELIST.has(IPC.invoke.goalControl)).toBe(true);
+    expect(IPC.invoke.goalBudgetUpdate).toBe("pi-desktop/goals/budget/update");
+    expect(IPC_WHITELIST.has(IPC.invoke.goalBudgetUpdate)).toBe(true);
     expect(IPC_WHITELIST.has(IPC.event.plansChanged)).toBe(true);
+    expect(IPC.event.goalProgress).toBe("pi-desktop/goals/event/progress");
+    expect(IPC_WHITELIST.has(IPC.event.goalProgress)).toBe(true);
     expect(IPC.invoke.commandShellList).toBe("pi-desktop/commandShell/list");
     expect(IPC_WHITELIST.has(IPC.invoke.commandShellList)).toBe(true);
     expect(IPC_WHITELIST.has(IPC.invoke.scheduledList)).toBe(true);

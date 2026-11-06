@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative } from "node:path";
 import test from "node:test";
@@ -181,6 +181,7 @@ test("history SVG filename metadata overrides stale kind and MIME", async (t) =>
   const { data, scratch } = await fixture(t);
   const path = join(scratch, "diagram.SVG");
   await writeFile(path, svg);
+  const canonicalPath = await realpath(path);
   for (const supportsVision of [false, true]) {
     const [restored] = await hydrateAttachmentHistory([{
       id: "named-svg", role: "user", content: "", ts: 1,
@@ -188,7 +189,7 @@ test("history SVG filename metadata overrides stale kind and MIME", async (t) =>
     }], { scratchDir: scratch, attachmentsDir: join(data, "attachments"), supportsVision });
     assert.equal(restored.attachments[0].kind, "file");
     assert.equal(restored.attachments[0].data, undefined);
-    assert.ok(restored.content.includes(path));
+    assert.ok(restored.content.includes(canonicalPath));
   }
 });
 
@@ -213,6 +214,7 @@ test("history non-vision images and non-user messages preserve existing behavior
   const { scratch } = await fixture(t);
   const path = join(scratch, "pixel.png");
   await writeFile(path, png);
+  const canonicalPath = await realpath(path);
   const assistant = { id: "assistant", role: "assistant", content: "Unchanged", ts: 2 };
   const [restored, unchanged] = await hydrateAttachmentHistory([{
     id: "user", role: "user", content: "Explain", ts: 1,
@@ -220,7 +222,7 @@ test("history non-vision images and non-user messages preserve existing behavior
   }, assistant], { scratchDir: scratch, supportsVision: false });
   assert.equal(restored.attachments[0].kind, "image");
   assert.equal(restored.attachments[0].data, undefined);
-  assert.ok(restored.content.includes(path));
+  assert.ok(restored.content.includes(canonicalPath));
   assert.equal(unchanged, assistant);
 });
 

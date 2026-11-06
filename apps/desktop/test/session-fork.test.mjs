@@ -30,7 +30,7 @@ test("session fork is wired through protocol, main, API, store, and sidebar", ()
   assert.match(main, /"session\.fork"/);
   assert.match(
     api,
-    /forkSession:\s*\(sessionId: string, title\?: string, throughMessageId\?: string\)/,
+    /forkSession:\s*\([\s\S]*?sideChatExcerpt\?: string/,
   );
   assert.match(store, /forkSession:\s*async \(id\)/);
   assert.match(store, /commitForkedSession\(result\.session/);
@@ -49,10 +49,11 @@ test("assistant response fork reuses isolated session snapshots", () => {
   const transcript = readTranscriptSourceSync();
 
   assert.match(main, /throughMessageId/);
-  assert.match(store, /forkAssistantMessage:\s*async \(messageId\)/);
+  assert.match(store, /forkAssistantMessage:\s*async \(messageId,\s*selectedText\)/);
   assert.match(store, /api\.forkSession\([\s\S]*?messageId/);
   assert.match(transcript, /forkAssistantMessage\(actionMessage\.id\)/);
   assert.match(transcript, /chat\.forkResponse/);
+  assert.match(readStoreModuleSync("slices/side-chat-slice.ts"), /forkAssistantMessageInSession\([\s\S]*?before\.excerpt/);
 });
 
 test("session fork labels are localized", () => {
@@ -132,8 +133,13 @@ test("fork actions commit the child through one durable helper", () => {
   );
   assert.match(
     forkAssistantBlock,
-    /commitForkedSession\(result\.session,\s*\{\s*activate: runtime\.navigationIntentIsCurrent\(intent\)/,
-    "forkAssistantMessage must record the child and gate only activation",
+    /const activate = runtime\.navigationIntentIsCurrent\(intent\);\s*commitForkedSession\(result\.session,\s*\{\s*activate,\s*clearError: true,\s*\}\)/,
+    "forkAssistantMessage must record the child and gate activation before applying its draft",
+  );
+  assert.match(
+    forkAssistantBlock,
+    /if \(activate && selectedText\?\.trim\(\)\)/,
+    "selected text must only prefill the child that owns navigation",
   );
   // A bare early return on a stale intent is what dropped the branch before.
   assert.doesNotMatch(

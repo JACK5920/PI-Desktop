@@ -13,6 +13,7 @@ import {
 } from "../../lib/session-transcript-updates";
 import type {
   AgentEventEnvelope,
+  GoalProgressEvent,
   PlanningStateEvent,
   PlanProposal,
   SessionTodoSnapshot,
@@ -40,7 +41,11 @@ import {
   isPendingPlan,
   mergePlanCheckpoint,
 } from "../../lib/plan-mode-state";
-import { newerGoalLifecycle } from "../../lib/goal-lifecycle-state";
+import {
+  goalProgressMatches,
+  mergeGoalProgress,
+  newerGoalLifecycle,
+} from "../../lib/goal-lifecycle-state";
 import { formatToolValue } from "../../lib/tool-display";
 import type { AppState } from "../app-state";
 import type { SessionRuntime } from "../runtime/session-runtime";
@@ -111,7 +116,7 @@ export function createEventsSlice({
   withCompactionMark,
 }: EventsSliceDependencies): Pick<
   AppState,
-  "handlePlansChanged" | "handleAgentEvent" | "applyTodosChanged"
+  "handlePlansChanged" | "handleAgentEvent" | "applyTodosChanged" | "applyGoalProgressChanged"
 > {
   let flushingStreamUpdates = false;
   const streamUpdates = createFrameBatcher<AgentEventEnvelope>((envelopes) => {
@@ -151,6 +156,22 @@ export function createEventsSlice({
   };
 
   return {
+    applyGoalProgressChanged: (event) => {
+      if (!isGoalProgressEvent(event)) return;
+      set((state) => {
+        const next = mergeGoalProgress(
+          state.goalLifecycles[event.sessionId],
+          state.goalProgress[event.sessionId],
+          event,
+        );
+        if (next === state.goalProgress[event.sessionId]) return state;
+        return {
+          goalProgress: next
+            ? { ...state.goalProgress, [event.sessionId]: next }
+            : withoutRecordKey(state.goalProgress, event.sessionId),
+        };
+      });
+    },
     applyTodosChanged: (snapshot: SessionTodoSnapshot) => {
       if (!isSessionTodoSnapshot(snapshot)) return;
       set((state) => {
@@ -179,6 +200,17 @@ export function createEventsSlice({
         const executionActive = isActivePlanExecution(checkpoint);
         const planExecutionWasActive = isActivePlanExecution(previousCheckpoint);
         const planExecutionRunChanged = executionActive || planExecutionWasActive;
+        const currentGoal = state.goalLifecycles[event.sessionId];
+        const nextGoal = event.goal
+          ? newerGoalLifecycle(currentGoal, event.goal)
+          : event.goal === null
+            ? undefined
+            : currentGoal;
+        const currentGoalProgress = state.goalProgress[event.sessionId];
+        const goalProgress = currentGoalProgress &&
+          !goalProgressMatches(nextGoal, currentGoalProgress)
+          ? withoutRecordKey(state.goalProgress, event.sessionId)
+          : state.goalProgress;
         return {
           planningStates: {
             ...state.planningStates,
@@ -191,13 +223,16 @@ export function createEventsSlice({
             ? {
                 goalLifecycles: {
                   ...state.goalLifecycles,
-                  [event.sessionId]: newerGoalLifecycle(
-                    state.goalLifecycles[event.sessionId],
-                    event.goal,
-                  ),
+                  [event.sessionId]: nextGoal!,
                 },
               }
             : {}),
+          ...(event.goal === null
+            ? {
+                goalLifecycles: withoutRecordKey(state.goalLifecycles, event.sessionId),
+              }
+            : {}),
+          goalProgress,
           pendingPlans,
           runningSessions: planExecutionRunChanged
             ? { ...state.runningSessions, [event.sessionId]: executionActive }
@@ -752,4 +787,16 @@ export function createEventsSlice({
       }
     },
   };
+}
+
+function isGoalProgressEvent(value: unknown): value is GoalProgressEvent {
+  if (!value || typeof value !== "object") return false;
+  const event = value as Partial<GoalProgressEvent>;
+  return (
+    typeof event.sessionId === "string" && event.sessionId.length > 0 &&
+    typeof event.proposalId === "string" && event.proposalId.length > 0 &&
+    typeof event.executionId === "string" && event.executionId.length > 0 &&
+    typeof event.turnId === "string" && event.turnId.length > 0 &&
+    typeof event.tokensUsed === "number" && Number.isSafeInteger(event.tokensUsed) && event.tokensUsed >= 0
+  );
 }

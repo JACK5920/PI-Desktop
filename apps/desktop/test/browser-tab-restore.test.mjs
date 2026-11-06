@@ -31,7 +31,7 @@ function store() {
   let state = {
     activeSessionId: "A", sessions: [], workPanelOpen: false,
     workPanelTabs: [], activeWorkPanelTabId: null, workPanelFileRequest: null,
-    workPanelContexts: {},
+    workPanelContexts: {}, sideChats: {},
   };
   const get = () => state;
   const set = (value) => { state = { ...state, ...(typeof value === "function" ? value(state) : value) }; };
@@ -114,4 +114,34 @@ test("bulk tab closing retains the target and releases Browser resources", () =>
     sessionId: "A",
     tabId: remainingBrowser.id,
   });
+});
+
+test("closing a side-chat tab in an inactive session releases only that projection", () => {
+  const { get, set } = store();
+  const parentTab = workPanelTabs.toolWorkPanelTab("review");
+  const sideChatId = "side-chat:background";
+  const sideChatTab = workPanelTabs.sideChatWorkPanelTab(sideChatId);
+  set({
+    activeSessionId: "A",
+    workPanelTabs: [parentTab],
+    activeWorkPanelTabId: parentTab.id,
+    sideChats: {
+      [sideChatId]: { id: sideChatId, parentSessionId: "B", childSessionId: "child-B" },
+    },
+    workPanelContexts: {
+      B: { open: true, tabs: [sideChatTab], activeTabId: sideChatTab.id, fileRequest: null },
+    },
+  });
+
+  get().closeWorkPanelTab(sideChatTab.id, "B");
+
+  assert.deepEqual(get().workPanelTabs, [parentTab]);
+  assert.equal(get().activeWorkPanelTabId, parentTab.id);
+  assert.deepEqual(get().workPanelContexts.B, {
+    open: true,
+    tabs: [],
+    activeTabId: null,
+    fileRequest: null,
+  });
+  assert.deepEqual(get().sideChats, {});
 });

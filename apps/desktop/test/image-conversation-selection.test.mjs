@@ -37,6 +37,7 @@ test("runtime rejects an image binding retained by an existing conversation", as
   const shell = { id: "cmd", label: "Command Prompt", dialect: "cmd", available: true, isDefault: true };
   const runtime = createSessionLaunchRuntime({
     runtimeState: { host: { call: async (method) => {
+      if (method === "session.managedOwner") return { pluginId: null };
       if (method === "commandShells.list") return { configuredId: null, effective: shell, fallback: false, choices: [shell] };
       if (method === "providers.list") return { providers: [{ ...providers[0], authKind: "none" }] };
       if (method === "providers.getSecret") return {};

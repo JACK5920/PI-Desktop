@@ -25,8 +25,10 @@ mod repository;
 
 pub use approval::{expire_pending_approvals, gate_session_configure};
 pub use goals::{
-    GoalControlResult, GoalCriterionReport, GoalLifecycle, GoalProgressReport,
-    GOAL_MAX_ROUNDS_PER_CYCLE,
+    GoalBudget, GoalBudgetUpdateResult, GoalControlResult, GoalCriterionReport, GoalLifecycle,
+    GoalProgressReport, GOAL_DEFAULT_DURATION_MS_PER_CYCLE, GOAL_DEFAULT_ROUNDS_PER_CYCLE,
+    GOAL_DEFAULT_TOKENS_PER_CYCLE, GOAL_MAX_DURATION_MS_PER_CYCLE, GOAL_MAX_ROUNDS_PER_CYCLE,
+    GOAL_MIN_DURATION_MS_PER_CYCLE,
 };
 pub use model::{
     kind_for_mode, normalize_kind, PlanArtifact, PlanExecution, PlanHistoryEntry, PlanManager,
@@ -41,6 +43,7 @@ pub(crate) use artifact::{
     plan_filename, publish_artifact, safe_artifact_path, title_slug, verify_artifact,
 };
 pub(crate) use execution::{execution_from_proposal, resolution_from_proposal};
+pub(crate) use goals::{is_valid_goal_budget_defaults, normalize_goal_budget_defaults};
 pub(crate) use repository::{
     get_proposal, history_for_tool_calls, live_turn_belongs_to_session, proposal_from_row,
     session_submit_kind, PROPOSAL_COLUMNS,

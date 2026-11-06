@@ -12,6 +12,15 @@ import type {
   TurnEndReason,
 } from "./session-coordination";
 
+export type ApprovedExecutionTurn = Pick<
+  PlanExecution,
+  "kind" | "proposalId" | "sessionId"
+> & {
+  turnId: string;
+  /** Host-saved cycle usage before this Goal execution began. */
+  tokensUsedBaseline?: number;
+};
+
 /**
  * Identity and per-call switches of one turn finalization. `turnId` is
  * required: a terminal event, an abort, a crash or a failed start must name the
@@ -55,7 +64,7 @@ export type PlanRuntimeDependencies = {
   planSubmissionTurnIds: Set<string>;
   approvedExecutionIdsBySession: Map<string, string>;
   claimedExecutionSessions: Map<string, string>;
-  approvedExecutionTurns: Map<string, any>;
+  approvedExecutionTurns: Map<string, ApprovedExecutionTurn>;
   startedApprovedExecutions: Set<string>;
   finishedApprovedExecutions: Set<string>;
   dispatchingApprovedExecutions: Set<string>;
@@ -217,7 +226,7 @@ function finishTurn(
             // checkpoint instead of waiting for a final row that never comes.
             ...(recoverInflight ? { recoverInflight: true } : {}),
           });
-          settledTurnId = turnId;
+          if (result.ok) settledTurnId = turnId;
           if (result.notification) {
             sendToRenderer(IPC.event.notificationChanged, {
               notification: result.notification,
@@ -274,7 +283,7 @@ function finishTurn(
     // The turn can no longer start a plugin tool, and its finalization record
     // still holds the queue, so the announcement observes a settled turn. Every
     // delivery failure is isolated inside the announcement itself.
-    announceTurnEnded({ sessionId: id, turnId, reason });
+    announceTurnEnded({ sessionId: id, turnId, reason, persisted: settledTurnId === turnId });
   };
 
   let record: Promise<void> | undefined;
@@ -502,6 +511,32 @@ async function dispatchApprovedPlan(
       settings,
       { mode: "agent" },
     );
+    let goalTokensUsedBaseline: number | undefined;
+    if (execution.kind === "goal") {
+      try {
+        const pending = await runtimeState.host.call<{ goal?: GoalLifecycle | null }>(
+          "plans.pending",
+          { sessionId: execution.sessionId },
+        );
+        const goal = pending.goal;
+        if (
+          goal?.status === "active" &&
+          goal.proposalId === execution.proposalId &&
+          goal.currentExecutionId === execution.id &&
+          Number.isSafeInteger(goal.tokensUsed) &&
+          goal.tokensUsed >= 0
+        ) {
+          goalTokensUsedBaseline = goal.tokensUsed;
+        }
+      } catch (error) {
+        // Progress is display-only: a failed snapshot must not prevent an
+        // otherwise valid approved execution from starting.
+        logger.app("runtime", "warn", "Goal live token baseline unavailable", {
+          sessionId: execution.sessionId,
+          data: { executionId: execution.id, error: String(error) },
+        });
+      }
+    }
     const turn = await runtimeState.host.call<{ turnId: string }>("session.beginTurn", {
       sessionId: execution.sessionId,
       providerId: launch.providerId,
@@ -515,7 +550,12 @@ async function dispatchApprovedPlan(
     approvedExecutionIdsBySession.set(execution.sessionId, execution.id);
     approvedExecutionTurns.set(execution.id, {
       sessionId: execution.sessionId,
+      proposalId: execution.proposalId,
+      kind: execution.kind,
       turnId,
+      ...(goalTokensUsedBaseline !== undefined
+        ? { tokensUsedBaseline: goalTokensUsedBaseline }
+        : {}),
     });
     startedApprovedExecutions.add(execution.id);
     const accepted = await runtimeState.sidecar.call<{ accepted: boolean }>(

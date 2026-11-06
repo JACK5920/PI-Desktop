@@ -64,6 +64,11 @@ function importSelectionKey(value: unknown): string | null {
   return `${source}:${externalId}`;
 }
 
+async function rejectManagedMutation(host: HostProcess, sessionId: string): Promise<void> {
+  const owner = await host.call<{ pluginId: string | null }>("session.managedOwner", { sessionId });
+  if (owner.pluginId) throw Object.assign(new Error("This transcript is managed by a plugin"), { errorCode: "PLUGIN_SESSION_MANAGED" });
+}
+
 function rejectNativeMutation(sessionId: unknown, action: string): void {
   if (typeof sessionId === "string" && sessionId.startsWith("native-pi:")) {
     throw Object.assign(new Error(`Native Pi session ${action} is not supported`), {
@@ -247,7 +252,7 @@ export function registerSessionIpc({
   handle(
     IPC.invoke.sessionFork,
     async (
-      input: { sessionId?: string; title?: string; throughMessageId?: string } = {},
+      input: { sessionId?: string; title?: string; throughMessageId?: string; sideChatExcerpt?: string } = {},
     ) => {
       const sessionId = String(input.sessionId ?? "").trim();
       if (sessionId.startsWith("native-pi:")) {
@@ -297,6 +302,9 @@ export function registerSessionIpc({
           title: String(input.title ?? "").trim() || undefined,
           throughMessageId:
             String(input.throughMessageId ?? "").trim() || undefined,
+          ...(typeof input.sideChatExcerpt === "string"
+            ? { sideChatExcerpt: input.sideChatExcerpt }
+            : {}),
         });
       } catch (error: any) {
         if (error?.data?.errorCode === ErrorCodes.CONFLICT) {
@@ -317,6 +325,16 @@ export function registerSessionIpc({
       };
     },
   );
+  handle(IPC.invoke.sessionPromoteSideChat, async (input: { sessionId?: string } = {}) => {
+    const sessionId = String(input.sessionId ?? "").trim();
+    if (!host) throw new Error("host unavailable");
+    if (!sessionId) {
+      throw Object.assign(new Error("sessionId required"), {
+        errorCode: ErrorCodes.INVALID_ARGUMENT,
+      });
+    }
+    return host.call("session.promoteSideChat", { sessionId });
+  });
   handle(
     IPC.invoke.sessionGet,
     async (
@@ -508,6 +526,7 @@ export function registerSessionIpc({
       if (!host) throw new Error("host unavailable");
       const sessionId = String(input?.sessionId || "");
       if (!sessionId) throw new Error("sessionId required");
+      await rejectManagedMutation(host, sessionId);
       const currentHost = host;
       return runTranscriptRewrite(
         sessionId,
@@ -570,6 +589,7 @@ export function registerSessionIpc({
     }) => {
       if (!host) throw new Error("host unavailable");
       rejectNativeMutation(input?.sessionId, "revision save");
+      await rejectManagedMutation(host, input.sessionId);
       return host.call("session.saveRevision", {
         sessionId: String(input?.sessionId || ""),
         rootUserId: String(input?.rootUserId || ""),
@@ -601,6 +621,7 @@ export function registerSessionIpc({
       if (!host) throw new Error("host unavailable");
       const sessionId = String(input?.sessionId || "");
       if (!sessionId) throw new Error("sessionId required");
+      await rejectManagedMutation(host, sessionId);
       const currentHost = host;
       return runTranscriptRewrite(
         sessionId,

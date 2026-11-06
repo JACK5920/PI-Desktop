@@ -375,6 +375,30 @@ async function scenarioGoalLifecycle(binary, tempRoot) {
     const approved = await resolvePlan(ctx.host, submitted.proposal, "approve", "ask");
     assert(approved.goal?.status === "active", shortJson(approved));
     const first = approved.execution;
+    assert(approved.goal.maxRounds === 8, shortJson(approved.goal));
+    assert(approved.goal.maxTokens === 250_000, shortJson(approved.goal));
+    assert(approved.goal.maxDurationMs === 3_600_000, shortJson(approved.goal));
+    assert(approved.goal.tokenBudgetUnlimited === false, shortJson(approved.goal));
+
+    const unlimitedBudget = await ctx.host.call("goals.budget.update", {
+      sessionId: session.id,
+      proposalId: submitted.proposal.id,
+      budget: {
+        maxRounds: 16,
+        maxTokens: 1_250_000,
+        maxDurationMs: 86_400_000,
+        tokenBudgetUnlimited: true,
+      },
+    });
+    assert(unlimitedBudget.goal?.status === "active", shortJson(unlimitedBudget));
+    assert(unlimitedBudget.goal?.currentExecutionId === first.id, shortJson(unlimitedBudget));
+    assert(unlimitedBudget.goal?.cycle === approved.goal.cycle, shortJson(unlimitedBudget));
+    assert(unlimitedBudget.goal?.tokensUsed === approved.goal.tokensUsed, shortJson(unlimitedBudget));
+    assert(unlimitedBudget.goal?.maxRounds === 16, shortJson(unlimitedBudget));
+    assert(unlimitedBudget.goal?.maxTokens === 1_250_000, shortJson(unlimitedBudget));
+    assert(unlimitedBudget.goal?.maxDurationMs === 86_400_000, shortJson(unlimitedBudget));
+    assert(unlimitedBudget.goal?.tokenBudgetUnlimited === true, shortJson(unlimitedBudget));
+
     const firstClaim = await ctx.host.call("plans.claimExecution", { executionId: first.id });
     const report = {
       outcome: "continue",
@@ -405,6 +429,8 @@ async function scenarioGoalLifecycle(binary, tempRoot) {
     const snapshot = await ctx.host.call("plans.pending", { sessionId: session.id });
     assert(snapshot.goal?.proposalId === submitted.proposal.id, shortJson(snapshot));
     assert(snapshot.goal?.latestReport?.criteria?.[0]?.status === "unmet", shortJson(snapshot));
+    assert(snapshot.goal?.tokenBudgetUnlimited === true, shortJson(snapshot));
+    assert(snapshot.goal?.maxTokens === 1_250_000, shortJson(snapshot));
     const second = await ctx.host.call("plans.claimExecution", {
       executionId: finished.execution.id,
     });
@@ -416,6 +442,20 @@ async function scenarioGoalLifecycle(binary, tempRoot) {
     assert(paused.goal?.status === "paused", shortJson(paused));
     assert(paused.execution === undefined, shortJson(paused));
 
+    const finiteBudget = await ctx.host.call("goals.budget.update", {
+      sessionId: session.id,
+      proposalId: submitted.proposal.id,
+      budget: {
+        maxRounds: 16,
+        maxTokens: 1_250_000,
+        maxDurationMs: 86_400_000,
+        tokenBudgetUnlimited: false,
+      },
+    });
+    assert(finiteBudget.goal?.status === "paused", shortJson(finiteBudget));
+    assert(finiteBudget.goal?.maxTokens === 1_250_000, shortJson(finiteBudget));
+    assert(finiteBudget.goal?.tokenBudgetUnlimited === false, shortJson(finiteBudget));
+
     const resumed = await ctx.host.call("goals.control", {
       sessionId: session.id,
       proposalId: submitted.proposal.id,
@@ -424,6 +464,9 @@ async function scenarioGoalLifecycle(binary, tempRoot) {
     assert(resumed.goal?.status === "active", shortJson(resumed));
     assert(resumed.execution?.id !== second.execution.id, shortJson(resumed));
     assert(resumed.execution?.state === "queued", shortJson(resumed));
+    assert(resumed.goal?.tokenBudgetUnlimited === false, shortJson(resumed));
+    assert(resumed.goal?.maxTokens === 1_250_000, shortJson(resumed));
+    assert(resumed.goal?.cycle === paused.goal.cycle + 1, shortJson(resumed));
     const cleared = await ctx.host.call("goals.control", {
       sessionId: session.id,
       proposalId: submitted.proposal.id,
@@ -433,7 +476,7 @@ async function scenarioGoalLifecycle(binary, tempRoot) {
     const queue = await ctx.host.call("plans.queuedExecutions", { sessionId: session.id });
     assert(queue.executions?.every((execution) => execution.id !== resumed.execution.id), shortJson(queue));
     await endTurn(ctx.host, turnId);
-    return "report persisted; continuation created a distinct round; pause/resume/clear never replayed an execution";
+    return "report persisted; in-flight budget edit preserved execution; unlimited mode retained the finite limit; explicit resume retained settings in a fresh cycle";
   }, binary, tempRoot);
 }
 

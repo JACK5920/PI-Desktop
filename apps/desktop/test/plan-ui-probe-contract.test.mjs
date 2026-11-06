@@ -75,3 +75,46 @@ test("Plan UI harness uses the second inspector and never starts a fixture Host"
   assert.match(harnessSource, /hostChildPid/);
   assert.doesNotMatch(harnessSource, /e2e-plan-ui-fixture|runFixture|fixtureChildren/);
 });
+
+test("Goal budget UI acceptance edits, saves, and rehydrates a Goal through the live Host", () => {
+  assert.match(probeSource, /operation === "seedGoal"/);
+  assert.match(probeSource, /"plans\.resolve"/);
+  assert.match(probeSource, /targetPermissionMode: "auto"/);
+  assert.match(probeSource, /goal-budget-ui-probe-\$\{session\.id\}/);
+  for (const snapshotField of [
+    "maxRounds",
+    "maxTokens",
+    "maxDurationMs",
+    "tokenBudgetUnlimited",
+  ]) {
+    assert.match(probeSource, new RegExp(`goal\\?: \\{[^}]*${snapshotField}`, "s"));
+    assert.match(probeSource, new RegExp(`goal\\.${snapshotField}`));
+  }
+  assert.match(harnessSource, /E2E-goal-budget-editor/);
+  assert.match(harnessSource, /operation: "seedGoal"/);
+  for (const selector of [
+    "goal-budget-defaults-rounds",
+    "goal-budget-defaults-tokens",
+    "goal-budget-defaults-duration",
+    "goal-budget-defaults-save",
+  ]) {
+    assert.match(harnessSource, new RegExp(`"${selector}"`));
+  }
+  assert.match(harnessSource, /Goal budget defaults saved/);
+  assert.match(harnessSource, /approved Goal did not snapshot saved system defaults/);
+  assert.match(harnessSource, /existing Goal retains approved budget snapshot after system defaults changed/);
+  for (const selector of [
+    "goal-budget-edit",
+    "goal-budget-rounds",
+    "goal-budget-tokens",
+    "goal-budget-minutes",
+    "goal-budget-save",
+  ]) {
+    assert.match(harnessSource, new RegExp(`"${selector}"`));
+  }
+  assert.match(harnessSource, /goal-budget-unlimited-hint/);
+  assert.match(harnessSource, /unlimited Goal budget rehydrated after renderer reload/);
+  assert.match(harnessSource, /live Goal elapsed display tick/);
+  assert.match(harnessSource, /paused Goal remains frozen through another timer interval/);
+  assert.match(harnessSource, /\[data-testid="goal-pause"\]/);
+});

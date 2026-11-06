@@ -1,6 +1,6 @@
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentSession, ModelRuntime, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { createAssistantMessageEventStream, PI_ATTRIBUTION, Type, type AssistantMessage } from "@earendil-works/pi-ai";
@@ -11,13 +11,24 @@ import {
 } from "./native-pi-session-lease.js";
 
 const roots: string[] = [];
+const originalHome = process.env.HOME;
 
 beforeEach(() => {
+  // Native Pi trust checks must not inherit this machine's user-level skills.
+  // On Windows, the temp directory can use an 8.3 alias (ADMINI~1) while
+  // homedir() returns the long profile path, making global skills appear
+  // project-local to the trust detector.
+  process.env.HOME = process.platform === "win32"
+    ? resolve(tmpdir(), "..", "..", "..")
+    : mkdtempSync(join(tmpdir(), "pi-desktop-test-home-"));
+  if (process.platform !== "win32") roots.push(process.env.HOME);
   vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("Network forbidden in native fixtures"));
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
+  if (originalHome === undefined) delete process.env.HOME;
+  else process.env.HOME = originalHome;
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 

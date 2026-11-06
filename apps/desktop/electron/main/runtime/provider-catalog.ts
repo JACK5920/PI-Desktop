@@ -3,6 +3,8 @@ import {
   SESSION_THINKING_LEVELS,
   defaultCommandShellForPlatform,
   isCommandShellId,
+  isGoalBudget,
+  normalizeGoalBudgetDefaults,
   normalizeRadialMenuPreferences,
   radialMenuWriteError,
   validateNetworkProxy,
@@ -168,7 +170,11 @@ export function createProviderCatalogRuntime({
   ): T & { defaultCommandShell: CommandShellId } => {
     const value = (
       settings && typeof settings === "object" ? settings : {}
-    ) as T & { defaultCommandShell?: unknown; radialMenu?: unknown };
+    ) as T & {
+      defaultCommandShell?: unknown;
+      radialMenu?: unknown;
+      goalBudgetDefaults?: unknown;
+    };
     return {
       ...(value as T),
       infiniteProviderRetry: (value as T & { infiniteProviderRetry?: unknown })
@@ -177,6 +183,7 @@ export function createProviderCatalogRuntime({
         .keepAwakeWhileRunning === true,
       scheduledTasksEnabled: (value as T & { scheduledTasksEnabled?: unknown })
         .scheduledTasksEnabled !== false,
+      goalBudgetDefaults: normalizeGoalBudgetDefaults(value.goalBudgetDefaults),
       jevEnabled: (value as T & { jevEnabled?: unknown }).jevEnabled === true,
       transcriptDisplayMode:
         (value as T & { transcriptDisplayMode?: unknown }).transcriptDisplayMode === "flat" ||
@@ -200,6 +207,7 @@ export function createProviderCatalogRuntime({
       infiniteProviderRetry?: unknown;
       keepAwakeWhileRunning?: unknown;
       scheduledTasksEnabled?: unknown;
+      goalBudgetDefaults?: unknown;
       jevEnabled?: unknown;
       updatePreference?: unknown;
       lastNotifiedUpdateVersion?: unknown;
@@ -208,6 +216,14 @@ export function createProviderCatalogRuntime({
       transcriptDisplayMode?: unknown;
       radialMenu?: unknown;
     };
+    if (
+      Object.prototype.hasOwnProperty.call(value, "goalBudgetDefaults") &&
+      !isGoalBudget(value.goalBudgetDefaults)
+    ) {
+      throw Object.assign(new Error("goalBudgetDefaults is invalid"), {
+        errorCode: ErrorCodes.INVALID_PARAMS,
+      });
+    }
     if (
       Object.prototype.hasOwnProperty.call(value, "defaultCommandShell") &&
       !isCommandShellId(value.defaultCommandShell)

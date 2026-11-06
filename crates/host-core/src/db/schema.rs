@@ -26,6 +26,32 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_session_todo_active
 /// Same DDL as the fresh schema, exposed for the v20 -> v21 migration.
 pub(crate) const SESSION_TODO_DDL: &str = session_todo_ddl!();
 
+/// Host-verified provenance for the content-addressed blobs a managed transcript
+/// may read.
+///
+/// The transcript itself is plugin-writable, so its attachment blocks prove
+/// nothing: a plugin could append another session's `attachments/<sha256>` ref
+/// and then read those bytes. A row here is written only where the host itself
+/// moved the bytes — the host staging a native Composer send, or the plugin
+/// committing its own upload — so it is an authorization the plugin cannot
+/// forge by writing its own transcript. Kept in one place so the fresh schema
+/// and the migration cannot drift; `IF NOT EXISTS` keeps a second run harmless.
+macro_rules! managed_attachments_ddl {
+    () => {
+        r#"
+CREATE TABLE IF NOT EXISTS session_managed_attachments (
+  session_id   TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  ref          TEXT NOT NULL,
+  origin       TEXT NOT NULL CHECK (origin IN ('host', 'plugin')),
+  created_at   INTEGER NOT NULL,
+  PRIMARY KEY (session_id, ref)
+);
+"#
+    };
+}
+
+pub(crate) const MANAGED_ATTACHMENTS_DDL: &str = managed_attachments_ddl!();
+
 pub(crate) const SCHEMA_LATEST: &str = concat!(
     r#"
 CREATE TABLE kv (
@@ -106,12 +132,19 @@ CREATE TABLE sessions (
   last_seq    INTEGER NOT NULL DEFAULT 0,
   todo_revision INTEGER NOT NULL DEFAULT 0,
   todo_updated_at INTEGER,
+  side_chat_parent_id TEXT REFERENCES sessions(id) ON DELETE SET NULL,
+  side_chat_source_message_id TEXT,
+  side_chat_excerpt TEXT,
+  side_chat_promoted INTEGER NOT NULL DEFAULT 0 CHECK (side_chat_promoted IN (0, 1)),
   created_at  INTEGER NOT NULL,
   updated_at  INTEGER NOT NULL
 );
 CREATE INDEX idx_sessions_updated_id ON sessions(updated_at DESC, id DESC);
 CREATE INDEX idx_sessions_project ON sessions(project_id) WHERE project_id IS NOT NULL;
 CREATE INDEX idx_sessions_deleted ON sessions(deleted_at) WHERE deleted_at IS NOT NULL;
+CREATE INDEX idx_sessions_side_chat_parent
+  ON sessions(side_chat_parent_id, updated_at DESC)
+  WHERE side_chat_parent_id IS NOT NULL AND side_chat_promoted = 0;
 
 "#,
     session_todo_ddl!(),
@@ -297,6 +330,7 @@ CREATE INDEX idx_audit_ts ON audit_log(ts);
 CREATE INDEX idx_audit_session ON audit_log(session_id, ts) WHERE session_id IS NOT NULL;
 
 "#,
+    managed_attachments_ddl!(),
 );
 
 /// Approval storage is kept in one batch so fresh databases and migrations
@@ -359,6 +393,7 @@ CREATE TABLE IF NOT EXISTS goal_lifecycles (
   run_count             INTEGER NOT NULL DEFAULT 1 CHECK (run_count > 0),
   max_rounds            INTEGER NOT NULL DEFAULT 8 CHECK (max_rounds > 0),
   max_tokens            INTEGER NOT NULL DEFAULT 250000 CHECK (max_tokens > 0),
+  token_budget_unlimited INTEGER NOT NULL DEFAULT 0 CHECK (token_budget_unlimited IN (0, 1)),
   max_duration_ms       INTEGER NOT NULL DEFAULT 3600000 CHECK (max_duration_ms > 0),
   tokens_used           INTEGER NOT NULL DEFAULT 0 CHECK (tokens_used >= 0),
   elapsed_ms            INTEGER NOT NULL DEFAULT 0 CHECK (elapsed_ms >= 0),

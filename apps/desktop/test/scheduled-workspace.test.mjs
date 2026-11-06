@@ -186,7 +186,7 @@ test("the task column reports each task's own last outcome", async () => {
 
     assert.match(html, /Nightly dependency check/);
     assert.match(html, /Daily · 09:05/, "cadence and its clock share one line");
-    assert.match(html, /Failed/, "the failing task reports its own outcome");
+    assert.match(html, /Session error/, "the failing task reports its own outcome");
     assert.match(html, /1m 12s/, "and how long it took");
     assert.match(html, /PR sweep/);
     assert.match(html, /Not run yet/, "a task that never ran says so");
@@ -222,7 +222,7 @@ test("the task page reads facts, history, and the selected run in place", async 
     );
 
     assert.match(html, /Nightly dependency check/);
-    assert.match(html, /Last run[\s\S]*?Failed/, "the facts lead with the last outcome");
+    assert.match(html, /Last run[\s\S]*?Session error/, "the facts lead with the last outcome");
     assert.match(html, /1m 12s/);
     assert.match(html, /~/u, "the project path is shortened");
     assert.match(html, /Auto/, "the task's own permission mode is shown");
@@ -308,11 +308,13 @@ test("the session list and search both consume the ownership rule", async () => 
     /listableSessions\(sessions\)/,
     "the sidebar drops automation transcripts before grouping",
   );
+  assert.match(sidebar, /candidate\.sideChat\?\.parentSessionId === session\.id/);
+  assert.match(sidebar, /reopenSideChat\(child\.id\)/);
   const search = await readFile(new URL("../src/hooks/use-session-search.ts", import.meta.url), "utf8");
   assert.match(
     search,
-    /state\.hits\.filter\(\(hit\) => !isAutomationSession\(hit\.session\)\)/,
-    "search never offers one as a conversation to open",
+    /state\.hits\.filter\(\(hit\) => !isAutomationSession\(hit\.session\) && !hit\.session\.managedByPlugin &&[\s\S]*?!hit\.session\.sideChat\.promoted\)/,
+    "search never offers an unpromoted side chat as a conversation to open",
   );
   const palette = await readFile(
     new URL("../src/components/SearchDialog.tsx", import.meta.url),
@@ -474,13 +476,16 @@ test("every session list the user can enter drops a run's transcript", async () 
     const listed = [
       { id: "plain" },
       { id: "automation", scheduledRun: true },
+      { id: "managed", managedByPlugin: "fixture.owner" },
+      { id: "hidden-side-chat", sideChat: { parentSessionId: "plain", sourceMessageId: "m1", excerpt: "quote", promoted: false } },
+      { id: "promoted-side-chat", sideChat: { parentSessionId: "plain", sourceMessageId: "m1", excerpt: "quote", promoted: true } },
       { id: "legacy" },
       { id: "explicit-false", scheduledRun: false },
     ];
     assert.deepEqual(
       origin.listableSessions(listed).map((session) => session.id),
-      ["plain", "legacy", "explicit-false"],
-      "only a run's transcript leaves the list",
+      ["plain", "promoted-side-chat", "legacy", "explicit-false"],
+      "owned transcripts and unpromoted side chats leave ordinary lists",
     );
     assert.deepEqual(origin.listableSessions([]), []);
 

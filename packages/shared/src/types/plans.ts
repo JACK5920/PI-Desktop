@@ -110,10 +110,13 @@ export type GoalLifecycleStatus =
   | "interrupted"
   | "cleared";
 
-/** Maximum execution rounds in one Goal cycle, including its initial approved round. */
-export const GOAL_MAX_ROUNDS_PER_CYCLE = 8;
-export const GOAL_MAX_TOKENS_PER_CYCLE = 250_000;
-export const GOAL_MAX_DURATION_MS_PER_CYCLE = 60 * 60 * 1_000;
+/** Default execution-round budget, including the initial approved round. */
+export const GOAL_DEFAULT_ROUNDS_PER_CYCLE = 8;
+export const GOAL_MAX_ROUNDS_PER_CYCLE = 32;
+export const GOAL_DEFAULT_TOKENS_PER_CYCLE = 250_000;
+export const GOAL_DEFAULT_DURATION_MS_PER_CYCLE = 60 * 60 * 1_000;
+export const GOAL_MIN_DURATION_MS_PER_CYCLE = 60 * 1_000;
+export const GOAL_MAX_DURATION_MS_PER_CYCLE = 24 * 60 * 60 * 1_000;
 
 export type GoalCriterionReport = {
   criterion: string;
@@ -137,17 +140,31 @@ export type GoalLifecycle = {
   status: GoalLifecycleStatus;
   currentExecutionId?: string;
   cycle: number;
+  /** Persisted Host start time for displaying live elapsed time while active. */
+  cycleStartedAt?: number;
   roundInCycle: number;
   runCount: number;
   maxRounds: number;
   maxTokens: number;
   maxDurationMs: number;
+  /** Last finite token limit, retained when token cutoff is disabled. */
+  tokenBudgetUnlimited?: boolean;
   tokensUsed: number;
   elapsedMs: number;
   stopReason?: string;
   latestReport?: GoalProgressReport;
   updatedAt: string;
   version: number;
+};
+
+/** Transient provider-reported usage for the current Goal execution. */
+export type GoalProgressEvent = {
+  sessionId: string;
+  proposalId: string;
+  executionId: string;
+  turnId: string;
+  /** Cycle total, including earlier settled rounds and this active turn. */
+  tokensUsed: number;
 };
 
 export type GoalControlAction = "pause" | "resume" | "clear";
@@ -161,6 +178,24 @@ export type GoalControlRequest = {
 export type GoalControlResult = {
   goal: GoalLifecycle;
   execution?: PlanExecution;
+};
+
+export type GoalBudget = {
+  maxRounds: number;
+  /** Last finite token limit, retained while token limiting is disabled. */
+  maxTokens: number;
+  maxDurationMs: number;
+  tokenBudgetUnlimited: boolean;
+};
+
+export type GoalBudgetUpdateRequest = {
+  sessionId: string;
+  proposalId: string;
+  budget: GoalBudget;
+};
+
+export type GoalBudgetUpdateResult = {
+  goal: GoalLifecycle;
 };
 
 export type PlanExecutionDescriptor = PlanExecution;

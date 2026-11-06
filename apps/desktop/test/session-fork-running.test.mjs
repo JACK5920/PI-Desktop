@@ -1,8 +1,22 @@
 import assert from "node:assert/strict";
+import i18n from "i18next";
 import { register } from "node:module";
 import test from "node:test";
 
 register(new URL("./helpers/ts-import-hooks.mjs", import.meta.url));
+await i18n.init({
+  lng: "en",
+  interpolation: { escapeValue: false },
+  resources: {
+    en: {
+      translation: {
+        chat: {
+          selectedTextPrompt: "Explain this excerpt from the previous reply:\n\n{{excerpt}}",
+        },
+      },
+    },
+  },
+});
 const { createSessionSlice } = await import("../src/stores/slices/session-slice.ts");
 const { createSessionCoordination } = await import("../src/stores/runtime/session-coordination.ts");
 const { api } = await import("../src/lib/api.ts");
@@ -16,9 +30,11 @@ function harness(t) {
     sessionHistory: { parent: { hasMoreBefore: true, contentLimited: true } },
     sessionMeta: {}, sessionCompactions: {}, planningStates: {},
     retainedSessionIds: ["parent"], retainedTranscripts: { parent: [old, live] },
+    composerPrefill: null,
     workPanelContexts: {}, workPanelTabs: [], workPanelOpen: false,
     navStack: [{ page: "chat", sessionId: "parent" }], navIndex: 0,
     restorePendingPlan: async () => {},
+    restorePendingInteractive: async () => {},
   };
   let intent = 0;
   const cache = new Map([["parent", state.messages]]);
@@ -65,6 +81,19 @@ test("reply fork activates an independent child without hydrating or stopping it
   assert.deepEqual(h.get().sessions.map(s => s.id), ["child", "parent"]);
 });
 
+test("selected-text follow-up forks through the reply and pre-fills an editable localized prompt", async (t) => {
+  const h = harness(t);
+  const action = h.slice.forkAssistantMessage("old", "  line one\r\nline two  ");
+  h.complete();
+  await action;
+  assert.equal(h.get().activeSessionId, "child");
+  assert.deepEqual(h.get().composerPrefill, {
+    sessionId: "child",
+    text: "Explain this excerpt from the previous reply:\n\n> line one\n> line two",
+    fileReferences: [],
+  });
+});
+
 test("a fork that finishes after navigation lists the child without stealing the view", async (t) => {
   const h = harness(t);
   const action = h.slice.forkAssistantMessage("old");
@@ -73,6 +102,7 @@ test("a fork that finishes after navigation lists the child without stealing the
   h.complete();
   await action;
   assert.equal(h.get().activeSessionId, "other");
+  assert.equal(h.get().composerPrefill, null, "a stale fork must not prefill another session's composer");
   assert.deepEqual(h.get().messages, []);
   assert.equal(h.get().runningSessions.parent, true);
   assert.deepEqual(h.get().sessions.map(s => s.id), ["child", "parent"]);

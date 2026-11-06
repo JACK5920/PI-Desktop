@@ -154,6 +154,7 @@ stdio 与 Tokio 的动态阻塞池隔离，因此后一种情况
 | `PLAN_EXECUTION_INTERRUPTED` | 不 | 已批准的 queued/running Plan 或 Goal 执行已停止且不重播 |
 | `GOAL_ALREADY_ACTIVE` | 不 | 会话已有未清除的 Goal 生命周期 |
 | `GOAL_ACTION_INVALID` | 不 | Goal 控制动作不是 `pause`、`resume` 或 `clear` |
+| `GOAL_BUDGET_INVALID` | 不 | Goal cycle 预算超出 Host 校验范围 |
 | `GOAL_EXECUTION_STALE` | 不 | Goal run 不再是当前获批执行 |
 | `GOAL_NOT_FOUND` | 不 | 会话没有未清除的 Goal 生命周期 |
 | `GOAL_NOT_RESUMABLE` | 不 | 获批 Goal 合约不能手动恢复 |
@@ -378,8 +379,13 @@ Node sidecar 将提供商 SDK 错误映射到：
 `maximum prompt length is`、Groq、llama.cpp，以及 Bedrock 的
 `Input is too long for requested model`。`CONTEXT_TOO_LARGE` 不会进入任何重试
 预算，子代理会将其报告为 `SUBAGENT_CONTEXT_OVERFLOW`。明确的账单/账户耗尽代码和
-消息（包括 `insufficient_quota`、`credit_balance_exhausted`、组织用量限额以及组织/项目消费限额代码）
-即使 HTTP 状态为 429，也映射为终止的 `PROVIDER_ERROR`。吞吐限流措辞（包括 Bedrock 的
+消息（包括 OpenCode Zen 的 `FreeUsageLimitError`、`insufficient_quota`、`credit_balance_exhausted`、组织用量限额以及组织/项目消费限额代码）
+即使 HTTP 状态为 429，也映射为终止的 `PROVIDER_ERROR`。HTTP 500/502/503 等 5xx
+若包装了上下文超限，则映射为终止的 `CONTEXT_TOO_LARGE`；普通 5xx 仍可重试。
+即使消息同时提到 token 数量，明确的限流措辞仍按 `PROVIDER_RATE_LIMITED` 重试。
+对 HTTP 400/422，只有明确的 API Key 拒绝措辞（`invalid api key`、`api key not valid` 或
+`API_KEY_INVALID`）才归为终止的 `PROVIDER_UNAUTHORIZED`；单独出现 `unauthorized` 或
+`permission denied` 不足以证明 API Key 被拒绝。吞吐限流措辞（包括 Bedrock 的
 `Throttling error: Too many tokens, please wait before trying again.`）仍映射为
 `PROVIDER_RATE_LIMITED`。
 

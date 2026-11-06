@@ -20,6 +20,7 @@ import {
   IconChevronLeft,
   IconChevronRight,
   IconCopy,
+  IconNewSession,
   IconPencil,
   IconReview,
   IconTextSelect,
@@ -137,6 +138,7 @@ export function assistantTurnMenuItems({
   actions,
   onRegenerate,
   onBranch,
+  onAskAboutSelection,
 }: {
   t: TFunction;
   answer: string;
@@ -146,6 +148,7 @@ export function assistantTurnMenuItems({
   actions: MenuItemActions;
   onRegenerate: () => void;
   onBranch: () => void;
+  onAskAboutSelection: (selection: string) => void;
 }): ContextMenuItem[] {
   const items: ContextMenuItem[] = [];
   if (answer.trim()) {
@@ -161,6 +164,15 @@ export function assistantTurnMenuItems({
       icon: selectIcon(),
       onSelect: () => actions.selectText(selectTarget),
     });
+    if (complete) {
+      items.push({
+        id: "ask-about-selection",
+        label: t("chat.askAboutSelection"),
+        icon: askAboutSelectionIcon(),
+        requiresSelection: true,
+        onSelect: onAskAboutSelection,
+      });
+    }
   }
   if (complete) {
     items.push({
@@ -296,6 +308,10 @@ function regenerateIcon() {
 
 function branchIcon() {
   return <IconBranch size={14} />;
+}
+
+function askAboutSelectionIcon() {
+  return <IconNewSession size={14} />;
 }
 
 function upIcon() {

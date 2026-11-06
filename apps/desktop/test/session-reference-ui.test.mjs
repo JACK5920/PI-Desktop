@@ -24,6 +24,12 @@ register(pathToFileURL(join(here, "helpers/ts-import-hooks.mjs")));
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 
+const responseAnnotations = load(
+  new URL("../src/lib/response-annotations.ts", import.meta.url),
+  { "./transcript-selection": { normalizeTranscriptExcerpt: (value) => value } },
+);
+const { buildAnnotatedPrompt, parseAnnotatedPrompt, requestTextWithoutAnnotations } = responseAnnotations;
+
 /** The shipped catalogs answer `t`, so the assertions read real wording. */
 let locale = "en";
 const t = (key, values) => {
@@ -72,6 +78,7 @@ const shared = load(new URL("../src/features/chat/transcript/shared.tsx", import
   "react/jsx-runtime": jsxRuntime,
   "react-i18next": { useTranslation: () => ({ t, i18n: { language: locale } }) },
   "@pi-desktop/shared": await import("@pi-desktop/shared"),
+  "../../../plugins/renderer-slots/use-slots": { useSlotSessionId: () => "local-session" },
   "./disclosure": {},
   "./TextShimmer": {
     TextShimmer: ({ text }) => React.createElement("span", null, text),
@@ -119,6 +126,15 @@ const shared = load(new URL("../src/features/chat/transcript/shared.tsx", import
   "../../../stores/app-store": { useAppStore },
 });
 
+const messageAnnotationSummary = load(
+  new URL("../src/features/chat/transcript/MessageAnnotationSummary.tsx", import.meta.url),
+  {
+    react: React,
+    "react/jsx-runtime": jsxRuntime,
+    "react-i18next": { useTranslation: () => ({ t, i18n: { language: locale } }) },
+  },
+);
+
 const { MessageRow } = load(new URL("../src/features/chat/transcript/MessageRow.tsx", import.meta.url), {
   react: React,
   "react/jsx-runtime": jsxRuntime,
@@ -139,10 +155,18 @@ const { MessageRow } = load(new URL("../src/features/chat/transcript/MessageRow.
     sessionAllows,
   },
   "../../../plugins/renderer-slots/use-slots": { useSlotSessionId: () => "local-session" },
+  "../../../lib/response-annotations": {
+    annotationsForAssistantMessage: () => [],
+    parseAnnotatedPrompt,
+    requestTextWithoutAnnotations,
+    transcriptMessagesForSession: () => [],
+  },
+  "./transcript-action-scope": { useTranscriptHistoryActionsAllowed: () => true },
   "../../../plugins/renderer-slots/slot-message": { slotMessage: () => undefined },
   "./menu-items": { userMessageMenuItems: () => [] },
   "./ActionBarSlots": { ActionSlotSide: () => null },
   "./SessionMessageOrigin": { SessionMessageOrigin: () => null },
+  "./MessageAnnotationSummary": messageAnnotationSummary,
   "./extra-attachments": { getExtraMessageAttachments },
   "./TranscriptMenu": {
     useTranscriptMenu: () => () => {},
@@ -254,6 +278,26 @@ test("a user message shows the reference as its body chip, not a second block", 
   assert.match(html, /data-session-id="session-a"/);
   assert.match(html, /Conversation · Nightly review/);
   assert.doesNotMatch(html, /pi-desktop:\/\/session\/session-a/, "the raw link is replaced by the chip");
+});
+
+test("a sent user message keeps its quote and comment in a collapsed summary", () => {
+  locale = "en";
+  const annotated = {
+    ...userMessage,
+    content: buildAnnotatedPrompt("Please address this", [{
+      sourceMessageId: "assistant-1",
+      excerpt: "The menu disappears while streaming.",
+      comment: "Please keep the action available during generation.",
+    }]),
+  };
+  const html = renderRow(annotated);
+
+  assert.match(html, /<details class="message-annotation-summary"/);
+  assert.match(html, /<summary>[^<]+<\/summary>/, "the reference disclosure has a visible summary");
+  assert.match(html, /The menu disappears while streaming\./);
+  assert.match(html, /Please keep the action available during generation\./);
+  assert.match(html, /Please address this/);
+  assert.doesNotMatch(html, /Response annotations:|sourceMessageId/);
 });
 
 test("an extra attachment chip continues the body text instead of heading it", () => {

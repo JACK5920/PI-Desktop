@@ -9,14 +9,20 @@ import { useSlotSessionId } from "../../../plugins/renderer-slots/use-slots";
 import { GenUiCards } from "../gen-ui/GenUiCard";
 import { useGenUiSplit } from "../gen-ui/gen-ui-split";
 import { isGenUiRemoteOwner } from "../gen-ui/gen-ui-source";
+import { sessionAllows } from "../../../lib/remote-session-safety";
+import {
+  annotationsForAssistantMessage,
+  transcriptMessagesForSession,
+} from "../../../lib/response-annotations";
 import { ActivityGroup } from "./ActivityGroup";
 import { AssistantErrorMessage } from "./shared";
 import { useRenderBlocks, type RenderBlock } from "./render-blocks";
 
 /** Message bubble that optionally applies smooth text release. */
-const SmoothMessageBubble = memo(function SmoothMessageBubble({ message, streaming }: {
+const SmoothMessageBubble = memo(function SmoothMessageBubble({ message, streaming, selectable }: {
   message: UiMessage;
   streaming: boolean;
+  selectable: boolean;
 }) {
   const smoothStreaming = useAppStore((s) => s.settings?.smoothStreaming !== false);
   // Opt-in feature: an absent setting keeps cards out of the transcript.
@@ -29,15 +35,30 @@ const SmoothMessageBubble = memo(function SmoothMessageBubble({ message, streami
   const genUi = useGenUiSplit(displayContent, streaming, inlineVisualizations);
   // Cards load the pane session's own copy, never the session a path names.
   const sessionId = useSlotSessionId();
-  const remote = useAppStore((s) =>
-    isGenUiRemoteOwner(sessionId, s.sessions.find((session) => session.id === sessionId)),
+  const session = useAppStore((s) => s.sessions.find((item) => item.id === sessionId));
+  const responseAnnotations = useAppStore((s) =>
+    annotationsForAssistantMessage(
+      transcriptMessagesForSession(s, sessionId),
+      message.id,
+    ),
   );
+  const remote = isGenUiRemoteOwner(sessionId, session);
+  const selectionEligible = selectable && sessionAllows(session, "canEditMessages");
   return (
     <div
       className={`message-bubble assistant-turn-fragment${streaming ? " streaming" : ""}${showCursor ? " smooth-cursor" : ""}`}
       data-message-id={message.id}
+      data-selection-message-id={message.id}
+      data-selection-session-id={sessionId || undefined}
+      data-selection-role="assistant"
+      data-selection-eligible={selectionEligible ? "true" : "false"}
     >
-      {genUi.content ? <div className="prose-chat"><Markdown source={genUi.content} streaming={streaming} /></div> : null}
+      {genUi.content ? <div className="prose-chat"><Markdown
+        source={genUi.content}
+        streaming={streaming}
+        responseAnnotations={responseAnnotations}
+        annotationSessionId={sessionId}
+      /></div> : null}
       <GenUiCards references={genUi.references} sessionId={sessionId} remote={remote} />
       {message.error ? <AssistantErrorMessage message={message} /> : null}
     </div>
@@ -99,6 +120,7 @@ const TurnPartBlock = memo(function TurnPartBlock({
       key={part.message.id}
       message={part.message}
       streaming={isActive && part.message.status === "streaming"}
+      selectable={!isActive || part.message.status === "streaming"}
     />
   ))}</>;
 });

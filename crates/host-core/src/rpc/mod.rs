@@ -31,7 +31,9 @@ use crate::artifacts;
 use crate::audit;
 use crate::background_tasks;
 use crate::notifications;
-use crate::permissions::{PermissionDecision, PermissionEvaluationParams, PermissionManager};
+use crate::permissions::{
+    effective_permission_mode, PermissionDecision, PermissionEvaluationParams, PermissionManager,
+};
 use crate::plans;
 use crate::plugin_sessions;
 use crate::plugin_usage;
@@ -851,6 +853,11 @@ fn prompt_enhancement_template_error(field: &str, value: &Value) -> Option<Strin
 
 fn normalize_settings_value(mut value: Value) -> Value {
     if let Some(object) = value.as_object_mut() {
+        let goal_budget_defaults =
+            crate::plans::normalize_goal_budget_defaults(object.get("goalBudgetDefaults"));
+        object.insert("goalBudgetDefaults".into(), goal_budget_defaults);
+    }
+    if let Some(object) = value.as_object_mut() {
         object.remove("planApprovalPermissionMode");
         if object.get("defaultMode").and_then(Value::as_str) == Some("chat") {
             object.insert("defaultMode".into(), Value::String("plan".into()));
@@ -1013,6 +1020,16 @@ fn validate_settings_value(value: &Value) -> Result<(), JsonRpcError> {
     let Some(object) = value.as_object() else {
         return Ok(());
     };
+    if object
+        .get("goalBudgetDefaults")
+        .is_some_and(|budget| !crate::plans::is_valid_goal_budget_defaults(budget))
+    {
+        return Err(rpc_err(
+            1002,
+            "goalBudgetDefaults is invalid",
+            "INVALID_PARAMS",
+        ));
+    }
     if object
         .get("scheduledTasksEnabled")
         .is_some_and(|enabled| !enabled.is_boolean())
@@ -2794,24 +2811,54 @@ async fn handle_request(
             let title = params.get("title").and_then(|v| v.as_str());
             let through_message_id = params.get("throughMessageId").and_then(|v| v.as_str());
             let st = state.lock().await;
-            let session =
-                match sessions::fork_session_through(&st.db, session_id, title, through_message_id)
-                    .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?
-                {
-                    sessions::ForkSessionResult::Created(session) => session,
-                    sessions::ForkSessionResult::NotFound => {
-                        return Err(rpc_err(1007, "session not found", "NOT_FOUND"))
-                    }
-                    sessions::ForkSessionResult::Busy => {
-                        return Err(rpc_err(1008, "session is running", "CONFLICT"))
-                    }
+            let fork = if let Some(excerpt) = params.get("sideChatExcerpt").and_then(|v| v.as_str())
+            {
+                let Some(anchor) = through_message_id else {
+                    return Err(rpc_err(
+                        1002,
+                        "side-chat fork requires throughMessageId",
+                        "INVALID_PARAMS",
+                    ));
                 };
+                sessions::fork_side_chat_through(&st.db, session_id, anchor, excerpt)
+            } else {
+                sessions::fork_session_through(&st.db, session_id, title, through_message_id)
+            };
+            let session = match fork.map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))? {
+                sessions::ForkSessionResult::Created(session) => session,
+                sessions::ForkSessionResult::NotFound => {
+                    return Err(rpc_err(1007, "session not found", "NOT_FOUND"))
+                }
+                sessions::ForkSessionResult::Busy => {
+                    return Err(rpc_err(1008, "session is running", "CONFLICT"))
+                }
+            };
             let session = remote_tools::decorate_session(
                 &st.db,
                 serde_json::to_value(session)
                     .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?,
             )?;
             Ok(json!({ "session": session }))
+        }
+        "session.promoteSideChat" => {
+            let session_id = params
+                .get("sessionId")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| rpc_err(1002, "sessionId required", "INVALID_PARAMS"))?;
+            let st = state.lock().await;
+            let updated = sessions::promote_side_chat(&st.db, session_id)
+                .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?;
+            let exists: bool = st.db.conn().query_row(
+                "SELECT EXISTS(SELECT 1 FROM sessions WHERE id = ?1 AND side_chat_parent_id IS NOT NULL)",
+                [session_id],
+                |row| row.get(0),
+            ).map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?;
+            if !updated && !exists {
+                return Err(rpc_err(1007, "side chat not found", "NOT_FOUND"));
+            }
+            Ok(json!({ "ok": true }))
         }
         "session.moveProject" => {
             let session_id = params
@@ -3317,6 +3364,73 @@ async fn handle_request(
         // Plugin sessions are a separate host-owned domain. Electron main is
         // the only caller that can supply pluginId; the plugin process never
         // receives a generic host RPC handle or SQLite access.
+        "plugin.session.createManaged"
+        | "plugin.session.appendManaged"
+        | "plugin.session.setManagedModel" => {
+            let plugin_id = params
+                .get("pluginId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| rpc_err(1002, "pluginId required", "INVALID_PARAMS"))?;
+            let st = state.lock().await;
+            match method {
+                "plugin.session.createManaged" => {
+                    plugin_sessions::managed::create(&st.db, plugin_id, &params)
+                        .map_err(plugin_session_rpc_err)
+                }
+                "plugin.session.appendManaged" => {
+                    plugin_sessions::managed::append(&st.db, plugin_id, &params)
+                        .map_err(plugin_session_rpc_err)
+                }
+                _ => plugin_sessions::managed::set_model(&st.db, plugin_id, &params)
+                    .map_err(plugin_session_rpc_err),
+            }
+        }
+        // Electron main is the only caller. It records the provenance of bytes
+        // the host itself staged, and gates a managed blob read on that record
+        // rather than on transcript membership — which the plugin can write.
+        "session.managedGrantRef" => {
+            let plugin_id = params
+                .get("pluginId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| rpc_err(1002, "pluginId required", "INVALID_PARAMS"))?;
+            let st = state.lock().await;
+            plugin_sessions::managed::grant_ref(&st.db, plugin_id, &params)
+                .map_err(plugin_session_rpc_err)
+        }
+        "session.managedAuthorizeRef" => {
+            let plugin_id = params
+                .get("pluginId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| rpc_err(1002, "pluginId required", "INVALID_PARAMS"))?;
+            let st = state.lock().await;
+            plugin_sessions::managed::authorize_ref(&st.db, plugin_id, &params)
+                .map_err(plugin_session_rpc_err)
+        }
+        "plugins.secrets.get" | "plugins.secrets.set" | "plugins.secrets.delete" => {
+            let st = state.lock().await;
+            crate::secrets::handle_plugin_secrets_rpc(&st.secrets, method, &params).map_err(
+                |error| match error {
+                    crate::secrets::PluginSecretRpcError::InvalidParams => rpc_err(
+                        1002,
+                        "invalid plugin secret storage parameters",
+                        "INVALID_PARAMS",
+                    ),
+                    crate::secrets::PluginSecretRpcError::Storage => {
+                        rpc_err(1000, "plugin secret storage operation failed", "INTERNAL")
+                    }
+                },
+            )
+        }
+        "session.managedOwner" => {
+            let session_id = params
+                .get("sessionId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| rpc_err(1002, "sessionId required", "INVALID_PARAMS"))?;
+            let st = state.lock().await;
+            let owner = plugin_sessions::managed::owner(&st.db, session_id)
+                .map_err(plugin_session_rpc_err)?;
+            Ok(json!({"pluginId": owner}))
+        }
         "plugin.session.import" => {
             let plugin_id = params
                 .get("pluginId")
@@ -4165,6 +4279,45 @@ async fn handle_request(
             .await;
             Ok(json!(result))
         }
+        "goals.budget.update" => {
+            let session_id = params
+                .get("sessionId")
+                .and_then(|value| value.as_str())
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| rpc_err(1002, "sessionId required", "INVALID_PARAMS"))?;
+            let proposal_id = params
+                .get("proposalId")
+                .and_then(|value| value.as_str())
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| rpc_err(1002, "proposalId required", "INVALID_PARAMS"))?;
+            let budget = params
+                .get("budget")
+                .cloned()
+                .ok_or_else(|| rpc_err(1002, "budget required", "GOAL_BUDGET_INVALID"))
+                .and_then(|value| {
+                    serde_json::from_value::<plans::GoalBudget>(value)
+                        .map_err(|_| rpc_err(1002, "budget is invalid", "GOAL_BUDGET_INVALID"))
+                })?;
+            let result = {
+                let st = state.lock().await;
+                st.plans
+                    .update_goal_budget(&st.db, session_id, proposal_id, budget)
+                    .map_err(plan_rpc_err)?
+            };
+            emit_notification(
+                &tx,
+                "plans.changed",
+                json!({
+                    "sessionId": session_id,
+                    "proposalId": result.goal.proposal_id,
+                    "state": "inactive",
+                    "kind": plans::KIND_GOAL,
+                    "goal": result.goal,
+                }),
+            )
+            .await;
+            Ok(json!(result))
+        }
 
         method if method.starts_with("scheduled.") => {
             let st = state.lock().await;
@@ -4366,38 +4519,29 @@ async fn handle_request(
                     if st.shutting_down {
                         return Err(rpc_err(1001, "host is shutting down", "HOST_SHUTTING_DOWN"));
                     }
-                    // Effective permission mode (D115): per-session override
-                    // unless it is `inherit`, then the global settings default,
-                    // then `ask`. A subagent's tool call carries its own scope
-                    // (ADR 0089), which resolves the call under that mode
-                    // instead; external-path gating and the contract modes'
-                    // hard deny are untouched by the override.
+                    // Resolve authorization from Host-owned session state.
+                    // Goal's fixed Auto contract is applied here rather than
+                    // by mutating the persisted session setting; an explicit
+                    // delegate scope retains its existing precedence.
                     let session_pm = sessions::session_permission_mode(&st.db, &p.session_id)
-                        .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?
-                        .filter(|m| m != "inherit");
-                    let effective_pm = match session_pm {
-                        Some(m) => m,
-                        None => st
-                            .db
-                            .get_setting("app")
-                            .ok()
-                            .flatten()
-                            .and_then(|s| {
-                                s.get("defaultPermissionMode")
-                                    .and_then(|v| v.as_str())
-                                    .map(str::to_string)
-                            })
-                            .filter(|m| sessions::is_valid_permission_mode(m) && m != "inherit")
-                            .unwrap_or_else(|| "ask".to_string()),
-                    };
-                    let effective_pm = match p.permission_scope.as_deref() {
-                        Some(scope)
-                            if sessions::is_valid_permission_mode(scope) && scope != "inherit" =>
-                        {
-                            scope.to_string()
-                        }
-                        _ => effective_pm,
-                    };
+                        .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?;
+                    let default_pm = st
+                        .db
+                        .get_setting("app")
+                        .ok()
+                        .flatten()
+                        .and_then(|settings| {
+                            settings
+                                .get("defaultPermissionMode")
+                                .and_then(|value| value.as_str())
+                                .map(str::to_string)
+                        });
+                    let effective_pm = effective_permission_mode(
+                        &durable_mode,
+                        session_pm.as_deref(),
+                        default_pm.as_deref(),
+                        p.permission_scope.as_deref(),
+                    );
                     // Resolve the tool root from the persisted session instead of
                     // the mutable global workspace. This keeps background turns
                     // isolated when the renderer switches between project tabs.
@@ -5109,25 +5253,24 @@ async fn handle_request(
                 return Err(rpc_err(1007, "session not found", "SESSION_NOT_FOUND"));
             };
             let session_pm = sessions::session_permission_mode(&st.db, session_id)
-                .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?
-                .filter(|value| value != "inherit");
-            let effective_pm = session_pm
-                .or_else(|| {
-                    st.db
-                        .get_setting("app")
-                        .ok()
-                        .flatten()
-                        .and_then(|settings| {
-                            settings
-                                .get("defaultPermissionMode")
-                                .and_then(|value| value.as_str())
-                                .filter(|value| {
-                                    sessions::is_valid_permission_mode(value) && *value != "inherit"
-                                })
-                                .map(str::to_string)
-                        })
-                })
-                .unwrap_or_else(|| "ask".into());
+                .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?;
+            let default_pm = st
+                .db
+                .get_setting("app")
+                .ok()
+                .flatten()
+                .and_then(|settings| {
+                    settings
+                        .get("defaultPermissionMode")
+                        .and_then(|value| value.as_str())
+                        .map(str::to_string)
+                });
+            let effective_pm = effective_permission_mode(
+                &mode,
+                session_pm.as_deref(),
+                default_pm.as_deref(),
+                None,
+            );
             let args = params.get("args").cloned().unwrap_or_else(|| json!({}));
             let workspace_path = resolve_tool_workspace_for_call(&st, session_id, &args)?;
             let external_path_permission =
@@ -7773,19 +7916,20 @@ mod tests {
 
     #[cfg(windows)]
     fn descendant_marker_bash_command(started: &Path, late: &Path) -> String {
+        let started = started.to_string_lossy().replace('\'', "''");
+        let late = late.to_string_lossy().replace('\'', "''");
         format!(
-            "$null = Start-Process -FilePath powershell.exe -ArgumentList @('-NoLogo','-NoProfile','-Command',\"Start-Sleep -Milliseconds 1000; [IO.File]::WriteAllText('{}', 'late')\") -WindowStyle Hidden; [IO.File]::WriteAllText('{}', 'started'); Start-Sleep -Seconds 30",
-            late.display(),
-            started.display()
+            "$null = Start-Process -FilePath powershell.exe -ArgumentList @('-NoLogo','-NoProfile','-Command',\"[IO.File]::WriteAllText('{}', 'started'); Start-Sleep -Milliseconds 1000; [IO.File]::WriteAllText('{}', 'late')\") -WindowStyle Hidden; Start-Sleep -Seconds 30",
+            started, late
         )
     }
 
     #[cfg(not(windows))]
     fn descendant_marker_bash_command(started: &Path, late: &Path) -> String {
         format!(
-            "(sleep 1; printf late > '{}') & printf started > '{}'; sleep 30",
-            late.display(),
-            started.display()
+            "(printf started > '{}'; sleep 1; printf late > '{}') & sleep 30",
+            started.display(),
+            late.display()
         )
     }
 
@@ -9448,7 +9592,7 @@ mod tests {
         let started_command = descendant_marker_bash_command(&started_marker, &late_marker);
         let session_id = session.id.clone();
         let pending_state = state.clone();
-        let pending_task = tokio::spawn(async move {
+        let mut pending_task = tokio::spawn(async move {
             handle_request(
                 pending_state,
                 "tools.execute",
@@ -9466,16 +9610,48 @@ mod tests {
             .await
         });
         wait_for_bash_registration(&state, &session.id, "abort-during-execution").await;
-        for _ in 0..100 {
-            if started_marker.exists() {
-                break;
+        // The child itself signals readiness, so abort cannot race ahead of
+        // descendant startup. Cold Windows PowerShell launches can take
+        // several seconds; keep the setup bounded while allowing that latency.
+        let startup = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            loop {
+                if started_marker.exists() {
+                    return None;
+                }
+                tokio::select! {
+                    result = &mut pending_task => return Some(result),
+                    _ = tokio::time::sleep(std::time::Duration::from_millis(10)) => {}
+                }
             }
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        })
+        .await;
+        match startup {
+            Ok(None) => {}
+            Ok(Some(result)) => {
+                panic!("Bash execution ended before its descendant became ready: {result:?}")
+            }
+            Err(_) => {
+                let aborted = handle_request(
+                    state.clone(),
+                    "tools.abort",
+                    json!({
+                        "sessionId": session.id,
+                        "toolCallId": "abort-during-execution"
+                    }),
+                    mpsc::unbounded_channel().0,
+                )
+                .await
+                .unwrap();
+                let result = tokio::time::timeout(std::time::Duration::from_secs(5), pending_task)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .unwrap();
+                panic!(
+                    "Bash descendant did not become ready within ten seconds; abort={aborted:?}; result={result:?}"
+                );
+            }
         }
-        assert!(
-            started_marker.exists(),
-            "the command should have started before abort"
-        );
 
         let aborted = handle_request(
             state.clone(),
@@ -9821,6 +9997,110 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(finished["execution"]["state"], "completed");
+    }
+
+    #[tokio::test]
+    async fn goal_budget_update_rpc_persists_limits_and_rejects_invalid_ranges() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let project = data_dir.path().join("project");
+        fs::create_dir_all(&project).unwrap();
+        let mut app_state = AppState::open(data_dir.path()).unwrap();
+        app_state.handshook = true;
+        app_state.workspace.set(project.clone());
+        let session = sessions::create_session(
+            &app_state.db,
+            Some("Goal".into()),
+            Some("goal".into()),
+            None,
+            None,
+            Some(project.to_string_lossy().into_owned()),
+        )
+        .unwrap();
+        let turn_id = sessions::begin_turn(&app_state.db, &session.id, None, None).unwrap();
+        let state = Arc::new(Mutex::new(app_state));
+        let (tx, mut notifications) = mpsc::unbounded_channel();
+        let submitted = handle_request(
+            state.clone(),
+            "plans.submit",
+            json!({
+                "sessionId": session.id,
+                "turnId": turn_id,
+                "toolCallId": "submit-goal-budget-call",
+                "kind": "goal",
+                "title": "Reach the target",
+                "markdown": "# Goal\n- verification passes",
+                "question": "Approve?"
+            }),
+            tx.clone(),
+        )
+        .await
+        .unwrap();
+        let proposal_id = submitted["proposal"]["id"].as_str().unwrap();
+        let proposal_version = submitted["proposal"]["version"].as_i64().unwrap();
+        let _submit_notification = notifications.try_recv().unwrap();
+        let resolved = handle_request(
+            state.clone(),
+            "plans.resolve",
+            json!({
+                "sessionId": session.id,
+                "proposalId": proposal_id,
+                "turnId": turn_id,
+                "toolCallId": "submit-goal-budget-call",
+                "version": proposal_version,
+                "action": "approve",
+                "targetPermissionMode": "auto"
+            }),
+            tx.clone(),
+        )
+        .await
+        .unwrap();
+        let execution_id = resolved["execution"]["id"].as_str().unwrap();
+        let _approval_notification = notifications.try_recv().unwrap();
+
+        let updated = handle_request(
+            state.clone(),
+            "goals.budget.update",
+            json!({
+                "sessionId": session.id,
+                "proposalId": proposal_id,
+                "budget": {
+                    "maxRounds": 24,
+                    "maxTokens": 500_000,
+                    "maxDurationMs": 86_400_000,
+                    "tokenBudgetUnlimited": true
+                }
+            }),
+            tx.clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(updated["goal"]["maxRounds"], 24);
+        assert_eq!(updated["goal"]["maxTokens"], 500_000);
+        assert_eq!(updated["goal"]["maxDurationMs"], 86_400_000);
+        assert_eq!(updated["goal"]["tokenBudgetUnlimited"], true);
+        assert_eq!(updated["goal"]["currentExecutionId"], execution_id);
+        let notification: Value = serde_json::from_str(&notifications.try_recv().unwrap()).unwrap();
+        assert_eq!(notification["method"], "plans.changed");
+        assert_eq!(notification["params"]["goal"]["maxRounds"], 24);
+
+        let error = handle_request(
+            state,
+            "goals.budget.update",
+            json!({
+                "sessionId": session.id,
+                "proposalId": proposal_id,
+                "budget": {
+                    "maxRounds": 33,
+                    "maxTokens": 500_000,
+                    "maxDurationMs": 86_400_000,
+                    "tokenBudgetUnlimited": true
+                }
+            }),
+            tx,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.data.unwrap()["errorCode"], "GOAL_BUDGET_INVALID");
     }
 
     #[tokio::test]
@@ -10785,6 +11065,104 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn goal_fixed_auto_allows_bash_even_when_session_inherits_ask() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let project = data_dir.path().join("project");
+        fs::create_dir_all(&project).unwrap();
+        let mut app_state = AppState::open(data_dir.path()).unwrap();
+        app_state.handshook = true;
+        app_state
+            .db
+            .set_setting("app", &json!({ "defaultPermissionMode": "ask" }))
+            .unwrap();
+        let session = sessions::create_session(
+            &app_state.db,
+            Some("Goal".into()),
+            Some("goal".into()),
+            None,
+            None,
+            Some(project.to_string_lossy().into_owned()),
+        )
+        .unwrap();
+        let session_id = session.id.clone();
+        assert_eq!(
+            sessions::session_permission_mode(&app_state.db, &session_id)
+                .unwrap()
+                .as_deref(),
+            Some("inherit")
+        );
+        let state = Arc::new(Mutex::new(app_state));
+        let (tx, mut notifications) = mpsc::unbounded_channel();
+
+        let evaluation = handle_request(
+            state.clone(),
+            "permissions.evaluate",
+            json!({
+                "sessionId": session_id,
+                "toolName": "Bash",
+                "args": { "command": "inspect workspace" }
+            }),
+            tx.clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(evaluation["decision"], "allow-once");
+
+        #[cfg(windows)]
+        let command = "[Console]::Out.Write('goal-auto')";
+        #[cfg(not(windows))]
+        let command = "printf goal-auto";
+        let command_shell_id = crate::tools::shell::default_shell_id();
+        let execute_state = state.clone();
+        let execute_session_id = session_id.clone();
+        let mut execute_task = tokio::spawn(async move {
+            handle_request(
+                execute_state,
+                "tools.execute",
+                json!({
+                    "sessionId": execute_session_id,
+                    "toolCallId": "goal-fixed-auto-bash",
+                    "toolName": "Bash",
+                    "args": { "command": command },
+                    "expectedCommandShellId": command_shell_id,
+                    "expectedCommandShellDialect": crate::tools::shell::dialect_for_id(command_shell_id),
+                    "mode": "agent"
+                }),
+                tx,
+            )
+            .await
+        });
+        let result = loop {
+            tokio::select! {
+                biased;
+                notification = notifications.recv() => {
+                    match notification {
+                        Some(notification) => {
+                            let notification: Value = serde_json::from_str(&notification).unwrap();
+                            assert_ne!(
+                                notification["method"],
+                                "permissions.request",
+                                "Goal's fixed Auto mode unexpectedly requested permission"
+                            );
+                        }
+                        None => break execute_task.await.unwrap().unwrap(),
+                    }
+                }
+                result = &mut execute_task => break result.unwrap().unwrap(),
+            }
+        };
+        assert_eq!(result["ok"], true);
+        assert_eq!(result["content"]["stdout"], "goal-auto");
+        assert_eq!(
+            sessions::session_permission_mode(&state.lock().await.db, &session_id)
+                .unwrap()
+                .as_deref(),
+            Some("inherit"),
+            "Goal's fixed Auto policy must not persistently change the session override"
+        );
+    }
+
+    #[tokio::test]
     async fn provider_model_cache_roundtrips_through_rpc() {
         let data_dir = tempfile::tempdir().unwrap();
         let mut app_state = AppState::open(data_dir.path()).unwrap();
@@ -11121,5 +11499,127 @@ mod update_settings_tests {
         ] {
             assert!(validate_settings_value(&value).is_err(), "{value}");
         }
+    }
+}
+
+#[cfg(test)]
+mod goal_budget_settings_tests {
+    use super::*;
+
+    fn default_goal_budget() -> Value {
+        json!({
+            "maxRounds": 8,
+            "maxTokens": 250_000,
+            "maxDurationMs": 3_600_000,
+            "tokenBudgetUnlimited": true
+        })
+    }
+
+    #[test]
+    fn missing_or_malformed_goal_defaults_use_the_unlimited_defaults() {
+        assert_eq!(
+            normalize_settings_value(json!({}))["goalBudgetDefaults"],
+            default_goal_budget()
+        );
+        for malformed in [
+            json!(null),
+            json!({}),
+            json!({"maxRounds": 8}),
+            json!({"maxRounds": 8, "maxTokens": 250_000, "maxDurationMs": 3_600_000, "tokenBudgetUnlimited": "true"}),
+        ] {
+            assert_eq!(
+                normalize_settings_value(json!({"goalBudgetDefaults": malformed}))
+                    ["goalBudgetDefaults"],
+                default_goal_budget()
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn settings_get_returns_unlimited_goal_defaults_for_missing_or_invalid_values() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let mut app_state = AppState::open(data_dir.path()).unwrap();
+        app_state.handshook = true;
+        let state = Arc::new(Mutex::new(app_state));
+        let tx = mpsc::unbounded_channel().0;
+
+        let defaults = handle_request(state.clone(), "settings.get", json!({}), tx.clone())
+            .await
+            .unwrap();
+        assert_eq!(defaults["goalBudgetDefaults"], default_goal_budget());
+
+        state
+            .lock()
+            .await
+            .db
+            .set_setting("app", &json!({"goalBudgetDefaults": {"maxRounds": 0}}))
+            .unwrap();
+        let repaired = handle_request(state, "settings.get", json!({}), tx)
+            .await
+            .unwrap();
+        assert_eq!(repaired["goalBudgetDefaults"], default_goal_budget());
+    }
+    #[test]
+    fn validates_goal_budget_boundaries_and_rejects_malformed_values() {
+        for budget in [
+            json!({"maxRounds": 1, "maxTokens": 1, "maxDurationMs": 60_000, "tokenBudgetUnlimited": false}),
+            json!({"maxRounds": 32, "maxTokens": 9_007_199_254_740_991u64, "maxDurationMs": 86_400_000, "tokenBudgetUnlimited": true}),
+        ] {
+            assert!(validate_settings_value(&json!({"goalBudgetDefaults": budget})).is_ok());
+        }
+
+        for budget in [
+            json!(null),
+            json!(false),
+            json!({}),
+            json!({"maxRounds": 0, "maxTokens": 250_000, "maxDurationMs": 3_600_000, "tokenBudgetUnlimited": true}),
+            json!({"maxRounds": 33, "maxTokens": 250_000, "maxDurationMs": 3_600_000, "tokenBudgetUnlimited": true}),
+            json!({"maxRounds": 1.5, "maxTokens": 250_000, "maxDurationMs": 3_600_000, "tokenBudgetUnlimited": true}),
+            json!({"maxRounds": 8, "maxTokens": 0, "maxDurationMs": 3_600_000, "tokenBudgetUnlimited": true}),
+            json!({"maxRounds": 8, "maxTokens": -1, "maxDurationMs": 3_600_000, "tokenBudgetUnlimited": true}),
+            json!({"maxRounds": 8, "maxTokens": 1.5, "maxDurationMs": 3_600_000, "tokenBudgetUnlimited": true}),
+            json!({"maxRounds": 8, "maxTokens": 9_007_199_254_740_992u64, "maxDurationMs": 3_600_000, "tokenBudgetUnlimited": true}),
+            json!({"maxRounds": 8, "maxTokens": 250_000, "maxDurationMs": 59_999, "tokenBudgetUnlimited": true}),
+            json!({"maxRounds": 8, "maxTokens": 250_000, "maxDurationMs": 86_400_001, "tokenBudgetUnlimited": true}),
+            json!({"maxRounds": 8, "maxTokens": 250_000, "maxDurationMs": 3_600_000, "tokenBudgetUnlimited": 1}),
+        ] {
+            assert!(
+                validate_settings_value(&json!({"goalBudgetDefaults": budget})).is_err(),
+                "accepted invalid budget: {budget}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn rejected_goal_budget_write_preserves_the_last_valid_settings() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let mut app_state = AppState::open(data_dir.path()).unwrap();
+        app_state.handshook = true;
+        let state = Arc::new(Mutex::new(app_state));
+        let tx = mpsc::unbounded_channel().0;
+        let valid = json!({
+            "goalBudgetDefaults": {
+                "maxRounds": 12,
+                "maxTokens": 500_000,
+                "maxDurationMs": 7_200_000,
+                "tokenBudgetUnlimited": false
+            }
+        });
+
+        handle_request(state.clone(), "settings.set", valid.clone(), tx.clone())
+            .await
+            .unwrap();
+        let rejected = handle_request(
+            state.clone(),
+            "settings.set",
+            json!({"goalBudgetDefaults": {"maxRounds": 33}}),
+            tx.clone(),
+        )
+        .await;
+        assert!(rejected.is_err());
+        let stored = handle_request(state, "settings.get", json!({}), tx)
+            .await
+            .unwrap();
+        assert_eq!(stored["goalBudgetDefaults"], valid["goalBudgetDefaults"]);
     }
 }

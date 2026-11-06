@@ -88,7 +88,7 @@ localStorage.setItem("pi.desktop.configSyncDraft", JSON.stringify({ endpoint: "h
 let view;
 const mount = () => { view = createRoot(document.getElementById("root")); flushSync(() => view.render(React.createElement(ConfigSyncPage))); };
 const check = (value, message) => { if (!value) throw new Error(message); };
-const frame = () => new Promise(requestAnimationFrame);
+const frame = () => new Promise((resolve) => setTimeout(resolve, 0));
 const until = async (condition, message) => {
   const end = performance.now() + 5000;
   while (!condition()) { if (performance.now() > end) throw new Error(message); await frame(); }

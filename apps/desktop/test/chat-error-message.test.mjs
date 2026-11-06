@@ -43,6 +43,8 @@ test("assistant error messages expose readable provider details and one Continue
   assert.doesNotMatch(component, /errors\.action\.retry/);
   assert.match(component, /errors\.action\.continue/);
   assert.match(component, /chat\.continueCurrentTaskPrompt/);
+  assert.match(component, /useSlotSessionId/);
+  assert.match(component, /sendPrompt\(t\("chat\.continueCurrentTaskPrompt"\), undefined, paneSessionId \|\| undefined\)/);
   assert.match(component, /setSettingsTab\("agent"\)/);
 
 // Issue #234: the localized NETWORK_ERROR summary cannot tell DNS from TLS from

@@ -384,7 +384,7 @@ test("transcript density and hover actions are quiet", () => {
 test("transcript markup uses dedicated user text and assistant turn surfaces", () => {
   assert.match(transcriptSource, /className="message-user-text selectable"/);
   assert.match(transcriptSource, /streaming \? " streaming" : ""/);
-  assert.match(transcriptSource, /CopyButton text=\{message\.content\}/);
+  assert.match(transcriptSource, /CopyButton text=\{displayed\}/);
   assert.match(transcriptSource, /className=\{`message-row assistant assistant-turn/);
   assert.match(transcriptSource, /CopyButton text=\{content\}/);
 });
@@ -467,7 +467,7 @@ test("delete remains on user turns and is removed from assistant toolbar", async
   assert.match(transcriptSource, /chat\.deleteMessage/);
   assert.match(
     transcriptSource,
-    /const editableUserMessage = isUser && !isSessionMessage && canEditMessages;/,
+    /const canMutateHistory = canEditMessages && historyActionsAllowed;[\s\S]*?const editableUserMessage = isUser && !isSessionMessage && !message\.id\.startsWith\("plugin:"\) && canMutateHistory;/,
   );
   assert.match(transcriptSource, /\{editableUserMessage \? \(/);
   assert.match(stylesSource, /\.copy-btn\.danger:hover/);
@@ -477,7 +477,12 @@ test("editing a user prompt regenerates it and keeps the old branch reachable", 
   const storeSource = await readStoreSource();
   // Edit lives on the user turn (the prompt is what gets rewritten), not on
   // the assistant answer.
-  assert.match(transcriptSource, /editUserMessage\(message\.id, next, message\.attachments\)/);
+  assert.match(
+    transcriptSource,
+    /editUserMessage\(\s*message\.id,\s*buildAnnotatedPrompt\(requestText, editAnnotations\.current\),\s*message\.attachments,?\s*\)/,
+  );
+  assert.match(transcriptSource, /prepareAnnotatedPromptEdit\(full\.command \|\| full\.content \|\| ""\)/);
+  assert.match(transcriptSource, /setEditValue\(preparedEdit\.requestText\)/);
   assert.match(transcriptSource, /className="message-edit-input selectable"/);
   assert.match(transcriptSource, /chat\.editMessage/);
   assert.match(transcriptSource, /const retryEdit = async \(\)/);
@@ -488,7 +493,8 @@ test("editing a user prompt regenerates it and keeps the old branch reachable", 
   assert.doesNotMatch(transcriptSource, /editAssistantMessage/);
   assert.doesNotMatch(storeSource, /editAssistantMessage/);
   // Slash prompts edit their typed form so the resend re-expands the template.
-  assert.match(transcriptSource, /const editSeed =\s*\(editableUserMessage && message\.command\) \|\| \(message\.content \|\| ""\);/);
+  assert.match(transcriptSource, /const displayContent = requestTextWithoutAnnotations\(message\.content \|\| ""\);/);
+  assert.match(transcriptSource, /const editSeed =\s*\(editableUserMessage && message\.command\) \|\| displayContent;/);
   // Same branch mechanics as regenerate, so main archives the replaced turn
   // as a revision the pager can walk back to.
   assert.match(storeSource, /editUserMessage:\s*async \(messageId, content, attachments\)/);

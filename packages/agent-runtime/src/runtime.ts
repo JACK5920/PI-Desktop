@@ -120,7 +120,6 @@ import {
   isToolsOutputParams,
   MAX_ASK_TOOL_QUESTION_CHARS,
   MAX_SUBAGENT_CONCURRENCY,
-  GOAL_MAX_ROUNDS_PER_CYCLE,
   normalizeAskToolOption,
   normalizeSubagentName,
   proposalKindForMode,
@@ -1829,6 +1828,7 @@ export class DesktopAgentRuntime {
   private model: Model<Api>;
   private turnId?: string;
   private disposed = false;
+  private aborting?: Promise<void>;
   readonly sessionId: string;
   private mode: Mode;
   private provider: RuntimeProviderConfig;
@@ -9219,7 +9219,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
             "</approved-goal-markdown>",
             "Choose your own approach with the normal Agent tools. Then verify every acceptance criterion yourself, running the checks the contract names rather than assuming they pass.",
             "Keep working while a criterion is still unmet and you have an untried approach. Stop early only if a boundary in the contract blocks you or a criterion cannot be verified; say which one and why.",
-            `This is one bounded execution round (up to ${GOAL_MAX_ROUNDS_PER_CYCLE} rounds per cycle, including this one). At the end of this round, call GoalReport exactly once with every acceptance criterion, its met/unmet status, and concrete observed evidence.`,
+            "This is one bounded execution round. The Host enforces this Goal's saved round and time limits, and its token limit only when enabled. At the end of this round, call GoalReport exactly once with every acceptance criterion, its met/unmet status, and concrete observed evidence.",
             "Choose complete only when every criterion is met and supported by evidence; choose continue when work remains; choose blocked only when a contract boundary or external dependency prevents progress. The Host records each report and automatically starts the next round only after this turn finishes.",
           ].join("\n")
         : [
@@ -9582,11 +9582,16 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
     }
   }
 
-  async abort(): Promise<void> {
+  abort(): Promise<void> {
+    return this.aborting ??= this.abortTurn().finally(() => { this.aborting = undefined; });
+  }
+
+  private async abortTurn(): Promise<void> {
     const turnId = this.turnId;
     const settlement = turnId
       ? this.activeTurnSettlements.get(turnId)
       : undefined;
+    const delegates = this.runningDelegations().map((record) => record.completion);
     this.acceptingSteering = false;
     this.gracefulStopRequested = false;
     this.runCancelled = true;
@@ -9607,7 +9612,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
     // the whole session until it finished on its own (#1767). Drive the tools
     // from here as well, so a stop always releases them.
     for (const abortTool of [...this.activeToolAborts]) abortTool();
-    await settlement;
+    await Promise.allSettled([...(settlement ? [settlement] : []), ...delegates]);
   }
 
   private trackTurnOperation<T>(
@@ -9651,6 +9656,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
     return {
       sessionId: this.sessionId,
       isRunning:
+        this.aborting !== undefined ||
         this.agent.state.isStreaming ||
         this.compactionInProgress ||
         this.agentActivity !== undefined ||

@@ -7,7 +7,7 @@ pub(crate) use serde_json::Value;
 pub(crate) use std::path::{Path, PathBuf};
 
 /// Current SQLite schema version.
-pub const SCHEMA_VERSION: i64 = 28;
+pub const SCHEMA_VERSION: i64 = 31;
 
 /// Absolute approval deadline for a newly submitted Plan or Goal proposal.
 pub const PLAN_APPROVAL_TIMEOUT_MS: i64 = 30 * 60 * 1000;
@@ -36,6 +36,7 @@ pub(crate) use migrations::{
     migrate_v19_to_v20, migrate_v20_to_v21, migrate_v7_to_v8, migrate_v8_to_v15, migrate_v9_to_v15,
     migration_backup_path, validate_session_modes,
 };
+pub(crate) use migrations::{migrate_v28_to_v29, migrate_v29_to_v30, migrate_v30_to_v31};
 pub(crate) use model::PlanWorkRow;
 pub use model::{Database, ProjectMemoryEntryRecord, ProjectMemoryRecord, ProjectRecord};
 pub use project_groups::{
@@ -48,6 +49,7 @@ pub(crate) use repositories::{
     OBSOLETE_PLAN_APPROVAL_PERMISSION_MODE,
 };
 pub(crate) use schema::GOAL_LIFECYCLE_SCHEMA;
+pub(crate) use schema::MANAGED_ATTACHMENTS_DDL;
 pub(crate) use schema::{PLAN_APPROVALS_SCHEMA, SCHEMA_LATEST, SESSION_TODO_DDL};
 pub(crate) use session_fast_mode_migration::migrate_v26_to_v27;
 pub(crate) use session_title_source_migration::migrate_v22_to_v23;

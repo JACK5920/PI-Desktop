@@ -50,6 +50,7 @@ test("an isolated session launches in its worktree with its project's configurat
     const host = {
       isAvailable: () => true,
       async call(method, input) {
+        if (method === "session.managedOwner") return { pluginId: null };
         if (method === "commandShells.list") {
           const shell = { id: "bash", label: "Bash", dialect: "posix", available: true, isDefault: true };
           return { configuredId: "bash", effective: shell, fallback: false, choices: [shell] };

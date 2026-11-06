@@ -26,6 +26,7 @@ const { assertSshArgument, createSystemSshTransport, reserveLocalPort } = await 
 
 /** Every test is bounded well below the module's own 30 s / 120 s defaults. */
 const TEST_TIMEOUT_MS = 20_000;
+const posixTest = process.platform === "win32" ? test.skip : test;
 
 const FIXTURES = {
   /** Prints the argv it was handed, one entry per line. */
@@ -172,7 +173,7 @@ async function waitForPid(file) {
   return pid;
 }
 
-test("exec passes the command as one argv entry behind the common options", { timeout: TEST_TIMEOUT_MS }, async (t) => {
+posixTest("exec passes the command as one argv entry behind the common options", { timeout: TEST_TIMEOUT_MS }, async (t) => {
   const binary = await writeFixture(t, FIXTURES.argvEcho, "ssh-argv-echo");
   const transport = createSystemSshTransport({ host: "remote.example" }, { binary });
 
@@ -219,7 +220,7 @@ test("exec passes the command as one argv entry behind the common options", { ti
   targeted.dispose();
 });
 
-test("execWithInput runs the script through `sh -s` with the body on stdin", { timeout: TEST_TIMEOUT_MS }, async (t) => {
+posixTest("execWithInput runs the script through `sh -s` with the body on stdin", { timeout: TEST_TIMEOUT_MS }, async (t) => {
   const binary = await writeFixture(t, FIXTURES.argvAndStdin, "ssh-argv-and-stdin");
   const transport = createSystemSshTransport({ host: "remote.example" }, { binary });
   const script = [
@@ -252,7 +253,7 @@ test("execWithInput runs the script through `sh -s` with the body on stdin", { t
   transport.dispose();
 });
 
-test("execWithInput honors a non-shell command and keeps JSON out of argv", { timeout: TEST_TIMEOUT_MS }, async (t) => {
+posixTest("execWithInput honors a non-shell command and keeps JSON out of argv", { timeout: TEST_TIMEOUT_MS }, async (t) => {
   const binary = await writeFixture(t, FIXTURES.argvAndStdin, "ssh-import-stdin");
   const transport = createSystemSshTransport({ host: "remote.example" }, { binary });
   t.after(() => transport.dispose());
@@ -265,7 +266,7 @@ test("execWithInput honors a non-shell command and keeps JSON out of argv", { ti
   assert.equal(stdin, input);
 });
 
-test("execWithInput enforces a combined stdout/stderr cap without echoing input", { timeout: TEST_TIMEOUT_MS }, async (t) => {
+posixTest("execWithInput enforces a combined stdout/stderr cap without echoing input", { timeout: TEST_TIMEOUT_MS }, async (t) => {
   const binary = await writeFixture(t, '#!/bin/sh\ncat >&2\n', "ssh-output-cap");
   const transport = createSystemSshTransport({ host: "remote.example" }, { binary });
   t.after(() => transport.dispose());
@@ -276,7 +277,7 @@ test("execWithInput enforces a combined stdout/stderr cap without echoing input"
   });
 });
 
-test("a non-zero exit becomes a typed error carrying both streams", { timeout: TEST_TIMEOUT_MS }, async (t) => {
+posixTest("a non-zero exit becomes a typed error carrying both streams", { timeout: TEST_TIMEOUT_MS }, async (t) => {
   const binary = await writeFixture(t, FIXTURES.failing, "ssh-failing");
   const transport = createSystemSshTransport({ host: "remote.example" }, { binary });
 
@@ -300,7 +301,7 @@ test("a non-zero exit becomes a typed error carrying both streams", { timeout: T
   transport.dispose();
 });
 
-test("the stdout of that error is redacted of a live pairing token", { timeout: TEST_TIMEOUT_MS }, async (t) => {
+posixTest("the stdout of that error is redacted of a live pairing token", { timeout: TEST_TIMEOUT_MS }, async (t) => {
   const binary = await writeFixture(t, FIXTURES.tokenLeak, "ssh-token-leak");
   const transport = createSystemSshTransport({ host: "remote.example" }, { binary });
 
@@ -323,7 +324,7 @@ test("the stdout of that error is redacted of a live pairing token", { timeout: 
   transport.dispose();
 });
 
-test("a command outliving timeoutMs is killed, not awaited", { timeout: TEST_TIMEOUT_MS }, async (t) => {
+posixTest("a command outliving timeoutMs is killed, not awaited", { timeout: TEST_TIMEOUT_MS }, async (t) => {
   const binary = await writeFixture(t, FIXTURES.sleeper, "ssh-sleeper");
   const transport = createSystemSshTransport({ host: "remote.example" }, { binary });
 
@@ -359,7 +360,7 @@ test("a binary that does not exist rejects instead of crashing", { timeout: TEST
   transport.dispose();
 });
 
-test("forward rejects fast, with the ssh diagnostic, when ssh exits instead", { timeout: TEST_TIMEOUT_MS }, async (t) => {
+posixTest("forward rejects fast, with the ssh diagnostic, when ssh exits instead", { timeout: TEST_TIMEOUT_MS }, async (t) => {
   const binary = await writeFixture(t, FIXTURES.deadSsh, "ssh-dead");
   const transport = createSystemSshTransport({ host: "remote.example" }, { binary });
   const localPort = await reserveLocalPort();
@@ -384,7 +385,7 @@ test("forward rejects fast, with the ssh diagnostic, when ssh exits instead", { 
   transport.dispose();
 });
 
-test("forward resolves once the port answers and close() is idempotent", { timeout: TEST_TIMEOUT_MS }, async (t) => {
+posixTest("forward resolves once the port answers and close() is idempotent", { timeout: TEST_TIMEOUT_MS }, async (t) => {
   const binary = await writeFixture(t, NODE_FIXTURE, "ssh-forward");
   const transport = createSystemSshTransport({ host: "remote.example" }, { binary });
   const localPort = await reserveLocalPort();
@@ -413,7 +414,7 @@ test("forward resolves once the port answers and close() is idempotent", { timeo
   }
 });
 
-test("dispose reaps a live forward and leaves a finished exec alone", { timeout: TEST_TIMEOUT_MS }, async (t) => {
+posixTest("dispose reaps a live forward and leaves a finished exec alone", { timeout: TEST_TIMEOUT_MS }, async (t) => {
   const binary = await writeFixture(t, NODE_FIXTURE, "ssh-dispose");
   const logged = [];
   const transport = createSystemSshTransport(

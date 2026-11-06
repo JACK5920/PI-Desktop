@@ -149,6 +149,22 @@ pub struct SessionSummary {
     /// session. Filled in by the list and single-summary reads.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worktree: Option<crate::session_worktrees::lifecycle::WorktreeSummary>,
+    /// Durable plugin ownership, independent of the plugin lifecycle.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub managed_by_plugin: Option<String>,
+    /// Durable origin for side-chat children. The `promoted` flag preserves
+    /// provenance after a child becomes an ordinary conversation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub side_chat: Option<SideChatOrigin>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SideChatOrigin {
+    pub parent_session_id: String,
+    pub source_message_id: String,
+    pub excerpt: String,
+    pub promoted: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1319,7 +1335,11 @@ const SUMMARY_SELECT: &str =
     "SELECT s.id, s.title, s.last_seq, p.path, s.model_id, s.provider_id, s.mode,
             s.thinking_level, s.permission_mode, s.updated_at, s.created_at,
             EXISTS (SELECT 1 FROM task_runs r WHERE r.session_id = s.id) AS scheduled_run,
-            s.fast_mode
+            s.fast_mode,
+            (SELECT oi.plugin_id FROM session_import_origins oi
+             WHERE oi.session_id = s.id AND json_extract(oi.origin_json, '$.managed') = 1) AS managed_by_plugin,
+            s.side_chat_parent_id, s.side_chat_source_message_id, s.side_chat_excerpt,
+            s.side_chat_promoted
      FROM sessions s LEFT JOIN projects p ON p.id = s.project_id
      WHERE s.deleted_at IS NULL";
 
@@ -1341,6 +1361,22 @@ pub(crate) fn summary_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Sess
         scheduled_run: row.get("scheduled_run")?,
         fast_mode: row.get("fast_mode")?,
         worktree: None,
+        managed_by_plugin: row.get("managed_by_plugin")?,
+        side_chat: match (
+            row.get::<_, Option<String>>("side_chat_parent_id")?,
+            row.get::<_, Option<String>>("side_chat_source_message_id")?,
+            row.get::<_, Option<String>>("side_chat_excerpt")?,
+        ) {
+            (Some(parent_session_id), Some(source_message_id), Some(excerpt)) => {
+                Some(SideChatOrigin {
+                    parent_session_id,
+                    source_message_id,
+                    excerpt,
+                    promoted: row.get("side_chat_promoted")?,
+                })
+            }
+            _ => None,
+        },
     })
 }
 
@@ -1503,6 +1539,8 @@ pub fn create_session_with_options(
         scheduled_run: false,
         // A new or forked session starts without a worktree (ADR 0329).
         worktree: None,
+        managed_by_plugin: None,
+        side_chat: None,
     })
 }
 
@@ -1741,6 +1779,39 @@ pub fn fork_session_through(
     title: Option<&str>,
     through_message_id: Option<&str>,
 ) -> Result<ForkSessionResult> {
+    fork_session_through_with_side_chat(db, source_id, title, through_message_id, None)
+}
+
+/// Create a message-anchored child that stays associated with its parent until
+/// the user promotes it to an ordinary conversation.
+pub fn fork_side_chat_through(
+    db: &Database,
+    source_id: &str,
+    through_message_id: &str,
+    excerpt: &str,
+) -> Result<ForkSessionResult> {
+    let excerpt = excerpt.trim();
+    if excerpt.is_empty() || excerpt.chars().count() > 2_000 {
+        return Err(anyhow!(
+            "side-chat excerpt must contain 1 to 2000 characters"
+        ));
+    }
+    fork_session_through_with_side_chat(
+        db,
+        source_id,
+        None,
+        Some(through_message_id),
+        Some((through_message_id, excerpt)),
+    )
+}
+
+fn fork_session_through_with_side_chat(
+    db: &Database,
+    source_id: &str,
+    title: Option<&str>,
+    through_message_id: Option<&str>,
+    side_chat: Option<(&str, &str)>,
+) -> Result<ForkSessionResult> {
     let Some(source) = get_session(db, source_id)? else {
         return Ok(ForkSessionResult::NotFound);
     };
@@ -1847,14 +1918,24 @@ pub fn fork_session_through(
             .prepare_cached(
                 "INSERT INTO sessions (
                     id, title, project_id, provider_id, model_id, mode, thinking_level,
-                    permission_mode, fast_mode, source, pinned, last_seq, created_at,
-                    updated_at
+                    permission_mode, fast_mode, source, pinned, last_seq,
+                    side_chat_parent_id, side_chat_source_message_id, side_chat_excerpt,
+                    created_at, updated_at
                  )
                  SELECT ?1, ?2, project_id, provider_id, model_id, mode, thinking_level,
-                        permission_mode, fast_mode, NULL, 0, ?3, ?4, ?4
-                 FROM sessions WHERE id = ?5",
+                        permission_mode, fast_mode, NULL, 0, ?3, ?4, ?5, ?6, ?7, ?7
+                 FROM sessions WHERE id = ?8",
             )?
-            .execute(params![id, title, records.len() as i64, now, source_id])?;
+            .execute(params![
+                id,
+                title,
+                records.len() as i64,
+                side_chat.map(|_| source_id),
+                side_chat.map(|(anchor, _)| anchor),
+                side_chat.map(|(_, excerpt)| excerpt),
+                now,
+                source_id
+            ])?;
         if inserted == 0 {
             return Err(anyhow!("session not found: {source_id}"));
         }
@@ -1888,6 +1969,13 @@ pub fn fork_session_through(
         scheduled_run: false,
         // A new or forked session starts without a worktree (ADR 0329).
         worktree: None,
+        managed_by_plugin: None,
+        side_chat: side_chat.map(|(source_message_id, excerpt)| SideChatOrigin {
+            parent_session_id: source_id.to_string(),
+            source_message_id: source_message_id.to_string(),
+            excerpt: excerpt.to_string(),
+            promoted: false,
+        }),
     };
     let messages = records.into_iter().map(record_to_ui).collect();
     Ok(ForkSessionResult::Created(Box::new(SessionDetail {
@@ -1902,6 +1990,18 @@ pub fn fork_session_through(
         compaction: compactions.last().cloned(),
         compactions,
     })))
+}
+
+/// Promote a side-chat child without changing its transcript or active turn.
+pub fn promote_side_chat(db: &Database, session_id: &str) -> Result<bool> {
+    let changed = db
+        .conn()
+        .prepare_cached(
+            "UPDATE sessions SET side_chat_promoted = 1, updated_at = ?1
+             WHERE id = ?2 AND side_chat_parent_id IS NOT NULL AND side_chat_promoted = 0",
+        )?
+        .execute(params![now_ms(), session_id])?;
+    Ok(changed > 0)
 }
 
 /// Backwards-compatible configurator.  Omitting the thinking level preserves
@@ -5262,6 +5362,8 @@ mod tests {
             scheduled_run: false,
             fast_mode: false,
             worktree: None,
+            managed_by_plugin: None,
+            side_chat: None,
             created_at: "2025-01-01T00:00:00Z".into(),
             updated_at: "2025-01-02T00:00:00Z".into(),
         };
@@ -5316,6 +5418,8 @@ mod tests {
             scheduled_run: false,
             fast_mode: false,
             worktree: None,
+            managed_by_plugin: None,
+            side_chat: None,
             created_at: "2025-01-01T00:00:00Z".into(),
             updated_at: "2025-01-01T00:00:00Z".into(),
         };
@@ -6496,6 +6600,8 @@ mod tests {
             scheduled_run: false,
             fast_mode: false,
             worktree: None,
+            managed_by_plugin: None,
+            side_chat: None,
             created_at: "2025-01-01T00:00:00Z".into(),
             updated_at: "2025-01-01T00:00:00Z".into(),
         };
@@ -6645,6 +6751,84 @@ mod tests {
         let restored = get_session(&db, id).unwrap().unwrap();
         assert_eq!(restored.summary.title, "Recovered session");
         assert_eq!(restored.messages[0].content, "from outbox");
+    }
+
+    #[test]
+    fn side_chat_fork_persists_parent_excerpt_and_can_be_promoted() {
+        let db = test_db();
+        let parent = create_session(&db, Some("Parent".into()), None, None, None, None).unwrap();
+        let mut anchor = user_msg(
+            "assistant-anchor",
+            "A selected answer excerpt",
+            "2025-05-01T00:00:00Z",
+        );
+        anchor.role = "assistant".into();
+        append_message(&db, &parent.id, &anchor, None).unwrap();
+
+        let fork = fork_side_chat_through(
+            &db,
+            &parent.id,
+            "assistant-anchor",
+            "A selected answer excerpt",
+        )
+        .unwrap();
+        let ForkSessionResult::Created(child) = fork else {
+            panic!("expected side-chat fork");
+        };
+        assert_eq!(
+            child.summary.side_chat,
+            Some(SideChatOrigin {
+                parent_session_id: parent.id.clone(),
+                source_message_id: "assistant-anchor".into(),
+                excerpt: "A selected answer excerpt".into(),
+                promoted: false,
+            })
+        );
+        assert!(list_sessions(&db)
+            .unwrap()
+            .iter()
+            .any(|session| session.id == child.summary.id && session.side_chat.is_some()));
+
+        assert!(promote_side_chat(&db, &child.summary.id).unwrap());
+        assert!(!promote_side_chat(&db, &child.summary.id).unwrap());
+        let promoted = session_summary(&db, &child.summary.id).unwrap().unwrap();
+        assert!(promoted.side_chat.unwrap().promoted);
+
+        let invalid = fork_side_chat_through(&db, &parent.id, "assistant-anchor", " ");
+        assert!(invalid.is_err());
+    }
+
+    #[test]
+    fn deleting_side_chat_parent_releases_child_as_an_ordinary_session() {
+        let db = test_db();
+        let parent = create_session(&db, Some("Parent".into()), None, None, None, None).unwrap();
+        let mut anchor = user_msg(
+            "assistant-anchor",
+            "A selected answer excerpt",
+            "2025-05-01T00:00:00Z",
+        );
+        anchor.role = "assistant".into();
+        append_message(&db, &parent.id, &anchor, None).unwrap();
+        let fork = fork_side_chat_through(
+            &db,
+            &parent.id,
+            "assistant-anchor",
+            "A selected answer excerpt",
+        )
+        .unwrap();
+        let ForkSessionResult::Created(child) = fork else {
+            panic!("expected side-chat fork");
+        };
+
+        assert!(delete_session(&db, &parent.id).unwrap());
+
+        let released = session_summary(&db, &child.summary.id).unwrap().unwrap();
+        assert_eq!(released.side_chat, None);
+        assert!(list_sessions(&db)
+            .unwrap()
+            .iter()
+            .any(|session| session.id == child.summary.id));
+        assert!(get_session(&db, &child.summary.id).unwrap().is_some());
     }
 
     #[test]

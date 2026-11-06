@@ -105,6 +105,7 @@ test("a running turn disables edit, delete, and revision navigation", () => {
 });
 
 test("a completed assistant turn offers copy, select, regenerate, and branch", () => {
+  const selected = [];
   const items = assistantTurnMenuItems({
     t,
     answer: "Patched main.ts.",
@@ -113,9 +114,13 @@ test("a completed assistant turn offers copy, select, regenerate, and branch", (
     actions,
     onRegenerate: noop,
     onBranch: noop,
+    onAskAboutSelection: (selection) => selected.push(selection),
   });
-  assert.deepEqual(ids(items), ["copy", "select-text", "regenerate", "branch"]);
+  assert.deepEqual(ids(items), ["copy", "select-text", "ask-about-selection", "regenerate", "branch"]);
+  assert.equal(items.find((item) => item.id === "ask-about-selection").requiresSelection, true);
   assert.equal(items.find((item) => item.id === "regenerate").separatorBefore, true);
+  items.find((item) => item.id === "ask-about-selection").onSelect("selected excerpt");
+  assert.deepEqual(selected, ["selected excerpt"]);
 });
 
 test("a streaming assistant turn without a settled answer offers no items", () => {
@@ -127,6 +132,7 @@ test("a streaming assistant turn without a settled answer offers no items", () =
     actions,
     onRegenerate: noop,
     onBranch: noop,
+    onAskAboutSelection: noop,
   });
   assert.deepEqual(ids(items), []);
 });
