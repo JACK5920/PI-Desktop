@@ -11332,7 +11332,7 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
 | Post-MVP | E2E-022A, E2E-022B, E2E-022C, E2E-024I, E2E-024J, E2E-024K, E2E-024L, E2E-024M (plugin roadmap R2/R3/R6) |
 | Post-baseline local automation | E2E-220 |
 | Post-baseline local automation (MCP `pi_session_get` large compaction) | E2E-MCP-session-get-projects-large-compaction |
-| Post-MVP remote control | E2E-221, E2E-222, E2E-223, E2E-224, E2E-225, E2E-226, E2E-227, E2E-228, E2E-229, E2E-230, E2E-231, E2E-232, E2E-REMOTE-HOST-settings-compact-inventory |
+| Post-MVP remote control | E2E-221, E2E-222, E2E-223, E2E-224, E2E-225, E2E-226, E2E-227, E2E-228, E2E-229, E2E-230, E2E-231, E2E-232, E2E-REMOTE-HOME, E2E-REMOTE-HOST-settings-compact-inventory |
 | Trusted extensions (R7 v1) | E2E-DIALOG-long-text-boundaries, E2E-241, E2E-242, E2E-HOOKS-prompt-chain, E2E-HOOKS-context-every-request, E2E-HOOKS-cancel-and-dispose, E2E-TRUSTED-EXTENSION-custom-agent-stream-and-binding, E2E-243, E2E-TRUSTED-EXTENSION-temporary-session-cwd-is-scratch, E2E-244, E2E-245, E2E-PLUGIN-imported-pi-package-skills, E2E-PLUGIN-import-extension-installs-dependencies, E2E-PLUGIN-import-extension-reports-missing-dependency, E2E-PLUGIN-declared-provider-appears-in-the-native-provider-list, E2E-PLUGIN-provider-catalog-add-service |
 | Trusted extensions (R7 v1 npm recovery) | E2E-PLUGIN-import-extension-recovers-missing-npm |
 | Post-MVP regression coverage (plugin tool dispatch) | E2E-PLUGIN-slow-tool-is-not-cut-off-by-host-dispatch |
@@ -16242,9 +16242,13 @@ browser milestones are scheduled.
   runs a local model fixture through production Desktop relay, WebSocket RACP
   and real Rust Read/Bash execution, asserting zero remote providers, projects
   and sessions. Both local and remote Rust Hosts are real; the model service
-  and the fixture's user approval action are controlled test boundaries.
-- **Status**: Candidate implementation; real SSH release validation remains the
-  separately provisioned E2E-231 scenario.
+  and the fixture's user approval action are controlled test boundaries. Ubuntu
+  CI runs this script in `trusted-extensions-e2e` after building host-core, so
+  its temporary remote workspace uses native POSIX paths. It uses no SSH server,
+  account, key, provider credential, paid API, or running user app.
+- **Status**: Automated on Ubuntu CI for the local-Agent → remote-workspace Host
+  path; it does not qualify SSH transport or release installation. Real SSH
+  release validation remains the separately provisioned E2E-231 scenario.
 
 #### E2E-231: The desktop drives a remote Host over an SSH tunnel
 
