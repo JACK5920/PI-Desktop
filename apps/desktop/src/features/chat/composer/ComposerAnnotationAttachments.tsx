@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { IconPencil, IconTrash } from "../../../components/icons";
 import { Button, Textarea, TooltipButton } from "../../../components/ui";
@@ -19,11 +19,57 @@ export function ComposerAnnotationAttachments({ sessionId: requestedSessionId }:
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [comment, setComment] = useState("");
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const previewRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const focusChange = (event: FocusEvent) => {
+      setPreviewOpen(Boolean(previewRef.current?.contains(event.target as Node)));
+    };
+    document.addEventListener("focusin", focusChange);
+    return () => document.removeEventListener("focusin", focusChange);
+  }, []);
+
+  useEffect(() => {
+    if (!previewOpen) return;
+    const outside = (event: PointerEvent) => {
+      if (!previewRef.current?.contains(event.target as Node)) setPreviewOpen(false);
+    };
+    const keyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setPreviewOpen(false);
+    };
+    document.addEventListener("pointerdown", outside, true);
+    document.addEventListener("keydown", keyDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", outside, true);
+      document.removeEventListener("keydown", keyDown, true);
+    };
+  }, [previewOpen]);
 
   if (!sessionId || annotations.length === 0) return null;
 
   return (
-    <div className="composer-annotation-attachments" data-testid="composer-annotation-attachments">
+    <div
+      className="composer-annotation-attachments"
+      data-testid="composer-annotation-attachments"
+      ref={previewRef}
+      onPointerEnter={() => {
+        if (!open) setPreviewOpen(true);
+      }}
+      onPointerOver={() => {
+        if (!open) setPreviewOpen(true);
+      }}
+      onFocusCapture={() => {
+        if (!open) setPreviewOpen(true);
+      }}
+      onPointerLeave={(event) => {
+        if (!open && !event.currentTarget.contains(event.relatedTarget as Node) &&
+          !event.currentTarget.querySelector(".composer-annotation-chip:focus")) setPreviewOpen(false);
+      }}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node)) setPreviewOpen(false);
+      }}
+    >
       <TooltipButton
         type="button"
         className="composer-annotation-chip"
@@ -31,10 +77,28 @@ export function ComposerAnnotationAttachments({ sessionId: requestedSessionId }:
         aria-controls="composer-annotation-review"
         tooltip={t("chat.reviewAnnotations")}
         ariaLabel={t("chat.annotationAttachments", { count: annotations.length })}
-        onClick={() => setOpen((value) => !value)}
+        onFocus={() => {
+          if (!open) setPreviewOpen(true);
+        }}
+        onClick={() => {
+          setPreviewOpen(false);
+          setOpen((value) => !value);
+        }}
       >
         {t("chat.annotationAttachments", { count: annotations.length })}
       </TooltipButton>
+      {previewOpen && !open ? (
+        <div className="composer-annotation-hover-preview" role="region" aria-label={t("chat.reviewAnnotations")} data-testid="composer-annotation-preview">
+          {annotations.slice(0, 3).map((annotation, index) => (
+            <div key={annotation.id} className="composer-annotation-hover-item">
+              <span className="composer-annotation-number">{index + 1}</span>
+              <span className="composer-annotation-hover-excerpt">{annotation.excerpt}</span>
+              {annotation.comment ? <span className="composer-annotation-hover-comment">{annotation.comment}</span> : null}
+            </div>
+          ))}
+          {annotations.length > 3 ? <span className="composer-annotation-hover-more">+{annotations.length - 3}</span> : null}
+        </div>
+      ) : null}
       {open ? (
         <div id="composer-annotation-review" className="composer-annotation-review" role="region" aria-label={t("chat.reviewAnnotations")}>
           <ol className="composer-annotation-list">

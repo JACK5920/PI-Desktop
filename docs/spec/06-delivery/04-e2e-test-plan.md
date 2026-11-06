@@ -5653,6 +5653,17 @@ window; opening a normal panel afterward must still work.
   a non-empty ordinary request and inspect the user bubble, edit seed, and queue
   preview. 5) Render an answer containing the exact citation directive and open
   its reference.
+- **Selection and preview steps**: During a pointer drag, assert that no toolbar
+  is shown until release; verify the captured offsets across inline formatting
+  and Unicode. After attachment but before sending, verify a pending Composer
+  reference places its numbered source marker beside the exact excerpt and
+  opens its text-only preview on hover/focus. Verify the Composer control
+  previews on hover/focus, remains open while the pointer moves into the preview,
+  and click switches to management without stacking both surfaces. Verify a
+  valid answer citation previews on hover/focus and activation, stays open when
+  the pointer enters the card, and dismisses on Escape/outside press. Corrupt or
+  remove an optional source offset and verify that the reference falls back to
+  a message-level marker rather than a guessed text range.
 - **Expected**: The Composer exposes ordered, editable, removable references;
   cancelled edits do not attach, duplicate source/excerpt reopens its editor,
   and a reference without a comment is valid. Both comment editors retain
@@ -5673,8 +5684,9 @@ window; opening a normal panel afterward must still work.
   keeps the original attachments. A valid citation opens a safe text-only
   excerpt/comment/source card; unknown indices and hostile reference text stay
   inert ordinary text.
-- **Coverage**: `node scripts/e2e-selection-reference-workflow.mjs` covers attach,
-  edit, prompt serialization, and citation rendering. The AgentRuntime provider
+- **Coverage**: `node scripts/e2e-selection-reference-workflow.mjs` covers stable
+  selection capture, source-marker placement, Composer/citation preview, attach,
+  edit, prompt serialization, and the no-auto-send path. The AgentRuntime provider
   message test verifies the excerpt and request reach the model-facing user
   message. `node --test
   apps/desktop/test/response-annotations.test.mjs

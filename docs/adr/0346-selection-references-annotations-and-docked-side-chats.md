@@ -35,15 +35,24 @@ migrations for drafts that have not been sent.
    open a docked side-chat draft. Keep the existing message Copy, context-menu
    Copy, Select message text, Fork, and **Ask about selection** behavior
    distinct.
+   During a pointer drag, keep the toolbar hidden and capture on pointer-up;
+   keyboard selection is shown only after it settles. New assistant references
+   may carry optional half-open UTF-16 source offsets. Resolve them only when
+   the rendered source text still matches the excerpt; legacy, stale, or
+   ambiguous offsets use a message-level marker rather than a guessed range.
 2. Keep annotations renderer-owned and transient until an ordinary prompt is
    admitted. Serialize the pending excerpts, optional comments, and source
     message ids as JSON in a generated prompt section. Transcript, edit-seed,
     queue-preview, and title projections show only the user's request text; a
     sent user-message row separately offers a collapsed, expandable summary of
     the safe excerpt and optional comment, never the raw JSON envelope. An
-    assistant may cite a pending annotation with the exact
+   assistant may cite a pending annotation with the exact
    `:codex-annotation{index="N"}` directive; the citation opens a safe text-only
-   excerpt/comment/source card. Unknown directives stay ordinary text.
+   excerpt/comment/source card on hover, keyboard focus, or activation. A
+   numbered marker also appears at the source passage when its anchor resolves,
+   with a message-level fallback otherwise. Composer references preview on
+   hover/focus, while click remains the explicit entry to review/edit. Unknown
+   directives stay ordinary text. Previewing never submits a prompt.
 3. Restore **Ask in side chat** as a docked WorkPanel tab. Opening it creates
    only renderer draft state. The first explicit non-empty Send forks the
    parent at the selected assistant message without activating the child, then

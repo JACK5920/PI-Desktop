@@ -1361,7 +1361,18 @@ Running turns and pending approvals continue to gate the controls.
   ordinary request. Neither action sends. Message-row Copy and context-menu
   Copy keep their existing full-message / live-selection semantics, and
   **Ask about selection** remains the ordinary activated-fork context-menu path.
+- Pointer selection keeps the toolbar hidden until pointer-up; keyboard-driven
+  selection is captured only after the range stabilizes. New references may
+  retain half-open UTF-16 offsets into the eligible rendered source text. A
+  marker follows the excerpt only when the offsets still match it exactly;
+  missing, stale, or ambiguous offsets fall back to a message-level marker.
 - The Composer's annotation review exposes edit, remove, and clear-all actions.
+  Its compact reference control previews excerpts/comments on hover and
+  keyboard focus; click remains the explicit review/edit entry point. Source
+  markers and answer citations expose safe text-only previews on hover/focus
+  and activation. Moving pointer/focus into a preview keeps it available;
+  Escape and outside press dismiss it. Previewing never sends or consumes
+  references.
   After admission, the user message retains a collapsed reference disclosure
   whose expanded summary shows only the saved excerpt/comment data.
   Ordinary send and queued admission serialize the exact attachment snapshot as
