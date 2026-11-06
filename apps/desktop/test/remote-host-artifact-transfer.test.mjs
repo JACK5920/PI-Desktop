@@ -30,7 +30,7 @@ test("verified bytes stream over SSH, temporary local bytes are removed, cleanup
     fetchArtifact: async () => new Response(bytes) });
   assert.equal(artifact.path, `${remoteDir}/artifact.tar.gz`);
   assert.deepEqual(f.uploads[0].data, bytes);
-  assert.equal(f.uploads[0].mode, 0o600);
+  if (process.platform !== "win32") assert.equal(f.uploads[0].mode, 0o600);
   await assert.rejects(stat(f.uploads[0].path), { code: "ENOENT" });
   await artifact.cleanup(); await artifact.cleanup();
   assert.equal(f.commands.length, 2);
@@ -112,7 +112,7 @@ test("cancellation while checksum waits cannot resume installation", async () =>
   controller.abort(); gate.resolve(digest);
   await assert.rejects(pending, { name: "AbortError" }); assert.equal(installs, 0);
 });
-test("system SSH file transport preserves binary stdin", async () => {
+test("system SSH file transport preserves binary stdin", { skip: process.platform === "win32" ? "POSIX SSH fixture is unavailable on Windows" : false }, async () => {
   const dir = await mkdtemp(join(tmpdir(), "ssh-file-stream-"));
   const binary = join(dir, "ssh"), source = join(dir, "source"), dest = join(dir, "dest");
   await writeFile(binary, '#!/bin/sh\nfor arg do command="$arg"; done\nexec sh -c "$command"\n', { mode: 0o755 });

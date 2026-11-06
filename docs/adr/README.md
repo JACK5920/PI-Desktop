@@ -20,6 +20,7 @@ Each ADR includes:
 
 | ID | Title | Status |
 |---|---|---|
+| 0347 | [Side-chat session visibility](0347-side-chat-session-visibility.md) | Accepted for implementation |
 | plugin-managed-native-transcripts | [Plugin-managed native transcripts and private storage](plugin-managed-native-transcripts.md) | Accepted for implementation |
 | plugin-projects-list | [Read-only durable project enumeration for plugins](plugin-projects-list.md) | Accepted |
 | append-only-review-state | [Append-only review state](append-only-review-state.md) | Implemented candidate |
@@ -400,5 +401,9 @@ Each ADR includes:
 | 0340 | [Add read-only GitHub Pull Request review to the Work Panel](0340-read-only-github-pull-request-review.md) | Accepted (amends ADR 0308 for this independent read-only surface) |
 | 0341 | [Authenticate GitHub PR Review and gate external writes](0341-authenticated-github-pr-review-and-confirmed-writes.md) | Accepted (amends ADR 0340 for private reads and confirmed writes) |
 | 0342 | [Selected-text follow-up uses an ordinary session fork](0342-selected-text-follow-up-forks.md) | Accepted (amends ADR 0268) |
+| 0343 | [Goal uses fixed Auto permission before approval](0343-goal-fixed-auto-permission-before-approval.md) | Accepted for implementation (D683) |
+| 0344 | [Configure per-cycle Goal budgets](0344-configurable-goal-cycle-budgets.md) | Accepted for implementation (D684; defaults amended by ADR 0345) |
+| 0345 | [Configure Goal budget defaults in AI Settings](0345-goal-budget-defaults-in-system-settings.md) | Accepted for implementation (D685; amends ADR 0344) |
+| 0346 | [Restore selection references, annotations, and docked side chats](0346-selection-references-annotations-and-docked-side-chats.md) | Accepted for implementation (D686; amends ADR 0268 / ADR 0342) |
 
 | model-reasoning-effort-override | [Model reasoning effort override](model-reasoning-effort-override.md) | Proposed |

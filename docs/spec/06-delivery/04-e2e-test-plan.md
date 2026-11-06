@@ -85,6 +85,10 @@
 - **Expected:** Input stops the old browser animation at the current offset;
   later frames cannot move the reader toward its stale destination. Streaming,
   disclosure anchoring, pinned follow, and long-history work budgets still pass.
+- When the host OS requests reduced motion, the probe explicitly skips only
+  the in-flight smooth-animation assertions; the browser otherwise completes
+  `scrollTo({ behavior: "smooth" })` immediately, so there is no animation to
+  interrupt. Disclosure geometry and the remaining probe still run.
 - Repeat owned wheel, scroll-key, scrollbar-surface and touch inputs in the
   main and delegated scrollers. Observe real browser calls to distinguish
   application cancellation from Chromium's own pointer behavior. Button Space,
@@ -273,6 +277,13 @@
   future and proves a conflicting write cannot acquire until that body finishes.
   Closing/abandoning metadata must not release running work. Snapshot/finalize
   and later rollback participate in the same Host file domain.
+- Independent identified writes with validated tickets may use two session
+  slots. Per-file native gates must observe both blocking bodies before either
+  is released, and retain the cancelled body's lease. Budget regressions cover
+  legacy/coordinated admission in both orders, conservative waiter draining,
+  reversed source order, global limits and cancellation after reservation.
+  Runtime E2E must preserve distinct snapshots and rollback for both writes;
+  this is correctness evidence, not a wall-clock throughput claim.
 - Runtime/pi integration tests cover parent/delegate registration, preparation
   order, validation/mode failures, Stop and model result order. Protocol adapter
   tests cover sealing, cleanup, remote/legacy fallback and equal provider IDs in
@@ -1428,6 +1439,12 @@ identify the platform validation still needed.
 #### E2E-003: Rust host healthcheck responds
 
 - **Preconditions**: App is running; Rust host-core sidecar started.
+- **Cold-start timeout**: Let the first handshake time out, then allow a fresh
+  host to answer. Verify the shell opens in the same desktop process. Repeat
+  with both handshakes timing out and with quit during the first attempt.
+  Verify the recovery surface stays available after two attempts and quit
+  prevents a second child. The startup-host-retry tests inject these outcomes
+  at the Main lifecycle boundary.
 - **Steps**: 1) Electron handshakes with protocol version 11. 2) Call the host
   healthcheck RPC. 3) Repeat boot with mismatched older and newer protocol
   fixtures.
@@ -2839,18 +2856,22 @@ identify the platform validation still needed.
 - **Steps**: 1) Click New Task (sidebar, top bar, or Cmd/Ctrl+N). 2) Observe
   the chat surface on the next frame, before the new sidebar row is required
   to exist. 3) Type in the composer during that interval. 4) Wait for the new
-  row and send.
+  row and send. Also send while creation is still pending, and overlap two
+  first-input materialization requests with the host response delayed.
 - **Expected**: A's transcript is gone on the first frame (empty home, idle
   Send). The composer does not stay on A's draft. After `session.create` the
   same empty session is selected, any text typed during the wait belongs to
   that session, and sending does not create a second row. Repeating New Task
   before sending reuses the row. The host is not asked to `session.list` or
-  `session.get` before the empty destination is visible.
+  `session.get` before the empty destination is visible. Overlapping inputs
+  share one creation and its session id; the first send does not invalidate
+  New Task navigation. Superseded creation returns no target to waiting inputs,
+  and a failed create releases the slot so retry can succeed.
 - **Specs linked**: `04-ux/09-interaction-patterns.md` (§1.6),
   `04-ux/08-component-spec.md` (§11), ADR 0154
 - **Acceptance**: C (session creation), Quality
 - **Milestone**: M2
-- **Status**: Source-level regression covered (`session-create.test.mjs`,
+- **Status**: Source-level regression covered (`session-draft-materialization.test.mjs`, `session-create.test.mjs`,
   `session-switch-performance.test.mjs`); full UI scenario Draft
 
 
@@ -2938,8 +2959,9 @@ identify the platform validation still needed.
   Click the same Composer chip to return to Agent. 4) Begin a turn and try to
   toggle mode mid-run or while a pending Plan approval is visible.
 - **Expected**: The Composer chip updates the active session `mode` (Plan and
-  Goal hard-deny Write/Edit and plugin tools while Bash follows the selected
-  permission mode; Agent allows its normal tools per permission settings). The
+  Goal hard-deny Write/Edit and plugin tools; Plan Bash follows the selected
+  permission mode, while Goal contract-phase Bash uses fixed Auto until
+  approval. Agent allows its normal tools per permission settings). The
   chip is disabled while a turn or active pending approval exists and re-enables
   after the session returns idle/planning. No top-bar mode control is rendered.
 - **Specs linked**: `04-ux/08-component-spec.md` (§2, §11),
@@ -3401,15 +3423,34 @@ identify the platform validation still needed.
 - **Milestone**: M5
 - **Status**: Automated (host-core unit tests)
 
-#### E2E-019c: Permission modes govern high-risk approval (D115/D132)
+#### E2E-019c: Permission modes govern high-risk approval (D115/D132/D683)
 
-- **Preconditions**: Agent mode; project open; global default `ask`.
-- **Steps**: 1) With a newly inherited session and global default Ask every time, open the composer menu — expect Ask every time to be selected with no global-default/inherit label — then ask the Agent to write a workspace file and expect a permission card. 2) Switch the session chip to Accept edits; repeat — expect no card for Write/Edit but still a card for Bash. 3) Switch to Auto — expect no card for Bash either. 4) Create another inherited session after setting the global default to Accept edits in Settings — expect the composer chip and menu selection to display Accept edits directly and Write/Edit to be auto-allowed. 5) Switch the session to Plan, then Goal, with Auto set — expect Write/Edit/plugin denied but Bash allowed without confirmation.
-- **Expected**: Effective mode = session override → global default → ask; Plan and Goal Write/Edit/plugin hard denies outrank every mode while their Bash follows the selected mode; the composer chip and menu always display the effective mode without default/inherit provenance.
-- **Specs linked**: `03-runtime/03-tools-and-permissions.md §6`, `03-runtime/04-data-storage.md`, `08-meta/decisions-log.md` (D115/D132)
+- **Preconditions**: Agent mode; project open; global default `ask`; the primary session inherits its permission mode.
+- **Steps**:
+  1. In Agent mode, verify the inherited session displays Ask every time; ask it
+     to write a workspace file and expect a permission card.
+  2. Switch the session to Accept edits; repeat — expect no card for Write/Edit
+     but still a card for Bash.
+  3. Switch to Auto — expect no card for Bash either.
+  4. Create another inherited session after setting the global default to
+     Accept edits in Settings — expect the composer chip and menu selection to
+     display Accept edits directly and Write/Edit to be auto-allowed.
+  5. In Plan with Auto selected, verify Write/Edit/plugin tools remain denied
+     and Bash follows the selected mode.
+  6. In Goal on the original inherited session while the global default is Ask,
+     verify the fixed Auto chip has no menu, admitted Bash runs without a
+     permission card, and Write/Edit/plugin tools remain denied. Check that the
+     stored session permission is still `inherit`.
+  7. Return to Agent and verify the inherited session again follows global Ask
+     and prompts for Bash.
+- **Expected**: Agent and Plan resolve session override → global default → ask. Goal's contract phase uses fixed Auto regardless of those settings, without changing the stored session permission; its hard denies still outrank Auto. Leaving Goal restores the existing Agent/Plan resolution.
+- **Specs linked**: `03-runtime/03-tools-and-permissions.md §6`, `03-runtime/04-data-storage.md`, `04-ux/03-permission-ux.md`, ADR 0343, `08-meta/decisions-log.md` (D115/D132/D683)
 - **Acceptance**: E (permission modes resolve and enforce host-side)
 - **Milestone**: M5
-- **Status**: Partially automated (host-core unit tests: evaluate matrix, Plan policy precedence, session grants under ask; renderer source test: effective-only composer options and selection)
+- **Status**: Partially automated (host-core unit/RPC tests cover the
+  effective-mode matrix, Goal fixed Auto with inherited Ask, Goal hard-deny
+  precedence, Plan policy, and unchanged stored permission; renderer source
+  test covers effective-only composer options and selection)
 
 #### E2E-019d: Bash tool sees the user's login-shell toolchain (D181)
 
@@ -5197,7 +5238,8 @@ window; opening a normal panel afterward must still work.
   its merged status letter and counts; up to four files use relaxed rows,
   more use dense rows with a directory count, and rows past 12 fold into
   `+N more`. A row click opens the session's Review tab scrolled to that file
-  with its changes expanded; the link opens Review without expanding. The
+  inside the Review list without moving the app shell, with its changes
+  expanded; the link opens Review without expanding. The
   rolled-back file stays listed, struck through. Every earlier finished turn
   keeps its own card, a turn without writes has none, and a session switch
   fetches nothing extra. The per-call review rows are unchanged.
@@ -5519,8 +5561,9 @@ window; opening a normal panel afterward must still work.
   text highlights the bubble. Escape and Tab dismiss the menu without
   running an item.
   A link still offers Open in default browser, Open in work panel, and
-  Copy link address. Quote, Annotate, and Open side chat are absent
-  (ADR 0268). The surface is a viewport-fixed body-level layer and does
+  Copy link address. Quote, Annotate, and Open side chat are not context-menu
+  items; selection actions are provided by the separate toolbar (ADR 0346).
+  The surface is a viewport-fixed body-level layer and does
   not resize the transcript. During editing, Copy uses the selected draft text
   or the full draft with a collapsed caret; Select message text selects the
   draft. Edit, Delete, and revision actions are absent until editing ends.
@@ -5566,6 +5609,145 @@ window; opening a normal panel afterward must still work.
 - **Milestone**: Maintenance.
 - **Status**: Automated component and store-path coverage; full visual desktop
   acceptance Draft.
+
+#### E2E-CHAT-selection-capture-v2: Capture, copy, and append transcript selections
+
+- **Preconditions**: An editable local session contains completed user and
+  assistant messages and a streaming assistant answer, with a non-empty draft
+  and the transcript selection toolbar enabled.
+- **Steps**: 1) Select part of a user message and copy it from the selection
+  toolbar. 2) Repeat and append it to chat. 3) Select text from a completed
+  assistant answer, open the comment editor, then change the browser selection
+  before saving. 4) Collapse or move the selection while the toolbar is open and
+  verify actions still use the captured source.
+- **Expected**: Copy writes the exact captured excerpt; changing a completed
+  transcript selection updates the toolbar to the new stable excerpt, while an
+  open comment editor retains its captured source; visible prose in the active
+  streaming answer can also be selected. Add to chat appends a
+  localized quote with attribution without replacing the existing draft or
+  references. The assistant comment editor saves the originally captured
+  excerpt, not the later browser selection. Empty, cross-message, ineligible, or
+  remote selections expose no invalid action; excerpt normalization enforces
+  the 2,000-character cap without splitting a Unicode code point. Context-menu
+  Copy, message-row Copy, Select message text, and ordinary Ask about selection
+  keep their distinct behavior.
+- **Coverage**: `node scripts/e2e-selection-reference-workflow.mjs` exercises
+  selection/copy/append and captured-source behavior in Chromium;
+  `node --test apps/desktop/test/transcript-selection.test.mjs
+  apps/desktop/test/selection-draft-append.test.mjs
+  apps/desktop/test/selected-text-followup.test.mjs` covers normalization,
+  ownership, and existing fork semantics.
+- **Specs**: `04-ux/08-component-spec.md` §7, `04-ux/09-interaction-patterns.md`
+  §7.6, ADR 0346.
+- **Acceptance**: C (chat stream), Quality.
+- **Milestone**: Maintenance.
+- **Status**: Automated Chromium fixture and helper coverage; full visual desktop
+  acceptance remains separate.
+
+#### E2E-CHAT-annotation-citation-flow-v2: Attach a commented excerpt and cite it in an answer
+
+- **Preconditions**: A completed assistant answer and a local writable Composer.
+- **Steps**: 1) Select an assistant excerpt and choose Add to chat. 2) Add a
+  comment, attach it, and review the Composer references. 3) Edit the comment,
+  remove or clear pending annotations, then attach the excerpt again. 4) Submit
+  a non-empty ordinary request and inspect the user bubble, edit seed, and queue
+  preview. 5) Render an answer containing the exact citation directive and open
+  its reference.
+- **Expected**: The Composer exposes ordered, editable, removable references;
+  cancelled edits do not attach, duplicate source/excerpt reopens its editor,
+  and a reference without a comment is valid. Both comment editors retain
+  readable text-button widths, while reference-review edit/remove actions are
+  compact icon buttons with accessible names and do not wrap into vertical
+  labels. The model receives an explicit
+  JSON-serialized annotation envelope whose instructions state that selected
+  excerpts are present in the model-visible context and must not be reported
+  missing when included. A provider-boundary runtime fixture confirms the
+  excerpt survives into the final user message passed to the model, while
+  visible request projections show
+  only the user's request and the admitted user-message row offers a separate
+  collapsed disclosure whose expanded content shows safe excerpts and
+  comments. Acceptance consumes only unchanged submitted
+  attachments; rejection preserves them, and annotation-only submit is not
+  admitted. Editing a queued prompt restores its hidden annotation attachments
+  ahead of any newer pending Composer attachments, and a failed queue admission
+  keeps the original attachments. A valid citation opens a safe text-only
+  excerpt/comment/source card; unknown indices and hostile reference text stay
+  inert ordinary text.
+- **Coverage**: `node scripts/e2e-selection-reference-workflow.mjs` covers attach,
+  edit, prompt serialization, and citation rendering. The AgentRuntime provider
+  message test verifies the excerpt and request reach the model-facing user
+  message. `node --test
+  apps/desktop/test/response-annotations.test.mjs
+  apps/desktop/test/response-annotation-slice.test.mjs
+  apps/desktop/test/response-annotation-citations.test.mjs
+  apps/desktop/test/queue-pending-actions.test.mjs
+  apps/desktop/test/composer-submit-race.test.mjs
+  apps/desktop/test/session-title-prompt-fallback.test.mjs` covers serialization,
+  display reduction, order, exact-snapshot acknowledgement, and rejection.
+- **Specs**: `04-ux/08-component-spec.md` §7 / §11,
+  `04-ux/09-interaction-patterns.md` §7.6, ADR 0346.
+- **Acceptance**: C (chat stream), Quality, Security.
+- **Milestone**: Maintenance.
+- **Status**: Automated Chromium/store/helper coverage; real-provider acceptance
+  is not part of this fixture.
+
+#### E2E-CHAT-docked-follow-up-tab-v2: Keep a child follow-up beside its parent
+
+- **Preconditions**: A completed assistant reply in a forkable local session;
+  the user can open and prompt a child session.
+- **Steps**: 1) Select assistant text and open Ask in side chat; verify no child
+  session or prompt exists before Send. 2) Enter a non-empty prompt and Send.
+  3) While the child streams, inspect its transcript and resolve a child-scoped
+  permission request and AskTool card. 4) Add the result to the main Composer.
+  5) Open one child as a conversation; open and send another side chat, then
+  close its tab. 6) In the child transcript, append selected user text to its
+  compact draft and attach/review a selected assistant annotation; verify nested
+  Ask in side chat is not offered and history mutation actions are hidden while
+  docked. Verify Continue on a child error targets the child, not the active
+  parent. 7) Request promotion during a deferred first send, reject the send,
+  and verify the unsent text survives in the child Composer; also exercise
+  retry and close/session-switch races.
+- **Expected**: Only explicit Send forks and submits, using the selected
+  assistant message as the anchor. The parent remains active with its original
+  transcript position and draft. Child events, permission resolution, and
+  AskTool answers are scoped to the child id and use the existing Host-owned
+  path. Add to main chat appends without replacing the parent draft; promotion
+  activates the normal child and releases only its side-chat projection;
+  closing a sent tab preserves the durable child without stopping it. A rejected
+  prompt keeps the created child retryable, duplicate first sends create one
+  child, and late fork/send completion cannot reopen a closed tab or overwrite a
+  different session's draft. Promotion waits for an in-flight first send to
+  settle; if it is rejected, the retained side-chat draft is appended to the
+  child Composer without replacing its existing text or file references. Child
+  transcript selection actions target the child draft and annotation list; a
+  nested docked tab is not created under a hidden WorkPanel context.
+- **Coverage**: `node scripts/e2e-selection-reference-workflow.mjs` exercises
+  first-send fork/send, child streaming, permission and AskTool UI/resolution,
+  parent selection, Add to main chat, promotion, and close retention with a
+  deterministic Host/store fixture in real Chromium. It also selects child
+  transcript text, appends into the compact child draft, attaches/reviews a
+  child annotation, and verifies that nested Ask in side chat is not exposed.
+  `side-chat-store.test.mjs` verifies that promotion waits for a rejected first
+  send and retains its draft alongside existing child-composer content.
+  `node --test
+  apps/desktop/test/side-chat-lifecycle.test.mjs
+  apps/desktop/test/side-chat-store.test.mjs
+  apps/desktop/test/session-fork-running.test.mjs
+  apps/desktop/test/work-panel-tabs.test.mjs
+  apps/desktop/test/session-runtime-updates.test.mjs
+  apps/desktop/test/session-message-presentation.test.mjs
+  apps/desktop/test/plugin-action-slots.test.mjs
+  apps/desktop/test/chat-context-menu-surface.test.mjs
+  apps/desktop/test/chat-error-message.test.mjs` covers lifecycle races, retry,
+  tab cleanup, session-scoped history/error actions, and session event projections.
+  The browser fixture does
+  not call a real provider or Host.
+- **Specs**: `04-ux/08-component-spec.md` §7, `04-ux/09-interaction-patterns.md`
+  §7.6, ADR 0346.
+- **Acceptance**: C (chat stream), E (tools and permissions), Quality.
+- **Milestone**: Maintenance.
+- **Status**: Automated Chromium/store coverage; full desktop visual and real
+  Host/provider acceptance remain separate.
 
 #### E2E-CHAT-radial-background-menu: Radial menu on the empty transcript background
 
@@ -7906,9 +8088,10 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
   6. If the task uses a dedicated worktree outside the advertised workspace,
      verify its guarded Bash edit and resulting `git diff`.
 - **Expected**:
-  - Read/search calls may overlap, but only one `Write`/`Edit` executes for a
-    session at a time; queued mutations do not consume another global
-    mutation slot while waiting.
+  - Read/search calls may overlap. A session may execute two independent
+    identified local writes with validated batch tickets; conservative writes
+    remain exclusive within the session. Queued mutations consume no global
+    mutation capacity while waiting; total running writes stay bounded by two.
   - The stale-tag edit fails without changing the file and returns
     `EDIT_TAG_MISMATCH` carrying the live tag and current content at the
     anchors; the overlapping-range payload fails with `EDIT_RANGE_INVALID`
@@ -8242,30 +8425,59 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
 - **Preconditions**: An isolated Host profile and project-bound session; no live
   provider is required. Host tests reopen the same database to exercise the
   startup fence.
-- **Steps**: Submit and approve a Goal. Claim its execution, submit one
-  criterion-by-criterion `GoalReport` with evidence, and finish the turn.
-  Confirm `continue` creates a distinct queued execution only after the first
-  execution completes. Pause the next run, manually resume, and verify a new
-  execution ID and cycle. Clear the lifecycle and verify no Goal execution is
-  queued. In a separate process-reopen leg, leave the run queued/running,
-  restart Host, and inspect `plans.pending` before manually resuming.
+- **Steps**: Submit and approve a Goal. Verify the defaults (8 rounds, 250,000
+  reported tokens, 60 minutes, finite token mode), then update its budgets while
+  active to 16 rounds, 1,250,000 tokens, 1,440 minutes, and unlimited token
+  mode. During an active run, deliver repeated cumulative provider-usage
+  snapshots and observe the Composer's live token total and active elapsed time;
+  wait for the visible elapsed display to advance, then pause and confirm the
+  displayed time stays frozen through another timer interval. Separately
+  interrupt an active run before its first GoalReport and verify the Host stores
+  the elapsed snapshot instead of resetting it. Resume and compare the new cycle
+  and execution identity with the preceding turn's stopped transcript label. Verify
+  the existing execution identity, cycle, and counters remain
+  unchanged and that `plans.pending` returns the updated values. Claim its
+  execution, submit one criterion-by-criterion `GoalReport` with evidence, and
+  finish the turn. Confirm `continue` creates a distinct queued execution only
+  after the first execution completes. Pause the next run, change back to finite
+  tokens while retaining 1,250,000, manually resume, and verify a new execution
+  ID/cycle with the chosen budgets. Clear the lifecycle and verify no Goal
+  execution is queued. In a separate process-reopen leg, leave the run
+  queued/running, restart Host, and inspect `plans.pending` before manually
+  resuming.
 - **Expected**: Reports are persisted per execution and visible from
   `plans.pending`; stale/wrong-turn or duplicate reports are rejected. Complete
-  requires all reported criteria to be met, missing reports stop as blocked,
-  and automatic continuation pauses after eight execution rounds per cycle,
-  including the initial approved round, or after 250,000 reported tokens or
-  60 minutes of elapsed wall-clock time. A running round may exceed a cap but
-  no next round is queued. Resume resets both cycle budgets. Pause/clear never dispatch
-  an old ID. A Host restart records `interrupted` with `host_restart`, preserves
-  report history, and dispatches nothing until explicit resume creates a new
-  execution. Existing v27 approved Goals migrate to interrupted review state.
+  requires all reported criteria to be met and missing reports stop as blocked.
+  Defaults remain 8 rounds, 250,000 tokens, and 60 minutes; rounds can be
+  configured from 1–32, finite token limits accept any positive safe integer,
+  and time can be configured from 1–1,440 minutes. Unlimited token mode still
+  accumulates usage while bypassing only the token cutoff. A successful budget
+  update does not cancel a running round, alter its execution identity, reset
+  usage, or start a new cycle. The Host checks changed limits only after a
+  round settles; no new automatic round is queued once a configured limit is
+  reached. Resume resets cycle counters while retaining settings. Pause/clear
+  never dispatch an old ID. A Host restart records `interrupted` with
+  `host_restart`, preserves report history, and dispatches nothing until
+  explicit resume creates a new execution. Existing v27 approved Goals migrate
+  to interrupted review state; v29 Goals keep finite token mode and their saved
+  finite limit under schema v30.
   The Composer labels criterion status/evidence as Agent-reported, not
-  Host-certified.
+  Host-certified. Live tokens use only provider-reported, deduplicated usage,
+  never move backward below the Host snapshot, and reject mismatched or stale
+  session/proposal/execution events. Elapsed time advances to seconds only
+  while active and freezes after pause/interruption. After resume, the lifecycle
+  names “第 N 个周期” distinctly from its execution-round count; the old turn
+  reads “This run stopped” and does not imply the resumed Goal itself is stopped.
 - **Coverage**: `pnpm test:e2e:plan` exercises the no-provider Host RPC journey;
   `cargo test -p host-core --locked` covers lifecycle transitions, v27 migration,
-  and process reopen; `packages/agent-runtime/src/runtime.test.ts` covers the
-  round-scoped GoalReport tool; `apps/desktop/test/goal-lifecycle-render-and-control.test.mjs`
-  covers localized lifecycle rendering and serialized controls.
+  v29→v30 migration, budget validation/update, and process reopen;
+  `packages/agent-runtime/src/runtime.test.ts` covers the round-scoped GoalReport
+  tool; `apps/desktop/test/goal-lifecycle-render-and-control.test.mjs` covers
+  localized lifecycle rendering and serialized controls;
+  `apps/desktop/test/goal-live-progress.test.mjs` covers provider usage
+  attribution/deduplication, IPC validation, identity fencing, monotonic overlay
+  and elapsed projection; `apps/desktop/test/turn-process.test.mjs` preserves
+  the stopped-turn classifier.
 - **Dispatcher guard**: `packages/host-runtime/src/plan-dispatch.test.ts`
   verifies automatic continuation defers while interactive input or a contract
   approval is pending.
@@ -8276,7 +8488,42 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
 - **Acceptance**: F (durability), Quality (bounded lifecycle), Security
   (no-replay startup fence).
 - **Milestone**: Goal lifecycle.
-- **Status**: Automated offline; real provider execution is not required.
+- **Status**: Host/Main/Renderer projection checks are automated offline. The
+  isolated Electron `test:e2e:plan-ui` path verifies the active elapsed tick and
+  pause freeze without a provider; live provider acceptance remains optional.
+
+#### E2E-GOAL-budget-editor: Configure future Goal defaults and edit a persisted cycle
+
+- **Preconditions**: Isolated Electron profile, project, and Host; the gated
+  Main-only Plan UI probe creates and approves Goals directly through the live
+  Host. No model/provider credentials are required, and no execution is
+  dispatched by the probe.
+- **Steps**: Open Settings → AI and verify the new-profile defaults are 8
+  rounds, 250,000 retained tokens, 60 minutes, and unlimited tokens enabled.
+  Approve a probe Goal and verify the Host snapshot. Through the rendered AI
+  settings controls, save custom defaults of 12 rounds, 1,250,000 tokens, 90
+  minutes, and unlimited enabled; approve another probe Goal and verify its
+  snapshot. Change the global defaults again, select the second Goal, and verify
+  its approval-time snapshot did not change. Open its Edit limits UI, set rounds
+  and duration to 16 and 1,440 minutes, edit the retained finite token value to
+  1,500,000 while unlimited, save, reload, and verify it rehydrates. Disable
+  unlimited, confirm the retained finite value remains, save, and verify the
+  visible finite budget.
+- **Expected**: The rendered AI Settings save path persists Host-owned
+  `AppSettings.goalBudgetDefaults`, and Goal approval snapshots that value from
+  the Host at approval time. Changing defaults never mutates existing Goals.
+  The per-Goal edit/save path remains separate, unlimited mode keeps the finite
+  token value editable, and renderer reload rehydrates Goal state. The probe
+  never calls a model or alters the Goal execution/cycle while updating budgets.
+- **Coverage**: `pnpm test:e2e:plan-ui` runs the isolated Electron path;
+  `apps/desktop/test/plan-ui-probe-contract.test.mjs` guards the live-Host probe
+  and case wiring. The full user path is environment-gated on the candidate
+  Electron build/runtime.
+- **Acceptance**: F (durability), Quality (user path), Security (normal Host
+  ownership and no model credentials).
+- **Milestone**: Goal lifecycle budgets.
+- **Status**: Automated offline when the Electron development runtime is
+  available.
 
 #### E2E-CHAT-opaque-floating-decision-and-retry-surfaces: Dock, Plan approval, and retry surfaces occlude transcript text
 
@@ -10075,27 +10322,37 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
 
 #### E2E-121: Goal approval resumes autonomous acceptance-criteria execution
 
-- **Preconditions**: A project-bound session has a configured provider and is
-  idle in Agent mode; the workspace permits host artifact creation and has no
-  prior test goal artifact.
-- **Steps**: 1) Switch the session to Goal and let the Agent call
-  `EnterGoalMode`, then `SubmitGoal(title, markdown, question)`. 2) Inspect the
-  exact Markdown bytes in the new `.pi/goal/*.md` artifact and the matching
-  `plan_approvals` row. 3) Confirm the shared approval card exposes only
-  Approve/Reject and that Goal denies Write/Edit/plugin tools while Bash follows
-  the selected permission mode. 4) Approve with Ask and observe the same Agent
-  resume in Agent mode. 5) Inspect the final response for criterion-by-criterion
-  verification or an explicit boundary, then reload the session.
+- **Preconditions**: A project-bound session has a configured provider, global
+  permission default `ask`, and stored session permission `inherit`; it is idle
+  in Agent mode. The workspace permits host artifact creation and has no prior
+  test goal artifact.
+- **Steps**: 1) Switch the session to Goal and verify the Composer shows fixed
+  Auto without a permission-mode menu. Let the Agent call `EnterGoalMode`, then
+  `SubmitGoal(title, markdown, question)`. 2) During the Goal contract phase,
+  have the Agent run an admitted Bash check; verify it runs without a permission
+  request and the stored session permission remains `inherit`. Verify Write,
+  Edit, unknown tools, the other contract submit tool, and plugins without
+  declared safe actions remain denied. 3) Inspect the exact Markdown bytes in
+  the new `.pi/goal/*.md` artifact and the matching `plan_approvals` row. 4)
+  Confirm the approval card exposes only Approve/Reject plus its execution-mode
+  choice; approve with Ask. 5) Observe the same Agent resume in Agent mode and
+  verify a high-risk Bash action now follows Ask and requires its ordinary
+  permission decision. Allow it, then inspect the final response for
+  criterion-by-criterion verification or an explicit boundary. 6) Reload the
+  session and verify the transcript and stored permission preference.
 - **Expected**: Goal uses the Plan approval pipeline without a second planner;
-  the artifact is immutable and the row records `kind = goal`, path, hash,
-  size, and execution state. Approval is a separate user decision, transitions
-  the session to Agent, and starts autonomous work only after approval. The
-  transcript remains reviewable after reload and no scheduled/unattended Goal
-  run can bypass the approval boundary.
+  its pre-approval contract phase uses Host-enforced fixed Auto while preserving
+  the session's `inherit` preference. The artifact is immutable and the row
+  records `kind = goal`, path, hash, size, and execution state. Approval is a
+  separate user decision: its selected mode (Ask in this scenario) governs the
+  post-approval Agent run, not the earlier Goal contract phase. The transcript
+  remains reviewable after reload and no scheduled/unattended Goal run can
+  bypass the approval boundary.
 - **Specs linked**: `03-runtime/02-agent-runtime.md`,
   `03-runtime/03-tools-and-permissions.md`, `03-runtime/04-data-storage.md`,
   `03-runtime/06-host-rpc-protocol.md`, `03-runtime/10-session-state-machine.md`,
-  `04-ux/01-ui-ia.md`, `04-ux/08-component-spec.md`, D198
+  `04-ux/01-ui-ia.md`, `04-ux/03-permission-ux.md`,
+  `04-ux/08-component-spec.md`, ADR 0343, D198, D683
 - **Acceptance**: C (conversation & stream), E (tools & permissions),
   F (persistence), H (diagnostics), Security
 - **Milestone**: M6+
@@ -10964,8 +11221,11 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
 | A / C / F / Quality — Tray session navigation | E2E-TRAY-bounded-session-navigation |
 | B — Model config | E2E-005, E2E-PROVIDER-custom-endpoint-no-api-key, E2E-006, E2E-007, E2E-038, E2E-050, E2E-052, E2E-055, E2E-066, E2E-080, E2E-082, E2E-102c, E2E-102d, E2E-102e, E2E-151, E2E-154, E2E-163, E2E-166, E2E-172, E2E-174, E2E-197, E2E-005G, E2E-005J, E2E-199, E2E-201, E2E-202, E2E-203, E2E-205, E2E-206, E2E-209, E2E-PLUGIN-provider-catalog-add-service |
 | C — Conversation & stream | E2E-CHAT-long-history-stream-keeps-responsive, E2E-CHAT-running-status-survives-output-pauses, E2E-008, E2E-008d, E2E-008e, E2E-008a, E2E-009, E2E-010, E2E-011, E2E-011a, E2E-011b, E2E-011d, E2E-011e, E2E-011g, E2E-031, E2E-040, E2E-047, E2E-048, E2E-048A, E2E-049, E2E-052, E2E-053, E2E-054, E2E-055, E2E-059, E2E-059a, E2E-060c, E2E-060d, E2E-061, E2E-061a, E2E-062, E2E-064, E2E-065, E2E-068, E2E-071, E2E-073, E2E-074, E2E-075, E2E-081, E2E-083, E2E-084, E2E-086, E2E-087, E2E-088, E2E-088b, E2E-089, E2E-090, E2E-COMPOSER-narrow-controls, E2E-094, E2E-095, E2E-096, E2E-097, E2E-098, E2E-099, E2E-102, E2E-102a, E2E-102b, E2E-102c, E2E-102d, E2E-102g, E2E-106, E2E-109, E2E-111, E2E-114, E2E-116, E2E-117, E2E-118, E2E-119, E2E-120, E2E-121, E2E-218, E2E-259, E2E-219, E2E-AGENTS-001, E2E-142, E2E-144, E2E-145, E2E-146, E2E-146a, E2E-147, E2E-151, E2E-154, E2E-155, E2E-158, E2E-159, E2E-161, E2E-162, E2E-166, E2E-172, E2E-173, E2E-174, E2E-177, E2E-178, E2E-179, E2E-180, E2E-182, E2E-183, E2E-187, E2E-198, E2E-199, E2E-202, E2E-203, E2E-207, E2E-208, E2E-CHAT-content-width-handles, E2E-250, E2E-102i, E2E-PLUGIN-session-orchestrator-real-workers, E2E-SUBAGENT-settlement-updates-before-parent-poll, E2E-SUBAGENT-resume-a-settled-delegation |
+| C / Quality — Transcript selection references | E2E-CHAT-selection-capture-v2, E2E-CHAT-annotation-citation-flow-v2 |
+| C / E / Quality — Docked follow-up session | E2E-CHAT-docked-follow-up-tab-v2 |
 | C — Conversation & stream (composer drafts) | E2E-011c, E2E-011c-1, E2E-011c-2 |
 | C / F / Security / Quality — Goal lifecycle | E2E-GOAL-lifecycle |
+| C / F / Quality — Goal budget editing | E2E-GOAL-lifecycle, E2E-GOAL-budget-editor |
 | D — Workspace | E2E-012, E2E-013, E2E-022B, E2E-024I, E2E-047, E2E-049, E2E-057, E2E-058, E2E-060, E2E-068, E2E-075, E2E-078, E2E-153, E2E-158, E2E-182, E2E-187, E2E-252 |
 | C / D / Quality — Project session history resets after collapse | E2E-263 |
 | D — Workspace (project ordering) | E2E-253 |
@@ -11060,7 +11320,7 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
 | Post-MVP | E2E-022A, E2E-022B, E2E-022C, E2E-024I, E2E-024J, E2E-024K, E2E-024L, E2E-024M (plugin roadmap R2/R3/R6) |
 | Post-baseline local automation | E2E-220 |
 | Post-baseline local automation (MCP `pi_session_get` large compaction) | E2E-MCP-session-get-projects-large-compaction |
-| Post-MVP remote control | E2E-221, E2E-222, E2E-223, E2E-224, E2E-225, E2E-226, E2E-227, E2E-228, E2E-229, E2E-230, E2E-231, E2E-232, E2E-REMOTE-HOST-settings-compact-inventory |
+| Post-MVP remote control | E2E-221, E2E-222, E2E-223, E2E-224, E2E-225, E2E-226, E2E-227, E2E-228, E2E-229, E2E-230, E2E-231, E2E-232, E2E-REMOTE-HOME, E2E-REMOTE-HOST-settings-compact-inventory |
 | Trusted extensions (R7 v1) | E2E-DIALOG-long-text-boundaries, E2E-241, E2E-242, E2E-HOOKS-prompt-chain, E2E-HOOKS-context-every-request, E2E-HOOKS-cancel-and-dispose, E2E-TRUSTED-EXTENSION-custom-agent-stream-and-binding, E2E-243, E2E-TRUSTED-EXTENSION-temporary-session-cwd-is-scratch, E2E-244, E2E-245, E2E-PLUGIN-imported-pi-package-skills, E2E-PLUGIN-import-extension-installs-dependencies, E2E-PLUGIN-import-extension-reports-missing-dependency, E2E-PLUGIN-declared-provider-appears-in-the-native-provider-list, E2E-PLUGIN-provider-catalog-add-service |
 | Trusted extensions (R7 v1 npm recovery) | E2E-PLUGIN-import-extension-recovers-missing-npm |
 | Post-MVP regression coverage (plugin tool dispatch) | E2E-PLUGIN-slow-tool-is-not-cut-off-by-host-dispatch |
@@ -13400,6 +13660,13 @@ This test plan spec is accepted when:
 - **Acceptance**: C (conversation), Quality
 
 #### E2E-155: Subagent lifetime is parent-judged; runtime delivers reports
+
+- Abort the parent while it is waiting for a provider response and while it is
+  idle waiting for two delegates. Hold delegate teardown at the provider edge;
+  retire the parent and one child first. Abort must remain pending, status must
+  remain busy and a new prompt must be rejected until the last child retires.
+  Concurrent abort requests share cleanup. A follow-up prompt is accepted after
+  abort resolves, with no old-turn continuation or tool execution.
 
 - **Preconditions**: A project-bound Agent session with a Bash-capable
   `explorer` definition and a mocked provider stream.
@@ -15963,9 +16230,13 @@ browser milestones are scheduled.
   runs a local model fixture through production Desktop relay, WebSocket RACP
   and real Rust Read/Bash execution, asserting zero remote providers, projects
   and sessions. Both local and remote Rust Hosts are real; the model service
-  and the fixture's user approval action are controlled test boundaries.
-- **Status**: Candidate implementation; real SSH release validation remains the
-  separately provisioned E2E-231 scenario.
+  and the fixture's user approval action are controlled test boundaries. Ubuntu
+  CI runs this script in `trusted-extensions-e2e` after building host-core, so
+  its temporary remote workspace uses native POSIX paths. It uses no SSH server,
+  account, key, provider credential, paid API, or running user app.
+- **Status**: Automated on Ubuntu CI for the local-Agent → remote-workspace Host
+  path; it does not qualify SSH transport or release installation. Real SSH
+  release validation remains the separately provisioned E2E-231 scenario.
 
 #### E2E-231: The desktop drives a remote Host over an SSH tunnel
 
@@ -19692,3 +19963,21 @@ their separate platform acceptance.
   ordinary and imported session behavior unchanged.
 - **Milestone:** M6+ (plugin API). **Status:** Unit/process/Host coverage;
   packaged-Electron acceptance is pending.
+
+## E2E-CHAT-side-chat-session-visibility-v1
+
+- **Path:** Select assistant text, open a side chat, send a prompt, close its
+  WorkPanel tab, and verify the child is absent from top-level session lists
+  and global search. From the parent row, reopen the side chat and verify its
+  saved excerpt and transcript. Choose “Open as a conversation” and verify the
+  child becomes listable/searchable without changing its transcript. Delete a
+  separate parent with a sent side chat and verify the child becomes an
+  ordinary conversation rather than disappearing.
+- **Coverage:** `side-chat-store.test.mjs`, `scheduled-workspace.test.mjs`,
+  Host side-chat migration, parent-delete, and global-search tests, plus the
+  isolated Chromium selection-reference workflow.
+- **Acceptance:** Ordinary forks remain top-level; schema-v30 sessions remain
+  ordinary after migration; closing/reopening never creates a second child or
+  loses the saved transcript; promotion changes visibility only.
+- **Milestone:** M6+ (side-chat follow-up). **Status:** Implementation complete;
+  targeted Node, Host, and isolated Chromium workflow checks pass locally.

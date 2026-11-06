@@ -14,6 +14,7 @@ import {
   latestPlanProposal,
   terminalizeMissingPlan,
 } from "../../lib/plan-mode-state";
+import { retainMatchingGoalProgress } from "../../lib/goal-lifecycle-state";
 import {
   EMPTY_SESSION_WINDOW,
   sessionIsReusableEmpty,
@@ -167,6 +168,7 @@ export function createSessionSlice({
   | "newSession"
   | "forkSession"
   | "forkAssistantMessage"
+  | "forkAssistantMessageInSession"
   | "configureActiveSession"
   | "abortSession"
 > {
@@ -233,36 +235,40 @@ export function createSessionSlice({
             : undefined;
         const executionActive = isActivePlanExecution(checkpoint);
         const planRunSettled = Boolean(activeProposal || executionActive || wasPending);
-        set((state) => ({
-          planningStates: {
-            ...state.planningStates,
-            [sessionId]: nextState,
-          },
-          planCheckpoints: checkpoint
-            ? { ...state.planCheckpoints, [sessionId]: checkpoint }
-            : state.planCheckpoints,
-          goalLifecycles: result.goal && result.goal.status !== "cleared"
+        set((state) => {
+          const goalLifecycles = result.goal && result.goal.status !== "cleared"
             ? { ...state.goalLifecycles, [sessionId]: result.goal }
-            : withoutRecordKey(state.goalLifecycles, sessionId),
-          pendingPlans: activeProposal
-            ? { ...state.pendingPlans, [sessionId]: activeProposal }
-            : withoutRecordKey(state.pendingPlans, sessionId),
-          runningSessions: planRunSettled
-            ? { ...state.runningSessions, [sessionId]: executionActive }
-            : state.runningSessions,
-          isRunning:
-            state.activeSessionId === sessionId && planRunSettled
-              ? executionActive
-              : state.isRunning,
-          sessions: state.sessions.map((session) =>
-            session.id === sessionId
-              ? {
-                  ...session,
-                  mode: sessionModeForPlanningState(nextState, nextKind),
-                }
-              : session,
-          ),
-        }));
+            : withoutRecordKey(state.goalLifecycles, sessionId);
+          return {
+            planningStates: {
+              ...state.planningStates,
+              [sessionId]: nextState,
+            },
+            planCheckpoints: checkpoint
+              ? { ...state.planCheckpoints, [sessionId]: checkpoint }
+              : state.planCheckpoints,
+            goalLifecycles,
+            goalProgress: retainMatchingGoalProgress(goalLifecycles, state.goalProgress),
+            pendingPlans: activeProposal
+              ? { ...state.pendingPlans, [sessionId]: activeProposal }
+              : withoutRecordKey(state.pendingPlans, sessionId),
+            runningSessions: planRunSettled
+              ? { ...state.runningSessions, [sessionId]: executionActive }
+              : state.runningSessions,
+            isRunning:
+              state.activeSessionId === sessionId && planRunSettled
+                ? executionActive
+                : state.isRunning,
+            sessions: state.sessions.map((session) =>
+              session.id === sessionId
+                ? {
+                    ...session,
+                    mode: sessionModeForPlanningState(nextState, nextKind),
+                  }
+                : session,
+            ),
+          };
+        });
         if (checkpoint && activeProposal) {
           openPlanArtifact(
             checkpoint,
@@ -691,12 +697,12 @@ export function createSessionSlice({
           const workspace = await get().activateProject(requestedProjectPath, {
             navigationIntent: intent,
           });
-          if (!runtime.navigationIntentIsCurrent(intent)) return;
+          if (!runtime.navigationIntentIsCurrent(intent)) return null;
           if (!workspace) throw new Error(i18n.t("errors.workspaceActivationFailed"));
         }
         if (requestedProjectPath === null && get().workspace) {
           await get().clearProject({ navigationIntent: intent });
-          if (!runtime.navigationIntentIsCurrent(intent)) return;
+          if (!runtime.navigationIntentIsCurrent(intent)) return null;
         }
 
         const latest = runtime.latestSessionInScope(
@@ -713,12 +719,12 @@ export function createSessionSlice({
             submitted: runtime.submittedComposerDrafts.has(latest.id),
           })
         ) {
-          if (get().activeSessionId === latest.id && get().page === "chat") return;
+          if (get().activeSessionId === latest.id && get().page === "chat") return latest.id;
           await get().selectSession(latest.id, { navigationIntent: intent });
-          return;
+          return runtime.navigationIntentIsCurrent(intent) ? latest.id : null;
         }
 
-        await persistSessionAndSelect({
+        return await persistSessionAndSelect({
           intent,
           projectPath: requestedProjectPath,
           draftConfiguration: null,
@@ -812,6 +818,32 @@ export function createSessionSlice({
           errorCode: (error as { code?: string })?.code ?? null,
         });
       }
+    },
+
+    forkAssistantMessageInSession: async (sessionId, messageId, sideChatExcerpt) => {
+      const state = get();
+      if (!sessionId || !messageId || state.selectingSessionId === sessionId) return null;
+      const source = state.sessions.find((session) => session.id === sessionId);
+      if (!source || !sessionAllows(source, "canEditMessages") ||
+        !sessionAllows(source, "canPrompt")) return null;
+      const transcript = state.activeSessionId === sessionId
+        ? state.messages
+        : state.retainedTranscripts[sessionId] ?? runtime.sessionTranscriptCache.get(sessionId) ?? [];
+      const message = transcript.find((candidate) => candidate.id === messageId);
+      if (!message || message.role !== "assistant" || message.status === "streaming") return null;
+
+      const sourceTitle = source.title.trim() || i18n.t("chat.untitledTask");
+      const result = await api.forkSession(
+        sessionId,
+        i18n.t("nav.branchTitle", { title: sourceTitle }),
+        messageId,
+        sideChatExcerpt,
+      );
+      // A side chat is a separate reading surface. Persist the new child in
+      // the session inventory/cache, but never let this action navigate away
+      // from the parent conversation.
+      commitForkedSession(result.session, { activate: false, clearError: true });
+      return result.session.id;
     },
 
     configureActiveSession: async (config) => {

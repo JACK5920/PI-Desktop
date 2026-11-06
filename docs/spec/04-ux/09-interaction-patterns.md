@@ -363,6 +363,10 @@ may be retained while exactly one workspace supplies the visible shell context.
   transcript on the same frame rather than waiting for `session.get`. The
   durable row is inserted from the `session.create` summary; send and paste wait
   for that in-flight create instead of opening a second slot (ADR 0154).
+  Concurrent first-input materializations share the same project-scoped
+  creation result, including cancellation and failure. A first send does not
+  supersede an in-flight New Task's navigation intent or adopt an unrelated
+  session selected while waiting. A failed create releases the slot for retry.
 - A first-opened session settles at its newest turn. A revisited pane returns to
   the offset the user left, and a pane still pinned re-anchors to the bottom;
   activation no longer resets manual-scroll state for a revisit (ADR 0137).
@@ -1083,7 +1087,8 @@ may be retained while exactly one workspace supplies the visible shell context.
 ### 5.1 Flow sequence
 
 ```text
-Agent calls a permission-gated tool (including Plan/Goal Bash under Ask or Accept edits)
+Agent calls a permission-gated tool (including Plan Bash under Ask or Accept edits,
+or post-approval Goal Agent Bash under its selected Ask or Accept edits mode)
   → PermissionCard inserted inline in transcript
   → Composer disabled (cannot send new prompt)
   → User responds: Allow once / Allow session / Deny
@@ -1144,15 +1149,45 @@ Agent calls a permission-gated tool (including Plan/Goal Bash under Ask or Accep
 7. An approved Goal shows its durable lifecycle in the originating Composer.
    Each completed execution round reports all criteria through `GoalReport`;
    the Host saves the Agent-reported evidence and automatically queues another
-   round only for `continue`, up to eight execution rounds per cycle,
-   including the initial approved round, and subject to 250,000 reported tokens
-   and 60 minutes of elapsed wall-clock time per cycle. A current round may
-   exceed either budget; reaching a cap prevents further automatic continuation.
-   Pause stops the
+   round only for `continue`, up to the configured round limit (8 by default,
+   1–32 per cycle). Approval snapshots Goal defaults from AI Settings; the
+   initial default is a retained finite value of 250,000 reported tokens with
+   unlimited mode enabled. A finite token ceiling may be any positive safe
+   integer; unlimited mode skips only the token cutoff while continuing usage
+   accounting. The elapsed-time ceiling defaults to 60 minutes and is
+   configurable from 1 to 1,440 minutes. The Host checks current limits after
+   the round settles; a running round may exceed a budget but is never
+   terminated at the boundary. During an active execution, the Composer's token
+   count updates only when provider-reported usage arrives, using Main's
+   deduplicated turn aggregate; it does not estimate tokens or change Host
+   enforcement. Active cycle elapsed time refreshes once per second from the
+   Host cycle-start timestamp and freezes to the Host snapshot while stopped.
+   Progress is scoped to the current session, proposal, and execution, so a late
+   event cannot update a resumed cycle. Chinese labels distinguish “第 N 个
+   周期” from “第 N / M 轮”.
+8. Edit limits is available for active, paused, blocked, and interrupted Goals.
+   The user may edit all three limits, including the retained finite token
+   value while unlimited mode is enabled, and toggle unlimited tokens without
+   losing that value. Saving persists limits but does not
+   reset usage, change the cycle/execution identity, cancel a current round, or
+   resume a stopped Goal. When a limit is reached, no further automatic
+   continuation is queued. Pause stops the
    current run, Resume starts a fresh execution after pause/block/restart, and
    Clear removes active tracking while retaining the audit/history and
-   immutable artifact. After restart the bar says the run was interrupted and
-   requires a manual Resume; boot never dispatches it automatically.
+   immutable artifact. Resume starts a new cycle, resets cycle usage, and keeps
+   the configured budgets. After restart the bar says the run was interrupted and
+   requires a manual Resume; boot never dispatches it automatically. The
+   transcript's stopped label refers to that specific historical turn (“This
+   run stopped”), not the current Goal lifecycle; a resumed Goal can be active
+   while its earlier turn remains stopped.
+
+The AI Settings Goal budget defaults card accepts a future-default budget and
+keeps the finite token value editable while unlimited mode is on. Saving
+affects only Goals approved afterward: host-core snapshots the latest saved
+preference atomically with approval, and existing Goal bars keep their prior
+budget until edited through their own per-Goal controls. Settings sync carries
+the preference as portable application configuration; the lifecycle and
+approval RPC contracts do not change.
 
 The approval card is session-scoped. Background sessions may retain a pending
 approval or queued/running execution state in `plan_approvals`, but opening
@@ -1309,6 +1344,55 @@ Running turns and pending approvals continue to gate the controls.
   non-selectable and must keep their click and keyboard behavior.
 - Selection rules must not disable `focus-visible` feedback or native window
   drag regions.
+
+### 7.6 Transcript selection references and side chats (D686)
+
+- A non-empty selection wholly owned by one eligible local writable transcript
+  message captures its session id, message id, role, excerpt, and range before
+  an action receives focus. Actions use that captured excerpt even if the native
+  selection collapses or changes afterward. The toolbar is dismissed on Escape,
+  outside press, invalid/collapsed selection, owner-session change, or loss of
+  the eligible message; repositioning after scroll/resize is allowed only while
+  the captured range remains valid.
+- The toolbar copies only the captured excerpt, capped at 2,000 characters
+  without splitting a Unicode code point. Selected user text can be appended as
+  a localized editable quote to the current Composer; selected assistant text
+  can open the optional-comment editor and attach the excerpt to the next
+  ordinary request. Neither action sends. Message-row Copy and context-menu
+  Copy keep their existing full-message / live-selection semantics, and
+  **Ask about selection** remains the ordinary activated-fork context-menu path.
+- The Composer's annotation review exposes edit, remove, and clear-all actions.
+  After admission, the user message retains a collapsed reference disclosure
+  whose expanded summary shows only the saved excerpt/comment data.
+  Ordinary send and queued admission serialize the exact attachment snapshot as
+  JSON before the user's request text; only unchanged attachments are consumed
+  after Host admission. Rejected submissions keep the attachment, and an
+  annotation alone does not qualify as a prompt. Transcript, edit, queue, and
+  title projections show only the user's request text; a sent user message may
+  separately expand its reference summary. A citation is recognized
+  only for exact `:codex-annotation{index="N"}` syntax associated with that
+  assistant turn's preceding request; activation opens a safe text-only
+  excerpt/comment/source card. Unknown citations remain ordinary text.
+- **Ask in side chat** creates an unsent WorkPanel draft. The first explicit
+  non-empty Send creates a normal non-activating child fork and submits only
+  through the existing child-session path. The parent session, reading
+  position, and Composer remain in place. Child streaming, Stop, permissions,
+  and AskTool requests remain scoped to that child and use existing Host-owned
+  controls. Add to main chat appends the latest answer to the parent draft; Open
+  as a conversation selects the normal child. Promotion waits for an in-flight
+  send to settle and carries any retained draft into the child Composer without
+  replacing its existing draft. Closing a sent tab releases its
+  transient projection without stopping or deleting the durable child. A late
+  fork/send completion cannot recreate a closed tab or overwrite another
+  session's newer draft. Selection copy, quote-to-draft, and annotations also
+  work in the child transcript; child quotes append to its compact input and
+  pending annotations are reviewable there. Nested Ask in side chat is not
+  offered from a docked child; promote it to a normal conversation first. Sent,
+  unpromoted side chats stay discoverable under the parent and are hidden from
+  ordinary session lists and global search. Reopening restores the saved
+  excerpt and transcript without activating a fork; promotion makes the child
+  listable. Deleting the parent releases its side-chat children as ordinary
+  conversations without deleting their transcripts.
 
 ## 8. Drag / drop
 

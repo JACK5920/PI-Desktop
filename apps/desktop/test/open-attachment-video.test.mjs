@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readlink, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -17,9 +17,11 @@ test("an extensionless stored MP4 gets an OS-openable name without copying bytes
 
   const alias = await openableMp4Path(dataDir, storedReal, "video/mp4");
   assert.equal(alias, join(dataDir, "openable-attachments", `${hash}.mp4`));
-  assert.equal(await realpath(alias), storedReal);
-  assert.equal(await readlink(alias), storedReal);
-  assert.equal((await stat(alias)).size, 512 * 1024 + 1);
+  const storedStat = await stat(storedReal);
+  const aliasStat = await stat(alias);
+  assert.equal(aliasStat.size, 512 * 1024 + 1);
+  assert.equal(aliasStat.dev, storedStat.dev);
+  assert.equal(aliasStat.ino, storedStat.ino);
   assert.equal(await openableMp4Path(dataDir, storedReal, "video/mp4"), alias);
 });
 

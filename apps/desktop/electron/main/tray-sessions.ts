@@ -15,6 +15,7 @@ import type { Logger } from "./logger";
 const REFRESH_AFTER_INVOKE = new Set<string>([
   IPC.invoke.sessionCreate,
   IPC.invoke.sessionFork,
+  IPC.invoke.sessionPromoteSideChat,
   IPC.invoke.sessionRename,
   IPC.invoke.sessionDelete,
   IPC.invoke.sessionMoveProject,
@@ -36,7 +37,8 @@ const REFRESH_AFTER_INVOKE = new Set<string>([
 export function trayVisibleSessions(
   sessions: readonly SessionSummary[],
 ): SessionSummary[] {
-  return sessions.filter((session) => session.scheduledRun !== true && !session.managedByPlugin);
+  return sessions.filter((session) => session.scheduledRun !== true && !session.managedByPlugin &&
+    !(session.sideChat && !session.sideChat.promoted && session.sideChat.parentSessionId));
 }
 
 export function createTraySessions({

@@ -145,6 +145,7 @@ export const IPC = {
     sessionList: "pi-desktop/session/list",
     sessionCreate: "pi-desktop/session/create",
     sessionFork: "pi-desktop/session/fork",
+    sessionPromoteSideChat: "pi-desktop/session/promote-side-chat",
     sessionMoveProject: "pi-desktop/session/moveProject",
     sessionSearch: "pi-desktop/session/search",
     sessionSearchContext: "pi-desktop/session/searchContext",
@@ -242,6 +243,7 @@ export const IPC = {
     pendingInteractive: "pi-desktop/agent/pendingInteractive",
     plansResolve: "pi-desktop/plans/resolve",
     goalControl: "pi-desktop/goals/control",
+    goalBudgetUpdate: "pi-desktop/goals/budget/update",
     /**
      * List every paired remote `pi-host` this desktop knows, redacted so no
      * device token reaches the renderer. See ADR 0286 (R2b pairing UX).
@@ -518,6 +520,7 @@ export const IPC = {
     notificationActivated: "pi-desktop/notification/event/activated",
     notificationSound: "pi-desktop/notification/event/sound",
     plansChanged: "pi-desktop/plans/event/changed",
+    goalProgress: "pi-desktop/goals/event/progress",
     todosChanged: "pi-desktop/todos/event/changed",
     providersOauth: "pi-desktop/providers/oauth/event",
     mcpOauth: "pi-desktop/mcp/oauth/event",

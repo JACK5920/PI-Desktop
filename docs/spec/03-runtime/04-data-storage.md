@@ -1,4 +1,4 @@
-# 04. Data Storage (Schema v28)
+# 04. Data Storage (Schema v30)
 
 
 ### Lossless tool-image storage (#1868)
@@ -511,6 +511,16 @@ a portable application preference and changes presentation only. The deprecated
 compatibility; it is no longer exposed in Settings and no longer read for
 rendering. These additive display preferences neither rewrite stored reasoning
 nor change the database schema.
+
+`AppSettings.goalBudgetDefaults` is an optional portable application
+preference containing `maxRounds`, `maxTokens`, `maxDurationMs`, and
+`tokenBudgetUnlimited`. Host reads normalize absent or malformed stored values
+to 8 rounds, a retained finite value of 250,000 tokens, 60 minutes, and
+unlimited tokens enabled; writes reject invalid values. The existing
+configuration-sync application-settings allowlist carries this field. Goal
+approval snapshots the normalized preference into a new Host-owned lifecycle;
+later preference changes do not rewrite existing cycles. This uses the
+existing settings JSON and does not require a SQLite schema migration.
 
 The settings blob may still contain legacy prompt-enhancement keys from an
 earlier release. They are retained for rollback and downgrade compatibility,
@@ -1775,12 +1785,24 @@ truncating at a guessed position.
 - **Schema v28 is additive.** It adds host-owned `goal_lifecycles` and
   `goal_runs`, keeping mutable Goal progress and per-execution reports outside
   the immutable `plan_approvals` contract. Each cycle stores its round, token,
-  and elapsed-time ceilings and counters (8 rounds, 250,000 reported tokens,
-  and 60 minutes by default); counters reset only when the user explicitly
+  and elapsed-time ceilings and counters (8 rounds, a retained 250,000 finite
+  token value, and 60 minutes by default; new Goal snapshots default to
+  unlimited token mode through `AppSettings.goalBudgetDefaults`); counters reset only when the user explicitly
   resumes into a new cycle. The v27 migration retains at most
   the newest approved Goal lifecycle per session, marks it interrupted for
   review, and never replays an old execution. A v27 backup precedes the
   migration.
+- **Schema v29 is additive.** It records Host-verified provenance for
+  plugin-managed transcript attachment refs. Existing refs receive no
+  historical grant. The v28 migration keeps a v28 backup.
+- **Schema v30 is additive.** It adds
+  `goal_lifecycles.token_budget_unlimited`, defaulting to `0` for migrated
+  rows. Existing Goals preserve their saved finite `max_tokens` budget and
+  remain limited after migration. Newly approved Goals instead snapshot the
+  Host-normalized `AppSettings.goalBudgetDefaults`, whose default enables
+  unlimited mode and retains the finite value of 250,000. When unlimited is
+  later disabled, the saved finite value remains available. The v29 migration
+  keeps a v29 backup.
 - **Schema v14 is additive.** It adds nullable `sessions.deleted_at`, the
   partial deletion index, and `session_import_origins`. Existing sessions stay
   active and have no origin rows. The migration runs in the same guarded

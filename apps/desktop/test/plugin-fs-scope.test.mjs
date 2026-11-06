@@ -355,8 +355,16 @@ test("a symlink inside the workspace cannot carry a read out of it", async (t) =
   const outside = mkdtempSync(join(tmpdir(), "pi-fs-scope-outside-"));
   writeFileSync(join(outside, "id_rsa"), "PRIVATE KEY", "utf8");
   const ws = makeWorkspace();
-  symlinkSync(join(outside, "id_rsa"), join(ws, "innocent.txt"));
-  symlinkSync(outside, join(ws, "elsewhere"));
+  try {
+    symlinkSync(join(outside, "id_rsa"), join(ws, "innocent.txt"));
+    symlinkSync(outside, join(ws, "elsewhere"));
+  } catch (error) {
+    if (["EPERM", "EACCES", "ENOTSUP"].includes(error?.code)) {
+      t.skip(`symbolic links are unavailable on this platform: ${error.code}`);
+      return;
+    }
+    throw error;
+  }
 
   const { runtime } = await harness(t, {
     id: "fs.read.symlink",
@@ -484,7 +492,7 @@ test("default-app opening reuses the readable file scope", async (t) => {
     }),
     { ok: true },
   );
-  assert.deepEqual(opened, [realpathSync(join(ws, "docs/a.md"))]);
+  assert.deepEqual(opened, [realpathSync.native(join(ws, "docs/a.md"))]);
   assert.ok(
     audits.some((entry) => entry.api === "fs.openDefault" && entry.ok === true),
     "opening a file is audited",
@@ -527,7 +535,7 @@ test("opening an HTML file in the Browser reuses the readable file scope", async
     }),
     { ok: true, value: null },
   );
-  assert.deepEqual(browserOpened, [realpathSync(join(ws, "docs/index.HTML"))]);
+  assert.deepEqual(browserOpened, [realpathSync.native(join(ws, "docs/index.HTML"))]);
   assert.ok(
     audits.some((entry) => entry.api === "fs.openInBrowser" && entry.ok === true),
     "opening an HTML file in the Browser is audited",
@@ -599,7 +607,7 @@ test("file reveal reuses the readable file scope", async (t) => {
     }),
     { ok: true },
   );
-  assert.deepEqual(revealed, [realpathSync(join(ws, "docs/a.md"))]);
+  assert.deepEqual(revealed, [realpathSync.native(join(ws, "docs/a.md"))]);
   assert.ok(
     audits.some((entry) => entry.api === "fs.reveal" && entry.ok === true),
     "revealing a file is audited",
@@ -634,7 +642,7 @@ test("a host action reaches a file in another folder of the open project", async
   // A relative path still means the workspace root: the primary folder is
   // addressed exactly as it always was.
   await runtime.invokePanelBridge("fs.folders.open", "fs.openDefault", { path: "notes.txt" });
-  assert.deepEqual(opened, [realpathSync(join(ws, "notes.txt"))]);
+  assert.deepEqual(opened, [realpathSync.native(join(ws, "notes.txt"))]);
 
   // A sibling folder's own file can only be named absolutely, and it opens that
   // file rather than a same-named one in the workspace (ADR 0264).
@@ -642,19 +650,19 @@ test("a host action reaches a file in another folder of the open project", async
     path: join(other, "notes.txt"),
   });
   assert.deepEqual(opened, [
-    realpathSync(join(ws, "notes.txt")),
-    realpathSync(join(other, "notes.txt")),
+    realpathSync.native(join(ws, "notes.txt")),
+    realpathSync.native(join(other, "notes.txt")),
   ]);
 
   await runtime.invokePanelBridge("fs.folders.open", "fs.openInBrowser", {
     path: join(other, "index.html"),
   });
-  assert.deepEqual(browserOpened, [realpathSync(join(other, "index.html"))]);
+  assert.deepEqual(browserOpened, [realpathSync.native(join(other, "index.html"))]);
 
   await runtime.invokePanelBridge("fs.folders.open", "fs.reveal", {
     path: join(other, "notes.txt"),
   });
-  assert.deepEqual(revealed, [realpathSync(join(other, "notes.txt"))]);
+  assert.deepEqual(revealed, [realpathSync.native(join(other, "notes.txt"))]);
 });
 
 test("the project's other folders are not an escape hatch", async (t) => {
@@ -700,8 +708,8 @@ test("the project's other folders are not an escape hatch", async (t) => {
     runtime.invokePanelBridge("fs.folders.guards", "fs.openDefault", {
       path: join(stranger, "notes.txt"),
     }),
-    "NOT_FOUND",
-    /path not found/,
+    "INVALID_ARGUMENT",
+    /path escapes the plugin's root/,
   );
   assert.ok(
     audits.some((entry) => entry.api === "fs.read" && entry.ok === false),

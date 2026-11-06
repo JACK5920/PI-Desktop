@@ -1,7 +1,7 @@
 # Decisions Log
 
-> Baseline delta: `0.3.0` → `0.4.23`
-> Date: `2026-11-03`
+> Baseline delta: `0.4.24` → `0.4.25`
+> Date: `2026-11-04`
 > Status: Accepted for implementation
 
 This log freezes previously open questions into concrete decisions.
@@ -8170,3 +8170,80 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
 - Validation is limited to isolated fixtures; no real room transport, provider
   request, or installed plugin data is used. See ADR
   `plugin-managed-native-transcripts` and E2E-271.
+
+## 2026-11-03 — Goal fixed Auto permission before approval (D683)
+
+- While a durable session is in Goal contract mode, host-core resolves the
+  effective permission as Auto regardless of the stored session permission or
+  global default. Entering or leaving Goal does not mutate the stored
+  preference; Agent and Plan keep their existing session → global → Ask
+  resolution.
+- Goal's Host-owned tool allowlist and hard denies remain authoritative, and an
+  explicit delegated permission scope keeps its precedence. The approval
+  card's selected mode applies only after approval transitions the session to
+  Agent. No RPC, IPC, schema, or persisted-data change is introduced.
+- Coverage: host-core resolver and RPC tests plus E2E-019c / E2E-121. See ADR
+  0343 and the permission runtime/UX specifications.
+
+## 2026-11-04 — Configurable per-cycle Goal budgets (D684)
+
+- The original defaults were 8 rounds, 250,000 reported tokens, and 60
+  minutes. ADR 0345 / D685 amends only the default token mode and settings
+  scope; the current default is unlimited tokens with 250,000 retained as the
+  finite value. Allow editing to 1–32 rounds and 1–1,440 minutes; finite token
+  limits accept any positive safe integer through `Number.MAX_SAFE_INTEGER`.
+- Add a persisted unlimited-token mode. Token usage remains tracked and shown,
+  while only the token cutoff is bypassed; round/time limits and explicit
+  manual-resume semantics continue to apply. Keep and allow editing the last
+  finite token value while unlimited is enabled.
+- Active, paused, blocked, and interrupted Goals can be edited. Budget updates
+  preserve counters, cycle, and execution ID, and never interrupt a current
+  round; the Host checks new limits after that round settles. Resume still
+  starts a new cycle and retains the configured limits.
+- Schema v30 adds `goal_lifecycles.token_budget_unlimited` with default `0`;
+  v29 Goals retain their finite token limit. Protocol v11 adds
+  `goals.budget.update`; Host validation remains authoritative.
+- Coverage: Host lifecycle/migration/RPC tests, offline Goal E2E, and the
+  isolated Composer Goal budget user path. See ADR 0344, ADR 0338, and the Goal
+  lifecycle specs.
+
+## 2026-11-04 — Goal budget defaults in AI Settings (D685)
+
+- Add optional, Host-normalized `AppSettings.goalBudgetDefaults` with defaults
+  of 8 rounds, a retained finite token value of 250,000, 60 minutes, and
+  unlimited tokens enabled. The AI Settings card supports editing the global
+  defaults; unlimited mode leaves the finite value editable.
+- Host approval snapshots the latest saved settings in the same transaction
+  that creates a new Goal lifecycle. Settings affect future approvals only and
+  never rewrite an existing Goal; per-Goal budget editing remains available.
+- `goalBudgetDefaults` is included in portable application-settings sync. No
+  database schema or RPC protocol migration is introduced; unlimited token mode
+  still tracks usage and skips only the token cutoff.
+- Coverage: shared/Host/Renderer settings tests, config-sync tests, and
+  `E2E-GOAL-budget-editor` for default settings, custom snapshots, and existing
+  Goal immutability. See ADR 0345 and the runtime/UX Goal budget specs.
+
+## 2026-11-04 — Restore selection references, annotations, and docked side chats (D686)
+
+- Restore a captured-selection toolbar for eligible local writable transcript
+  rows. Copy uses the captured excerpt; selected user text appends as an editable
+  quote, while selected assistant text can become a numbered annotation or a
+  docked side-chat context. Keep context-menu copy and the ordinary
+  Ask-about-selection activated fork distinct.
+- Pending annotations are transient and JSON-serialized into ordinary prompts;
+  user-visible request projections hide the generated envelope. Exact
+  `:codex-annotation{index="N"}` citations open a safe text-only reference card.
+- A side-chat draft creates no child or request until explicit non-empty Send.
+  The first send creates a normal non-activating session fork and uses existing
+  session-scoped streaming, permission, and AskTool paths. Closing a sent tab
+  releases only its renderer projection; its ordinary child session remains.
+- Unsent drafts and annotations are not restored after restart. ADR 0346 amends
+  ADR 0268 and ADR 0342; all retired decision and E2E identifiers remain
+  retired. ADR 0347 adds Host-owned side-chat provenance and promotion state so
+  sent follow-ups stay out of ordinary lists/search while remaining reopenable
+  from their parent; existing conversations remain ordinary.
+- Coverage: selection helper and annotation/side-chat store tests plus the
+  isolated Chromium selection-reference workflow. See ADR 0346, the component
+  and interaction specifications, and E2E-CHAT-selection-capture-v2,
+  E2E-CHAT-annotation-citation-flow-v2, and
+  E2E-CHAT-docked-follow-up-tab-v2.

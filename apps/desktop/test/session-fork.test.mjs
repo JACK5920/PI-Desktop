@@ -30,7 +30,7 @@ test("session fork is wired through protocol, main, API, store, and sidebar", ()
   assert.match(main, /"session\.fork"/);
   assert.match(
     api,
-    /forkSession:\s*\(sessionId: string, title\?: string, throughMessageId\?: string\)/,
+    /forkSession:\s*\([\s\S]*?sideChatExcerpt\?: string/,
   );
   assert.match(store, /forkSession:\s*async \(id\)/);
   assert.match(store, /commitForkedSession\(result\.session/);
@@ -53,6 +53,7 @@ test("assistant response fork reuses isolated session snapshots", () => {
   assert.match(store, /api\.forkSession\([\s\S]*?messageId/);
   assert.match(transcript, /forkAssistantMessage\(actionMessage\.id\)/);
   assert.match(transcript, /chat\.forkResponse/);
+  assert.match(readStoreModuleSync("slices/side-chat-slice.ts"), /forkAssistantMessageInSession\([\s\S]*?before\.excerpt/);
 });
 
 test("session fork labels are localized", () => {

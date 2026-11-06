@@ -414,15 +414,16 @@ test("work panel starts closed with no tabs and persists width only", () => {
 });
 
 test("closing the final tab keeps the panel open for the New launcher", () => {
+  const closeStart = storeSource.indexOf(
+    "closeWorkPanelTab: (tabId, requestedSessionId) =>",
+  );
+  assert.notEqual(closeStart, -1);
   const closeBlock = storeSource.slice(
-    storeSource.indexOf("closeWorkPanelTab: (tabId) =>"),
-    storeSource.indexOf(
-      "openWorkPanelTabForSession:",
-      storeSource.indexOf("closeWorkPanelTab: (tabId) =>"),
-    ),
+    closeStart,
+    storeSource.indexOf("openWorkPanelTabForSession:", closeStart),
   );
   assert.doesNotMatch(closeBlock, /closePanel/);
-  assert.match(closeBlock, /nextContext[\s\S]*open:\s*state\.workPanelOpen/);
+  assert.match(closeBlock, /open:\s*visible \? state\.workPanelOpen : currentContext\.open/);
   assert.match(closeBlock, /workPanelOpen:\s*state\.workPanelOpen/);
   assert.match(panelSource, /panel\.new\.title/);
   assert.match(panelSource, /work-panel-launcher/);

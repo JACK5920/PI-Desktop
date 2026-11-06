@@ -1,8 +1,8 @@
 # PI-Desktop Baseline Freeze
 
-- Baseline Version: `0.4.23`
-- Date: `2026-11-03`
-- Status: `Frozen for implementation details (indefinite local permission approvals + Plan checkpoint artifact + approval/execution startup fence + protocol v11 + schema v29 + host-owned plugin session import/read/update/delete + plugin-managed native transcripts + encrypted per-plugin secrets + session-scoped agent events + bounded plugin renderer shell contributions + categorized plugin providers in Add Service)`
+- Baseline Version: `0.4.26`
+- Date: `2026-11-04`
+- Status: `Frozen for implementation details (indefinite local permission approvals + Plan checkpoint artifact + approval/execution startup fence + protocol v11 + schema v30 + host-owned plugin session import/read/update/delete + plugin-managed native transcripts + encrypted per-plugin secrets + session-scoped agent events + bounded plugin renderer shell contributions + categorized plugin providers in Add Service)`
 - Language policy: **English-first**
 - Backend policy: **Rust host core + pi agent sidecar**
 
@@ -53,6 +53,18 @@
 > merely by adding their content-addressed refs to its own transcript (D682 /
 > ADR `plugin-managed-native-transcripts`). No transcript or secret data is
 > backfilled by the migration.
+> `0.4.24` makes Goal's fixed Auto Composer state authoritative in
+> host-core during the pre-approval contract phase (D683 / ADR 0343). The
+> session's stored permission preference remains unchanged; the
+> approval-selected mode governs the post-approval Agent run. No protocol or
+> storage schema changes. `0.4.25` makes per-cycle Goal budgets editable
+> without interrupting the current round, and adds an explicit unlimited-token
+> mode while retaining the finite token limit (D684 / ADR 0344). Schema v30
+> preserves existing Goals' saved finite token limit; protocol remains v11.
+> `0.4.26` moves future Goal budget defaults to AI Settings, defaults new Goals
+> to unlimited tokens while retaining a 250,000 finite value, and snapshots
+> saved defaults only when a new Goal is approved (D685 / ADR 0345); no schema
+> or RPC version changes.
 > `0.4.10` replaces destructive work-panel clearing on conversation switches
 > with runtime session-scoped contexts through D142 / ADR 0028.
 > `0.4.11` adopts turn-boundary model-context checkpoint compaction through

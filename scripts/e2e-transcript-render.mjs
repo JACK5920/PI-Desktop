@@ -156,7 +156,9 @@ function describe(error) {
 }
 
 app.whenReady().then(async () => {
-  const window = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } });
+  // Keep the geometry probe's hit targets inside the content viewport on
+  // Windows, where native window decorations reduce the default client area.
+  const window = new BrowserWindow({ width: 800, height: 900, show: false, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } });
   const report = (line) => process.stderr.write(line + "\\n");
   // stdout is a pipe; app.exit() would truncate a buffered write, so the probe
   // line is flushed first and only then does the process exit.

@@ -1,8 +1,8 @@
 /**
  * Plan UI acceptance probe (scripts/e2e-plan-ui.mjs). Installed only when
  * PI_DESKTOP_PLAN_UI_PROBE=1, it exposes a Main-only global the harness calls
- * over the inspector to seed sessions, submit plans, and settle turns through
- * the live host and sidecar instead of a fixture backend.
+ * over the inspector to seed sessions, submit plans, settle turns, and create
+ * an approved Goal through the live Host instead of a fixture backend.
  */
 import { existsSync, statSync } from "node:fs";
 import { resolve } from "node:path";
@@ -185,11 +185,12 @@ export function createPlanUiProbe(deps: PlanUiProbeDeps) {
       }
       if (
         operation !== "seed" &&
+        operation !== "seedGoal" &&
         operation !== "submit" &&
         operation !== "settle" &&
         operation !== "liveSetup"
       ) {
-        throw new Error("probe operation must be identity, runtimeIdentity, seed, submit, settle, or liveSetup");
+        throw new Error("probe operation must be identity, runtimeIdentity, seed, seedGoal, submit, settle, or liveSetup");
       }
 
       const activeHost = deps.getHost();
@@ -266,6 +267,116 @@ export function createPlanUiProbe(deps: PlanUiProbeDeps) {
           title: session.title,
           mode: session.mode,
           projectPath: session.projectPath,
+        };
+      }
+
+      if (operation === "seedGoal") {
+        const sessionResponse = await activeHost.call<{
+          session?: {
+            id?: string;
+            title?: string;
+            mode?: string;
+            providerId?: string | null;
+            projectPath?: string | null;
+          } | null;
+        }>("session.create", {
+          title: "Goal budget UI acceptance",
+          mode: "goal",
+          projectPath: workspace,
+        });
+        const session = sessionResponse.session;
+        if (!session?.id) throw new Error("Goal UI probe session.create returned no session");
+        if (session.mode !== "goal") throw new Error("seed session is not Goal mode");
+        if (session.providerId) {
+          throw new Error("Goal UI probe session unexpectedly requires a provider");
+        }
+        if (!session.projectPath) {
+          throw new Error("Goal UI probe session is not project-bound");
+        }
+
+        const turnResponse = await activeHost.call<{ turnId?: string }>(
+          "session.beginTurn",
+          { sessionId: session.id },
+        );
+        const turnId = turnResponse.turnId;
+        if (!turnId) throw new Error("Goal UI probe session.beginTurn returned no turn");
+        const toolCallId = `goal-budget-ui-probe-${session.id}`;
+        const submitted = await activeHost.call<{
+          status?: string;
+          proposal?: {
+            id?: string;
+            version?: number;
+            sessionId?: string;
+            turnId?: string;
+            toolCallId?: string;
+          } | null;
+        }>("plans.submit", {
+          sessionId: session.id,
+          turnId,
+          toolCallId,
+          kind: "goal",
+          title: "Goal budget UI acceptance",
+          markdown: "# Goal budget UI acceptance\n\n## Acceptance criteria\n- The budget editor saves and rehydrates its limits.",
+          question: "Approve the offline Goal budget acceptance fixture?",
+        });
+        const proposal = submitted.proposal;
+        if (submitted.status !== "pending" || !proposal?.id) {
+          throw new Error("Goal UI probe plans.submit did not create a pending Goal");
+        }
+        if (
+          proposal.sessionId !== session.id ||
+          proposal.turnId !== turnId ||
+          proposal.toolCallId !== toolCallId ||
+          !Number.isSafeInteger(proposal.version)
+        ) {
+          throw new Error("Goal UI probe approval identity mismatch");
+        }
+        const resolved = await activeHost.call<{
+          state?: string;
+          action?: string;
+          goal?: {
+            proposalId?: string;
+            status?: string;
+            maxRounds?: number;
+            maxTokens?: number;
+            maxDurationMs?: number;
+            tokenBudgetUnlimited?: boolean;
+          } | null;
+          execution?: { id?: string; state?: string } | null;
+        }>("plans.resolve", {
+          sessionId: session.id,
+          proposalId: proposal.id,
+          turnId,
+          toolCallId,
+          version: proposal.version,
+          action: "approve",
+          targetPermissionMode: "auto",
+        });
+        if (
+          resolved.action !== "approve" ||
+          resolved.state !== "inactive" ||
+          resolved.goal?.proposalId !== proposal.id
+        ) {
+          throw new Error("Goal UI probe approval did not persist a Goal lifecycle");
+        }
+        if (deps.getHost() !== activeHost) throw new Error("host changed during Goal UI probe");
+        return {
+          ...planUiProbeIdentity(activeHost),
+          ok: true,
+          operation,
+          sessionId: session.id,
+          title: session.title,
+          mode: session.mode,
+          projectPath: session.projectPath,
+          proposalId: proposal.id,
+          goalStatus: resolved.goal.status,
+          goalBudget: {
+            maxRounds: resolved.goal.maxRounds,
+            maxTokens: resolved.goal.maxTokens,
+            maxDurationMs: resolved.goal.maxDurationMs,
+            tokenBudgetUnlimited: resolved.goal.tokenBudgetUnlimited,
+          },
+          executionId: resolved.execution?.id,
         };
       }
 

@@ -127,6 +127,9 @@ import type {
   PlanProposal,
   GoalControlRequest,
   GoalControlResult,
+  GoalProgressEvent,
+  GoalBudgetUpdateRequest,
+  GoalBudgetUpdateResult,
   PlanResolveRequest,
   PlanResolutionResult,
   PlanningStateEvent,
@@ -167,6 +170,8 @@ import type {
 } from "@pi-desktop/shared";
 import {
   defaultCommandShellForPlatform,
+  isGoalBudget,
+  normalizeGoalBudgetDefaults,
   IPC,
   isCommandShellId,
   normalizeLargePasteThreshold,
@@ -445,6 +450,7 @@ export function normalizeSettings(settings: AppSettings): AppSettings {
     sidebarRunningRail: settings.sidebarRunningRail === true,
     keepCommandsExpanded: settings.keepCommandsExpanded !== false,
     scheduledTasksEnabled: settings.scheduledTasksEnabled !== false,
+    goalBudgetDefaults: normalizeGoalBudgetDefaults(settings.goalBudgetDefaults),
     transcriptDisplayMode: isTranscriptDisplayModeValue(settings.transcriptDisplayMode)
       ? settings.transcriptDisplayMode
       : "fully-folded",
@@ -495,6 +501,14 @@ export function validateSettingsWrite(settings: AppSettings): AppSettings {
     !isTranscriptDisplayModeValue(settings.transcriptDisplayMode)
   ) {
     throw Object.assign(new Error("transcriptDisplayMode is invalid"), {
+      errorCode: "INVALID_PARAMS",
+    });
+  }
+  if (
+    Object.prototype.hasOwnProperty.call(settings, "goalBudgetDefaults") &&
+    !isGoalBudget(settings.goalBudgetDefaults)
+  ) {
+    throw Object.assign(new Error("goalBudgetDefaults is invalid"), {
       errorCode: "INVALID_PARAMS",
     });
   }
@@ -698,6 +712,18 @@ function normalizePlansChangedEvent(value: unknown): PlanningStateEvent {
   };
 }
 
+function isGoalProgressEvent(value: unknown): value is GoalProgressEvent {
+  if (!value || typeof value !== "object") return false;
+  const event = value as Partial<GoalProgressEvent>;
+  return (
+    typeof event.sessionId === "string" && event.sessionId.length > 0 &&
+    typeof event.proposalId === "string" && event.proposalId.length > 0 &&
+    typeof event.executionId === "string" && event.executionId.length > 0 &&
+    typeof event.turnId === "string" && event.turnId.length > 0 &&
+    typeof event.tokensUsed === "number" && Number.isSafeInteger(event.tokensUsed) && event.tokensUsed >= 0
+  );
+}
+
 export const api = {
   getVersion: () => invoke<AppVersionInfo>(IPC.invoke.appGetVersion),
   health: () => invoke<HostHealth>(IPC.invoke.appHealth),
@@ -778,12 +804,20 @@ export const api = {
     invoke<{ command: string | null }>(IPC.invoke.worktreeSetupCommandGet, { projectPath }),
   setWorktreeSetupCommand: (projectPath: string, command: string | null) =>
     invoke<{ ok: boolean }>(IPC.invoke.worktreeSetupCommandSet, { projectPath, command }),
-  forkSession: (sessionId: string, title?: string, throughMessageId?: string) =>
+  forkSession: (
+    sessionId: string,
+    title?: string,
+    throughMessageId?: string,
+    sideChatExcerpt?: string,
+  ) =>
     invoke<{ session: SessionDetail }>(IPC.invoke.sessionFork, {
       sessionId,
       title,
       throughMessageId,
+      sideChatExcerpt,
     }).then((result) => ({ ...result, session: normalizeSessionDetail(result.session)! })),
+  promoteSideChat: (sessionId: string) =>
+    invoke<{ ok: boolean }>(IPC.invoke.sessionPromoteSideChat, { sessionId }),
   searchSessions: (query: string, offset = 0) =>
     invoke<SessionSearchPage>(IPC.invoke.sessionSearch, { query, offset }),
   getSearchContext: (request: SessionSearchContextRequest) =>
@@ -1226,6 +1260,8 @@ export const api = {
     invoke<PlanResolutionResult>(IPC.invoke.plansResolve, resolution),
   controlGoal: (request: GoalControlRequest) =>
     invoke<GoalControlResult>(IPC.invoke.goalControl, request),
+  updateGoalBudget: (request: GoalBudgetUpdateRequest) =>
+    invoke<GoalBudgetUpdateResult>(IPC.invoke.goalBudgetUpdate, request),
   listPlugins: () =>
     invoke<{ plugins: PluginSummary[] }>(IPC.invoke.pluginList),
   /** One renderer slot component asking its own plugin for one JSON answer. */
@@ -1980,6 +2016,12 @@ export const api = {
     return window.piDesktop.on(IPC.event.plansChanged, (payload) =>
       listener(normalizePlansChangedEvent(payload)),
     );
+  },
+  onGoalProgress: (listener: (event: GoalProgressEvent) => void) => {
+    if (!window.piDesktop?.on) return () => undefined;
+    return window.piDesktop.on(IPC.event.goalProgress, (payload) => {
+      if (isGoalProgressEvent(payload)) listener(payload);
+    });
   },
   getTodos: (sessionId: string) =>
     invoke<SessionTodoSnapshot>(IPC.invoke.todosGet, { sessionId }),

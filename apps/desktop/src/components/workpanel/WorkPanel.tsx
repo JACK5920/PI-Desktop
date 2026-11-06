@@ -41,6 +41,7 @@ import type { IconProps } from "../icons";
 import {
   IconBot,
   IconBranch,
+  IconChat,
   IconClose,
   IconDiff,
   IconFileText,
@@ -56,6 +57,7 @@ import { GitHubPrReviewTab } from "./GitHubPrReviewTab";
 import { FilesTab } from "./FilesTab";
 import { PluginViewTab } from "./PluginViewTab";
 import { SubagentTranscriptTab } from "./SubagentTranscriptTab";
+import { SideChatTab } from "./SideChatTab";
 import {
   MAIN_PANE_MIN_WIDTH,
   WORK_PANEL_COMPACT_MIN_WIDTH,
@@ -75,6 +77,7 @@ const TAB_ICONS = {
   file: IconFileText,
   plugin: IconPlug,
   subagent: IconBot,
+  "side-chat": IconChat,
 } as const;
 
 type WorkPanelResizeState = {
@@ -129,6 +132,7 @@ function tabLabel(
   }
   if (tab.kind === "new") return t("panel.new.title");
   if (tab.kind === "subagent") return tab.label ?? t("panel.tabs.subagent");
+  if (tab.kind === "side-chat") return t("panel.tabs.sideChat");
   if (tab.kind === "branch-review") return t("panel.tabs.branchReview");
   if (tab.kind === "github-pr-review") return t("panel.tabs.githubPrReview");
   if (tab.kind !== "file") return t(`panel.tabs.${tab.kind}`);
@@ -1106,6 +1110,17 @@ function LocalWorkPanel({
           </div>
         </header>
         <div className="work-panel-body">
+          {activeTab?.kind === "side-chat" && activeTab.resource ? (
+            <div
+              key={activeTab.id}
+              id={`work-panel-surface-${activeTab.id}`}
+              className="work-panel-tabpane"
+              role="tabpanel"
+              aria-labelledby={`work-panel-tab-${activeTab.id}`}
+            >
+              <SideChatTab sideChatId={activeTab.resource} />
+            </div>
+          ) : null}
           {activeTab?.kind === "subagent" && (
             <div
               key={activeTab.id}

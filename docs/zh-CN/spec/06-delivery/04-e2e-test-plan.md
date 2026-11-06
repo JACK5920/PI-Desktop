@@ -2763,15 +2763,48 @@ MainChat 弥补了缺口。 Maximized/fullscreen 调用保留最新的
 
 - **前提条件**：会话中有一条完成的用户提示和一条完成的助手回答；对话面板已聚焦。
 - **步骤**：1）右键用户板。2）选择复制，再选择选中消息文本。3）在用户板里选中一段文字，再右键该板并选择复制；收起选区后再右键复制一次。4）右键助手回合并选择复制。5）右键最后一回合下方空白处，选择复制整个对话。6）在打开的菜单上按 Escape，再按 Tab。7）右键回答里的 markdown 链接。8）编辑用户消息、替换内容、选中一段草稿并右键复制；再验证无选区复制、选中消息文本和取消编辑后的复制。
-- **预期**：用户菜单列出复制、选中消息文本、编辑，以及分隔后的删除；助手菜单列出复制、选中消息文本、重新生成和分叉。复制写入打开菜单时该行内的选中文本；光标折叠或选区在行外时退回整段。复制整个对话仍写入带说话人标签的整段对话。两者都显示 toast。选中文本会高亮气泡。Escape 和 Tab 关闭菜单且不执行项。链接仍提供在默认浏览器打开、在工作面板打开、复制链接地址。引用、批注、打开侧边聊天不出现（ADR 0268）。表面是视口固定的文档级层，不会改变记录高度。
+- **预期**：用户菜单列出复制、选中消息文本、编辑，以及分隔后的删除；助手菜单列出复制、选中消息文本、重新生成和分叉。复制写入打开菜单时该行内的选中文本；光标折叠或选区在行外时退回整段。复制整个对话仍写入带说话人标签的整段对话。两者都显示 toast。选中文本会高亮气泡。Escape 和 Tab 关闭菜单且不执行项。链接仍提供在默认浏览器打开、在工作面板打开、复制链接地址。右键菜单不直接提供引用、批注或侧边聊天；选中文本后由独立工具栏提供这些操作（ADR 0346）。表面是视口固定的文档级层，不会改变记录高度。
 - **链接规格**：`04-ux/08-component-spec.md` §8.3 / §8.5，
   `04-ux/09-interaction-patterns.md`（浮动下拉表面），
-  ADR 0268
+  ADR 0346
 - **验收**：C（聊天流），质量
 - **里程碑**：M5
 - **状态**：单位覆盖（`chat-context-menu.test.mjs`、
   `chat-context-menu-items.test.mjs`、`chat-context-menu-surface.test.mjs`）；
   完整 UI 场景草稿
+
+#### E2E-CHAT-selection-capture-v2：捕获、复制并追加对话选区
+
+- **前提条件**：可编辑的本地会话中有已完成的用户消息和助手消息，且输入框已有未发送草稿。
+- **步骤**：1）选中一段用户消息文本，从选区工具栏复制。2）再次选中并追加到输入框。3）选中已完成助手回答的一段文本并打开评论编辑器，然后改变浏览器选区再保存。4）工具栏打开时折叠或移动选区，确认操作仍使用最初捕获的来源。
+- **预期**：复制得到精确的已捕获摘录；追加到输入框会附带来源说明，以本地化引用块追加，不覆盖原草稿或已有引用。助手评论编辑器保存最初捕获的摘录，而不是后来改变的浏览器选区。空选区、跨消息选区、不符合条件的消息及远程会话不显示无效操作；长度限制为 2,000 个 Unicode 码点且不拆分字符。右键菜单复制、消息行复制、选中文本及普通的“询问所选内容”仍各自保持原有语义。
+- **覆盖范围**：`node scripts/e2e-selection-reference-workflow.mjs` 在 Chromium 中覆盖选区、复制、追加和来源捕获；`node --test apps/desktop/test/transcript-selection.test.mjs apps/desktop/test/selection-draft-append.test.mjs apps/desktop/test/selected-text-followup.test.mjs` 覆盖规范化、来源归属和既有分叉行为。
+- **关联规格**：`04-ux/08-component-spec.md` §7、`04-ux/09-interaction-patterns.md` §7.6、ADR 0346。
+- **验收**：C（聊天流）、质量。
+- **里程碑**：维护。
+- **状态**：Chromium 自动化夹具和辅助逻辑覆盖；完整桌面视觉验收另行执行。
+
+#### E2E-CHAT-annotation-citation-flow-v2：为摘录添加评论并在回答中引用
+
+- **前提条件**：有已完成的助手回答和可写的本地输入框。
+- **步骤**：1）选中助手摘录并选择“添加到聊天”。2）添加评论、附加并查看输入框中的引用。3）编辑评论、移除或清空待发送批注，再次附加摘录。4）发送非空普通请求，检查用户气泡、编辑草稿和排队预览。5）渲染包含精确引用指令的回答并打开引用。
+- **预期**：输入框显示有序、可编辑和可移除的引用；取消编辑不会附加，重复选择相同来源和摘录会重新打开编辑器，无评论的引用也有效。选区批注和输入框内编辑批注的操作按钮保持可读宽度；输入框引用审阅中的编辑/移除操作使用带可访问名称的紧凑图标按钮，不会挤成竖排文字。模型收到显式 JSON 序列化的批注信封，而用户可见的请求投影只显示用户请求。接收成功后仅消费未变化的已提交引用；拒绝时保留它们；只有批注而没有请求文本时不接受提交。编辑排队请求会先恢复其隐藏批注，再放到较新的输入框批注之前；排队接收失败时保留原批注。有效引用打开安全的纯文本摘录、评论和来源卡片；未知序号及恶意文本保持惰性普通文本。
+- **覆盖范围**：`node scripts/e2e-selection-reference-workflow.mjs` 覆盖附加、编辑、提示序列化和引用渲染；`node --test apps/desktop/test/response-annotations.test.mjs apps/desktop/test/response-annotation-slice.test.mjs apps/desktop/test/response-annotation-citations.test.mjs apps/desktop/test/queue-pending-actions.test.mjs apps/desktop/test/composer-submit-race.test.mjs apps/desktop/test/session-title-prompt-fallback.test.mjs` 覆盖序列化、显示精简、顺序、精确快照确认和拒绝处理。
+- **关联规格**：`04-ux/08-component-spec.md` §7 / §11、`04-ux/09-interaction-patterns.md` §7.6、ADR 0346。
+- **验收**：C（聊天流）、质量、安全。
+- **里程碑**：维护。
+- **状态**：Chromium、Store 和辅助逻辑自动覆盖；不包含真实模型提供方验收。
+
+#### E2E-CHAT-docked-follow-up-tab-v2：在父会话旁保留子会话追问
+
+- **前提条件**：可分叉本地会话中有已完成的助手回答，且用户有权打开并向子会话发送提示。
+- **步骤**：1）选中助手文本并打开“在侧聊中询问”；发送前确认尚未创建子会话或提交提示。2）输入非空提示并发送。3）子会话流式运行期间检查其记录，并处理仅属于该子会话的权限请求和 AskTool 卡片。4）将结果添加到主输入框。5）把一个子会话作为普通会话打开；再打开并发送另一个侧聊后关闭其标签。6）在子记录中选中用户文本并追加到紧凑草稿，选中助手文本并附加/查看批注；确认不提供嵌套侧聊，且停靠时隐藏历史修改操作。确认子会话错误卡片的“继续”明确发往子会话。7）在首次发送等待期间请求提升，随后拒绝发送并确认未发送文本保留在子会话输入框；再测试重试以及关闭/切换会话的竞态。
+- **预期**：只有用户明确发送才会分叉并提交，且使用选中的助手消息作为分叉锚点。父会话仍是活动会话，并保留原记录位置和草稿。子会话事件、权限处理和 AskTool 回答按子会话 id 隔离，并沿用 Host 权限路径。添加到主聊天时追加而不覆盖父草稿；提升为普通会话时激活子会话并仅释放侧聊投影；若发送仍在进行，提升会等待结果，发送被拒绝时将保留的侧聊草稿并入子会话输入框且不覆盖其已有草稿；关闭已发送的标签时保留持久子会话，不停止任务。提示被拒绝后保留可重试的子会话；并发首次发送只创建一个子会话；迟到的分叉/发送完成不能重新打开已关闭标签或覆盖其他会话草稿。子记录中的选区操作只影响子草稿和批注列表；不会把嵌套侧聊创建到不可见的工作面板上下文。
+- **覆盖范围**：`node scripts/e2e-selection-reference-workflow.mjs` 在真实 Chromium 中使用确定性的 Host/Store 夹具，覆盖首次分叉/发送、子会话流式输出、权限与 AskTool 界面/处理、父会话仍选中、追加到主输入框、提升以及关闭后保留。该夹具还覆盖子记录选区追加到紧凑草稿、附加/查看子批注以及不显示嵌套侧聊。`side-chat-store.test.mjs` 验证提升会等待首次发送结果，并在发送被拒绝时将草稿并入子会话已有输入内容。`node --test apps/desktop/test/side-chat-lifecycle.test.mjs apps/desktop/test/side-chat-store.test.mjs apps/desktop/test/session-fork-running.test.mjs apps/desktop/test/work-panel-tabs.test.mjs apps/desktop/test/session-runtime-updates.test.mjs apps/desktop/test/session-message-presentation.test.mjs apps/desktop/test/plugin-action-slots.test.mjs apps/desktop/test/chat-context-menu-surface.test.mjs apps/desktop/test/chat-error-message.test.mjs` 覆盖生命周期竞态、重试、标签清理、会话隔离的历史/错误操作和事件投影。
+- **关联规格**：`04-ux/08-component-spec.md` §7、`04-ux/09-interaction-patterns.md` §7.6、ADR 0346。
+- **验收**：C（聊天流）、E（工具和权限）、质量。
+- **里程碑**：维护。
+- **状态**：Chromium/Store 自动覆盖；完整桌面视觉验收及真实 Host/模型提供方验收另行执行。
 
 - **完整历史回归**：打开包含 140 条消息的会话，不向上翻页，选择复制整个对话；剪贴板必须包含第 1–140 条消息。从搜索上下文窗口和长消息截断预览重复验证。保留当前可见的生成中文字；读取失败时提示错误，剪贴板保持不变。仅在选择复制后读取完整历史，不改变阅读位置。运行 `node scripts/e2e-copy-conversation.mjs`。
 - 编辑时复制应使用草稿选区，无选区时复制整份草稿；选中消息文本应选中草稿。菜单不提供编辑、删除或版本切换；取消后原消息及其菜单保持不变。自动化验证：`node scripts/e2e-message-edit-copy.mjs`。
@@ -5967,8 +6000,11 @@ eleven-tool-round desktop paths are verified by
 | A — 应用程序启动 | E2E-001、E2E-002、E2E-003、E2E-004、E2E-067、E2E-076、E2E-079、E2E-092、E2E-097、E2E-143、E2E-150、E2E-168、E2E-204、E2E-217 |
 | B——模型配置 | E2E-005、E2E-005G、E2E-006、E2E-007、E2E-038、E2E-050、E2E-052、E2E-055、E2E-066、E2E-080、E2E-082、E2E-151、E2E-005J、E2E-199、E2E-201、E2E-202、E2E-203、E2E-209、E2E-166 |
 | C — 对话和直播 | E2E-CHAT-running-status-survives-output-pauses、E2E-008、E2E-008d、E2E-008a、E2E-009、E2E-010、E2E-011、E2E-011a、E2E-011b、E2E-031、E2E-040、E2E-047、E2E-048、E2E-048c、E2E-048A、E2E-049、E2E-052、 E2E-053、E2E-054、E2E-055、E2E-059、E2E-059a、E2E-060c、E2E-060d、E2E-061、E2E-061a、E2E-062、E2E-064、E2E-065、E2E-068、E2E-071、 E2E-073、E2E-074、E2E-075、E2E-081、E2E-083、E2E-084、E2E-086、E2E-087、E2E-088、E2E-088b、E2E-089、E2E-090、E2E-094、E2E-095、E2E-096、 E2E-097、E2E-098、E2E-099、E2E-102、E2E-102a、E2E-102b、E2E-106、E2E-109、E2E-111、E2E-114、E2E-116、E2E-117、E2E-118、E2E-119、 E2E-120、E2E-121、E2E-代理-001、E2E-142、E2E-144、E2E-145、E2E-146、E2E-147、E2E-151、E2E-199、E2E-250、E2E-166、E2E-SUBAGENT-resume-a-settled-delegation |
+| C / Quality — 对话文本选区引用 | E2E-CHAT-selection-capture-v2、E2E-CHAT-annotation-citation-flow-v2 |
+| C / E / Quality — 停靠式侧聊追问 | E2E-CHAT-docked-follow-up-tab-v2 |
 | C — 对话和直播（输入框草稿） | E2E-011c、E2E-011c-1、E2E-011c-2 |
 | C / F / 安全 / 品质 — Goal 生命周期 | E2E-GOAL-lifecycle |
+| C / F / 品质 — Goal 预算编辑 | E2E-GOAL-lifecycle、E2E-GOAL-budget-editor |
 | A / C / F / Quality — Tray session navigation | E2E-TRAY-bounded-session-navigation |
 | D——工作区 | E2E-012、E2E-013、E2E-022B、E2E-024I、E2E-047、E2E-049、E2E-057、E2E-058、E2E-060、E2E-068、E2E-075、E2E-078、E2E-153 |
 | D——工作区（项目排序） | E2E-253 |
@@ -6063,7 +6099,7 @@ eleven-tool-round desktop paths are verified by
 | 后MVP | E2E-022A、E2E-022B、E2E-022C、E2E-024I、E2E-024J、E2E-024K、E2E-024L、E2E-024M（插件路线图 R2/R3/R6） |
 | 基线后本地自动化 | E2E-220 |
 | 基线后本地自动化（MCP `pi_session_get` 超大 compaction） | E2E-MCP-session-get-projects-large-compaction |
-| MVP 后远程控制 | E2E-221、E2E-222、E2E-223、E2E-224、E2E-225、E2E-226、E2E-227、E2E-228、E2E-229、E2E-230、E2E-231、E2E-232、E2E-REMOTE-HOST-settings-compact-inventory |
+| MVP 后远程控制 | E2E-221、E2E-222、E2E-223、E2E-224、E2E-225、E2E-226、E2E-227、E2E-228、E2E-229、E2E-230、E2E-231、E2E-232、E2E-REMOTE-HOME、E2E-REMOTE-HOST-settings-compact-inventory |
 | 受信任扩展（R7 v1） | E2E-DIALOG-long-text-boundaries、E2E-241、E2E-242、E2E-HOOKS-cancel-and-dispose、E2E-243、E2E-TRUSTED-EXTENSION-temporary-session-cwd-is-scratch、E2E-244、E2E-245、E2E-PLUGIN-imported-pi-package-skills、E2E-PLUGIN-import-extension-installs-dependencies、E2E-PLUGIN-import-extension-reports-missing-dependency、E2E-PLUGIN-declared-provider-appears-in-the-native-provider-list |
 | 受信任扩展（R7 v1 npm 恢复） | E2E-PLUGIN-import-extension-recovers-missing-npm |
 | Post-MVP 回归覆盖（插件工具调度） | E2E-PLUGIN-slow-tool-is-not-cut-off-by-host-dispatch |
@@ -10020,12 +10056,22 @@ host-created files. The full app's file-preview viewer is covered separately.
 #### E2E-GOAL-lifecycle：持久化、报告、有界续跑、暂停、恢复与清除 Goal
 
 - **前置条件**：隔离的 Host profile 与绑定项目的会话；不需要真实 Provider。Host 测试通过重开同一数据库验证启动恢复。
-- **步骤**：提交并批准 Goal；认领其执行，提交逐条包含证据的 `GoalReport` 并结束 turn。确认 `continue` 只在首个执行结束后创建不同 ID 的排队执行。暂停下一轮，手动恢复并确认新的 execution ID 与 cycle。清除生命周期并确认没有 Goal 执行仍在排队。另一个进程重开场景中，保留 queued/running run，重启 Host，并在手动恢复前检查 `plans.pending`。
-- **预期**：每个执行轮次的报告均持久化并可由 `plans.pending` 读取；错误 turn、过期执行或重复报告会被拒绝。`complete` 要求所有已报告标准均为 `met`；缺少报告会将生命周期停止为 blocked；每个 cycle 最多八个执行轮次（含首次获批轮次），或在达到 250,000 个已报告 token、60 分钟墙钟时间后暂停自动续跑。当前轮次可超过预算，但不会再排入下一轮；手动 Resume 会重置两个预算。Pause/Clear 不会派发旧 ID。Host 重启后记录 `interrupted` 与 `host_restart`，保留报告历史，直到用户显式恢复并创建新执行才会派发。v27 获批 Goal 会迁移为 interrupted 供用户检查。Composer 将证据标记为 Agent 报告，而非 Host 认证。
-- **覆盖**：`pnpm test:e2e:plan` 执行无 Provider 的 Host RPC 用户流程；`cargo test -p host-core --locked` 覆盖生命周期状态迁移、v27 迁移及进程重开；`packages/agent-runtime/src/runtime.test.ts` 覆盖按轮作用域的 `GoalReport`；`apps/desktop/test/goal-lifecycle-render-and-control.test.mjs` 覆盖本地化显示与串行控制；`packages/host-runtime/src/plan-dispatch.test.ts` 覆盖有排队输入或待审批合约时自动续轮会等待。
+- **步骤**：提交并批准 Goal。先确认默认值为 8 轮、250,000 个已报告 Token、60 分钟且 Token 限制已启用；然后在 Goal 仍为 active 时改为 16 轮、1,250,000 个 Token、1,440 分钟，并启用“不限 Token”。确认当前执行身份、cycle 和计数器均未改变，且 `plans.pending` 返回更新后的值。认领执行，提交逐条包含证据的 `GoalReport` 并结束 turn；确认 `continue` 只在首个执行结束后创建不同 ID 的排队执行。暂停下一轮，切回有限 Token 并确认保留 1,250,000 的值；手动恢复并确认新 execution ID / cycle 使用所选预算。清除生命周期并确认没有 Goal 执行仍在排队。另一个进程重开场景中，保留 queued/running run，重启 Host，并在手动恢复前检查 `plans.pending`。
+- **预期**：每个执行轮次的报告均持久化并可由 `plans.pending` 读取；错误 turn、过期执行或重复报告会被拒绝。`complete` 要求所有已报告标准均为 `met`；缺少报告会将生命周期停止为 blocked。默认预算仍为 8 轮、250,000 个 Token 和 60 分钟；轮数可设为 1–32，有限 Token 上限可设为任意正安全整数，时间可设为 1–1,440 分钟。“不限 Token”仍累计用量，仅跳过 Token 截止；轮数和时间限制继续生效。成功更新预算不会取消当前轮、改变执行身份、重置用量或开启新 cycle；Host 仅在当前轮结束后检查新限制，达到配置的任一限制后不再排入下一轮。手动 Resume 会重置 cycle 计数器但保留预算。Pause/Clear 不会派发旧 ID。Host 重启后记录 `interrupted` 与 `host_restart`，保留报告历史，直到用户显式恢复并创建新执行才会派发。v27 获批 Goal 会迁移为 interrupted 供用户检查；v29 Goal 升级到 schema v30 后保留其有限 Token 限制。Composer 将证据标记为 Agent 报告，而非 Host 认证。
+- **覆盖**：`pnpm test:e2e:plan` 执行无 Provider 的 Host RPC 用户流程；`cargo test -p host-core --locked` 覆盖生命周期状态迁移、v27 与 v29→v30 迁移及进程重开；`packages/agent-runtime/src/runtime.test.ts` 覆盖按轮作用域的 `GoalReport`；`apps/desktop/test/goal-lifecycle-render-and-control.test.mjs` 覆盖本地化显示与串行控制；`packages/host-runtime/src/plan-dispatch.test.ts` 覆盖有排队输入或待审批合约时自动续轮会等待。
 - **规格**：`03-runtime/02-agent-runtime.md`、`03-runtime/04-data-storage.md`、`03-runtime/06-host-rpc-protocol.md`、`03-runtime/08-error-codes.md`、`03-runtime/10-session-state-machine.md`、`04-ux/08-component-spec.md`、`04-ux/09-interaction-patterns.md`、ADR 0338 / D679。
 - **验收**：F（持久性）、Quality（有界生命周期）、Security（启动不重放）。
 - **自动化**：离线；不需要真实 Provider 执行。
+
+#### E2E-GOAL-budget-editor：编辑并恢复已持久化的 Goal cycle 预算
+
+- **前置条件**：隔离 Electron profile、项目和 Host；由受门控的 Main-only Plan UI probe 直接通过实时 Host 创建并批准 Goal。无需模型/Provider 凭证，probe 不会派发执行。
+- **步骤**：重载渲染器并选中获批 Goal。打开“编辑预算”，把轮数、有限 Token 值（设为超过 100 万）和时间改为 1,440 分钟；启用“不限 Token”后，在不限模式下把有限值从 1,250,000 改为 1,500,000。保存并重载渲染器，再次打开编辑器，确认 Host 中的预算与不限状态均已恢复。关闭“不限 Token”，确认修改后的有限值仍在，保存并检查显示的有限预算。
+- **预期**：用户编辑/保存路径经正常 preload、Main、Host 桥接更新 Host；不限模式仍允许编辑并持久化有限 Token 值，供之后切回有限模式使用。渲染器重载后从 Host 恢复持久化状态。UI 修改预算时不调用模型、不更改 Goal 执行或 cycle。
+- **覆盖**：`pnpm test:e2e:plan-ui` 运行隔离 Electron 路径；`apps/desktop/test/plan-ui-probe-contract.test.mjs` 校验实时 Host probe 与门控接线。完整用户流程要求候选 Electron 构建/运行环境可用。
+- **验收**：F（持久性）、Quality（用户流程）、Security（Host 正常持有状态且不需要模型凭证）。
+- **里程碑**：Goal 生命周期预算。
+- **状态**：Electron 开发运行时可用时自动离线覆盖。
 
 #### E2E-PLUGIN-fetch-redirect-policy
 
@@ -10099,6 +10145,14 @@ host-created files. The full app's file-preview viewer is covered separately.
 - **关联规格**：`03-runtime/11-provider-model-system.md`、`03-runtime/04-data-storage.md`（v27）、
   `04-ux/04-builtin-commands.md`、ADR 0334、issue #1657。
 - **状态**：自动化覆盖见英文版。完整的设置 → `/fast` → 捕获请求路径为手动验证场景。
+
+### E2E-REMOTE-HOME：本地 Agent 通过 Host 访问远程工作区
+
+- **前置条件：** 构建后的 JS 工作区包和 Rust Host；Linux POSIX 临时目录；本地模型 fixture 与 loopback RACP。无需真实 SSH、账号、密钥、服务商凭据、付费 API 或用户正在运行的应用。
+- **步骤：** 运行 `PI_HOST_CORE_BINARY=target/debug/pi-desktop-host-core node scripts/e2e-local-agent-remote-tools.mjs`。让本地模型 fixture 请求读取远程 `README.md` 并通过 Bash 写入标记文件；检查请求经生产 Desktop relay、loopback WebSocket RACP 和真实 Rust Host 执行。
+- **预期：** 远程工作区使用 Linux POSIX 路径；Read 与获准的 Bash 只在远程 Host 上执行，文件内容正确，权限请求由本地边界处理；模型凭据不会进入远程工具请求，远程 Host 不需要 provider 配置，也不会创建持久远程项目或会话。断连后的工具请求不会被重放或回退到本地执行。
+- **自动化：** Ubuntu CI 的 `trusted-extensions-e2e` job 在构建 host-core 后运行该脚本。它覆盖本地 Agent 到远程工作区 Host 的离线集成路径，但不覆盖真实 SSH 传输或发布安装。
+- **状态：** Ubuntu CI 自动化；真实 SSH 发布验收仍由单独配置 Linux SSH 目标机的 E2E-231 负责。
 
 ### E2E-REMOTE-FILE-MANAGER：受限的插件远程读取
 

@@ -25,6 +25,12 @@ import type {
 } from "../../lib/composer-smart-stop";
 import { optimisticUserMessage } from "../../lib/session-transcript";
 import {
+  buildAnnotatedPrompt,
+  parseAnnotatedPrompt,
+  requestTextWithoutAnnotations,
+  type ResponseAnnotation,
+} from "../../lib/response-annotations";
+import {
   isDefaultSessionTitle,
   promptFallbackSessionTitle,
   untitledTaskTitle,
@@ -53,6 +59,45 @@ export type QueueSliceDependencies = StoreAccess & {
   materializeDraftSession: (intent?: number) => Promise<string | null>;
 };
 
+function sameAnnotationContent(left: ResponseAnnotation, right: ResponseAnnotation): boolean {
+  return left.sourceMessageId === right.sourceMessageId &&
+    left.excerpt === right.excerpt &&
+    left.comment === right.comment;
+}
+
+function mergeRestoredAnnotations(
+  restored: readonly ResponseAnnotation[],
+  current: readonly ResponseAnnotation[],
+): ResponseAnnotation[] {
+  const mergedRestored: ResponseAnnotation[] = [];
+  const usedIds = new Set(current.map((annotation) => annotation.id));
+  const currentById = new Map(current.map((annotation) => [annotation.id, annotation]));
+  const restoredByOriginalId = new Map<string, ResponseAnnotation>();
+
+  for (const annotation of restored) {
+    const sameOriginal = restoredByOriginalId.get(annotation.id);
+    if (sameOriginal && sameAnnotationContent(sameOriginal, annotation)) continue;
+    if (!sameOriginal) restoredByOriginalId.set(annotation.id, annotation);
+
+    const currentConflict = currentById.get(annotation.id);
+    if (currentConflict && sameAnnotationContent(currentConflict, annotation)) continue;
+
+    let id = annotation.id;
+    if (usedIds.has(id)) {
+      do {
+        id = crypto.randomUUID();
+      } while (usedIds.has(id));
+    }
+    usedIds.add(id);
+    mergedRestored.push({ ...annotation, id });
+  }
+
+  return [
+    ...mergedRestored,
+    ...current.map((annotation) => ({ ...annotation })),
+  ];
+}
+
 export function createQueueSlice({
   get,
   set,
@@ -76,15 +121,21 @@ export function createQueueSlice({
   | "steerPrompt"
 > {
   const queuedDrafts = new Map<string, ComposerDraftSnapshot>();
+  const queuedAnnotations = new Map<string, ResponseAnnotation[]>();
   const pendingSubmissions = new Set<string>();
 
   function toQueuedPrompt(entry: QueuedTurnSummary): QueuedPrompt {
+    const parsedAnnotations = parseAnnotatedPrompt(entry.content)?.annotations;
+    const annotations = queuedAnnotations.get(entry.id) ?? parsedAnnotations?.map(
+      (annotation) => ({ ...annotation, id: crypto.randomUUID() }),
+    );
     return {
       id: entry.id,
       sessionId: entry.sessionId,
-      content: entry.content,
+      content: requestTextWithoutAnnotations(entry.content),
+      ...(annotations?.length ? { annotations: annotations.map((annotation) => ({ ...annotation })) } : {}),
       draft: queuedDrafts.get(entry.id) ?? {
-        text: entry.content,
+        text: requestTextWithoutAnnotations(entry.content),
         fileReferences: (entry.attachments ?? []).map((attachment) => {
           const token = formatFileInsert(attachment.path, "file").trim();
           return {
@@ -114,6 +165,7 @@ export function createQueueSlice({
           !entries.some((entry) => entry.id === item.id)
         ) {
           queuedDrafts.delete(item.id);
+          queuedAnnotations.delete(item.id);
         }
       }
       const next = { ...state.queuedPrompts };
@@ -131,6 +183,7 @@ export function createQueueSlice({
       queuedPrompts: removeQueuedPrompt(state.queuedPrompts, sessionId, promptId),
     }));
     queuedDrafts.delete(promptId);
+    queuedAnnotations.delete(promptId);
     void api.removeQueuedPrompt(promptId).catch((error) => {
       get().showToast(
         error instanceof Error ? error.message : String(error),
@@ -145,6 +198,11 @@ export function createQueueSlice({
       const sessionId = requestedSessionId ?? get().activeSessionId;
       if (!sessionId) return false;
       if (isRemoteSession(get().sessions.find((session) => session.id === sessionId)) || sessionId.startsWith("remote:")) return false;
+      const annotationSnapshot = (get().responseAnnotations[sessionId] ?? []).map(
+        (annotation) => ({ ...annotation }),
+      );
+      if (annotationSnapshot.length > 0 && !content.trim()) return false;
+      const submittedContent = buildAnnotatedPrompt(content, annotationSnapshot);
       const queuedDraft: ComposerDraftSnapshot = draft
         ? {
             text: draft.text,
@@ -167,11 +225,15 @@ export function createQueueSlice({
       return api
         .queuePrompt({
           sessionId,
-          content,
+          content: submittedContent,
           ...(attachments.length ? { attachments } : {}),
         })
         .then((entry) => {
           queuedDrafts.set(entry.id, queuedDraft);
+          if (annotationSnapshot.length) {
+            queuedAnnotations.set(entry.id, annotationSnapshot.map((annotation) => ({ ...annotation })));
+          }
+          get().consumeAcceptedAnnotations(sessionId, annotationSnapshot);
           set((state) => ({
             queuedPrompts: removeQueuedPrompt(
               state.queuedPrompts,
@@ -211,6 +273,7 @@ export function createQueueSlice({
           queuedPrompts: removeQueuedPrompt(state.queuedPrompts, sessionId, promptId),
         }));
         queuedDrafts.delete(promptId);
+        queuedAnnotations.delete(promptId);
       } catch (error) {
         const conflict = error instanceof Error && "code" in error && error.code === "CONFLICT";
         get().showToast(conflict ? i18n.t("chat.queuedPromptAlreadyStarted") :
@@ -232,6 +295,12 @@ export function createQueueSlice({
       if (!item || isPendingQueuedPrompt(item) || isPromotedQueuedPrompt(item)) {
         return;
       }
+      if (
+        item.annotations?.length &&
+        !sessionAllows(get().sessions.find((session) => session.id === sessionId), "canEditMessages")
+      ) {
+        return;
+      }
       // `item.content` is token-stripped; the row's captured draft is the text
       // and the inline file references the user actually wrote.
       const restored: ComposerPrefill = {
@@ -241,8 +310,18 @@ export function createQueueSlice({
           ...reference,
         })),
       };
+      const restoredAnnotations = item.annotations ?? [];
       detachQueuedPrompt(sessionId, promptId);
-      set({ composerPrefill: restored });
+      set((state) => {
+        const currentAnnotations = state.responseAnnotations[sessionId] ?? [];
+        const nextAnnotations = mergeRestoredAnnotations(restoredAnnotations, currentAnnotations);
+        return {
+          composerPrefill: restored,
+          ...(restoredAnnotations.length
+            ? { responseAnnotations: { ...state.responseAnnotations, [sessionId]: nextAnnotations } }
+            : {}),
+        };
+      });
     },
 
     /** Move one waiting row past its neighbour; promoted rows stay locked. */
@@ -371,8 +450,7 @@ export function createQueueSlice({
           return false;
         }
         if (!sessionId) {
-          const intent = runtime.beginNavigationIntent();
-          const createdId = await materializeDraftSession(intent);
+          const createdId = await materializeDraftSession();
           if (!createdId) return false;
           sessionId = createdId;
           const key = `session:${createdId}`;
@@ -398,6 +476,11 @@ export function createQueueSlice({
           return accepted;
         }
         const startedIn = sessionId;
+        const annotationSnapshot: ResponseAnnotation[] = (
+          get().responseAnnotations[startedIn] ?? []
+        ).map((annotation) => ({ ...annotation }));
+        if (annotationSnapshot.length > 0 && !content.trim()) return false;
+        const submittedContent = buildAnnotatedPrompt(content, annotationSnapshot);
         const messageCountBeforeSend =
           startedIn === get().activeSessionId
             ? get().messages.length
@@ -425,7 +508,7 @@ export function createQueueSlice({
         }));
         const optimisticMessage = optimisticUserMessage(
           crypto.randomUUID(),
-          content,
+          submittedContent,
           submission.draft.fileReferences,
         );
         runtime.insertOptimisticUserMessage(startedIn, optimisticMessage);
@@ -470,7 +553,7 @@ export function createQueueSlice({
           }
           const receipt = await api.prompt({
             sessionId,
-            content,
+            content: submittedContent,
             messageId: optimisticMessage.id,
             viewingSessionId: isRemoteSession(current) ? null : viewingSessionIdForPrompt(get(), sessionId),
             attachments: draft ? promptAttachmentsFromDraft(draft.fileReferences) : [],
@@ -482,6 +565,7 @@ export function createQueueSlice({
               isRunning: state.activeSessionId === startedIn ? false : state.isRunning,
               runningSessions: { ...state.runningSessions, [startedIn]: false },
             }));
+            get().consumeAcceptedAnnotations(startedIn, annotationSnapshot);
             onAccepted?.(startedIn);
             try {
               await get().refreshSessions();
@@ -503,6 +587,7 @@ export function createQueueSlice({
           if (current?.source !== "pi-native" && current?.source !== "remote") {
             get().rememberModel(current ?? {});
           }
+          get().consumeAcceptedAnnotations(startedIn, annotationSnapshot);
           onAccepted?.(startedIn);
           return true;
         } catch (error) {

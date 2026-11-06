@@ -1,6 +1,47 @@
 use super::*;
 
 #[test]
+fn v30_to_v31_side_chat_migration_preserves_existing_conversations() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("pi.sqlite");
+    {
+        let db = Database::open(&path).unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO sessions (id, title, mode, created_at, updated_at)
+                 VALUES ('existing-chat', 'Existing chat', 'agent', 1, 1)",
+                [],
+            )
+            .unwrap();
+        db.conn()
+            .execute_batch(
+                "DROP INDEX IF EXISTS idx_sessions_side_chat_parent;
+                 ALTER TABLE sessions DROP COLUMN side_chat_promoted;
+                 ALTER TABLE sessions DROP COLUMN side_chat_excerpt;
+                 ALTER TABLE sessions DROP COLUMN side_chat_source_message_id;
+                 ALTER TABLE sessions DROP COLUMN side_chat_parent_id;",
+            )
+            .unwrap();
+        db.conn().pragma_update(None, "user_version", 30).unwrap();
+    }
+
+    let db = Database::open(&path).unwrap();
+    assert_eq!(schema_version(db.conn()), 31);
+    let row: (Option<String>, Option<String>, Option<String>, bool) = db
+        .conn()
+        .query_row(
+            "SELECT side_chat_parent_id, side_chat_source_message_id,
+                    side_chat_excerpt, side_chat_promoted
+             FROM sessions WHERE id = 'existing-chat'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .unwrap();
+    assert_eq!(row, (None, None, None, false));
+    assert!(migration_backup_path(&path, 30).exists());
+}
+
+#[test]
 fn project_memory_is_path_scoped_and_bounded() {
     let dir = tempfile::tempdir().unwrap();
     let first = dir.path().join("first");
@@ -491,7 +532,7 @@ fn v28_database_gains_the_managed_attachment_provenance_table() {
     };
 
     let db = Database::open(&path).unwrap();
-    assert_eq!(schema_version(db.conn()), 29);
+    assert_eq!(schema_version(db.conn()), SCHEMA_VERSION);
     assert!(migration_backup_path(&path, 28).exists());
     let rows: i64 = db
         .conn()

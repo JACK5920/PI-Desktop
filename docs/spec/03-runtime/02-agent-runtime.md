@@ -73,6 +73,10 @@ runtime returns `{ requested: false }`; immediate `abort()` remains the
 separate cancellation path. `abort()` resolves only after the named active
 operation has completed its cancellation cleanup, so the same runtime can
 accept a follow-up prompt as soon as the abort request returns.
+Cancellation remains busy until both the parent operation and all running
+delegates have retired. Concurrent aborts join that same cleanup. A parent's
+terminal event cannot make a new prompt admissible while a child is still
+retiring. Graceful turn-boundary stop remains a separate operation.
 
 On a headless Host, prompt and approved-plan admission share a per-session
 operation queue with immediate abort and its durable settlement. An abort
@@ -821,13 +825,21 @@ are Agent-reported claims, not Host-certified test results; the Composer labels
 them accordingly.
 
 Only a completed round that saved `continue` may automatically queue another
-round, and the Host caps this at eight execution rounds total per cycle,
-including the initial approved round. Each cycle also persists a ceiling of
-250,000 reported tokens and 60 minutes of wall-clock time. The Host evaluates
-both budgets after the current execution round settles; it never terminates an
-in-flight round at a budget boundary, but it will not automatically queue a
-subsequent round once either budget is reached. Manual resume starts a new
-cycle and resets both counters. `complete`
+round. At approval, the Host snapshots normalized `AppSettings.goalBudgetDefaults`
+into the new Goal lifecycle; the AI Settings defaults affect future approvals
+only and do not rewrite existing Goals. If the preference is missing, it
+normalizes to eight execution rounds total (including the initial approved
+round), a retained finite token value of 250,000, 60 minutes, and unlimited
+tokens enabled. A user may configure 1–32 rounds, 1–1,440 minutes, and any
+positive safe-integer finite token ceiling through `Number.MAX_SAFE_INTEGER`.
+Usage is still tracked in unlimited mode, but only the token cutoff is skipped.
+The Host evaluates the round and time ceilings, and a finite token ceiling
+when enabled, after the current execution round settles; it never terminates
+an in-flight round at a budget boundary.
+Editing limits for an active, paused, blocked, or interrupted Goal does not
+reset usage, change cycle/execution identity, or cancel the current round.
+Manual resume starts a new cycle and resets cycle usage while retaining the
+configured limits. `complete`
 is accepted only when all reported criteria are `met`; `blocked`, a missing
 report, or the round cap stops automatic continuation. Pause, resume, and clear
 are explicit user controls. Resume creates a new execution ID and cycle rather

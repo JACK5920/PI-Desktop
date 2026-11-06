@@ -9,11 +9,23 @@ import { createServer } from "vite";
 import { fileURLToPath } from "node:url";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
+const LOCAL_SHARED = fileURLToPath(
+  new URL("../../../packages/shared/dist/index.js", import.meta.url),
+);
+const LOCAL_I18N = fileURLToPath(
+  new URL("../../../packages/i18n/dist/index.js", import.meta.url),
+);
 const GOAL_API_MODULE = "\0goal-lifecycle-test-api";
 
 async function withGoalModules(run) {
   const server = await createServer({
     root: ROOT,
+    resolve: {
+      alias: {
+        "@pi-desktop/shared": LOCAL_SHARED,
+        "@pi-desktop/i18n": LOCAL_I18N,
+      },
+    },
     configFile: false,
     logLevel: "silent",
     server: { middlewareMode: true, hmr: false, ws: false },
@@ -31,7 +43,7 @@ async function withGoalModules(run) {
         },
         load(id) {
           if (id !== GOAL_API_MODULE) return null;
-          return `export const api = new Proxy({}, { get: (_target, key) => key === "controlGoal" ? (...args) => globalThis.__goalLifecycleControl(...args) : () => Promise.resolve({}) });`;
+          return `export const api = new Proxy({}, { get: (_target, key) => key === "controlGoal" ? (...args) => globalThis.__goalLifecycleControl(...args) : key === "updateGoalBudget" ? (...args) => globalThis.__goalLifecycleBudgetUpdate(...args) : () => Promise.resolve({}) });`;
         },
       },
     ],
@@ -65,6 +77,12 @@ function goal(status, overrides = {}) {
     roundInCycle: 2,
     runCount: 2,
     maxRounds: 8,
+    maxTokens: 250_000,
+    maxDurationMs: 3_600_000,
+    tokensUsed: 2_000,
+    elapsedMs: 60_000,
+    cycleStartedAt: Date.now() - 60_000,
+    tokenBudgetUnlimited: false,
     stopReason: status === "interrupted" ? "host_restart" : undefined,
     latestReport: {
       outcome: "continue",
@@ -100,7 +118,10 @@ function renderBar({ GoalLifecycleBar, useAppStore, i18n }, lifecycle, options =
     createElement(
       I18nextProvider,
       { i18n },
-      createElement(GoalLifecycleBar, { goal: lifecycle }),
+      createElement(GoalLifecycleBar, {
+        goal: lifecycle,
+        liveProgress: options.liveProgress,
+      }),
     ),
   );
 }
@@ -116,6 +137,7 @@ test("Goal lifecycle bar renders a durable report and only actions valid for the
     assert.match(active, /Reported met|Not yet met/);
     assert.match(active, /pnpm test: FAIL — one regression remains/);
     assert.match(active, /data-testid="goal-pause"/);
+    assert.match(active, /data-testid="goal-budget-edit"/);
     assert.match(active, /data-testid="goal-clear"/);
     assert.doesNotMatch(active, /data-testid="goal-resume"/);
 
@@ -124,9 +146,111 @@ test("Goal lifecycle bar renders a durable report and only actions valid for the
     assert.match(interrupted, /data-testid="goal-resume"/);
     assert.doesNotMatch(interrupted, /data-testid="goal-pause"/);
     assert.match(interrupted, /data-testid="goal-clear"/);
+    assert.match(interrupted, /data-testid="goal-budget-edit"/);
+
+    const budgetStoppedUnlimited = renderBar(
+      modules,
+      goal("paused", { stopReason: "GOAL_BUDGET_EXHAUSTED", tokenBudgetUnlimited: true }),
+    );
+    assert.match(budgetStoppedUnlimited, /time or token budget/);
+    assert.doesNotMatch(budgetStoppedUnlimited, /time budget\./);
+
+    const completed = renderBar(modules, goal("completed"));
+    assert.doesNotMatch(completed, /data-testid="goal-budget-edit"/);
 
     const restored = renderBar(modules, goal("interrupted"), { withProposal: false });
     assert.match(restored, /Persistent goal/);
+  });
+});
+
+test("Goal lifecycle bar shows matching live reported token progress", async () => {
+  await withGoalModules((modules) => {
+    const current = renderBar(modules, goal("active"), {
+      liveProgress: {
+        sessionId: "goal-session",
+        proposalId: "goal-proposal",
+        executionId: "goal-execution",
+        turnId: "goal-turn",
+        tokensUsed: 2_450,
+      },
+    });
+    assert.match(current, /2,450 \/ 250,000 tokens/);
+
+    const stale = renderBar(modules, goal("active"), {
+      liveProgress: {
+        sessionId: "goal-session",
+        proposalId: "goal-proposal",
+        executionId: "old-execution",
+        turnId: "old-turn",
+        tokensUsed: 9_999,
+      },
+    });
+    assert.match(stale, /2,000 \/ 250,000 tokens/);
+    assert.doesNotMatch(stale, /9,999 \/ 250,000 tokens/);
+  });
+});
+
+test("Goal lifecycle bar renders active cycle elapsed time to the second", async () => {
+  const originalNow = Date.now;
+  Date.now = () => 75_000;
+  try {
+    await withGoalModules((modules) => {
+      const active = renderBar(
+        modules,
+        goal("active", { cycleStartedAt: 10_000, elapsedMs: 0 }),
+      );
+      assert.match(active, /1 min 5 sec/);
+    });
+  } finally {
+    Date.now = originalNow;
+  }
+});
+
+test("Goal budget edits use Host result to reconcile the durable lifecycle", async () => {
+  await withGoalModules(async ({ createInteractionSlice }) => {
+    const calls = [];
+    const events = [];
+    const updatedGoal = goal("active", {
+      maxRounds: 18,
+      maxTokens: 600_000,
+      maxDurationMs: 86_400_000,
+      tokenBudgetUnlimited: true,
+    });
+    globalThis.__goalLifecycleBudgetUpdate = async (request) => {
+      calls.push(request);
+      return { goal: updatedGoal };
+    };
+    const state = { handlePlansChanged: (event) => events.push(event) };
+    let actions;
+    actions = createInteractionSlice({
+      get: () => ({ ...state, ...actions }),
+      set: () => undefined,
+      runtime: {},
+      interactionRuntime: { planResolutionRequests: new Map(), nextToastId: () => 1 },
+    });
+
+    await actions.updateGoalBudget("goal-session", "goal-proposal", {
+      maxRounds: 18,
+      maxTokens: 600_000,
+      maxDurationMs: 86_400_000,
+      tokenBudgetUnlimited: true,
+    });
+
+    assert.deepEqual(calls, [{
+      sessionId: "goal-session",
+      proposalId: "goal-proposal",
+      budget: {
+        maxRounds: 18,
+        maxTokens: 600_000,
+        maxDurationMs: 86_400_000,
+        tokenBudgetUnlimited: true,
+      },
+    }]);
+    assert.equal(events.length, 1);
+    assert.equal(events[0].goal.maxRounds, 18);
+    assert.equal(events[0].goal.maxTokens, 600_000);
+    assert.equal(events[0].goal.maxDurationMs, 86_400_000);
+    assert.equal(events[0].goal.tokenBudgetUnlimited, true);
   });
 });
 
