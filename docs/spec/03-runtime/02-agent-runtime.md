@@ -291,10 +291,16 @@ conservative format diagnostic, not a general XML parser or proof of intent.
 Before surfacing a pre-stream `PROVIDER_ERROR` for HTTP 400/422 whose message
 ends in `(no body)`, the runtime makes at most one silent repair attempt with
 the generated output-limit fields removed: `max_tokens`,
-`max_completion_tokens`, and `max_output_tokens`. This repair does not consume
+`max_completion_tokens`, and `max_output_tokens`. The same one attempt clamps
+those fields down to the ceiling when the body states one (`at most N
+completion tokens`, `max_tokens: N > M, which is the maximum allowed number of
+output tokens`, or `expected a value <= N`) instead of deleting them.
+Anthropic rejects a request that omits `max_tokens`. A field that is absent or
+already within the ceiling is left unchanged. Credit exhaustion and context
+overflow stay on their existing terminal paths. This repair does not consume
 the transient retry budget or add backoff, and the caller's `onPayload` rewrite
-remains active. A second opaque failure is terminal, and an abort before the
-repair starts prevents the repair request.
+remains active. A second failure of the same kind is terminal, and an abort
+before the repair starts prevents the repair request.
 
 The non-429 delay honors the server first: `retry-after-ms`, `retry-after`
 seconds, then `retry-after` HTTP-date, capped at 8 seconds. Captured headers are
@@ -551,7 +557,11 @@ and every record written before the marker existed — is normalized to its late
 user message only, so a restart cannot restore a sequence of
 executable-looking old requests. Dropping an assistant message also drops its
 tool calls, and the fallback drops the results of calls it did not keep, so no
-orphaned tool call or unmatched result can reach the provider. The retained tail
+orphaned tool call or unmatched result can reach the provider. Assistant
+thinking shares the same character budget as text. Answer text is reserved
+first; a thinking block that has to be shortened drops its provider signature,
+so the replay is not a mutated signed trace. A block that still fits keeps its
+signature, and redacted thinking is left unchanged. The retained tail
 is re-estimated with the summary before persistence and before continuation, so
 an oversized request still cannot pass the guard. A fallback also records
 `details.failureReason` — `no_new_history`, `summary_budget`,
@@ -920,7 +930,8 @@ safety bound, and restored history has a 30 MB aggregate raw-byte budget.
 The newest refs are considered first; all eligible images remain image blocks
 when the history fits, while over-budget or oversized images become safe
 `@path` fallbacks; so do images whose header reports a longest edge above
-8000 px (D675). Every provider request also replaces any image block past that
+8000 px (D675). A pixel-limit rejection does not consume the aggregate byte
+budget, so an older image that still fits is inlined. Every provider request also replaces any image block past that
 pixel limit, in user prompts and tool results alike, with a text notice naming
 its size, so a session that already holds one recovers. An image whose message names it inline (`inlinePath`) is
 spliced back into the prompt at that position, so a restored turn keeps the
