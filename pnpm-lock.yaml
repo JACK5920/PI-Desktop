@@ -436,6 +436,9 @@ importers:
       '@earendil-works/pi-coding-agent':
         specifier: 1.4.0
         version: 1.4.0(patch_hash=1f1a1efed2ccd6fccef2608bf0cd304cd6af4c91824839189c73ab88953e5635)(@aws-sdk/credential-provider-node@3.972.83)(@smithy/signature-v4@5.7.3)(supports-color@7.2.0)(ws@8.21.1)(zod@4.4.3)
+      '@pi-desktop/computer-use':
+        specifier: workspace:*
+        version: link:../computer-use
       '@pi-desktop/shared':
         specifier: workspace:*
         version: link:../shared
@@ -458,6 +461,22 @@ importers:
       esbuild:
         specifier: ^0.25.12
         version: 0.25.12
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.11
+        version: 4.1.11(@opentelemetry/api@1.9.0)(@types/node@24.13.3)(vite@7.3.6(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.33.0)(yaml@2.9.0))
+
+  packages/computer-use:
+    dependencies:
+      '@pi-desktop/shared':
+        specifier: workspace:*
+        version: link:../shared
+    devDependencies:
+      '@types/node':
+        specifier: ^24.13.3
+        version: 24.13.3
       typescript:
         specifier: ^5.9.3
         version: 5.9.3

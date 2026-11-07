@@ -26,14 +26,14 @@ function harness(allowed = true, childSource = child, esm = false) {
     onExit: () => () => {},
   };
   sidecar.setHost(host);
-  const execute = (mode = "agent", toolCallId = "i") =>
+  const execute = (mode = "agent", toolCallId = "i", toolName = "GenerateImages") =>
     sidecar.call<{ ok: boolean }>("probe", {
       method: "tools.execute",
       params: {
         sessionId: "s",
         toolCallId,
         mode,
-        toolName: "GenerateImages",
+        toolName,
         args: { items: [{ prompt: "image" }] },
       },
     });
@@ -93,6 +93,41 @@ it("denied and Plan calls never reach the image service", async () => {
   expect((await execute()).ok).toBe(false);
   expect((await execute("plan")).ok).toBe(false);
   expect(generate).not.toHaveBeenCalled();
+});
+
+it("authorizes Computer locally through host-core and hard-denies it in Plan mode", async () => {
+  const { sidecar, calls, execute } = harness();
+  const computer = vi.fn(async () => ({ ok: true, content: "done" }));
+  sidecar.setLocalTool("Computer", computer);
+
+  expect((await execute("agent", "computer-1", "Computer")).ok).toBe(true);
+  expect((await execute("plan", "computer-2", "Computer")).ok).toBe(false);
+  expect((await execute("goal", "computer-3", "Computer")).ok).toBe(false);
+  expect(computer).toHaveBeenCalledTimes(1);
+  expect(calls).toEqual(["tools.execute"]);
+});
+
+it("tools.abort cancels an in-flight Computer handler", async () => {
+  const { sidecar, calls, execute } = harness();
+  let started!: () => void;
+  const ready = new Promise<void>((resolve) => { started = resolve; });
+  const computer = vi.fn(async ({ signal }: { signal: AbortSignal }) => {
+    started();
+    await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
+    return { ok: false, content: "cancelled" };
+  });
+  sidecar.setLocalTool("Computer", computer);
+
+  const pending = execute("agent", "computer-cancel", "Computer");
+  await ready;
+  await sidecar.call("probe", {
+    method: "tools.abort",
+    params: { sessionId: "s", toolCallId: "computer-cancel" },
+  });
+
+  expect((await pending).ok).toBe(false);
+  expect(computer).toHaveBeenCalledOnce();
+  expect(calls).toEqual(["tools.execute", "tools.abort"]);
 });
 
 it("tools.abort reaches the in-flight request and still forwards host cancellation", async () => {

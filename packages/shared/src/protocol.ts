@@ -1,4 +1,6 @@
 export const PROTOCOL_VERSION = 11 as const;
+// Keep the fork's persisted schema contract. The upstream value is older and
+// must not make a fork database appear to need a destructive downgrade.
 export const SCHEMA_VERSION = 28 as const;
 export const APP_ID = "net.aiuo.pi-desktop";
 export const APP_NAME = "PI-Desktop";
@@ -130,6 +132,10 @@ export const IPC = {
     liveVoiceWidgetAction: "pi-desktop/voice/live/widget/action",
     liveVoiceWidgetOwnerState: "pi-desktop/voice/live/widget/ownerState",
     liveVoiceWidgetVisibility: "pi-desktop/voice/live/widget/visibility",
+    computerCapabilities: "pi-desktop/computer/capabilities",
+    computerRequestPermission: "pi-desktop/computer/permission/request",
+    computerGrantRevoke: "pi-desktop/computer/grant/revoke",
+    computerGrantDescribe: "pi-desktop/computer/grant/describe",
     agentCompact: "pi-desktop/agent/compact",
     agentAbort: "pi-desktop/agent/abort",
     agentStopSubagents: "pi-desktop/agent/stop-subagents",
@@ -421,6 +427,7 @@ export const IPC = {
     composerPickPhotos: "pi-desktop/composer/pickPhotos",
     composerImportFiles: "pi-desktop/composer/importFiles",
     composerPasteFiles: "pi-desktop/composer/pasteFiles",
+    composerReadClipboardDirectories: "pi-desktop/composer/readClipboardDirectories",
     clipboardRecordPaste: "pi-desktop/clipboard/recordPaste",
     composerCommands: "pi-desktop/composer/commands",
     workspaceDiff: "pi-desktop/workspace/diff",
@@ -533,6 +540,8 @@ export const IPC = {
     liveVoiceTranscript: "pi-desktop/voice/live/event/transcript",
     liveVoiceWidgetState: "pi-desktop/voice/live/event/widgetState",
     liveVoiceWidgetAction: "pi-desktop/voice/live/event/widgetAction",
+    computerGrantChanged: "pi-desktop/computer/event/grantChanged",
+    computerCursor: "pi-desktop/computer/event/cursor",
   },
 } as const;
 

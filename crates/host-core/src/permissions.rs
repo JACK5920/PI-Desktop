@@ -147,7 +147,7 @@ impl PermissionManager {
     pub fn tool_risk_with_declared(tool_name: &str, declared: Option<&str>) -> Risk {
         match tool_name {
             "Read" | "Glob" | "Grep" | "ScheduledTaskList" | "TodoWrite" => Risk::Low,
-            "Write" | "Edit" | "Bash" | "GenerateImages" => Risk::High,
+            "Write" | "Edit" | "Bash" | "GenerateImages" | "Computer" => Risk::High,
             name if name.starts_with("plugin_") => match declared {
                 Some("low") => Risk::Low,
                 Some("high") => Risk::High,
@@ -942,5 +942,26 @@ mod image_generation_tests {
             ),
             Some(PermissionDecision::Deny)
         );
+    }
+
+    #[test]
+    fn computer_use_is_high_risk_and_hard_denied_in_contract_modes() {
+        assert!(matches!(
+            PermissionManager::tool_risk_with_declared("Computer", None),
+            Risk::High
+        ));
+        let manager = PermissionManager::default();
+        let grants: HashMap<String, Vec<String>> = HashMap::new();
+        for contract in ["plan", "goal"] {
+            for mode in ["ask", "accept-edits", "auto"] {
+                assert_eq!(
+                    manager.evaluate_auto_with_permission_mode(
+                        "s", "Computer", contract, mode, &grants,
+                    ),
+                    Some(PermissionDecision::Deny),
+                    "Computer must remain unavailable in {contract} under {mode}"
+                );
+            }
+        }
     }
 }

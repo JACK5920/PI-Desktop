@@ -1,6 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { DEFAULT_RPC_TIMEOUT_MS, IMAGE_BATCH_TIMEOUT_MS, imageGenerationPrompts, readNdjsonLines, rpcTimeoutMs, rpcErrorFromWire, rpcErrorToWire } from "@pi-desktop/shared";
+import { COMPUTER_CALL_TIMEOUT_MS, DEFAULT_RPC_TIMEOUT_MS, IMAGE_BATCH_TIMEOUT_MS, imageGenerationPrompts, readNdjsonLines, rpcTimeoutMs, rpcErrorFromWire, rpcErrorToWire } from "@pi-desktop/shared";
 import type { ProcessExitHandler, StderrHandler } from "./host-process.js";
 
 // stderr lines kept per sidecar so an unexpected exit can be reported with the
@@ -50,6 +50,10 @@ export type VendorAuthResolver = (input: {
 // session, so it cannot reach a credential the session was not launched with.
 const HOST_PROXY_ALLOWED = new Set([
   "tools.execute",
+  "backgroundJobs.capabilities",
+  "backgroundJobs.list",
+  "backgroundJobs.wait",
+  "backgroundJobs.stop",
   "tools.fileBatchCapabilities",
   "tools.fileBatchRegister",
   "tools.fileBatchSeal",
@@ -275,12 +279,14 @@ export class AgentSidecar {
     const controller = new AbortController();
     this.localToolControllers.set(key, controller);
     const imageGeneration = params.toolName === "GenerateImages";
+    const computerUse = params.toolName === "Computer";
+    const requiresHostAuthorization = imageGeneration || computerUse;
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       return await Promise.race([
         (async () => {
-          if (imageGeneration) {
-            imageGenerationPrompts(input.args);
+          if (requiresHostAuthorization) {
+            if (imageGeneration) imageGenerationPrompts(input.args);
             if (!this.host) throw new Error("host unavailable");
             const gate = await this.host.call<LocalToolResult>("tools.execute", params);
             if (!gate.ok) return gate;
@@ -292,7 +298,7 @@ export class AgentSidecar {
           timer = setTimeout(() => {
             controller.abort();
             reject(new Error("host-local tool timeout"));
-          }, imageGeneration ? IMAGE_BATCH_TIMEOUT_MS + 130_000 : DEFAULT_RPC_TIMEOUT_MS);
+          }, computerUse ? COMPUTER_CALL_TIMEOUT_MS : imageGeneration ? IMAGE_BATCH_TIMEOUT_MS + 130_000 : DEFAULT_RPC_TIMEOUT_MS);
           this.localToolTimers.add(timer);
         }),
       ]);
@@ -481,7 +487,7 @@ export class AgentSidecar {
           requestedToolName.startsWith("plugin_");
         if (
           method === "tools.execute" &&
-          params.mode === "plan" &&
+          (params.mode === "plan" || params.mode === "goal") &&
           planLocalTool &&
           requestedToolName !== "BrowserPreview"
         ) {
@@ -550,12 +556,12 @@ export class AgentSidecar {
           // other host-local tool fails closed even if a stale runtime asks for
           // it directly.
           const result =
-            params.mode === "plan" && toolName !== "BrowserPreview"
+            (params.mode === "plan" || params.mode === "goal") && toolName !== "BrowserPreview"
               ? {
                   ok: false,
                   isError: true,
                   errorCode: "TOOL_DISABLED_IN_PLAN",
-                  content: `${toolName} is unavailable in Plan mode.`,
+                  content: `${toolName} is unavailable in ${String(params.mode)} mode.`,
                 }
               : await this.runLocalTool(localTool, {
                   sessionId: String(params.sessionId ?? ""),

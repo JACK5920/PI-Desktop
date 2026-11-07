@@ -35,6 +35,7 @@
     "@earendil-works/pi-ai": "1.4.0",
     "@earendil-works/pi-coding-agent": "1.4.0",
     "@pi-desktop/shared": "workspace:*",
+    "@pi-desktop/computer-use": "workspace:*",
     "jiti": "2.7.0",
     "typebox": "1.3.27",
     "undici": "8.10.2",

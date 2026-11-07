@@ -77,6 +77,9 @@ function Fixture({ sessionId, t, workspacePath }: { sessionId: string; t: TFunct
     value: draft.value, draftKey: draft.draftKey, activeSessionId: sessionId || null,
     thinkingLevel: "off", modelReady: true, sendBlocked: false, pasting: false,
     activeFileReferences: draft.activeFileReferences, t, draft,
+    invalidateComposerTransforms: noop,
+    sendQueuedNow: async () => false,
+    queuedPrompts: [],
     recordHistory: inputHistory.record,
     sendPrompt: (...args) => historySendPrompt(...args),
     steerPrompt: async () => false, showToast: noop,
@@ -651,7 +654,8 @@ globalThis.composerPasteProbe = async () => {
         "preview key altered or sent the draft");
       await globalThis.composerPreviewPressKey("Escape");
       await until(() => !dialog(), "native Escape did not dismiss the preview");
-      assert(!dialog() && document.activeElement === chip, "cancel did not close and restore attachment focus");
+      assert(!dialog() && editor.contains(document.activeElement),
+        "cancel did not close and restore focus to the composer");
     }
     // The isolated host supplies real images within the allowed scratch directory.
     const wide = createFileReference(imageReference.path.replace(/[^/\\]+$/, "wide-fixture.png"), "wide.png", "paste-a", {
@@ -1127,7 +1131,10 @@ globalThis.composerHistoryProbe = async (phase) => {
         messages: [],
         latestTurnResults: {},
         sessionOutcomes: {},
+        responseAnnotations: {},
         isRunning: false,
+        rememberModel: noop,
+        consumeAcceptedAnnotations: noop,
       } as unknown as AppState;
       const queueRuntime = {
         beginNavigationIntent: () => 1,
@@ -1152,7 +1159,7 @@ globalThis.composerHistoryProbe = async (phase) => {
         viewingSessionIdForPrompt: () => null,
         messageErrorFromUnknown: () => { throw new Error("unexpected prompt failure"); },
         assistantErrorMessage: () => { throw new Error("unexpected prompt failure"); },
-        materializeDraftSession: async () => "history-created-session",
+      materializeDraftSession: async () => "history-created-session",
       });
       historySendPrompt = queueSlice.sendPrompt;
       api.prompt = async (input) => {
@@ -1161,10 +1168,19 @@ globalThis.composerHistoryProbe = async (phase) => {
         await sendGate;
         queueState = { ...queueState, activeSessionId: "paste-b" };
         useAppStore.setState({ activeSessionId: "paste-b" });
+        return { managed: false };
       };
       try {
         await press("Enter");
-        await started;
+        await Promise.race([
+          started,
+          latestSubmission.then(() => {
+            throw new Error(`home submission finished before materializing its session; draft=${JSON.stringify(readEditorValue(controller.ref.current!))}; value=${JSON.stringify(controller.value)}; submitted=${submitted}`);
+          }),
+          new Promise<never>((_, reject) => {
+            setTimeout(() => reject(new Error("home submission did not reach the prompt boundary")), 5_000);
+          }),
+        ]);
         const homeSubmission = latestSubmission;
         render("paste-b");
         releaseSend();

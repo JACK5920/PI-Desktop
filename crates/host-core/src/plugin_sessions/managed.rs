@@ -26,7 +26,7 @@ pub fn create(db: &Database, plugin_id: &str, params: &Value) -> Result<Value> {
                 "externalId already belongs to an imported session",
             ));
         }
-        if own_session_row(db, plugin_id, &id)?.is_none() {
+        if session_row(db, plugin_id, &id, SessionScope::Own)?.is_none() {
             return Err(not_found("managed session is deleted"));
         }
         return Ok(json!({"sessionId": id, "created": false}));
@@ -83,7 +83,7 @@ pub fn grant_ref(db: &Database, plugin_id: &str, params: &Value) -> Result<Value
         128,
     )?;
     if owner(db, &session_id)?.as_deref() != Some(plugin_id)
-        || own_session_row(db, plugin_id, &session_id)?.is_none()
+        || session_row(db, plugin_id, &session_id, SessionScope::Own)?.is_none()
     {
         return Err(not_found("managed session not found"));
     }
@@ -134,7 +134,7 @@ pub fn authorize_ref(db: &Database, plugin_id: &str, params: &Value) -> Result<V
         128,
     )?;
     if owner(db, &session_id)?.as_deref() != Some(plugin_id)
-        || own_session_row(db, plugin_id, &session_id)?.is_none()
+        || session_row(db, plugin_id, &session_id, SessionScope::Own)?.is_none()
     {
         return Err(not_found("managed session not found"));
     }
@@ -176,7 +176,7 @@ pub fn set_model(db: &Database, plugin_id: &str, params: &Value) -> Result<Value
         128,
     )?;
     if owner(db, &session_id)?.as_deref() != Some(plugin_id)
-        || own_session_row(db, plugin_id, &session_id)?.is_none()
+        || session_row(db, plugin_id, &session_id, SessionScope::Own)?.is_none()
     {
         return Err(not_found("managed session not found"));
     }
@@ -235,7 +235,7 @@ pub fn append(db: &Database, plugin_id: &str, params: &Value) -> Result<Value> {
         128,
     )?;
     if owner(db, &session_id)?.as_deref() != Some(plugin_id)
-        || own_session_row(db, plugin_id, &session_id)?.is_none()
+        || session_row(db, plugin_id, &session_id, SessionScope::Own)?.is_none()
     {
         return Err(not_found("managed session not found"));
     }
@@ -351,7 +351,13 @@ mod tests {
             append(&db, "plugin.one", &message).unwrap()["appended"],
             false
         );
-        super::super::delete(&db, "plugin.one", &json!({"sessionId":id,"mode":"trash"})).unwrap();
+        super::super::delete(
+            &db,
+            "plugin.one",
+            SessionScope::Own,
+            &json!({"sessionId":id,"mode":"trash"}),
+        )
+        .unwrap();
         assert_eq!(owner(&db, id).unwrap().as_deref(), Some("plugin.one"));
         assert!(append(&db, "plugin.one", &message).is_err());
         assert!(create(&db, "plugin.one", &request).is_err());

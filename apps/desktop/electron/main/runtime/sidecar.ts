@@ -1,4 +1,4 @@
-import { IPC, type AgentEventEnvelope, type UiMessage } from "@pi-desktop/shared";
+import { IPC, type AgentEventEnvelope, type AppSettings, type ProviderPublic, type UiMessage } from "@pi-desktop/shared";
 import {
   findSubagentProviderSource,
   modelConfigWithBinding,
@@ -28,6 +28,8 @@ import type { RuntimeState } from "./context";
 import type { FinishTurn } from "./plans";
 import { formatSkillToolContent, type LoadedSkillDocument } from "../skill-document";
 import { currentSystemProxyRelayUrl } from "../network-proxy";
+import { createComputerUseTool } from "../computer-use/agent-tool";
+import type { ComputerCursorOverlay } from "../computer-use/cursor-overlay";
 
 export type SidecarRuntimeDependencies = {
   runtimeState: RuntimeState;
@@ -66,6 +68,7 @@ export type SidecarRuntimeDependencies = {
   disabledBuiltinSkills: () => Promise<string[]>;
   pluginActiveInProject: (pluginId: string, projectPath: string | null | undefined) => boolean;
   currentNetworkProxy: () => any;
+  computerCursorOverlay: Pick<ComputerCursorOverlay, "apply">;
 };
 
 export function createSidecarRuntime({
@@ -97,6 +100,7 @@ export function createSidecarRuntime({
   disabledBuiltinSkills,
   pluginActiveInProject,
   currentNetworkProxy,
+  computerCursorOverlay,
 }: SidecarRuntimeDependencies): {
   emitAgentEvent: (envelope: AgentEventEnvelope) => void;
   wireSidecar: (sidecar: AgentSidecar) => void;
@@ -569,6 +573,48 @@ export function createSidecarRuntime({
     },
     // Fake-IP tolerance belongs to the network policy, not to the proxy switch.
     allowFakeIp: () => relaxedNetworkPolicyEnabled(),
+  }));
+  s.setLocalTool("Computer", createComputerUseTool({
+    getHost: () => runtimeState.host,
+    cursorOverlay: computerCursorOverlay,
+    resolveProvider: async (settings: AppSettings) => {
+      const binding = settings.computerUse?.model;
+      if (!binding) return null;
+      const host = runtimeState.host;
+      if (!host) throw new Error("host unavailable");
+      const { provider } = await host.call<{ provider?: ProviderPublic }>("providers.get", { id: binding.providerId });
+      if (!provider?.enabled || !provider.baseUrl) return null;
+      const secret = provider.authKind === "none" || provider.authKind === "oauth"
+        ? undefined
+        : await host.call<{ value?: string }>("providers.getSecret", { id: provider.id });
+      if (provider.authKind !== "none" && provider.authKind !== "oauth" && !secret?.value) return null;
+      await modelsDevCatalog.ensureLoaded();
+      const catalogConfig = catalogModelConfigFor(modelsDevCatalog, {
+        providerId: provider.id,
+        vendorKey: provider.vendorKey,
+        baseUrl: provider.baseUrl,
+        apiStyle: provider.apiStyle,
+        modelId: binding.modelId,
+      });
+      const resolved = effectiveSubagentModelConfig(provider, binding.modelId, catalogConfig);
+      return {
+        id: provider.id,
+        name: provider.name,
+        vendorKey: provider.vendorKey,
+        baseUrl: provider.baseUrl,
+        modelId: binding.modelId,
+        apiKey: secret?.value ?? "",
+        authKind: provider.authKind,
+        apiStyle: provider.apiStyle,
+        headers: provider.headers,
+        supportsReasoning: resolved.capabilities.supportsReasoning,
+        supportedThinkingLevels: [...resolved.capabilities.supportedThinkingLevels],
+        ...(resolved.modelConfig ? { modelConfig: resolved.modelConfig } : {}),
+        ...(provider.authKind === "oauth"
+          ? { resolveAuth: () => vendorOAuth.resolveAuth(provider.id) }
+          : {}),
+      };
+    },
   }));
   s.setLocalTool("BrowserPreview", async ({ args, sessionId }) => {
     const raw = String((args as { path?: unknown })?.path ?? "").trim();

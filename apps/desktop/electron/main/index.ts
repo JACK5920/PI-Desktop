@@ -55,6 +55,8 @@ import { createVoiceService } from "./voice-service";
 import { MicrophoneLeaseRegistry } from "./live-voice/microphone-lease";
 import { createLiveCallService } from "./live-voice/runtime";
 import { createLiveVoiceWidget } from "./live-voice/widget-window";
+import { createComputerUseWidget } from "./computer-use/widget-window";
+import { createComputerCursorOverlay } from "./computer-use/cursor-overlay";
 import { getActiveRemoteHostsBoot } from "./bootstrap/remote-hosts";
 import { installLiveMicrophonePermissionHandlers } from "./live-voice/microphone-permissions";
 import { MainProcessState } from "./bootstrap/main-state";
@@ -762,6 +764,7 @@ const eventPersistence = createEventPersistence({
   emitAgentEvent: (envelope) => emitAgentEvent(envelope),
 });
 const { persistAgentEvent } = eventPersistence;
+const computerCursorOverlay = createComputerCursorOverlay();
 
 const sidecarRuntime = createSidecarRuntime({
   runtimeState,
@@ -794,6 +797,7 @@ const sidecarRuntime = createSidecarRuntime({
   disabledBuiltinSkills: runtimeDisabledBuiltinSkills,
   pluginActiveInProject,
   currentNetworkProxy,
+  computerCursorOverlay,
 });
 emitAgentEvent = sidecarRuntime.emitAgentEvent;
 const { startSidecar } = sidecarRuntime;
@@ -862,6 +866,7 @@ const liveVoiceWidget = createLiveVoiceWidget({
   safeOpenExternal,
   log: (message, data) => logger.app("diagnostics", "warn", message, data ? { data } : undefined),
 });
+const computerUseWidget = createComputerUseWidget();
 
 const liveCallService = createLiveCallService({
   getHost,
@@ -999,6 +1004,7 @@ function registerIpc() {
     voiceService,
     liveCallService,
     liveVoiceWidget,
+    computerUseWidget,
   });
 }
 
@@ -1045,6 +1051,8 @@ void app.whenReady().then(() => {
 
 // The widget is chrome for a call this window owns; it must never outlive the app.
 app.once("will-quit", () => liveVoiceWidget.close());
+app.once("will-quit", () => computerUseWidget.close());
+app.once("will-quit", () => computerCursorOverlay.close());
 
 registerApplicationStartup({
   hasSingleInstanceLock,

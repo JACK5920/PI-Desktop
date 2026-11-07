@@ -730,6 +730,14 @@ Frontmatter 新增 `permission: inherit | ask | accept-edits | auto`（默认
   中止结算后，在 `details.stopped[]` 上持久化 `status: "stopped"` 与
   `completedAt`。被停止的委托读作 `stopped`。
 
+在 Agent 模式下，`Task`、`TaskList` 及其结果还会公开带类型的作业引用
+`{ kind: "delegation" | "bash", id }`。Host 声明支持本地作业 RPC 时，`TaskList`
+会附带当前会话的后台 Bash 任务。将 `{ job: { kind: "bash", id } }` 传给
+`TaskWait` 可读取有界的 stdout/stderr 尾部和终态；等待超时或收到新用户输入都不会停止命令。
+用该明确引用调用 `TaskStop` 只会发出停止请求；在 supervisor 确认终态前返回
+`stopRequested`。不传 `job` 时，原有委托默认行为保持不变。共享的作业引用让模型按类型
+路由到正确的任务所有者，无需猜测含义不明的 ID。
+
 **委托循环。** `SubagentRun` 是同一 sidecar 进程中的第二个 pi `Agent`，
 使用该定义的系统提示、其（可能已固定的）provider/model、其声明的工具，
 以及与父级相同的主机连接，并遵循与父级相同的有界提供程序重试策略。
@@ -1321,3 +1329,6 @@ content. The durable transcript is unchanged and completed tools are not
 re-executed. Other malformed context remains subject to strict validation.
 Tool token estimates are optional telemetry: an invalid call identity must not
 prevent the corresponding terminal tool event from being delivered.
+
+对于已知工具，如果模型把完整的 Qwen 风格 `<tool_call><function=Name><parameter=...>...</parameter>
+</function></tool_call>` 块作为助手正文输出，该回复会显示 `TOOL_CALL_NOT_EXECUTED` 诊断。原始正文保留；相关消息标记为错误，但有效的结构化同级调用和正常后续执行不受影响。正文绝不会被解析成可执行参数，不会静默启用工具，也不会消耗提供方重试。代码围栏、行内代码、引用或缩进示例、未知工具名和不完整块仍视为普通文本。这是保守的格式诊断，不是通用 XML 解析器，也不代表模型确实有执行意图。

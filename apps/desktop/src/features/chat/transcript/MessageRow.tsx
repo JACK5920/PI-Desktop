@@ -9,7 +9,8 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import type { UiMessage } from "@pi-desktop/shared";
-import { splitInlineContent } from "@pi-desktop/shared";
+import { splitComposerDirectoryPrompt, splitInlineContent } from "@pi-desktop/shared";
+import { DirectoryReferenceCard } from "../DirectoryReferenceCard";
 import { useOpenChatFileRef } from "../../../hooks/use-preview-target";
 import { sessionAllows } from "../../../lib/remote-session-safety";
 import { useSlotSessionId } from "../../../plugins/renderer-slots/use-slots";
@@ -61,7 +62,10 @@ const EMPTY_PENDING_RESPONSE_ANNOTATIONS: readonly ResponseAnnotation[] = [];
 
 function SkillInvocationText({ message }: { message: UiMessage }) {
   const command = message.command ?? "";
-  const mentions = message.skillMentions ?? [];
+  const mentions = [
+    ...(message.skillMentions ?? []).map((mention) => ({ ...mention, label: mention.id, kind: "skill" as const })),
+    ...(message.agentMentions ?? []).map((mention) => ({ ...mention, label: mention.name, kind: "agent" as const })),
+  ].sort((a, b) => a.start - b.start);
   const parts: ReactNode[] = [];
   let cursor = 0;
   for (const mention of mentions) {
@@ -70,7 +74,7 @@ function SkillInvocationText({ message }: { message: UiMessage }) {
       !Number.isInteger(mention.end) ||
       mention.start < cursor ||
       mention.end > command.length ||
-      !command.slice(mention.start, mention.end).startsWith("/")
+      !command.slice(mention.start, mention.end).startsWith(mention.kind === "skill" ? "/" : "@")
     ) {
       return <LinkifiedText text={command} attachments={message.attachments} />;
     }
@@ -78,7 +82,7 @@ function SkillInvocationText({ message }: { message: UiMessage }) {
       parts.push(<LinkifiedText key={`text-${cursor}`} text={command.slice(cursor, mention.start)} attachments={message.attachments} />);
     }
     parts.push(
-      <code key={`skill-${mention.start}`} className="chat-command-chip" title={mention.id}>
+      <code key={`${mention.kind}-${mention.start}`} className="chat-command-chip" title={mention.label}>
         {command.slice(mention.start, mention.end)}
       </code>,
     );
@@ -170,7 +174,11 @@ export const MessageRow = memo(function MessageRow({
   // Runtime chunks are already progressive. Rendering that source directly
   // avoids a second per-frame state loop while Markdown memoizes stable blocks.
   const displayed = displayContent;
-  const hasAnswer = Boolean(displayed.trim());
+  const directoryPrompt = useMemo(
+    () => isUser ? splitComposerDirectoryPrompt(displayed) : { text: displayed, paths: [] },
+    [displayed, isUser],
+  );
+  const hasAnswer = Boolean(directoryPrompt.text.trim());
   const revisionCount = message.revisionCount ?? 0;
   const activeRevision = message.activeRevision ?? revisionCount;
   const showRevisionPager = editableUserMessage && revisionCount > 1;
@@ -184,8 +192,8 @@ export const MessageRow = memo(function MessageRow({
   // The user's own order: an image chip the draft named inline renders between
   // the text runs it sat between, exactly where the Composer showed it.
   const userContentParts = useMemo(
-    () => splitInlineContent(displayed, message.attachments ?? []).parts,
-    [displayed, message.attachments],
+    () => splitInlineContent(directoryPrompt.text, message.attachments ?? []).parts,
+    [directoryPrompt.text, message.attachments],
   );
   const renderContentPart = (
     part: (typeof userContentParts)[number],
@@ -384,11 +392,22 @@ export const MessageRow = memo(function MessageRow({
               </form>
             ) : isUser ? (
               <>
+                {directoryPrompt.paths.length ? (
+                  <div className="directory-reference-list">
+                    {directoryPrompt.paths.map((path, index) => (
+                      <DirectoryReferenceCard
+                        key={`${index}:${path}`}
+                        path={path}
+                        sessionId={sessionAllows(session ?? { id: paneSessionId }, "canUseLocalTools") ? paneSessionId : undefined}
+                      />
+                    ))}
+                  </div>
+                ) : null}
                 {displayed ? (
                   <div className="message-user-text selectable">
                     {editableUserMessage && message.command ? (
                       <>
-                        {message.skillMentions?.length ? (
+                        {message.skillMentions?.length || message.agentMentions?.length ? (
                           <SkillInvocationText message={message} />
                         ) : (
                           // Templates retain the existing whole-invocation chip.

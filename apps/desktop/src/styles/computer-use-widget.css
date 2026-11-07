@@ -1,0 +1,52 @@
+.computer-use-widget {
+  width: 100%;
+  min-height: 78px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--ds-border-strong);
+  border-radius: var(--radius-md-plus);
+  background: color-mix(in srgb, var(--ds-bg-elevated) 94%, transparent);
+  color: var(--ds-text-primary);
+  box-shadow: 0 10px 32px rgb(0 0 0 / 24%);
+  -webkit-app-region: drag;
+}
+
+.computer-use-widget-copy {
+  min-width: 0;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.computer-use-widget-copy strong {
+  font-size: var(--text-sm);
+  font-weight: var(--font-weight-strong);
+}
+
+.computer-use-widget-target,
+.computer-use-widget-meta,
+.computer-use-widget-error {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-xs);
+}
+
+.computer-use-widget-target { color: var(--ds-text-secondary); }
+.computer-use-widget-meta { color: var(--ds-text-muted); }
+.computer-use-widget-error { color: var(--ds-danger); }
+.computer-use-widget-stop { flex: 0 0 auto; -webkit-app-region: no-drag; }
+
+html[data-surface="computer-use-widget"],
+html[data-surface="computer-use-widget"] body,
+html[data-surface="computer-use-widget"] #root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  margin: 0;
+  background: transparent;
+}

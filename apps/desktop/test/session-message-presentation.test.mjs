@@ -80,10 +80,14 @@ function loadComponent(name, extras = {}) {
       useChatTextActions: () => ({ copyText: () => {}, selectText: () => {} }),
     },
     "./SourceAnnotationMarkers": { SourceAnnotationMarkers: () => null },
+    "../DirectoryReferenceCard": { DirectoryReferenceCard: () => null },
     "./ActionBarSlots": { ActionSlotSide: () => null },
     "../../../plugins/renderer-slots/slot-message": { slotMessage: () => undefined },
     // The row renders the user's own order through the shared placement helper.
-    "@pi-desktop/shared": { splitInlineContent },
+    "@pi-desktop/shared": {
+      splitComposerDirectoryPrompt: (content) => ({ text: content, paths: [] }),
+      splitInlineContent,
+    },
     ...extras,
   };
   const module = { exports: {} };
@@ -129,6 +133,20 @@ test("a human message keeps editing, deletion and regenerate navigation", () => 
   assert.match(html, /aria-label="chat.editMessage"/);
   assert.match(html, /aria-label="chat.deleteMessage"/);
   assert.match(html, /aria-label="chat.revisions"/);
+});
+
+test("an explicitly mentioned agent is shown inline in the typed transcript command", () => {
+  const command = "Please ask @explorer to inspect this";
+  const start = command.indexOf("@explorer");
+  const html = render({
+    ...userMessage,
+    content: "Delegation instruction\n\n" + command,
+    command,
+    agentMentions: [{ start, end: start + "@explorer".length, name: "explorer" }],
+  });
+  assert.match(html, /Please ask/);
+  assert.match(html, /class="chat-command-chip"[^>]*>@explorer<\/code>/);
+  assert.doesNotMatch(html, /Delegation instruction/);
 });
 
 test("a sent annotated request shows a separate expandable reference summary", () => {

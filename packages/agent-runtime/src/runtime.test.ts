@@ -192,6 +192,7 @@ function createRuntime(
     pluginSkills: import("./plugin-skills-prompt.js").PluginSkillDef[];
     commandShell: CommandShellOption;
     jevApiKey: string;
+    computerUseEnabled: boolean;
     turnId: string;
     host: { call: ReturnType<typeof vi.fn>; onNotification?: ReturnType<typeof vi.fn> };
     onEvent: (envelope: unknown) => void;
@@ -202,6 +203,7 @@ function createRuntime(
     sessionId: "session-1",
     mode: overrides.mode === "chat" ? "plan" : overrides.mode ?? "agent",
     jevApiKey: overrides.jevApiKey,
+    computerUseEnabled: overrides.computerUseEnabled,
     turnId: overrides.turnId,
     provider: overrides.provider ?? provider,
     commandShell: overrides.commandShell ?? commandShell,
@@ -233,6 +235,26 @@ function runtimeTool(runtime: DesktopAgentRuntime, name: string): AgentTool {
   if (!tool) throw new Error(`Runtime tool not found: ${name}`);
   return tool;
 }
+
+describe("Computer tool registration", () => {
+  it("is available only in Agent mode when Computer Use is enabled", async () => {
+    const disabled = createRuntime();
+    expect((disabled as unknown as { toolCatalog: Map<string, AgentTool> }).toolCatalog.has("Computer")).toBe(false);
+    await disabled.dispose();
+
+    const enabled = createRuntime({ computerUseEnabled: true });
+    expect((enabled as unknown as { toolCatalog: Map<string, AgentTool> }).toolCatalog.has("Computer")).toBe(true);
+    await enabled.dispose();
+
+    const plan = createRuntime({ computerUseEnabled: true, mode: "plan" });
+    expect((plan as unknown as { toolCatalog: Map<string, AgentTool> }).toolCatalog.has("Computer")).toBe(false);
+    await plan.dispose();
+
+    const goal = createRuntime({ computerUseEnabled: true, mode: "goal" });
+    expect((goal as unknown as { toolCatalog: Map<string, AgentTool> }).toolCatalog.has("Computer")).toBe(false);
+    await goal.dispose();
+  });
+});
 
 describe("Pi 1.4 client identity", () => {
   it("forwards the desktop identity through a user prompt to the provider adapter", async () => {
@@ -3859,6 +3881,9 @@ describe("DesktopAgentRuntime deferred tool catalog", () => {
       "Skill",
       "EnterPlanMode",
       "EnterGoalMode",
+      "TaskWait",
+      "TaskList",
+      "TaskStop",
       "new_context",
       "ToolSearch",
     ]);
@@ -14520,5 +14545,65 @@ describe("parallel policy tool provenance", () => {
       expect(host.call.mock.calls.some(([method]) =>
         ["project.instructions.resolve", "tools.prepareFileCall"].includes(method))).toBe(false);
     } finally { internal.extensionRunner = undefined; await runtime.dispose(); }
+  });
+});
+
+
+describe("background Bash job waits in the production runtime", () => {
+  it.each(["steer", "abort"] as const)("releases a wait on %s without stopping the process", async action => {
+    let entered!: () => void;
+    const waiting = new Promise<void>(resolve => { entered = resolve; });
+    let finish!: (value: unknown) => void;
+    const host = { call: vi.fn(async (method: string) => {
+      if (method === "backgroundJobs.capabilities") return { version: 1, supported: true };
+      if (method === "backgroundJobs.wait") {
+        entered();
+        return new Promise(resolve => { finish = resolve; });
+      }
+      return {};
+    }) };
+    const runtime = createRuntime({ host, subagents: [] });
+    const requests: AgentMessage[][] = [];
+    const internals = runtime as unknown as {
+      models: { streamSimple: (model: unknown, context: { messages: AgentMessage[] }) => ReturnType<typeof createAssistantMessageEventStream> };
+    };
+    internals.models = { streamSimple: (_model, context) => {
+      requests.push([...context.messages]);
+      const first = requests.length === 1;
+      const message = assistantMessage({
+        content: first
+          ? [{ type: "toolCall", id: "wait-bash", name: "TaskWait", arguments: { job: { kind: "bash", id: "process" } } }]
+          : [{ type: "text", text: "Handled new input." }],
+        stopReason: first ? "toolUse" : "stop",
+      }) as unknown as AssistantMessage;
+      const stream = createAssistantMessageEventStream();
+      queueMicrotask(() => {
+        stream.push({ type: "start", partial: message });
+        stream.push({ type: "done", reason: first ? "toolUse" : "stop", message });
+        stream.end(message);
+      });
+      return stream;
+    } };
+    const running = runtime.prompt("Wait for the background test.", "user", "job-turn");
+    try {
+      await waiting;
+      if (action === "steer") {
+        runtime.steer({ text: "Handle this correction." }, "job-turn", {
+          id: "new-user", role: "user", content: "Handle this correction.",
+          createdAt: "2026-11-05T00:00:00.000Z", steering: true,
+        });
+      } else {
+        await runtime.abort();
+      }
+      await running;
+      if (action === "steer") {
+        expect(JSON.stringify(requests.at(-1))).toContain("Interrupted by new user input");
+        expect(JSON.stringify(requests.at(-1))).toContain("Handle this correction.");
+      }
+      expect(host.call.mock.calls.some(([method]) => method === "backgroundJobs.stop")).toBe(false);
+      finish({ state: "running" });
+    } finally {
+      await runtime.dispose();
+    }
   });
 });

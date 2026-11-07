@@ -58,6 +58,11 @@ export const PERMISSION_RISK: Record<string, RiskTier> = {
   "session.autoTitle": "high",
   "session.import": "high",
   "session.delete.own": "high",
+  // The `.all` family reaches the user's own conversations, so every verb sits at
+  // the top tier the matrix gives the imported-only delete (ADR 0339).
+  "session.read.all": "high",
+  "session.update.all": "high",
+  "session.delete.all": "high",
   // Maintains a live transcript the user reads as native, so a bad write is as
   // visible as an agent turn; secrets.store is encrypted host storage.
   "session.manage.own": "high",

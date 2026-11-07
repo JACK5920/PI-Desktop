@@ -10,19 +10,19 @@
  * write never opens it. A provider that throws, rejects or takes too long
  * collapses only its own group.
  */
+
+import { applyCompletion, detectTrigger, fuzzyMatchCommand } from "@pi-desktop/shared";
 import {
+  type RefObject,
   useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
   useSyncExternalStore,
-  type RefObject,
 } from "react";
-import {
-  useComposerAutocomplete,
-  type AutocompleteItem,
-} from "../../../../hooks/use-composer-autocomplete";
+import { type AutocompleteItem, useComposerAutocomplete } from "../../../../hooks/use-composer-autocomplete";
+import { api } from "../../../../lib/api";
 import { slotRegistry } from "../../../../plugins/renderer-slots/registry";
 import { useAppStore } from "../../../../stores/app-store";
 import { createFileReference, isImageFilePath, nextChipToken } from "../editor";
@@ -43,7 +43,14 @@ export type PluginCompletionItem = {
   row: PluginTriggerRow;
 };
 
-export type CompletionItem = AutocompleteItem | PluginCompletionItem;
+export type AgentCompletionItem = {
+  kind: "agent";
+  name: string;
+  description: string;
+  match: { score: number; ranges: Array<[number, number]> };
+};
+
+export type CompletionItem = AutocompleteItem | PluginCompletionItem | AgentCompletionItem;
 
 export type CompletionController = {
   open: boolean;
@@ -69,6 +76,7 @@ export function useComposerCompletions({
   enabled,
   referenceSessionId,
   fileReferencesRef,
+  agentsEnabled = false,
   applyEditorDraft,
   handleInput,
   invalidateComposerTransforms,
@@ -79,11 +87,27 @@ export function useComposerCompletions({
   enabled: boolean;
   referenceSessionId: string;
   fileReferencesRef: RefObject<ComposerFileReference[]>;
+  agentsEnabled?: boolean;
   applyEditorDraft: (text: string, references: ComposerFileReference[], caret: number) => void;
   handleInput: (source: string, caret: number, composing?: boolean) => string;
   invalidateComposerTransforms: () => void;
 }) {
   const host = useComposerAutocomplete({ value, cursor, composing, enabled });
+  const [agentCatalog, setAgentCatalog] = useState<{ key: string; agents: Array<{ name: string; description: string }> } | null>(null);
+  const workspaceKey = useAppStore((state) => state.workspace?.path ?? "");
+  useEffect(() => {
+    if (!agentsEnabled || host.mode !== "file") return;
+    let current = true;
+    void api.subagentCatalog().then((catalog) => {
+      if (current) setAgentCatalog({
+        key: workspaceKey,
+        agents: catalog.subagents.map(({ name, description }) => ({ name, description })),
+      });
+    }).catch(() => {
+      if (current) setAgentCatalog({ key: workspaceKey, agents: [] });
+    });
+    return () => { current = false; };
+  }, [agentsEnabled, host.mode, workspaceKey]);
   const { triggers } = useSyncExternalStore(
     slotRegistry.subscribe,
     slotRegistry.getSnapshot,
@@ -141,10 +165,21 @@ export function useComposerCompletions({
     }));
   }, [entry, dismissed, answer, requestKey, plugins]);
 
+  const filesShadowingAgents = new Set(
+    host.items.flatMap((item) => item.kind === "path" ? [item.entry.path.replaceAll("\\", "/")] : []),
+  );
+  const agentItems = useMemo<AgentCompletionItem[]>(() => {
+    if (!agentsEnabled || host.mode !== "file" || agentCatalog?.key !== workspaceKey) return [];
+    return agentCatalog.agents.flatMap((agent) => {
+      if (filesShadowingAgents.has(agent.name)) return [];
+      const match = fuzzyMatchCommand(host.query, agent.name);
+      return match ? [{ kind: "agent" as const, ...agent, match }] : [];
+    }).sort((a, b) => b.match.score - a.match.score || a.name.localeCompare(b.name));
+  }, [agentsEnabled, host.mode, host.query, agentCatalog, workspaceKey, host.items]);
   const hostItems = host.open ? host.items : NO_ITEMS;
   const items = useMemo<CompletionItem[]>(
-    () => [...hostItems, ...pluginItems],
-    [hostItems, pluginItems],
+    () => [...agentItems, ...hostItems, ...pluginItems],
+    [agentItems, hostItems, pluginItems],
   );
 
   // A new query restarts keyboard navigation at the top hit.
@@ -173,8 +208,22 @@ export function useComposerCompletions({
   };
 
   const acceptCompletion = (index: number) => {
-    if (index >= hostItems.length) {
-      const item = pluginItems[index - hostItems.length];
+    if (index < agentItems.length) {
+      const item = agentItems[index];
+      const trigger = detectTrigger(value, cursor);
+      if (!trigger || trigger.mode !== "file") return;
+      invalidateComposerTransforms();
+      const result = applyCompletion(value, trigger, "");
+      const token = nextChipToken();
+      const text = result.value.slice(0, result.cursor) + token + result.value.slice(result.cursor);
+      applyEditorDraft(text, [
+        ...fileReferencesRef.current,
+        createFileReference(item.name, item.name, referenceSessionId, { kind: "agent", token }),
+      ], result.cursor + token.length);
+      return;
+    }
+    if (index >= agentItems.length + hostItems.length) {
+      const item = pluginItems[index - agentItems.length - hostItems.length];
       if (!item || !match) return;
       invalidateComposerTransforms();
       const text = value.slice(0, match.tokenStart) + value.slice(match.tokenEnd);
@@ -192,7 +241,7 @@ export function useComposerCompletions({
       );
       return;
     }
-    const result = host.accept(index);
+    const result = host.accept(index - agentItems.length);
     if (!result) return;
     invalidateComposerTransforms();
     // File accept strips the @ token (empty insert) and used to store a

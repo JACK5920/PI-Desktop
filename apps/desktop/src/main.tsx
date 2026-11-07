@@ -85,6 +85,14 @@ async function startRenderer(): Promise<void> {
     },
     interpolation: { escapeValue: false },
   });
+const ComputerUseWidget = React.lazy(() =>
+  import("./features/computer-use/ComputerUseWidget").then((module) => ({
+    default: module.ComputerUseWidget,
+  })),
+);
+const ComputerCursor = React.lazy(() =>
+  import("./features/computer-use/ComputerCursor").then((module) => ({ default: module.ComputerCursor })),
+);
   document.documentElement.lang = "en";
   root.render(
     <React.StrictMode>
@@ -104,6 +112,14 @@ async function startRenderer(): Promise<void> {
           ) : rendererSurface === "live-voice-widget" ? (
             <ErrorBoundary>
               <LiveVoiceWidget />
+            </ErrorBoundary>
+          ) : rendererSurface === "computer-use-widget" ? (
+            <ErrorBoundary>
+              <ComputerUseWidget />
+            </ErrorBoundary>
+          ) : rendererSurface === "computer-use-cursor" ? (
+            <ErrorBoundary>
+              <ComputerCursor />
             </ErrorBoundary>
           ) : (
             <App />

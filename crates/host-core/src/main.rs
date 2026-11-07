@@ -113,3 +113,5 @@ async fn main() -> anyhow::Result<()> {
     ));
     rpc::serve(state).await
 }
+
+mod computer;

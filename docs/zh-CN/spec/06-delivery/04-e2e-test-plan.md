@@ -9,6 +9,20 @@
 
 ---
 
+### E2E-RUNTIME-text-tool-call-diagnostic
+
+- **前提：** Runtime fixture 中存在已知 `TodoWrite` 工具，不连接真实模型提供方。
+- **步骤：** 分别返回独立的 Qwen 文本格式 `TodoWrite` 调用，以及与有效结构化 Bash 调用并列的该文本；另外返回代码示例、不完整调用和未知工具名。
+- **预期：** 文本调用原样显示并标记 `TOOL_CALL_NOT_EXECUTED`，不会执行正文，也不会触发提供方重试。结构化同级调用仍只执行一次，正常后续回复可完成。
+- **覆盖：** `text-tool-call.test.ts` 和 `malformed-tool-recovery.test.ts`。
+
+### E2E-RUNTIME-background-bash-jobs
+
+- **前提：** 隔离工作区、真实 Host 进程树和生产版 Agent Runtime；只有模型接口使用本地确定性 fixture。
+- **步骤：** 使用 `runInBackground` 启动一个失败命令和一个长期运行服务；通过 `TaskList` 找到它们；用 `TaskWait` 读取失败命令完整且有界的 Unicode stdout/stderr；让服务等待超时并确认它仍在运行；随后显式停止并观察终态。再从另一个会话尝试访问该任务 ID，并在 `Plan` 模式测试一次。
+- **预期：** 管道排空后保留错误输出与退出码；命令仅能由所属 Agent 会话访问；超时或用户新输入不会停止进程；只有显式 Bash 作业引用能停止 Bash；Plan 模式不可调用作业控制。原有委托默认行为和 Composer 任务面板保持不变。
+- **覆盖：** `background-job-tools.test.ts`、`runtime.test.ts`、`cargo test -p host-core background_tasks::jobs` 和 `scripts/e2e-session-background-jobs.mjs`。
+
 ### E2E-PI-130-kernel-upgrade
 
 - **Preconditions:** Pi 1.3.0 with migrated patches, isolated fixture state, and
@@ -1032,16 +1046,13 @@ task-candidate E2E 从请求工作树运行，但使用主工作区已经准备�
   后运行 `pnpm test:e2e:composer-autocomplete` 覆盖（真实 React/Chromium、生产 CSS、
   确定性命令夹具，无需提供商）。完整提供商/会话场景仍为草案；分支执行不替代合并后 E2E
 
-#### E2E-089：Composer 模型菜单向上打开并切换模型
+#### E2E-089：Composer 模型菜单浏览来源并切换模型
 
 - **先决条件**：聊天路线激活；提供商已配置。
 - **步骤**：1) 单击 Composer 右侧的模型 × 推理芯片。2）确认菜单
-  从底部输入框向上打开。3）进入“模型”并选择不同的 provider/model，
-  返回根菜单。4）进入“推理级别”并选择支持的级别。5）从命令面板
-  或应用程序菜单打开设置。
-- **预期**：根菜单仅显示“模型”和“推理级别”；“模型”子菜单列出
-  已启用、可运行提供程序中保存的模型绑定，并将每个模型行缩进显示在其提供商
-  标题下方。“推理级别”子菜单仅列出所选模型发布的级别。缓存或实时发现结果
+  从底部输入框向上打开。3）在来源栏依次选择“最近使用”和提供商，确认面板只显示对应模型。
+  4）搜索另一提供商的模型，确认结果跨来源。5）选择不同的 provider/model，选择其他支持的推理级别后重新选择同一模型。6）打开设置。
+- **预期**：搜索始终可见；来源不止一个时显示“最近使用”和提供商来源栏，来源面板只列出该提供商已配置的模型绑定。缓存或实时发现结果
   可以为已保存绑定提供显示名称和元数据，但未配置的发现结果不会出现；发现
   不可用时仍可选择已配置 ID。选择会话模型/推理配置后菜单保持打开并返回根菜单；
   设置从命令面板/菜单打开。Composer 模型触发器会省略长 ID。
@@ -5556,6 +5567,13 @@ eleven-tool-round desktop paths are verified by
 - **接受**：C（对话和流）、E（工具和权限）、F（持久）、质量
 - **里程碑**：M5
 - **状态**：单位覆盖（`composer-trigger.test.ts`、`apps/desktop/test/composer-paste-files.test.mjs`）；完整 UI 旅程草稿（适用变更合入前需在具备条件的环境中运行 E2E）
+
+#### E2E-102k：Composer 粘贴目录作为延迟引用
+
+- **先决条件**：应用运行于本地 Agent 会话并显示 Composer。系统剪贴板包含一个目录，以及一个目录与普通文件的混合列表；目录名含空格，条件允许时还包含 XML 特殊字符。
+- **步骤**：粘贴目录，确认草稿上方出现可移除的文件夹卡片且没有目录字节被复制；移除卡片并确认提示同步消失。再粘贴目录与普通文件的混合列表，检查顺序、现有文件导入和目录元数据相互独立。发送提示并检查模型输入与转录；保持未发送草稿并重新加载渲染器，确认目录引用保留。尝试从 MCP/插件上下文调用剪贴板目录读取入口。
+- **预期**：渲染器不向 IPC 提供路径；主进程只在用户明确粘贴时读取有界的原生剪贴板元数据，并按原顺序返回真实目录/文件类型。目录作为转义的 `<dir>` 标记和单条检查说明发送，用户消息中显示文件夹卡片；不遍历或复制目录，不发送二进制载荷，也不新增文件系统权限。MCP/插件调用被拒；普通文件导入令牌和现有权限检查不变。
+- **覆盖**：`composer-clipboard-directories.test.mjs`、`composer-directory-paste.test.mjs`、`composer-paste-files.test.mjs`。不同操作系统的原生剪贴板交互仍需平台验收。
 
 #### E2E-103：设置 > 智能体管理文件能力
 
@@ -10292,3 +10310,29 @@ PluginPack 产物的解包目录，仅用于开发验证。验收 #1711 前需�
   `07-plugins/03-plugin-api.md`、`07-plugins/13-plugin-permissions-matrix.md`。
 - **验收：** 不回退或重放；不跨插件读取密钥或附件；普通及导入会话行为保持不变。
 - **里程碑：** M6+（插件 API）。**状态：** 单元/进程/Host 覆盖；打包版 Electron 验收待完成。
+
+## E2E-COMPUTER-use-bounded-native-control-v1
+
+- **前置条件：** 使用一次性 Windows VM/profile 和确定性的 fixture 应用（仅含非敏感控件）。不得操作 PI-Desktop、密码字段、系统凭据对话框或用户日常桌面。
+- **路径：** 启用 Computer Use；启动 Agent 请求；检查当前窗口；执行一个无障碍动作；停止任务；在冷却期内尝试创建第二个 Agent 授权；随后重启 Host 并确认授权没有恢复。
+- **预期：** Host 报告 Windows UIA 后端和有界保真度；动作始终绑定已验证目标；停止会撤销授权并取消运行；冷却期内拒绝新的 Agent 授权；重启后不恢复任何权限。
+- **覆盖：** Host 策略/后端测试和隔离 fixture 应用进程 E2E。`agent-tool.test.ts` 在不操作真实桌面的情况下覆盖 Host RPC 有界循环；`image-generation-bridge.test.ts` 覆盖本地工具的 Host 授权与 Stop 取消。单测/模拟后端不等于 Windows 设备验收。原生探测默认忽略，会打开桌面中央的临时 fixture 窗口；仅在可报告 UIA 焦点的交互式 Windows 环境中显式运行：`cargo test -p host-core --locked -- --ignored windows_backend_drives_only_the_isolated_fixture_window --nocapture`。
+- **状态：** 将 COM 工厂从返回 `IUIAutomation2` 的 `E_NOINTERFACE` 的 `CUIAutomation` 改为 `CUIAutomation8` 后，本机交互式 Windows UIA fixture 已通过。仅在用户明确要求后才使用其日常桌面，且只操作临时 fixture；常规验收仍应使用上文所述一次性环境。fail-closed 安全输入检查仍保留。因测试会打开可见窗口，仍保持显式运行。
+
+## E2E-COMPUTER-use-settings-stop-control-v1
+
+- **前置条件：** 使用一次性 profile 与确定性的 Computer Use fixture；不得操作用户正在使用的桌面。
+- **路径：** 在“设置 → 行为”确认 Computer Use 默认关闭，绑定单独启用的提供方/模型，设置有界参数并启用功能；分别选择“仅辅助功能”和“授权窗口截图”，再启动 fixture Agent 任务。确认实时指示器显示绑定窗口、捕获模式和剩余操作预算，点击穿透光标跟随 fixture 操作。点击停止，再分别尝试过期 grant ID 和另一个 session ID。最后在 fixture 任务运行时关闭 Computer Use。
+- **预期：** 保存设置不会创建授权；仅在授权存续期间显示指示器。点击停止和关闭功能都会撤销授权并只取消所属 Agent 任务；过期或跨会话请求不能撤销授权或终止任务。截图模式只把 Host 当前授权的那个窗口图像发给专用模型；来源缺失或不匹配时不发送图像。光标叠层仅用于显示、点击穿透，并随授权结束消失。
+- **覆盖：** 设置表单、Main IPC 所有权校验、Host 授权生命周期和现有 Agent Abort 路径。`pnpm test:e2e:computer-use-settings` 使用隔离 Electron renderer 和 fixture IPC 操作真实 React 设置区与 Stop 浮窗。Electron Main 的 `agent-tool.test.ts` 使用有状态 Host RPC fixture 运行真实 Computer 处理器和 Stop IPC，验证先撤销再取消、只取消授权所属会话、精确窗口截图与模型转发以及授权清理；`computer-cursor-state.test.ts` 覆盖过期光标事件；Host 状态转换另由 Rust 策略/后端测试覆盖。这不能替代打包应用验收。
+- **状态：** Renderer 与 Main/Agent/Host-RPC 生命周期路径已有自动化；本机 Windows UIA fixture 已通过；完整打包应用验收仍待完成。
+
+### E2E-272：插件 `.all` 授权可访问任意活动会话
+
+- **前置条件：** 使用声明 `session.read.all`、`session.update.all` 和
+  `session.delete.all` 的开发插件、一个由用户创建的普通会话，以及同一插件仅声明 `.own` 的版本。
+- **步骤：** 通过插件 API 列出/获取/读取用户会话；重命名会话，追加消息、替换消息、删除用户消息并截断历史。再用仅有 `.own` 的版本重复操作，包括尝试自行传入 `scope: "all"`。在回合运行时尝试写消息并检查审计记录。
+- **预期：** `.all` 读取能返回真实会话元数据和转录；写入会更新已打开的转录而无需重新选择会话。回合运行时拒绝消息变更并返回 `TURN_RUNNING`。`.own` 无法访问用户创建的会话，插件提供的 `scope` 不能扩大权限；每次授权调用都记录实际作用域。
+- **覆盖：** `node --test apps/desktop/test/plugin-session-access.test.mjs apps/desktop/test/plugin-session-api.test.mjs` 与 `cargo test -p host-core --locked plugin_sessions` 覆盖策略、RPC 和持久化。交互式 Electron 验收仍需手动进行。
+- **规格：** ADR 0351、插件 API 和权限矩阵。
+- **状态：** 离线自动化；不覆盖原生 UI 点击和真实模型提供方。

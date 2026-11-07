@@ -503,6 +503,7 @@ export function Composer({
     enabled: !inputBlocked && localToolsAllowed,
     referenceSessionId,
     fileReferencesRef,
+    agentsEnabled: mode === "agent",
     applyEditorDraft,
     handleInput,
     invalidateComposerTransforms,
@@ -596,6 +597,8 @@ export function Composer({
           <ComposerAnnotationAttachments />
           <ComposerInput
             imagePreview={draft.imagePreview}
+            directoryReferences={activeFileReferences.filter((reference) => reference.kind === "directory")}
+            onRemoveDirectory={draft.removeDirectoryReference}
             inputRef={ref}
             value={value}
             placeholderText={placeholderText}

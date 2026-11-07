@@ -60,3 +60,15 @@ test("legacy sends without a snapshot keep the text-only fallback", () => {
     draft: { text: "plain prompt", fileReferences: [] },
   });
 });
+
+test("an expanded mention prompt restores the typed command when the draft snapshot is unavailable", () => {
+  const sent = {
+    ...message("user", "Task instruction\n\n@explorer inspect this"),
+    command: "@explorer inspect this",
+  };
+  assert.deepEqual(resolveComposerSmartStop([sent]), {
+    kind: "restore",
+    kept: [],
+    draft: { text: "@explorer inspect this", fileReferences: [] },
+  });
+});

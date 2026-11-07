@@ -52,6 +52,7 @@ import { AgentSubagentsPage } from "../../components/settings/AgentSubagentsPage
 import { RemoteHostsPage } from "../../components/settings/RemoteHostsPage";
 import { VoiceSettingsSection } from "./voice/VoiceSettingsSection";
 import { GoalBudgetDefaultsCard } from "./GoalBudgetDefaultsCard";
+import { ComputerUseSettingsSection } from "./ComputerUseSettings";
 import {
   CommandShellRow,
   ContextUsageDisplayRow,
@@ -628,6 +629,7 @@ export function SettingsPage() {
                 settings={settings}
                 saveSettings={saveSettings}
               />
+              <ComputerUseSettingsSection settings={settings} saveSettings={saveSettings} />
 
             </div>
           )}
