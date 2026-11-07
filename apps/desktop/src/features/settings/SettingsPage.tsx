@@ -31,6 +31,7 @@ import {
   IconSparkles,
   IconCloudDown,
   IconMic,
+  IconMonitor,
 } from "../../components/icons";
 import { Badge, Button, cx, SegmentedControl, SettingsToggle } from "../../components/ui";
 import { ModelConfigPage } from "../../components/settings/ModelConfigPage";
@@ -237,6 +238,7 @@ export function SettingsPage() {
       // Semantic Lucide glyphs for the settings destinations.
       general: <IconSliders size={14} />,
       ai: <IconSparkles size={14} />,
+      computerUse: <IconMonitor size={14} />,
       shortcuts: <IconKeyboard size={14} />,
       instructions: <IconFileText size={14} />,
       agent: <IconBot size={14} />,
@@ -287,7 +289,7 @@ export function SettingsPage() {
 
   const activeNavItem = navItems.find((item) => item.id === tab);
   const activeTitleKey = activeNavItem?.titleKey ?? "settings.title";
-  const tabNeedsSettings = ["general", "ai", "shortcuts", "agent"].includes(tab);
+  const tabNeedsSettings = ["general", "ai", "computerUse", "shortcuts", "agent"].includes(tab);
 
   return (
     <div className="settings-shell settings-shell-full">
@@ -629,8 +631,13 @@ export function SettingsPage() {
                 settings={settings}
                 saveSettings={saveSettings}
               />
-              <ComputerUseSettingsSection settings={settings} saveSettings={saveSettings} />
 
+            </div>
+          )}
+
+          {tab === "computerUse" && settings && (
+            <div className="settings-stack">
+              <ComputerUseSettingsSection settings={settings} saveSettings={saveSettings} />
             </div>
           )}
 

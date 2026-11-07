@@ -4,9 +4,25 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { matchesActiveComputerUseRun } from "../electron/main/computer-use/stop-policy.ts";
+import { searchSettings, visibleSettingsNav } from "../src/lib/settings-search.ts";
 
 const root = join(fileURLToPath(new URL("..", import.meta.url)), "src");
 const read = (path) => readFileSync(join(root, path), "utf8");
+
+test("Computer Use has a direct settings destination and search result", () => {
+  const localized = new Map([
+    ["settings.computerUseTitle", "电脑操作"],
+    ["settings.computerUseEnabled", "启用电脑操作"],
+  ]);
+  const translate = (key) => localized.get(key) ?? key;
+  const visible = visibleSettingsNav(false).find((entry) => entry.id === "computerUse");
+  const searchHit = searchSettings("电脑操作", translate).find((hit) => hit.tab === "computerUse");
+  const page = read("features/settings/SettingsPage.tsx");
+
+  assert.ok(visible, "Computer Use appears as a visible settings navigation item");
+  assert.ok(searchHit, "the settings search can find Computer Use by its Chinese label");
+  assert.match(page, /tab === "computerUse"[\s\S]*?<ComputerUseSettingsSection/);
+});
 
 test("Computer Use settings expose explicit enablement, a dedicated model, bounded settings, and capability diagnostics", () => {
   const page = read("features/settings/SettingsPage.tsx");
