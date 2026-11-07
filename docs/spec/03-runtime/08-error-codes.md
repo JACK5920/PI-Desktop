@@ -362,6 +362,37 @@ does not trigger automatic provider or billing fallback.
 | `LIVE_AUDIO_BACKPRESSURE` | no | bounded PCM or playback credits were exhausted |
 | `LIVE_EXECUTION_NOT_CONNECTED` | no | a provider requested an unsupported function/delegation execution path |
 
+### 3.10 Computer Use
+
+Computer Use errors are host-owned refusals or bounded-operation failures. They
+do not widen permission or retry past a refusal; a retry is appropriate only
+after the named transient condition has changed.
+
+| code | retriable | meaning |
+|---|---|---|
+| `COMPUTER_DISABLED` | no | Computer Use is disabled in Settings |
+| `COMPUTER_NOT_CONFIGURED` | no | no usable Computer Use model is configured |
+| `COMPUTER_NO_GRANT` | no | the session has no active desktop grant |
+| `COMPUTER_STOPPED_BY_USER` | no | the user stopped Computer Use; the host cooldown prevents immediate re-grant |
+| `COMPUTER_GRANT_IN_USE` | no | another session owns the single active desktop grant |
+| `COMPUTER_GRANT_EXPIRED` | no | the grant expired or was revoked |
+| `COMPUTER_BUDGET_EXHAUSTED` | no | the grant's bounded action budget is exhausted |
+| `COMPUTER_SCOPE_VIOLATION` | no | the requested action is outside the grant's current window scope |
+| `COMPUTER_SELF_TARGET_REFUSED` | no | the target is a PI-Desktop window and is never operable |
+| `COMPUTER_TARGET_DENYLISTED` | no | the target is refused by the host denylist |
+| `COMPUTER_SECURE_INPUT_REFUSED` | no | the OS or focused control reports secure/password input |
+| `COMPUTER_STALE_BASIS` | no | an element reference was produced from an obsolete inspection basis |
+| `COMPUTER_STALE_REVISION` | no | the bound window or its geometry changed after inspection |
+| `COMPUTER_ELEMENT_NOT_FOUND` | no | the requested accessibility element is no longer present |
+| `COMPUTER_ELEMENT_NOT_ACTIONABLE` | no | the element does not support the requested action |
+| `COMPUTER_INPUT_POLICY_DENIED` | no | the active input policy does not permit the requested synthesis |
+| `COMPUTER_OS_PERMISSION_MISSING` | no | the operating system has not granted the required accessibility/input permission |
+| `COMPUTER_TARGET_ELEVATED` | no | the target process runs at a higher integrity level than the host |
+| `COMPUTER_PLATFORM_UNSUPPORTED` | no | this platform has no native Computer Use backend |
+| `COMPUTER_CAPTURE_UNAVAILABLE` | no | the exact granted-window capture source is unavailable |
+| `COMPUTER_ACTION_REJECTED` | no | the host rejected an action that has no more specific refusal code |
+| `COMPUTER_TIMEOUT` | yes | a bounded native accessibility or action operation timed out |
+
 ## 4. Mapping rules
 
 ### Host RPC numeric → AppError.code

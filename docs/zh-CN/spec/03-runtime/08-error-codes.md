@@ -355,6 +355,35 @@ ADR 0285）。渲染进程除了一个标识徽章外看不到本地/远程之�
 | `LIVE_AUDIO_BACKPRESSURE` | 否 | PCM 或播放 credit 的有界容量已耗尽 |
 | `LIVE_EXECUTION_NOT_CONNECTED` | 否 | Provider 请求了当前不支持的函数/delegation 执行路径 |
 
+### 3.10 电脑操作
+
+Computer Use 错误是由 Host 管理的拒绝或有界操作失败。它们不会扩大权限，也不会绕过拒绝继续重试；只有指定的瞬时条件改变后才适合重试。
+
+| 代码 | 可重试 | 含义 |
+|---|---|---|
+| `COMPUTER_DISABLED` | 否 | 设置中关闭了 Computer Use |
+| `COMPUTER_NOT_CONFIGURED` | 否 | 未配置可用的 Computer Use 模型 |
+| `COMPUTER_NO_GRANT` | 否 | 此会话没有有效的桌面授权 |
+| `COMPUTER_STOPPED_BY_USER` | 否 | 用户已停止 Computer Use；Host 冷却期内不能立即重新授权 |
+| `COMPUTER_GRANT_IN_USE` | 否 | 另一个会话持有唯一的活动桌面授权 |
+| `COMPUTER_GRANT_EXPIRED` | 否 | 授权已过期或已撤销 |
+| `COMPUTER_BUDGET_EXHAUSTED` | 否 | 授权允许的操作次数已用尽 |
+| `COMPUTER_SCOPE_VIOLATION` | 否 | 请求的操作超出授权当前绑定窗口的范围 |
+| `COMPUTER_SELF_TARGET_REFUSED` | 否 | 目标属于 PI-Desktop 窗口，始终禁止操作 |
+| `COMPUTER_TARGET_DENYLISTED` | 否 | Host 拒绝了命中禁止名单的目标 |
+| `COMPUTER_SECURE_INPUT_REFUSED` | 否 | 操作系统或焦点控件报告了安全/密码输入状态 |
+| `COMPUTER_STALE_BASIS` | 否 | 元素引用来自过期的检查基准 |
+| `COMPUTER_STALE_REVISION` | 否 | 检查后绑定窗口或其几何信息已发生变化 |
+| `COMPUTER_ELEMENT_NOT_FOUND` | 否 | 请求的无障碍元素已不再存在 |
+| `COMPUTER_ELEMENT_NOT_ACTIONABLE` | 否 | 该元素不支持请求的操作 |
+| `COMPUTER_INPUT_POLICY_DENIED` | 否 | 当前输入策略不允许请求的输入合成 |
+| `COMPUTER_OS_PERMISSION_MISSING` | 否 | 操作系统尚未授予所需的无障碍/输入权限 |
+| `COMPUTER_TARGET_ELEVATED` | 否 | 目标进程的完整性级别高于 Host |
+| `COMPUTER_PLATFORM_UNSUPPORTED` | 否 | 此平台没有原生 Computer Use 后端 |
+| `COMPUTER_CAPTURE_UNAVAILABLE` | 否 | 无法获取确切的授权窗口捕获源 |
+| `COMPUTER_ACTION_REJECTED` | 否 | Host 拒绝了操作，但没有更具体的拒绝代码 |
+| `COMPUTER_TIMEOUT` | 是 | 有界原生无障碍或操作超时 |
+
 ## 4. 映射规则
 
 ### 主机 RPC 数字 → AppError.code
