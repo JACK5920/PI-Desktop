@@ -28,6 +28,7 @@ function loadPluginUiIpc({ gateFactory = () => () => ({ ignored: false }) } = {}
     "../plugin-runtime": { resolveInsidePlugin: () => "/plugin/index.html" },
     "../plugin-view-host": { pluginViewKey: (...parts) => parts.join("/") },
     "../plugin-panel-host": {},
+    "./plugin-launcher-ipc": { normalizeLauncherLaunch: () => undefined },
     "../plugin-provider-catalog": { pluginProviderCatalogEntries },
     "../plugin-session-push-gate": { createSessionPushGate: gateFactory },
   };

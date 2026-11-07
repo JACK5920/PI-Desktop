@@ -18,6 +18,7 @@ import { searchMcpMarket } from "../mcp-registry-catalog";
 import { registerNotificationIpc } from "./notification-ipc";
 import { registerPluginIpc } from "./plugin-ipc";
 import { registerPluginUiIpc } from "./plugin-ui-ipc";
+import { registerPluginLauncherIpc } from "./plugin-launcher-ipc";
 import { registerJevIpc } from "./jev-ipc";
 import { registerProviderIpc } from "./provider-ipc";
 import { registerScheduledIpc } from "./scheduled-ipc";
@@ -115,6 +116,7 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     settleComposerSuggestion,
     getPluginLauncherWindow,
     togglePluginLauncher,
+    openPluginMarket,
     safeOpenExternal,
     updater,
     pluginServices,
@@ -126,6 +128,7 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     persistenceOutbox,
     logger,
     plugins,
+    localApps,
     speech,
     sessionCapabilityContext,
     enrichSession,
@@ -586,6 +589,15 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     getPluginPanelTheme,
     setActivePluginSession,
     settleComposerSuggestion,
+  });
+  registerPluginLauncherIpc({
+    registrar,
+    getHost,
+    getPluginLauncherWindow,
+    plugins,
+    localApps,
+    getLocale: getUpdaterLocale,
+    openPluginMarket,
   });
   registerSpeechIpc({ registrar, speech });
 

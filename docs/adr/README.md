@@ -410,5 +410,6 @@ Each ADR includes:
 | 0349 | [Make native Computer Use a host-owned capability](0349-os-computer-use-capability.md) | Accepted for implementation (D687) |
 | 0351 | [Widen plugin session access only through explicit `.all` grants](0351-plugin-session-all-scope.md) | Accepted |
 | 0350 | [Grant Computer Use the desktop scope with a revocable Stop boundary](0350-computer-use-whole-desktop-grant.md) | Accepted for implementation (D688; amends ADR 0349) |
+| 0352 | [Launch installed local applications from the plugin launcher](0352-plugin-launcher-local-apps.md) | Accepted |
 
 | model-reasoning-effort-override | [Model reasoning effort override](model-reasoning-effort-override.md) | Proposed |
