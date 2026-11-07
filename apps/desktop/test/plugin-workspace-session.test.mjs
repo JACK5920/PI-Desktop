@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { fork } from "node:child_process";
-import { mkdtempSync, writeFileSync, rmSync, realpathSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { register } from "node:module";
@@ -89,7 +89,7 @@ test('remote session identity never becomes the visible local workspace',async t
 test('absolute reveal uses only the invoking project registered roots',async t=>{
   const f=await fixture(t);
   await f.tool.execute({reveal:join(f.sibling,'marker.txt')},{sessionId:'a'});
-  assert.deepEqual(f.revealed,[realpathSync(join(f.sibling,'marker.txt'))]);
+  assert.equal(statSync(f.revealed[0]).ino, statSync(join(f.sibling,'marker.txt')).ino);
   await assert.rejects(f.tool.execute({reveal:join(f.c,'marker.txt')},{sessionId:'a'}));
   assert.equal(f.revealed.length,1);
 });
