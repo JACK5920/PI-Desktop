@@ -8281,5 +8281,5 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
   payload-bounded, rate-limited, and refused while the target session has an
   active turn. Imported history remains unbound from the app's current model.
 - **Status:** Accepted. See ADR 0351 and the plugin permission/API specs. This
-  supersedes the previous ADR 0200-only imported-session reach without changing
-  the `.own` behavior.
+  supersedes the imported-session reach previously defined only by ADR 0200
+  without changing the `.own` behavior.

@@ -22,7 +22,7 @@
   height: 22px;
   flex: 0 0 auto;
   border: 2px solid #fff;
-  border-radius: 50%;
+  border-radius: var(--radius-round);
   background: rgb(59 130 246 / 72%);
   box-shadow: 0 0 0 2px rgb(37 99 235 / 65%);
 }
@@ -32,7 +32,7 @@
   margin-top: 17px;
   overflow: hidden;
   border: 1px solid rgb(255 255 255 / 20%);
-  border-radius: 7px;
+  border-radius: var(--radius-2xs);
   padding: 3px 7px;
   background: rgb(20 24 32 / 92%);
   color: #fff;
