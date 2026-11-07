@@ -11488,7 +11488,7 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
 | M6+ (MCP server timeout override) | E2E-261 |
 | M6+ (Destination loading and focus) | E2E-087b |
 | M6+ (Code review surfaces) | E2E-268, E2E-269, E2E-270 |
-| M6+ (Plugin launcher grid, triggers, and local applications) | E2E-272 |
+| M6+ (Plugin launcher grid, triggers, and local applications) | E2E-273 |
 | M6+ (Plugin-managed sessions) | E2E-271 |
 | M6+ (Session list responsiveness) | E2E-SESSION-list-refresh-keeps-desktop-responsive |
 | M6+ (Windows updater cache) | E2E-260 |
@@ -20282,7 +20282,7 @@ their separate platform acceptance.
   `cargo test -p host-core --locked plugin_sessions` exercise policy, RPC, and
   persistence. The interactive Electron scenario remains manual.
 
-### E2E-272: Plugin launcher grid, triggers, and local applications
+### E2E-273: Plugin launcher grid, triggers, and local applications
 
 - **Preconditions**: An isolated Host profile with a panel plugin that declares
   one launcher trigger (for example `^\d+\s*[\+\-\*/]\s*\d+$`, so `1+1` matches

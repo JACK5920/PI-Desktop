@@ -6106,6 +6106,7 @@ eleven-tool-round desktop paths are verified by
 | M6+（目的页加载与焦点） | E2E-087b |
 | M6+（代码审查界面） | E2E-268、E2E-269、E2E-270 |
 | M6+（插件托管会话） | E2E-271 |
+| M6+（插件启动器网格、触发器和本地应用） | E2E-273 |
 | M6+（会话列表响应性） | E2E-SESSION-list-refresh-keeps-desktop-responsive |
 | M6+（Windows 更新缓存） | E2E-260 |
 | M6+（独立会话通信） | E2E-SESSION-independent-top-level-communication、E2E-SESSION-hover-card-model-and-links |
@@ -10336,3 +10337,10 @@ PluginPack 产物的解包目录，仅用于开发验证。验收 #1711 前需�
 - **覆盖：** `node --test apps/desktop/test/plugin-session-access.test.mjs apps/desktop/test/plugin-session-api.test.mjs` 与 `cargo test -p host-core --locked plugin_sessions` 覆盖策略、RPC 和持久化。交互式 Electron 验收仍需手动进行。
 - **规格：** ADR 0351、插件 API 和权限矩阵。
 - **状态：** 离线自动化；不覆盖原生 UI 点击和真实模型提供方。
+
+### E2E-273：插件启动器网格、触发器和本地应用
+
+- **前提：** 使用隔离 Host profile，安装一个声明启动器触发器的面板插件（例如匹配 `1+1` 的表达式），并在面板中显示通过 `window.pluginBridge.consumeLauncherPayload()` 收到的内容。另准备一个拉丁字母名称的面板插件，以及至少两个已安装应用，其中一个为中文应用，具有 `wx`、`weixin`、`微信` 拼写链。在 Windows 和 macOS 上运行。
+- **步骤：** 1. 空输入时按 `Alt+Space`（macOS 为 `⌥+Space`），检查分组标题、行数、每行磁贴数和标题操作。2. 输入 `1+1`，检查首个磁贴与详情行，按 Enter 并检查打开的面板。3. 重新打开启动器，依次输入 `wx`、`weixin`、`微信`，确认命中同一应用。4. 输入 `pi`，确认 `PI-Desktop` 插件只出现一次，并可通过名称、拼音和首字母找到。5. 拖动面板边缘放大再缩小，检查每行磁贴数；退出并重启后再次打开。6. 输入可匹配超过 24 项的查询，检查标题操作和窗口高度。7. 禁用一个曾在最近使用或已固定列表中的插件，重新打开启动器，检查空输入视图及旧查询。8. 向搜索框粘贴 500 个字符的无意义文本。9. 固定一个应用，退出重启，再以空输入打开启动器。10. 安装一个名称与某个已安装应用相同的插件（例如 `Calculator`），然后打开启动器。
+- **预期：** 最近使用分组显示最多两行、每行八个磁贴；固定分组在有固定项时最多一行八个磁贴。最近使用标题显示真实数量，并提供 `Show all {count} →` 和 `All plugins →`。触发器插件优先显示且不重复展示详情；面板只消费一次 `1+1`。三种拼写均能找到同一应用。每种窗口宽度均保持八列，窗口高度与内容一致，重启后恢复拖动过的宽度。超过 24 个结果时显示溢出数量并提示继续输入。禁用的插件从最近、固定与搜索结果中移除，但其他项目仍可正常打开。500 字符输入不会卡住面板，并返回无匹配。插件与同名应用分别显示并保持各自打开行为。
+- **自动化覆盖：** `pnpm --filter @pi-desktop/desktop test` 中的 `launcher-search.test.mjs` 覆盖排序、分组上限、溢出计数、触发器整段匹配、256 字符限制和全部插件视图；`launcher-store.test.mjs` 覆盖固定、八项上限、最近记录、旧数据迁移和清理；`plugin-launcher-height.test.mjs` 覆盖高度计算和钳制；`local-apps.test.mjs` 覆盖本地应用发现、边界、图标预算与缓存、拖放目标和不透明 ID 启动；`plugin-launcher-state.test.mjs` 覆盖窗口尺寸钳制与重新居中。Rust `plugins` 测试覆盖清单规则。分组网格、内容高度、缩放、重启与面板载荷往返的 Electron 交互验收仍待专用启动器 E2E 脚本。
