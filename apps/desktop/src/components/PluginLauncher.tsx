@@ -7,6 +7,7 @@ import {
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { Button, Input } from "./ui";
 import {
   isThemeColorScheme,
   type LauncherCatalog,
@@ -90,16 +91,18 @@ function LauncherSectionGrid({
         {actions?.length ? (
           <div className="plugin-launcher-group-actions">
             {actions.map((action) => (
-              <button
+              <Button
                 key={action.label}
                 type="button"
+                variant="ghost"
+                size="sm"
                 className="plugin-launcher-group-action"
                 title={action.title}
                 tabIndex={-1}
                 onClick={action.onSelect}
               >
                 {action.label}
-              </button>
+              </Button>
             ))}
           </div>
         ) : null}
@@ -519,13 +522,15 @@ export function PluginLauncher() {
         : t("pluginLauncher.empty");
 
   const marketAction = (
-    <button
+    <Button
       type="button"
+      variant="ghost"
+      size="sm"
       className="plugin-launcher-empty-action"
       onClick={() => void openPluginMarket()}
     >
       {t("pluginLauncher.openPluginMarket")}
-    </button>
+    </Button>
   );
 
   const recentActions: LauncherAction[] = [];
@@ -665,7 +670,7 @@ export function PluginLauncher() {
       <section className="plugin-launcher-surface" ref={surfaceRef}>
         <div className="plugin-launcher-search-row" ref={searchRowRef}>
           <IconSearch size={18} aria-hidden />
-          <input
+          <Input
             ref={inputRef}
             className="plugin-launcher-input"
             value={query}

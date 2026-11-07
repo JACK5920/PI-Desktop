@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { LauncherTile } from "../../lib/launcher-search";
 import { IconPin } from "../icons";
+import { Button } from "../ui";
 
 /**
  * One grid cell: icon, type badge, and name — plus its own pin toggle.
@@ -60,10 +61,11 @@ export function LauncherTileButton({
 
   return (
     <div className={`plugin-launcher-tile${active ? " active" : ""}`}>
-      <button
+      <Button
         id={optionId}
         ref={openRef}
         type="button"
+        variant="ghost"
         role="option"
         aria-selected={active}
         disabled={disabled}
@@ -90,9 +92,11 @@ export function LauncherTileButton({
           <span className="plugin-launcher-tile-name">{tile.name}</span>
           <span className="plugin-launcher-tile-type">{typeLabel}</span>
         </span>
-      </button>
-      <button
+      </Button>
+      <Button
         type="button"
+        variant="ghost"
+        size="sm"
         tabIndex={-1}
         className="plugin-launcher-pin"
         aria-label={pinLabel}
@@ -105,7 +109,7 @@ export function LauncherTileButton({
         }}
       >
         <IconPin size={12} aria-hidden />
-      </button>
+      </Button>
     </div>
   );
 }
