@@ -8,6 +8,7 @@
 export type SettingsTabId =
   | "general"
   | "ai"
+  | "computerUse"
   | "shortcuts"
   | "instructions"
   | "agent"
@@ -146,6 +147,21 @@ export const SETTINGS_NAV: SettingsNavEntry[] = [
       "settings.contextUsageDisplayRemaining",
       "settings.contextUsageDisplayUsed",
       "settings.largePasteThreshold",
+    ],
+  },
+  {
+    id: "computerUse",
+    labelKey: "settings.computerUseTitle",
+    titleKey: "settings.computerUseTitle",
+    group: "preferences",
+    keywordKeys: [
+      "settings.computerUseEnabled",
+      "settings.computerUseModel",
+      "settings.computerUseModelRequired",
+      "settings.computerUseCapture",
+      "settings.computerUsePlatformStatus",
+      "settings.computerUseActionBudget",
+      "settings.computerUseIdleMinutes",
     ],
   },
   {

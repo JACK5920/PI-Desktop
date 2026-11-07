@@ -20215,7 +20215,7 @@ their separate platform acceptance.
 
 - **Preconditions:** Use a disposable profile and a deterministic Computer Use
   fixture; do not operate the user's live desktop.
-- **Path:** In Settings → Behavior, confirm Computer Use is disabled by
+- **Path:** Open Settings → Computer Use, confirm Computer Use is disabled by
   default, bind a dedicated enabled provider/model, set bounded limits, enable
   the feature, select accessibility-only and then granted-window pixel
   capture, and start a fixture Agent run. Confirm the live indicator shows

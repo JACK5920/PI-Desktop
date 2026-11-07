@@ -10323,7 +10323,7 @@ PluginPack 产物的解包目录，仅用于开发验证。验收 #1711 前需�
 ## E2E-COMPUTER-use-settings-stop-control-v1
 
 - **前置条件：** 使用一次性 profile 与确定性的 Computer Use fixture；不得操作用户正在使用的桌面。
-- **路径：** 在“设置 → 行为”确认 Computer Use 默认关闭，绑定单独启用的提供方/模型，设置有界参数并启用功能；分别选择“仅辅助功能”和“授权窗口截图”，再启动 fixture Agent 任务。确认实时指示器显示绑定窗口、捕获模式和剩余操作预算，点击穿透光标跟随 fixture 操作。点击停止，再分别尝试过期 grant ID 和另一个 session ID。最后在 fixture 任务运行时关闭 Computer Use。
+- **路径：** 打开“设置 → 电脑操作”，确认 Computer Use 默认关闭，绑定单独启用的提供方/模型，设置有界参数并启用功能；分别选择“仅辅助功能”和“授权窗口截图”，再启动 fixture Agent 任务。确认实时指示器显示绑定窗口、捕获模式和剩余操作预算，点击穿透光标跟随 fixture 操作。点击停止，再分别尝试过期 grant ID 和另一个 session ID。最后在 fixture 任务运行时关闭 Computer Use。
 - **预期：** 保存设置不会创建授权；仅在授权存续期间显示指示器。点击停止和关闭功能都会撤销授权并只取消所属 Agent 任务；过期或跨会话请求不能撤销授权或终止任务。截图模式只把 Host 当前授权的那个窗口图像发给专用模型；来源缺失或不匹配时不发送图像。光标叠层仅用于显示、点击穿透，并随授权结束消失。
 - **覆盖：** 设置表单、Main IPC 所有权校验、Host 授权生命周期和现有 Agent Abort 路径。`pnpm test:e2e:computer-use-settings` 使用隔离 Electron renderer 和 fixture IPC 操作真实 React 设置区与 Stop 浮窗。Electron Main 的 `agent-tool.test.ts` 使用有状态 Host RPC fixture 运行真实 Computer 处理器和 Stop IPC，验证先撤销再取消、只取消授权所属会话、精确窗口截图与模型转发以及授权清理；`computer-cursor-state.test.ts` 覆盖过期光标事件；Host 状态转换另由 Rust 策略/后端测试覆盖。这不能替代打包应用验收。
 - **状态：** Renderer 与 Main/Agent/Host-RPC 生命周期路径已有自动化；本机 Windows UIA fixture 已通过；完整打包应用验收仍待完成。
