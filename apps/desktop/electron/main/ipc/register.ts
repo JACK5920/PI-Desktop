@@ -41,6 +41,9 @@ import { registerLiveVoiceIpc } from "./live-voice-ipc";
 import type { LiveCallService } from "../live-voice/call-service";
 import type { ComposerSuggestionAnswer } from "../services/composer-suggestion";
 import type { LiveVoiceWidget } from "../live-voice/widget-window";
+import { registerComputerUseIpc } from "./computer-use-ipc";
+import type { ComputerUseWidget } from "../computer-use/widget-window";
+import { getActiveComputerUseRun } from "../computer-use/active-run";
 import type { IpcRegistrar } from "./types";
 import type { createTraySessions } from "../tray-sessions";
 import type { createTaskbarUnreadBadge } from "../taskbar-unread-badge";
@@ -78,6 +81,7 @@ export type RegisterIpcDependencies = {
   completionNoticeTurns: Set<string>;
   liveCallService?: LiveCallService;
   liveVoiceWidget?: LiveVoiceWidget;
+  computerUseWidget?: ComputerUseWidget;
   restartForStorage: () => void;
   mcpOAuth?: McpOAuthManager;
   markLifecycleDialogRendererReady: (window: BrowserWindow) => boolean;
@@ -199,10 +203,16 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     voiceService,
     liveCallService,
     liveVoiceWidget,
+    computerUseWidget,
   } = dependencies;
 
 
   const ipcHandlers = new Map<string, (...args: any[]) => Promise<any>>();
+  const abortAgentRun = async (sessionId: string): Promise<void> => {
+    const handler = ipcHandlers.get(IPC.invoke.agentAbort);
+    if (!handler) throw new Error("agent abort handler unavailable");
+    await handler({ sessionId });
+  };
   const handle = (channel: string, fn: (...args: any[]) => Promise<any>) => {
     const handler = async (...args: any[]) => {
       const result = await fn(...args);
@@ -313,6 +323,14 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     applyUpdatePreference: (preference) => updater.setPreference(preference),
     resolveEffectiveCommandShell,
     liveCallService,
+    stopComputerUse: async () => {
+      const active = getActiveComputerUseRun();
+      if (!active) return;
+      const host = getHost();
+      if (!host) throw new Error("Computer Use is active but its host is unavailable");
+      await host.call("computer.grantRevoke", { reason: "user" });
+      await abortAgentRun(active.sessionId);
+    },
   });
   registerConfigSyncIpc({
     registrar,
@@ -577,6 +595,7 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
   if (liveCallService && liveVoiceWidget) {
     registerLiveVoiceIpc({ registrar, service: liveCallService, getMainWindow, widget: liveVoiceWidget });
   }
+  registerComputerUseIpc({ registrar, getHost, abortAgentRun, widget: computerUseWidget });
 
   registerRemoteHostIpc({ registrar });
 

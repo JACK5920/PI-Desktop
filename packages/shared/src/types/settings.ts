@@ -5,6 +5,7 @@ import type { NetworkPolicySettings } from "../network-policy.js";
 import type { NetworkProxySettings } from "../network-proxy.js";
 import type { Mode } from "./common.js";
 import type { LiveVoiceSettings } from "./live-voice.js";
+import type { ComputerUseSettings } from "../computer-use.js";
 import type { ThinkingLevel } from "./models.js";
 import type { GlobalPermissionMode } from "./permissions.js";
 import type { GoalBudget } from "./plans.js";
@@ -56,6 +57,8 @@ export type AppSettings = {
   speech?: SpeechSettings;
   /** App-owned real-time voice bindings; separate from local dictation. */
   liveVoice?: LiveVoiceSettings;
+  /** Host-owned native application control; off and unbound by default (ADR 0342). */
+  computerUse?: ComputerUseSettings;
   defaultMode: Mode;
   /**
    * Keep retryable provider/network failures retrying until the request succeeds.

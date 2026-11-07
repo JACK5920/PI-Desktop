@@ -146,10 +146,12 @@ ipcMain.handle("pi-desktop/clipboard/recordPaste", (_event, input) => {
   history.push(input.text);
   return { ok: true, data: null };
 });
+// This fixture covers the ordinary file-paste path, not native folder lists.
+ipcMain.handle("pi-desktop/composer/readClipboardDirectories", () => ({ ok: true, data: null }));
 app.whenReady().then(async () => {
   if (process.argv.includes("--history-check")) {
     try {
-      const window = new BrowserWindow({ show: false, webPreferences: {
+      const window = new BrowserWindow({ show: true, webPreferences: {
         preload: ${JSON.stringify(join(root, "apps/desktop/out/preload/index.cjs"))},
         sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false,
       } });
@@ -162,11 +164,12 @@ app.whenReady().then(async () => {
         window.webContents.sendInputEvent({ type: "keyUp", keyCode });
       });
       await window.loadFile(path.join(__dirname, "index.html"));
+      window.focus();
       await window.webContents.executeJavaScript('globalThis.composerPreviewPressKey = key => new Promise(resolve => { document.addEventListener("keyup", () => requestAnimationFrame(resolve), { once: true }); console.log("PI_PREVIEW_KEY:" + key); }); void 0');
       const result = await window.webContents.executeJavaScript('globalThis.composerHistoryProbe("verify")');
       assert.equal(result.ok, true, JSON.stringify(result));
       console.log("COMPOSER_HISTORY_RESTART " + JSON.stringify(result));
-      app.quit();
+      app.exit(0);
     } catch (error) {
       console.error("COMPOSER_HISTORY_RESTART " + JSON.stringify({ ok: false, error: String(error), stack: error?.stack }));
       app.exit(1);
@@ -176,13 +179,14 @@ app.whenReady().then(async () => {
   await fs.mkdir(path.join(__dirname, "attachments"));
   await fs.writeFile(path.join(__dirname, "attachments", "a".repeat(64)), Buffer.alloc(512 * 1024 + 1));
   await fs.writeFile(path.join(__dirname, "attachments", "b".repeat(64)), Buffer.from([0, 1, 2, 0]));
-  const window = new BrowserWindow({ show: false, webPreferences: {
+  const window = new BrowserWindow({ show: true, webPreferences: {
     preload: ${JSON.stringify(join(root, "apps/desktop/out/preload/index.cjs"))},
     sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false,
   } });
   window.webContents.on("console-message", (event) => console.error(event.message));
   try {
     await window.loadFile(path.join(__dirname, "index.html"));
+    window.focus();
     window.webContents.debugger.attach("1.3");
     const { root } = await window.webContents.debugger.sendCommand("DOM.getDocument");
     const { nodeId } = await window.webContents.debugger.sendCommand("DOM.querySelector", { nodeId: root.nodeId, selector: "#native-files" });
@@ -217,9 +221,14 @@ app.whenReady().then(async () => {
     const result = await window.webContents.executeJavaScript("globalThis.composerPasteProbe()");
     await opensDone;
     assert.deepEqual(opened.map(path.extname), [".mp4", ".mp4", ".mp4"]);
-    assert.equal(await fs.realpath(opened[0]), await fs.realpath(path.join(__dirname, "attachments", "a".repeat(64))));
-    assert.equal(await fs.realpath(opened[1]), await fs.realpath(path.join(__dirname, "attachments", "b".repeat(64))));
-    assert.equal(opened[2], saved.find(entry => entry.mimeTypes.includes("video/mp4"))?.files[0].path);
+    assert.equal(opened[0], path.join(__dirname, "openable-attachments", "a".repeat(64) + ".mp4"));
+    assert.deepEqual(await fs.readFile(opened[0]), await fs.readFile(path.join(__dirname, "attachments", "a".repeat(64))));
+    assert.equal(opened[1], path.join(__dirname, "openable-attachments", "b".repeat(64) + ".mp4"));
+    assert.deepEqual(await fs.readFile(opened[1]), await fs.readFile(path.join(__dirname, "attachments", "b".repeat(64))));
+    assert.deepEqual(
+      await fs.readFile(opened[2]),
+      await fs.readFile(saved.find(entry => entry.mimeTypes.includes("video/mp4"))?.files[0].path),
+    );
     const mimeSets = saved.map((entry) => entry.mimeTypes.join("+"));
     assert.equal(
       saved.length,
@@ -242,7 +251,7 @@ app.whenReady().then(async () => {
     const historyResult = await window.webContents.executeJavaScript('globalThis.composerHistoryProbe("prepare")');
     assert.equal(historyResult.ok, true, JSON.stringify(historyResult));
     console.log("COMPOSER_HISTORY_PREPARE " + JSON.stringify(historyResult));
-    app.quit();
+    app.exit(0);
   } catch (error) {
     console.error("COMPOSER_PASTE_PROBE " + JSON.stringify({ ok: false, error: String(error), stack: error?.stack, savedCount: saved.length }));
     app.exit(1);

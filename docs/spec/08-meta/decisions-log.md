@@ -8247,3 +8247,39 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
   and interaction specifications, and E2E-CHAT-selection-capture-v2,
   E2E-CHAT-annotation-citation-flow-v2, and
   E2E-CHAT-docked-follow-up-tab-v2.
+
+## 2026-11-07 — Add a host-owned native Computer Use capability (D687)
+
+- **Decision:** PI-Desktop may expose native computer operation as a built-in
+  high-risk Agent tool. Rust host-core owns native window enumeration,
+  accessibility, refusals, grants, revalidation, and audit. Electron main owns
+  the bounded model loop and scope-cropped capture; Renderer receives no native
+  handles or input primitive. Plan and Goal hard-deny the tool.
+- **Safety boundary:** PI-Desktop's own windows, password/secure-input surfaces,
+  credential windows, elevated targets, stale revisions, and out-of-scope
+  coordinates are refused. Unsupported operations fail with explicit codes.
+- **Status:** Accepted for implementation. See ADR 0349 and the Computer Use
+  runtime spec. No live desktop interaction is used as an implementation test.
+
+## 2026-11-07 — Use a desktop-wide grant with Stop as the revocation boundary (D688)
+
+- **Decision:** Once the user enables Computer Use in Settings, an Agent turn
+  may mint one process-local desktop grant and rebind only to windows the Host
+  does not refuse. Grants have action budgets and idle expiry, are never
+  persisted, and Stop revokes the grant, aborts the turn, and applies a short
+  cooldown to prevent immediate re-mint.
+- **Status:** Accepted for implementation. See ADR 0350, which amends ADR 0349.
+
+## 2026-11-07 — Add explicit all-session plugin grants (D689)
+
+- **Decision:** Plugins may address every live session only when they separately
+  declare `session.read.all`, `session.update.all`, or `session.delete.all`.
+  Each grant is independently reviewed at install and audited per call; `.all`
+  takes precedence over the corresponding `.own` grant and the plugin cannot
+  supply its own scope.
+- **Writes:** Message-level append/replace/delete/truncate are `.all`-only,
+  payload-bounded, rate-limited, and refused while the target session has an
+  active turn. Imported history remains unbound from the app's current model.
+- **Status:** Accepted. See ADR 0351 and the plugin permission/API specs. This
+  supersedes the imported-session reach previously defined only by ADR 0200
+  without changing the `.own` behavior.

@@ -25,7 +25,7 @@ export type ComposerPluginPart =
 export type ComposerDraftFileReference = {
   path: string;
   name: string;
-  kind?: "image" | "file" | "session";
+  kind?: "image" | "file" | "session" | "directory" | "agent";
   mimeType?: string;
   /** Visible inline token for a generated large-text paste reference. */
   token?: string;
@@ -44,6 +44,7 @@ export type ComposerPrefill = ComposerDraftSnapshot & {
 type AbortMessage = {
   role: string;
   content: string;
+  command?: string;
   thinking?: string;
   steering?: boolean;
 };
@@ -87,7 +88,9 @@ export function resolveComposerSmartStop<T extends AbortMessage>(
     kind: "restore",
     kept: lastUserIndex >= 0 ? messages.slice(0, lastUserIndex) : [...messages],
     draft: submitted?.draft ?? {
-      text: lastUserIndex >= 0 ? messages[lastUserIndex].content : "",
+      text: lastUserIndex >= 0
+        ? messages[lastUserIndex].command ?? messages[lastUserIndex].content
+        : "",
       fileReferences: [],
     },
   };

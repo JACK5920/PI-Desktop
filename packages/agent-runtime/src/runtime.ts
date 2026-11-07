@@ -17,6 +17,8 @@ import { restoreHostedSearchReplay } from "./hosted-search-replay.js";
 import { requestExtensionUi } from "./extensions/ui-request.js";
 import { readLocalRequestErrorDetails } from "./local-request-errors.js";
 import { isValidToolCall, recoverMalformedToolCalls } from "./tool-call-recovery.js";
+import { textToolCallDiagnostic } from "./text-tool-call.js";
+import { buildJobTools } from "./background-job-tools.js";
 import { imageGenerationDescription, imageGenerationParameters } from "./image-generation/tool.js";
 import { todoWriteDescription, todoWriteParameters } from "./todo-tool.js";
 import { createJevClassifierTool } from "./jev-classifier-tool.js";
@@ -1018,6 +1020,8 @@ export type AgentRuntimeOptions = {
   fastMode?: boolean;
   /** TypeSafe Jev credential, resolved by Electron main only when enabled. */
   jevApiKey?: string;
+  /** Host-authoritative opt-in for the native Computer tool. */
+  computerUseEnabled?: boolean;
   systemPrompt?: string;
   /** pi-compatible SYSTEM.md / APPEND_SYSTEM.md resolved for the session (issue #542). */
   customSystemPrompt?: CustomSystemPrompt;
@@ -1094,6 +1098,7 @@ export type RuntimeMatchConfig = {
   provider: RuntimeProviderConfig;
   thinkingLevel: SessionThinkingLevel;
   jevApiKey?: string;
+  computerUseEnabled?: boolean;
   pluginTools?: PluginToolDef[];
   pluginSkills?: PluginSkillDef[];
   trustedExtensions?: TrustedExtensionSpec[];
@@ -1415,7 +1420,7 @@ function commandShellToolDescription(
     shellSyntaxGuidance(shell),
     `The session scratch directory variable is ${shellScratchVariable(shell)}.`,
     `An optional timeout from 1 to ${MAX_COMMAND_TIMEOUT_SECONDS} seconds may be supplied; without it, the command defaults to a 60-second timeout.`,
-    `Set runInBackground: true for long-lived processes the user needs after the turn ends (dev servers, watchers, builds). A background call returns a backgroundTaskId immediately, survives turn aborts and timeouts, and its output is visible in the composer's running-tasks bar; do not set it for commands whose output the current turn depends on.`,
+    `Set runInBackground: true for long-lived processes the user needs after the turn ends (dev servers, watchers, builds). A background call returns a backgroundTaskId immediately, survives turn aborts and timeouts, and its output is visible in the composer's running-tasks bar. In Agent mode on supported local Hosts, use TaskList to find it, TaskWait with its job reference to read results, and TaskStop with that reference to stop it. Background completion does not automatically resume the model; do not set it for commands whose output the current turn depends on.`,
     ...(formattedScratch ? [`The session scratch directory is ${formattedScratch}.`] : []),
   ].join(" ");
 }
@@ -1993,6 +1998,7 @@ export class DesktopAgentRuntime {
   private autonomousExecution = false;
   /** Set only during one host-approved Goal execution round. */
   private activeGoalExecution?: PlanExecution;
+  private activeApprovedExecution?: PlanExecution;
   private pendingProgressTurnRerun = false;
   private progressTurnRerunAttempted = false;
   private progressTurnRerunInProgress = false;
@@ -2031,6 +2037,7 @@ export class DesktopAgentRuntime {
   private composedSections: Record<string, string> = {};
   private activeCompaction?: ContextCompactionRecord;
   private compactionEnabled: boolean;
+  private computerUseEnabled: boolean;
   private readonly compactionStrategy: CompactionStrategy;
   private pendingUserMessageId?: string;
   private acceptingSteering = false;
@@ -2093,6 +2100,7 @@ export class DesktopAgentRuntime {
     this.streamSink = createStreamCoalescer(opts.onEvent);
     this.onEvent = (envelope) => this.streamSink.push(envelope);
     this.pluginTools = opts.pluginTools ?? [];
+    this.computerUseEnabled = opts.computerUseEnabled === true;
     this.pluginSkills = [...(opts.pluginSkills ?? [])].sort((left, right) => left.id.localeCompare(right.id));
     this.trustedExtensionSpecs = opts.trustedExtensions ?? [];
     this.subagents = opts.subagents ?? [];
@@ -2786,6 +2794,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
       ["disposed", !this.disposed],
       ["mode", this.mode === config.mode],
       ["jevApiKey", this.jevApiKey === config.jevApiKey],
+      ["computerUseEnabled", this.computerUseEnabled === (config.computerUseEnabled === true)],
       ["thinkingLevel", this.thinkingLevel === clampThinkingLevel(config.provider, config.thinkingLevel)],
       ["pluginTools", current === next],
       ["commandShell", safeJson(this.commandShell) === safeJson(config.commandShell)],
@@ -3347,6 +3356,8 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
       if (toolName === "GenerateImages") return imageGenerationDescription;
       if (scheduledToolDescriptions[toolName]) return scheduledToolDescriptions[toolName];
       switch (toolName) {
+        case "Computer":
+          return "Use this for the currently approved desktop-control capability only when the user explicitly requests interaction with a native application. State your intended action, use the host's bounded grant, and stop immediately when the host refuses or the user presses Stop.";
         case "BrowserPreview":
           return "Open an HTML file in PI-Desktop's built-in browser panel. `path` may be relative to a project folder or this session's scratch directory, or an absolute path inside those roots. No project is required for scratch previews. The preview live-reloads on later edits to the file or its sibling assets, so call once per page.";
         case "Read":
@@ -3400,6 +3411,11 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
     // stopped being readable.
     const parameters: Record<string, Parameters<typeof Type.Object>[0]> = {
       GenerateImages: imageGenerationParameters,
+      Computer: {
+        instruction: Type.String({ minLength: 1, maxLength: 4_000 }),
+        maxSteps: Type.Optional(Type.Integer({ minimum: 1, maximum: 40 })),
+        observeOnly: Type.Optional(Type.Boolean()),
+      },
       TodoWrite: todoWriteParameters,
       Read: {
         path: pathParam(
@@ -3579,7 +3595,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
         // waiting on a blocking read/search. Mutating, MCP, and plugin calls
         // must settle before the turn is reported stopped. Bash and image
         // generation retain their host process-abort path and grace window.
-        const hostAbortsProcess = isBash || toolName === "GenerateImages";
+        const hostAbortsProcess = isBash || toolName === "GenerateImages" || toolName === "Computer";
         const canAbandonWait = READ_ONLY_CORE_TOOLS.has(toolName);
         const abortedMarker = Symbol("tool-aborted");
         let resolveAborted: (marker: typeof abortedMarker) => void = () => undefined;
@@ -4057,6 +4073,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
         : ["Read", "Glob", "Grep", "BrowserPreview", "Bash", "Write", "Edit"];
     if (this.mode === "agent") {
       tools.push("PluginScaffold", "PluginPack", "GenerateImages", ...Object.keys(scheduledToolParameters));
+      if (this.computerUseEnabled && !this.activeApprovedExecution) tools.push("Computer");
     }
     const builtins = tools.map(exec);
     for (const tool of builtins) this.builtinTools.add(tool);
@@ -4124,18 +4141,41 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
       this.activeGoalExecution?.kind === "goal"
         ? [this.buildGoalReportTool()]
         : [];
-    // Keep configured delegation declarations stable across mode changes.
-    // Contract modes reject execution before handlers can spawn/control a
-    // delegate; publishing a schema never grants delegation permission.
-    const subagentTools =
-      this.subagents.length
-        ? [
-            this.buildSubagentTool(),
-            this.buildSubagentWaitTool(),
-            this.buildSubagentListTool(),
-            this.buildSubagentStopTool(),
-          ]
-        : [];
+    // Job controls are available without configured subagents. Contract modes
+    // retain the declarations for transcript compatibility and reject calls.
+    const subagentTools = [
+      ...(this.subagents.length ? [this.buildSubagentTool()] : []),
+      ...buildJobTools({
+        wait: this.buildSubagentWaitTool(),
+        list: this.buildSubagentListTool(),
+        stop: this.buildSubagentStopTool(),
+      }, {
+        host: this.host,
+        sessionId: this.sessionId,
+        remote: Boolean(this.remoteWorkspace),
+        defaultTimeoutSeconds: TASKWAIT_DEFAULT_TIMEOUT_SECONDS,
+        maxTimeoutSeconds: TASKWAIT_MAX_TIMEOUT_SECONDS,
+        wait: async (run, signal) => {
+          const steeringAbort = new AbortController();
+          this.steeringWaitAbort = steeringAbort;
+          if (this.pendingSteering.size) steeringAbort.abort();
+          try {
+            return await run(signal ? AbortSignal.any([signal, steeringAbort.signal]) : steeringAbort.signal);
+          } catch (error) {
+            const interruptedByInput = isRecord(error) && error.errorCode === "TOOL_ABORTED" &&
+              steeringAbort.signal.aborted && !signal?.aborted &&
+              !this.runCancelled && !this.disposed && !this.turnHadError;
+            if (!interruptedByInput) throw error;
+            return {
+              content: [{ type: "text", text: "Interrupted by new user input. The background command keeps running; handle the user's message before waiting again." }],
+              details: { status: "interrupted" },
+            };
+          } finally {
+            if (this.steeringWaitAbort === steeringAbort) this.steeringWaitAbort = undefined;
+          }
+        },
+      }),
+    ];
     for (const tool of subagentTools) this.builtinTools.add(tool);
     const contextTools = this.compactionEnabled
       ? [this.buildContextCompactionTool()]
@@ -5206,11 +5246,12 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
           content: [
             {
               type: "text",
-              text: `Delegation ${delegationId} started: the ${definition.name} subagent is working in the background${label ? ` (${label})` : ""}. Continue your own independent work, then call TaskWait with this delegationId to converge, or TaskStop to stop it.`,
+              text: `Delegation ${delegationId} started: the ${definition.name} subagent is working in the background${label ? ` (${label})` : ""}. Continue your own independent work, then call TaskWait with this delegationId to converge, or TaskStop to stop it. Job reference: ${JSON.stringify({ kind: "delegation", id: delegationId })}.`,
             },
           ],
           details: {
             delegationId,
+            job: { kind: "delegation", id: delegationId },
             agent: definition.name,
             status: "running",
             startedAt,
@@ -5911,7 +5952,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
           delegations.length === 0
             ? "No subagents have been started in this session."
             : delegations
-                .map((record) => `- ${formatDelegationHeartbeat(record)}`)
+                .map((record) => `- ${formatDelegationHeartbeat(record)}; job=${JSON.stringify({ kind: "delegation", id: record.delegationId })}`)
                 .join("\n"),
           this.delegationChains.resumableBlock({ runningDelegationIds }),
         ]
@@ -5920,7 +5961,10 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
         return {
           content: [{ type: "text", text }],
           details: {
-            delegations: delegations.map(delegationSummary),
+            delegations: delegations.map((record) => ({
+              ...delegationSummary(record),
+              job: { kind: "delegation", id: record.delegationId },
+            })),
             resumable: resumable.map((chain) => ({
               agent: chain.agentName,
               delegationId: chain.latestDelegationId,
@@ -8620,6 +8664,9 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
           // inspect only the response that just ended, or a silent retry after
           // progress text would look non-silent forever.
           const responseText = content.hasText ? content.text : "";
+          const textCallDiagnostic = !failed && !aborted
+            ? textToolCallDiagnostic(responseText, this.toolCatalog)
+            : undefined;
           if (looksLikePseudoToolCall(nextText)) {
             // The visible text is a lost tool batch, not an answer. Logging it
             // separates "the model went quiet" from "the model tried to act and
@@ -8842,6 +8889,8 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
                   thinking: nextThinking,
                 })
               : undefined;
+          // This annotates the visible message, but is not a terminal run error.
+          classifiedError ??= textCallDiagnostic;
           this.currentAssistant = {
             ...this.currentAssistant,
             content: nextText,
@@ -8850,7 +8899,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
               : content.hasThinking
                 ? { thinking: undefined }
                 : {}),
-            status: failed || emptyResponse
+            status: failed || emptyResponse || textCallDiagnostic
               ? "error"
               : aborted
                 ? "aborted"
@@ -9164,12 +9213,14 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
       });
     }
     return this.trackTurnOperation(durableTurnId, async () => {
+      this.activeApprovedExecution = execution;
       this.activeGoalExecution = execution.kind === "goal" ? execution : undefined;
       this.rebuildToolCatalog();
       this.setAgentTools(this.activeTools());
       try {
         return await this.executeApprovedPlanTurn(execution, durableTurnId);
       } finally {
+        this.activeApprovedExecution = undefined;
         this.activeGoalExecution = undefined;
         this.rebuildToolCatalog();
         this.setAgentTools(this.activeTools());

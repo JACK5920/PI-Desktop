@@ -13,6 +13,10 @@ const runtimeSrc = readFileSync(join(desktopRoot, "electron/main/plugin-runtime.
 const builtinSrc = readFileSync(join(desktopRoot, "electron/main/builtin-skills.ts"), "utf8");
 const devToolsSrc = readFileSync(join(desktopRoot, "electron/main/plugin-dev-tools.ts"), "utf8");
 const mainSrc = readMainSourceSync();
+const composerTriggerSrc = readFileSync(
+  join(repoRoot, "packages/shared/src/composer-trigger.ts"),
+  "utf8",
+);
 const packageJson = JSON.parse(readFileSync(join(desktopRoot, "package.json"), "utf8"));
 const skillDoc = readFileSync(
   join(desktopRoot, "resources/skills/plugin-development.md"),
@@ -94,7 +98,7 @@ test("the composer lists active skills last and routes slash skills to the Skill
     /\.\.\.extensionCommands,\s*\.\.\.mcpCommands,\s*\.\.\.skillCommands,/,
   );
   assert.match(mainSrc, /findSkillMentions\(req\.content, activeSkills\)/);
-  assert.match(mainSrc, /Call the \\`Skill\\` tool with each of these ids/);
+  assert.match(composerTriggerSrc, /Call the \\`Skill\\` tool with each of these ids/);
   assert.match(composerAutocompleteSrc, /item\.command\.kind === "skill"/);
 });
 

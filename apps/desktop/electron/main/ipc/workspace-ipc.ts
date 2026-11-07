@@ -1,4 +1,5 @@
-import { BrowserWindow, dialog, shell, type OpenDialogOptions } from "electron";
+import { clipboard, BrowserWindow, dialog, shell, type OpenDialogOptions } from "electron";
+import { readComposerClipboardDirectories } from "../composer-clipboard-directories";
 import { dirname } from "node:path";
 import { homedir } from "node:os";
 import { existsSync, statSync } from "node:fs";
@@ -632,6 +633,14 @@ export function registerWorkspaceIpc({
     },
   );
 
+  handleWithEvent(IPC.invoke.composerReadClipboardDirectories, async (event) => {
+    assertMainWindowSender(event);
+    return readComposerClipboardDirectories(
+      clipboard,
+      (paths) => rememberComposerPickerSelection(paths, event.sender.id),
+    );
+  });
+
   handleWithEvent(
     IPC.invoke.composerPasteFiles,
     async (event, input: { sessionId?: unknown; files?: unknown } = {}) => {
@@ -995,7 +1004,22 @@ export function registerWorkspaceIpc({
     },
   );
 
-  handle(IPC.invoke.fsReveal, async (input: { path?: string; sessionId?: string } = {}) => {
+  handleWithEvent(IPC.invoke.fsReveal, async (event, input: { path?: string; sessionId?: string; directory?: boolean } = {}) => {
+    if (input.directory === true) {
+      assertMainWindowSender(event);
+      if (!input.sessionId || !isAbsolute(String(input.path ?? ""))) {
+        throw Object.assign(new Error("A local session and absolute directory path are required"), { errorCode: ErrorCodes.INVALID_ARGUMENT });
+      }
+      if (await remoteFileWorkspace(input.sessionId)) {
+        throw Object.assign(new Error("remote directories cannot be revealed on this computer"), { errorCode: ErrorCodes.INVALID_ARGUMENT });
+      }
+      const directory = await realpath(String(input.path));
+      if (!(await stat(directory)).isDirectory()) {
+        throw Object.assign(new Error("path is not a directory"), { errorCode: ErrorCodes.INVALID_ARGUMENT });
+      }
+      shell.showItemInFolder(stripWinLongPrefix(directory));
+      return { ok: true };
+    }
     const remote = await remoteFileWorkspace(input.sessionId);
     if (remote && !(await isLocalStoredFile(String(input.path ?? "")))) throw Object.assign(new Error("remote paths cannot be revealed on this computer"), { errorCode: ErrorCodes.INVALID_ARGUMENT });
     const requested = String(input.path ?? "").trim();

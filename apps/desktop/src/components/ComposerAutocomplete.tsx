@@ -90,7 +90,9 @@ export function ComposerAutocomplete({
           ? `c:${item.command.kind}:${item.command.name}`
           : item.kind === "plugin"
             ? `pl:${item.pluginId}:${index}`
-            : `p:${item.entry.path}`,
+            : item.kind === "agent"
+              ? `a:${item.name}`
+              : `p:${item.entry.path}`,
       type: "button" as const,
       role: "option" as const,
       "aria-selected": active,
@@ -135,6 +137,15 @@ export function ComposerAutocomplete({
         </button>
       );
     }
+    if (item.kind === "agent") {
+      return (
+        <button {...commonProps} aria-label={`@${item.name}`} title={item.description}>
+          <span className="composer-ac-icon"><IconSparkles size={14} /></span>
+          <span className="composer-ac-name">@<Highlighted text={item.name} ranges={item.match.ranges} /></span>
+          {item.description ? <span className="composer-ac-desc">{item.description}</span> : null}
+        </button>
+      );
+    }
     const isDir = item.entry.kind === "dir";
     const name = item.entry.path.split("/").pop() ?? item.entry.path;
     const displayName = `${name}${isDir ? "/" : ""}`;
@@ -155,8 +166,15 @@ export function ComposerAutocomplete({
 
   const rows: React.ReactNode[] = [];
   let lastGroup: string | null = null;
+  const hasAgentGroup = ac.items.some((item) => item.kind === "agent");
   ac.items.forEach((item, index) => {
-    if (item.kind === "command") {
+    if (item.kind === "agent" && lastGroup !== "agents") {
+      lastGroup = "agents";
+      rows.push(<div key="g:agents" className="composer-model-group-label">{t("chat.agentGroup")}</div>);
+    } else if (item.kind === "path" && hasAgentGroup && lastGroup !== "files") {
+      lastGroup = "files";
+      rows.push(<div key="g:files" className="composer-model-group-label">{t("chat.fileGroup")}</div>);
+    } else if (item.kind === "command") {
       const group = item.command.kind;
       if (group !== lastGroup) {
         lastGroup = group;

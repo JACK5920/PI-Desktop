@@ -39,7 +39,7 @@ export function createFileReference(
   preferredName?: string,
   sessionId = "",
   metadata?: {
-    kind?: "image" | "file" | "session";
+    kind?: "image" | "file" | "session" | "directory" | "agent";
     mimeType?: string;
     token?: string;
     plugin?: ComposerPluginPart;
@@ -54,7 +54,7 @@ export function createFileReference(
     // A plugin mark's label is shown as given, and a session reference is
     // named by its conversation; neither is a path.
     name:
-      isPluginMark(metadata) || metadata?.kind === "session"
+      isPluginMark(metadata) || metadata?.kind === "session" || metadata?.kind === "directory" || metadata?.kind === "agent"
         ? (preferredName ?? "")
         : fileReferenceLabel(path, preferredName),
     kind: metadata?.kind ?? (isImageFilePath(path) ? "image" : "file"),
@@ -306,6 +306,7 @@ function buildChipElement(
   if (image) chip.dataset.image = "";
   const session = reference.kind === "session";
   if (session) chip.dataset.sessionId = reference.path;
+  if (reference.kind === "agent") chip.dataset.agent = reference.path;
   const editableText = !image && !session && isEditableTextReference(reference);
   const activate = editableText
     ? () => onExpandText(token)

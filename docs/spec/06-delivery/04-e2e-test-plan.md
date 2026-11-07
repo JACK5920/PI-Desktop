@@ -6,6 +6,36 @@
 
 ---
 
+### E2E-RUNTIME-text-tool-call-diagnostic
+
+- **Preconditions:** Runtime fixture with a known `TodoWrite` tool and no live provider.
+- **Steps:** Return a complete text-form Qwen `TodoWrite` call alone, then with
+  a valid structured Bash sibling; also return code examples, incomplete calls
+  and an unknown tool name.
+- **Expected:** The literal call stays visible with `TOOL_CALL_NOT_EXECUTED`
+  message status, is never executed, and does not trigger a provider retry.
+  Structured siblings still run once and normal continuation completes.
+- **Coverage:** `text-tool-call.test.ts` and
+  `malformed-tool-recovery.test.ts`.
+
+### E2E-RUNTIME-background-bash-jobs
+
+- **Preconditions:** Isolated workspace, real Host process tree and production
+  Agent Runtime; only the model endpoint is a local deterministic fixture.
+- **Steps:** Launch one failing command and one long-lived service with
+  `runInBackground`; discover both through `TaskList`; read the first command's
+  final bounded Unicode stdout/stderr through `TaskWait`; timeout on the service
+  and verify it keeps running; explicitly stop it and observe its terminal
+  state. Retry a job id from another session and use `Plan` mode once.
+- **Expected:** Failure output and exit code survive pipe draining; commands
+  are addressable only by the owning Agent session; a timeout or user input
+  does not stop them; only the explicit Bash job reference can stop a Bash
+  process; Plan mode cannot access job controls. Existing delegation defaults
+  and the Composer task panel remain intact.
+- **Coverage:** `background-job-tools.test.ts`, `runtime.test.ts`,
+  `cargo test -p host-core background_tasks::jobs`, and
+  `scripts/e2e-session-background-jobs.mjs`.
+
 
 ### E2E-TRANSCRIPT-lossless-tool-images
 
@@ -867,12 +897,15 @@
   capabilities and can be checked for multiple models. Save, use the image
   summary menu to choose one marked model as the default, then submit a
   two-image request through the composer and edit the first output through a
-  follow-up message. Collapse tool details.
+  follow-up message. The isolated Host HTTP fixture also returns a 6 MiB
+  `b64_json` image and verifies the saved file byte-for-byte.
 - **Expected:** After saving, the image summary appears with a 12px default-row
   gap and lists all marked candidates, the selected default is changeable
   without changing the chat default, decoded image previews stay outside
   collapsed process details, multipart source upload is used for editing,
-  originals are preserved, and no image HTTP request occurs while unconfigured.
+  originals are preserved, large base64 responses are saved intact without
+  stack overflow, and no image HTTP request occurs while unconfigured.
+  Covered by `scripts/e2e-image-generation.mjs`.
 - **Settings interactions:** The unconfigured state renders no image summary.
   Mark candidates in the attachment capability group, save, and select one
   from the summary menu. An existing missing/disabled candidate shows only
@@ -3043,6 +3076,30 @@ identify the platform validation still needed.
   fixtures; no provider required). Full provider/session scenario Draft;
   branch runs do not replace post-integration E2E
 
+#### E2E-COMPOSER-agent-mentions
+
+- **Preconditions**: A workspace has an `explorer` subagent, a root file named
+  `fixer`, and Agent, Plan and Goal mode sessions.
+- **Steps**: In Plan mode type `@` and confirm no Agents group appears. In Agent
+  mode type `@`, accept `@explorer` mid-sentence, and send it; also try `@fixer`,
+  `user@explorer`, and an unknown name. Repeat with a Skill mention and a leading
+  template. Stop a run before completion and inspect restored composer text.
+- **Expected**: The catalog group appears only in Agent mode, `fixer` is offered
+  as a file rather than agent, and accepting `@explorer` creates one atomic chip.
+  The model-facing request contains an explicit instruction to call existing
+  `Task` while retaining the user request; only known complete mentions resolve.
+  The transcript keeps the typed command and displays validated mention chips;
+  Stop restores that typed command. Existing Skills and templates retain their
+  precedence, with no second execution path or permission bypass.
+- **Coverage**: `packages/shared/src/composer-agent-mentions.test.ts`,
+  `apps/desktop/test/composer-agent-mention.test.mjs`,
+  `apps/desktop/test/composer-agent-mention-user-path.test.mjs`, and
+  `sessions::tests::agent_mentions_roundtrip_in_record_metadata`.
+- **Acceptance**: C (send/UI), Localization, Quality
+- **Milestone**: M6+
+- **Status**: Automated for shared resolution, prompt IPC, composer user path,
+  and Host metadata round-trip; run all four on the current task candidate.
+
 ##### Connected MCP slash selection (#1377)
 
 - Restart Desktop with an enabled saved MCP server. Without visiting MCP
@@ -3081,20 +3138,22 @@ identify the platform validation still needed.
 - Run `MCP_SELECTION_TOOL=1 node scripts/e2e-composer-mcp.mjs` for the
   individual-tool variant of the deterministic sidecar/Host/MCP scenario.
 
-#### E2E-089: Composer model menu opens upward and switches model
+#### E2E-089: Composer model menu browses sources and switches model
 
 - **Preconditions**: Chat route active; provider configured with two reasoning
   models whose binding defaults differ.
 - **Steps**: 1) Click the Composer-right model × reasoning chip. 2) Confirm the
-  menu opens upward from the bottom composer. 3) Enter Model, select a different
-  provider/model, and return to the root. 4) Confirm its default thinking level,
-  choose another supported level, then reselect the same model. 5) Open Settings
+  menu opens upward from the bottom composer. 3) Select Recent and then a
+  provider source in the rail; verify each pane lists only that source's models.
+  4) Search for a model from another provider and verify results span sources.
+  5) Select a different provider/model and confirm its default thinking level,
+  choose another supported level, then reselect the same model. 6) Open Settings
   from the command palette or application menu.
 - **Expected**: The trigger uses a Bot icon while retaining the current model
-  and reasoning labels. The root shows only Model and Reasoning level entries.
-  The Model submenu lists enabled runnable providers and only the model bindings
-  saved for each provider, with each model row visibly indented beneath its provider
-  heading. Cached or freshly discovered models may supply display names and
+  and reasoning labels. Search is always visible; Recent and provider sources
+  appear in a rail only when more than one source is available. The source pane
+  lists only configured model bindings for its provider. Cached or freshly
+  discovered models may supply display names and
   metadata for those bindings, but unconfigured discovery results are absent;
   configured IDs remain available when discovery is unavailable. The root slider
   lists the selected model's supported levels. Selecting a different model
@@ -9631,6 +9690,31 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
     attachment format and leaves work-panel tabs unchanged. Closing/unmounting
     releases modal/native-view blocking.
   - Deleting the session removes the pasted files with the rest of scratch.
+
+#### E2E-102k: Composer paste keeps native directories as lazy references
+
+- **Preconditions**: The app is running with a local Agent session and a home
+  composer. The OS clipboard contains one directory and, in a second case, a
+  directory mixed with a regular file. Use a temporary fixture directory whose
+  path includes whitespace and XML-significant characters where supported.
+- **Steps**: Paste the directory; confirm a removable folder card appears above
+  the draft and no directory bytes are copied. Remove it and confirm the hint is
+  gone. Paste a directory with a regular file and verify order, the existing
+  file scratch import, and that folder metadata remains separate. Send a short
+  prompt and inspect the model-facing text and transcript; restart the renderer
+  with the draft unsent and confirm the reference remains. Invoke the read
+  channel from an MCP/plugin context and confirm it is unavailable.
+- **Expected**: The renderer sends no source paths to the IPC method; main
+  reads only bounded native metadata on this paste path, resolves actual file
+  system types, and returns ordered references. Directories serialize as
+  escaped `<dir>` markers plus one inspection instruction and render as cards
+  in the user message. No directory traversal/copy, binary payload, or new
+  filesystem permission is introduced. Existing regular-file attachment limits,
+  sender-bound import tokens, and permission checks remain unchanged.
+- **Coverage**: `composer-clipboard-directories.test.mjs`,
+  `composer-directory-paste.test.mjs`, `composer-paste-files.test.mjs`,
+  `composer-model-thinking-menu.test.mjs`; Electron clipboard platform behavior
+  remains subject to per-OS acceptance.
   - Deleting text immediately before an inline file chip must not insert a
     blank line or move the chip to the next line; native undo/redo stay intact.
 - **Specs linked**: `04-ux/08-component-spec.md` §11.7–11.8,
@@ -19994,3 +20078,102 @@ their separate platform acceptance.
   loses the saved transcript; promotion changes visibility only.
 - **Milestone:** M6+ (side-chat follow-up). **Status:** Implementation complete;
   targeted Node, Host, and isolated Chromium workflow checks pass locally.
+
+## E2E-COMPUTER-use-bounded-native-control-v1
+
+- **Preconditions:** Use a disposable Windows VM/profile and a deterministic
+  fixture application with non-sensitive controls. Never target PI-Desktop,
+  password fields, OS credential dialogs, or a user's ordinary desktop session.
+- **Path:** Enable Computer Use; start an Agent request; inspect the active
+  window; perform one accessibility action; stop the run; attempt a second
+  agent-minted grant during the cooldown; then restart Host and verify no grant
+  is restored.
+- **Expected:** Host reports the Windows UIA backend and bounded fidelity;
+  actions stay bound to the validated target; Stop revokes and aborts; a new
+  agent grant is refused during cooldown; restart restores no authority.
+- **Coverage:** Host policy/backend tests and isolated fixture-app process E2E.
+  `agent-tool.test.ts` covers the host-backed bounded loop without touching a
+  live desktop; `image-generation-bridge.test.ts` covers local-tool host
+  authorization and Stop cancellation. Unit/mocked backend tests do not count
+  as Windows device acceptance. The native probe is ignored by default and
+  opens a visible, temporary fixture window; run it only in an interactive
+  Windows environment capable of reporting UIA focus:
+  `cargo test -p host-core --locked -- --ignored windows_backend_drives_only_the_isolated_fixture_window --nocapture`.
+- **Status:** The Windows UIA fixture passed on the current interactive host
+  after switching the COM factory from `CUIAutomation` (which returned
+  `E_NOINTERFACE` for `IUIAutomation2`) to `CUIAutomation8`. The fail-closed
+  secure-input guard remains enabled. This run used the user's ordinary
+  desktop only after explicit request and targeted only the temporary fixture;
+  routine acceptance should use the disposable environment above. The test
+  stays opt-in because it opens a visible window.
+
+## E2E-COMPUTER-use-settings-stop-control-v1
+
+- **Preconditions:** Use a disposable profile and a deterministic Computer Use
+  fixture; do not operate the user's live desktop.
+- **Path:** In Settings → Behavior, confirm Computer Use is disabled by
+  default, bind a dedicated enabled provider/model, set bounded limits, enable
+  the feature, select accessibility-only and then granted-window pixel
+  capture, and start a fixture Agent run. Confirm the live indicator shows
+  the bound target, capture mode, and remaining action budget; confirm the
+  click-through cursor follows the fixture action. Stop it, then try a stale grant
+  id and another session id. Finally disable Computer Use while a fixture run
+  is active.
+- **Expected:** Saving settings does not create a grant. The active indicator
+  appears only while a grant is live. Stop and disabling revoke the grant and
+  cancel only its owning Agent run; stale or cross-session requests do not
+  revoke or abort anything. Pixel mode sends only the exact Host-bound window
+  image to the dedicated model; a missing/mismatched source sends no image.
+  The cursor overlay is visual-only, click-through, and disappears when its
+  grant ends.
+- **Coverage:** Settings form, Main IPC owner policy, Host grant lifecycle,
+  and the ordinary Agent abort path. `pnpm test:e2e:computer-use-settings`
+  exercises the production React Settings section and Stop widget in an
+  isolated Electron renderer with fixture IPC. Electron-main
+  `agent-tool.test.ts` runs the production Computer handler and Stop IPC against
+  a stateful Host RPC fixture and verifies revoke-before-abort, owner-only
+  cancellation, and grant cleanup. Host policy/backend state transitions are
+  covered by the Rust tests. Pixel-source matching and model forwarding are
+  covered by `agent-tool.test.ts`, while stale cursor-event ownership is covered
+  by `computer-cursor-state.test.ts`; this does not replace packaged-app
+  acceptance.
+- **Status:** Renderer and Main/Agent/Host-RPC lifecycle paths are automated;
+  Windows UIA fixture acceptance passed locally. Full packaged-app acceptance
+  remains pending.
+
+### E2E-CHAT-transcript-history-loading-anchor
+
+- **Preconditions:** Production `ChatTranscript` in an isolated Electron window;
+  deterministic delayed older-history fixture; no live model or account.
+- **Steps:** Scroll to the history boundary while the page request is delayed;
+  continue wheel/key/touch input; then resolve, reject, or return an empty page.
+  Repeat while hidden/revealed, while cached rows mount, while the tail grows,
+  and while the user navigates to latest.
+- **Expected:** The visible reading anchor does not drift during the prepend or
+  late `content-visibility` layout. Input that could move the held transcript is
+  blocked only during the operation; fields, buttons, nested scroll owners, and
+  zoom retain their input. Page requests stay single-flight, failures do not
+  retry-loop, history growth restores the reading anchor, and explicit latest
+  navigation wins over a late page result.
+- **Coverage:** `node scripts/e2e-transcript-history-loading.mjs` and
+  `node scripts/e2e-transcript-render.mjs`.
+
+### E2E-272: Plugin `.all` grants can address any live session
+
+- **Preconditions:** A development plugin declaring `session.read.all`,
+  `session.update.all`, and `session.delete.all`; one ordinary session created
+  by the user; an `.own`-only build of the same plugin for comparison.
+- **Steps:** Use the plugin API to list/get/read messages for the user's
+  session; rename it; append a message; replace messages; delete a user message;
+  truncate from a message. Repeat with the `.own`-only build, including a call
+  that attempts to supply `scope: "all"` itself. Try message writes while a
+  turn is running and inspect the audit records.
+- **Expected:** `.all` reads return the real session metadata and transcript;
+  writes update the open transcript without reselecting the session. Message
+  mutations are rejected with `TURN_RUNNING` while a turn owns the transcript.
+  `.own` cannot address a user-created session, and a plugin-supplied `scope`
+  cannot widen it. Each authorized call is audited with the effective scope.
+- **Coverage:** `node --test apps/desktop/test/plugin-session-access.test.mjs
+  apps/desktop/test/plugin-session-api.test.mjs` and
+  `cargo test -p host-core --locked plugin_sessions` exercise policy, RPC, and
+  persistence. The interactive Electron scenario remains manual.

@@ -126,3 +126,15 @@ runs 10 delegates, telling the model to wait or stop first.
   must remember to set is a flag it forgets; a lifecycle with distinct tools
   makes "start, work, converge" a sequence the model can follow and the prompt
   can teach.
+
+## Amendment: shared job references and background Bash controls (2026-11-07)
+
+`TaskList`, `TaskWait`, and `TaskStop` also manage an explicitly referenced
+background Bash task in Agent mode. A reference has a discriminator and owner
+id (`{ kind: "bash" | "delegation", id }`), so existing delegation defaults
+remain unchanged and callers cannot ambiguously route an id. The model-facing
+Host RPC is session-scoped, verifies local Agent mode, and returns bounded
+output snapshots. Wait, timeout, and user steering do not stop Bash; only an
+explicit `TaskStop` job reference requests termination. Desktop-wide task RPCs
+remain outside the model proxy allowlist. Remote workspaces and older Hosts
+degrade to existing delegation behavior.

@@ -751,6 +751,19 @@ not wait for them to settle and does not fail when one cannot be killed.
 Removing a row in the UI is purely a view action and issues no RPC, so a removed
 task's output remains readable by id until the host's own retention drops it.
 
+### Model-facing background job controls
+
+`backgroundJobs.capabilities`, `backgroundJobs.list`, `backgroundJobs.wait`,
+and `backgroundJobs.stop` are a separate, session-scoped proxy surface. Each
+request names `sessionId`; Host verifies that the session exists, is in Agent
+mode, and is local. `list` returns only that session's tasks. `wait` and `stop`
+require an explicit task id and return a bounded snapshot (1 KiB command and up
+to 8 KiB per output stream); RPC waits are capped at one second. A wait does
+not stop the process, and `stopRequested` is not a terminal outcome. The model
+must observe the final task state to confirm completion. These methods do not
+expose the desktop's global `backgroundTasks.*` RPCs to the model. Remote
+workspaces and older Hosts report the capability as unavailable.
+
 ### Shells
 - `commandShells.list`
 - `settings.set` with a partial settings object; omitted fields are preserved,

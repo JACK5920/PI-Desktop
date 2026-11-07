@@ -3,11 +3,13 @@ import type { UiMessage } from "@pi-desktop/shared";
 
 /** Continue a restored reading range without turning it into a manual search page. */
 export function useTranscriptContinuation({
-  scrollRef, contentRef, enabled, loading, messages, cursor, onLoadNewer,
+  scrollRef, contentRef, enabled, isNavigationActive, loading, messages, cursor, onLoadNewer,
 }: {
   scrollRef: RefObject<HTMLDivElement | null>;
   contentRef: RefObject<HTMLDivElement | null>;
   enabled: boolean;
+  /** Recheck the mutable navigation owner when passive effects actually run. */
+  isNavigationActive: () => boolean;
   loading: boolean;
   messages: UiMessage[];
   cursor?: number;
@@ -21,7 +23,7 @@ export function useTranscriptContinuation({
     if (!enabled || loading || !onLoadNewer || !scroller || !content) return;
     let requested = false;
     const check = () => {
-      if (requested || scroller.clientHeight <= 0) return;
+      if (requested || isNavigationActive() || scroller.clientHeight <= 0) return;
       if (scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop > 240) return;
       // A failed/empty page must not spin on loading, resize or queued scroll
       // events. New reading input can retry; new rows can fill a short viewport.
@@ -47,5 +49,5 @@ export function useTranscriptContinuation({
       for (const event of inputEvents) scroller.removeEventListener(event, onInput);
       observer?.disconnect();
     };
-  }, [contentRef, cursor, enabled, loading, messages, onLoadNewer, scrollRef]);
+  }, [contentRef, cursor, enabled, isNavigationActive, loading, messages, onLoadNewer, scrollRef]);
 }

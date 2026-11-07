@@ -5663,6 +5663,12 @@ Markdown 源码，不是 `text/html` 负载；对禁用行内 HTML 的外部编�
 - 恢复始终创建新的 execution ID 和 cycle，并重置该 cycle 的预算。重启把 active Goal 标记为 interrupted，绝不自动重放；清除从当前跟踪中移除 Goal，但保留报告/执行历史和工件。
 - 协议仍为 v11；新增 Host `goals.report` / `goals.control`、Electron IPC 和 Composer 生命周期控件。见 ADR 0338。
 
+## 2026-11-07 — 增加显式的全会话插件授权（D689）
+
+- **决策：** 插件只有单独声明 `session.read.all`、`session.update.all` 或 `session.delete.all`，才能访问所有活动会话。每项授权都在安装时独立确认、每次调用单独审计；`.all` 优先于对应的 `.own`，插件不能自行指定作用域。
+- **写入：** 追加/替换/删除/截断消息仅允许 `.all` 授权；输入有大小限制、共享频率限制，目标会话正在运行回合时拒绝写入。导入历史仍不会绑定到应用当前模型。
+- **状态：** 已接受。见 ADR 0351 与插件权限/API 规格。此决策扩展 ADR 0200 的导入会话访问范围，但不改变 `.own` 行为。
+
 ## 2026-11-02 — 只读公开 GitHub PR 审查（D680）
 
 - D680 针对一个独立工作面板界面修订 ADR 0308：GitHub PR Review 只从当前本地会话的

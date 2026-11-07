@@ -3000,6 +3000,7 @@ async fn tool_bash(
         .await?;
         return Ok(serde_json::json!({
             "backgroundTaskId": started,
+            "job": { "kind": "bash", "id": started },
             "command": command,
             "commandShellId": options.command_shell_id,
         }));

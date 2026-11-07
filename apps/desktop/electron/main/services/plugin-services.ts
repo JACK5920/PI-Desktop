@@ -229,27 +229,28 @@ export function createPluginServices({
       throw Object.assign(new Error("host unavailable"), { code: "UNSUPPORTED" });
     }
     const result = await getHost()!.call(method, { ...input, pluginId });
+    const body = (result ?? {}) as Record<string, unknown>;
     const changed =
-      (method === "plugin.session.createManaged" && (result as { created?: unknown })?.created === true) ||
+      (method === "plugin.session.createManaged" && body.created === true) ||
       method === "plugin.session.appendManaged" ||
-      (method === "plugin.session.import" &&
-        (result as { imported?: unknown })?.imported === true) ||
-      (method === "plugin.session.importBatch" &&
-        Number((result as { imported?: unknown })?.imported ?? 0) > 0) ||
-      (method === "plugin.session.rename" &&
-        (result as { updated?: unknown })?.updated === true) ||
-      (method === "plugin.session.setAutoTitle" &&
-        (result as { updated?: unknown })?.updated === true) ||
-      (method === "plugin.session.setManagedModel" &&
-        (result as { updated?: unknown })?.updated === true) ||
-      (method === "plugin.session.delete" &&
-        (result as { deleted?: unknown })?.deleted === true);
+      (method === "plugin.session.import" && body.imported === true) ||
+      (method === "plugin.session.importBatch" && Number(body.imported ?? 0) > 0) ||
+      (method === "plugin.session.rename" && body.updated === true) ||
+      (method === "plugin.session.setAutoTitle" && body.updated === true) ||
+      (method === "plugin.session.setManagedModel" && body.updated === true) ||
+      (method === "plugin.session.delete" && body.deleted === true) ||
+      // Message-level writes (ADR 0351) also change what the user sees in the
+      // open transcript, so they announce themselves like the session writes.
+      (method === "plugin.session.appendMessage" && typeof body.messageId === "string") ||
+      (method === "plugin.session.replaceMessages" && typeof body.messageCount === "number") ||
+      (method === "plugin.session.deleteMessage" && typeof body.deletedCount === "number") ||
+      (method === "plugin.session.truncateFrom" && typeof body.keptCount === "number");
     if (changed) {
-      sendToRenderer(IPC.event.sessionsChanged, { reason: method, pluginId,
-        ...(method === "plugin.session.appendManaged" ||
-        method === "plugin.session.setManagedModel"
-          ? { sessionId: input.sessionId }
-          : {}),
+      const sessionId = typeof input.sessionId === "string" ? input.sessionId : undefined;
+      sendToRenderer(IPC.event.sessionsChanged, {
+        reason: method,
+        pluginId,
+        ...(sessionId ? { sessionId } : {}),
       });
     }
     return result;
@@ -523,6 +524,14 @@ export function createPluginServices({
         callPluginSessionHost("plugin.session.importBatch", pluginId, input),
       rename: (pluginId, input) => callPluginSessionHost("plugin.session.rename", pluginId, input),
       delete: (pluginId, input) => callPluginSessionHost("plugin.session.delete", pluginId, input),
+      appendMessage: (pluginId, input) =>
+        callPluginSessionHost("plugin.session.appendMessage", pluginId, input),
+      replaceMessages: (pluginId, input) =>
+        callPluginSessionHost("plugin.session.replaceMessages", pluginId, input),
+      deleteMessage: (pluginId, input) =>
+        callPluginSessionHost("plugin.session.deleteMessage", pluginId, input),
+      truncateFrom: (pluginId, input) =>
+        callPluginSessionHost("plugin.session.truncateFrom", pluginId, input),
     },
     project: {
       create: (pluginId, input) => callPluginProjectHost(pluginId, input),

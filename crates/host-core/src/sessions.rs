@@ -13,7 +13,7 @@ use crate::transcripts::{self, CompactionRecord, MessageRecord, RevisionRecord};
 mod fork_files;
 mod history_mutations;
 pub use history_mutations::{
-    activate_message_revision_canonical, delete_message, retract_pending_prompt,
+    activate_message_revision_canonical, delete_message, retract_pending_prompt, running_turn,
 };
 mod model_system;
 mod usage;
@@ -220,6 +220,9 @@ pub struct UiMessage {
     /// Validated Skill tokens in `command`, with UTF-16 offsets for the renderer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub skill_mentions: Option<Vec<SkillMention>>,
+    /// Validated `@agent` tokens in `command`, with UTF-16 offsets for the renderer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_mentions: Option<Vec<AgentMention>>,
     /// Host-authenticated agent-to-agent origin, never a human authorization.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_message: Option<Value>,
@@ -306,6 +309,14 @@ pub struct SkillMention {
     pub start: usize,
     pub end: usize,
     pub id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentMention {
+    pub start: usize,
+    pub end: usize,
+    pub name: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -422,6 +433,9 @@ pub(crate) fn ui_to_record(message: &UiMessage) -> (MessageRecord, Option<String
     }
     if let Some(mentions) = &message.skill_mentions {
         meta_obj.insert("skillMentions".into(), json!(mentions));
+    }
+    if let Some(mentions) = &message.agent_mentions {
+        meta_obj.insert("agentMentions".into(), json!(mentions));
     }
     if let Some(origin) = &message.session_message {
         meta_obj.insert("sessionMessage".into(), origin.clone());
@@ -581,6 +595,9 @@ pub(crate) fn record_to_ui(record: MessageRecord) -> UiMessage {
     let skill_mentions = meta
         .get("skillMentions")
         .and_then(|value| serde_json::from_value(value.clone()).ok());
+    let agent_mentions = meta
+        .get("agentMentions")
+        .and_then(|value| serde_json::from_value(value.clone()).ok());
     let session_message = meta.get("sessionMessage").cloned();
     let voice_origin = meta.get("voiceOrigin").cloned();
     let steering = meta.get("steering").and_then(Value::as_bool);
@@ -714,6 +731,7 @@ pub(crate) fn record_to_ui(record: MessageRecord) -> UiMessage {
             content: text,
             command: command.clone(),
             skill_mentions: skill_mentions.clone(),
+            agent_mentions: agent_mentions.clone(),
             session_message,
             voice_origin: voice_origin.clone(),
             attachments: None,
@@ -769,6 +787,7 @@ pub(crate) fn record_to_ui(record: MessageRecord) -> UiMessage {
             content,
             command,
             skill_mentions,
+            agent_mentions,
             session_message,
             voice_origin,
             attachments,
@@ -4535,6 +4554,7 @@ mod tests {
             content: content.into(),
             command: None,
             skill_mentions: None,
+            agent_mentions: None,
             attachments: None,
             voice_origin: None,
             steering: None,
@@ -4566,6 +4586,21 @@ mod tests {
             provider_replay: None,
             session_message: None,
         }
+    }
+
+    #[test]
+    fn agent_mentions_roundtrip_in_record_metadata() {
+        let mut message = user_msg("agent-mention", "inspect", "2025-05-01T00:00:01Z");
+        message.command = Some("@explorer inspect".into());
+        message.agent_mentions = Some(vec![AgentMention {
+            start: 0,
+            end: 9,
+            name: "explorer".into(),
+        }]);
+        let (record, _) = ui_to_record(&message);
+        let restored = record_to_ui(record);
+        assert_eq!(restored.command.as_deref(), Some("@explorer inspect"));
+        assert_eq!(restored.agent_mentions.unwrap()[0].name, "explorer");
     }
 
     /// A failed transcript device flush must not leave an index row that makes
@@ -5503,6 +5538,7 @@ mod tests {
             content: "ok".into(),
             command: None,
             skill_mentions: None,
+            agent_mentions: None,
             attachments: None,
             voice_origin: None,
             steering: None,
@@ -6298,6 +6334,7 @@ mod tests {
             content: "final answer".into(),
             command: None,
             skill_mentions: None,
+            agent_mentions: None,
             attachments: None,
             voice_origin: None,
             steering: None,
@@ -6446,6 +6483,7 @@ mod tests {
             content: "answer with sources".into(),
             command: None,
             skill_mentions: None,
+            agent_mentions: None,
             attachments: None,
             voice_origin: None,
             steering: None,

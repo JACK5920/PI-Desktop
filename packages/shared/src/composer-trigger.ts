@@ -148,6 +148,50 @@ export function findSkillMentions(
   return mentions;
 }
 
+export type AgentMention = { start: number; end: number; name: string };
+
+/** Resolve only known subagent names at whole-token boundaries. */
+export function findAgentMentions(
+  content: string,
+  agentNames: ReadonlySet<string>,
+): AgentMention[] {
+  const mentions: AgentMention[] = [];
+  for (const match of content.matchAll(
+    /(^|\s)@([a-z0-9][a-z0-9-]*)(?=$|\s|[,;:!?)\]，。；：！？、）]|\.(?:\s|$))/g,
+  )) {
+    if (!agentNames.has(match[2])) continue;
+    const start = match.index + match[1].length;
+    mentions.push({ start, end: start + match[2].length + 1, name: match[2] });
+  }
+  return mentions;
+}
+
+/** Build the model-facing instructions for explicit Skill and Agent mentions. */
+export function composeMentionPrompt(
+  content: string,
+  skillMentions: readonly SkillMention[],
+  agentMentions: readonly AgentMention[],
+): string {
+  let body = "";
+  let end = 0;
+  for (const mention of skillMentions) {
+    body += content.slice(end, mention.start);
+    end = mention.end;
+  }
+  body = (body + content.slice(end)).trim();
+  const skillIds = [...new Set(skillMentions.map((mention) => mention.id))];
+  const agentNames = [...new Set(agentMentions.map((mention) => mention.name))];
+  return [
+    skillIds.length
+      ? `Call the \`Skill\` tool with each of these ids before answering this request, in order: ${skillIds.map((id) => JSON.stringify(id)).join(", ")}. Follow the loaded skill instructions.`
+      : "",
+    agentNames.length
+      ? `The user explicitly delegated this request with @mentions. Call the \`Task\` tool with \`agent\` set to each of these subagents: ${agentNames.map((name) => JSON.stringify(name)).join(", ")}. Write each \`task\` as a complete brief built from the request below; there, @name marks the part addressed to that subagent. Converge with TaskWait and answer from the reports.`
+      : "",
+    body,
+  ].filter(Boolean).join("\n\n");
+}
+
 /** Insertion text for an accepted slash command: `/name ` ready for args. */
 export function formatCommandInsert(name: string): string {
   return `/${name} `;
@@ -186,13 +230,49 @@ export function serializeComposerFileReferences(
 ): string {
   const content = serializeInlineComposerFileReferences(draft, references);
   const paths = references
-    .filter((reference) => !reference.token && reference.kind !== "session")
+    .filter((reference) => !reference.token && reference.kind !== "session" && reference.kind !== "directory" && reference.kind !== "agent")
     .map((reference) => formatFileInsert(reference.path, "file"))
     .join("")
     .trim();
-  if (!content) return paths;
-  if (!paths) return content;
-  return `${content}\n${paths}`;
+  return [content, paths].filter(Boolean).join("\n");
+}
+
+const DIRECTORY_PROMPT_GUIDANCE =
+  "The user provided these local directories for the current task.\nInspect their structure and read relevant files as needed to fulfill the request.";
+
+/** Recover the user-facing text and folder paths from a serialized directory prompt. */
+export function splitComposerDirectoryPrompt(content: string): { text: string; paths: string[] } {
+  const guidanceStart = content.lastIndexOf(DIRECTORY_PROMPT_GUIDANCE);
+  if (guidanceStart < 0 || (guidanceStart > 0 && content[guidanceStart - 1] !== "\n")) {
+    return { text: content, paths: [] };
+  }
+  const body = content.slice(0, guidanceStart).trimEnd();
+  const trailer = content.slice(guidanceStart + DIRECTORY_PROMPT_GUIDANCE.length);
+  const marker = /<dir>([^<>]+)<\/dir>/g;
+  const paths: string[] = [];
+  const decodePath = (escaped: string) => escaped.replace(/&(amp|lt|gt);/g, (entity) =>
+    entity === "&amp;" ? "&" : entity === "&lt;" ? "<" : ">",
+  );
+  const absolute = /^(?:\/|[A-Za-z]:[\\/]|\\\\)/;
+  if (trailer) {
+    const markers = [...trailer.matchAll(marker)];
+    if (trailer !== markers.map(([tag]) => `\n${tag}`).join("")) return { text: content, paths };
+    for (const [, escaped] of markers) paths.push(decodePath(escaped));
+    return paths.every((path) => absolute.test(path)) ? { text: body, paths } : { text: content, paths: [] };
+  }
+  const text = body.replace(/<dir>([^<>]+)<\/dir>([ \t]?)/g, (tag, escaped: string, space: string, offset: number) => {
+    const path = decodePath(escaped);
+    if (!absolute.test(path)) return tag;
+    paths.push(path);
+    return offset > 0 && /[ \t]/.test(body[offset - 1]) ? "" : space;
+  }).trim();
+  return paths.length ? { text, paths } : { text: content, paths };
+}
+
+/** XML escaping keeps directory names from breaking out of their data marker. */
+function directoryPromptReference(path: string): string {
+  const escaped = path.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return `<dir>${escaped}</dir>`;
 }
 
 /**
@@ -213,22 +293,37 @@ export function serializeInlineComposerFileReferences(
     const send = reference.plugin?.send;
     const insert = typeof send === "string"
       ? send
+      : reference.kind === "agent"
+        ? `@${reference.path}`
       : reference.kind === "session"
         ? formatSessionLink(reference.path)
+        : reference.kind === "directory"
+          ? directoryPromptReference(reference.path)
         : formatFileInsert(reference.path, "file").trim();
     let index = content.indexOf(token);
     while (index !== -1) {
       const nextChar = content[index + token.length];
       const separator = nextChar && !/\s/.test(nextChar) ? " " : "";
+      const previousChar = content[index - 1];
+      const lead = reference.kind === "agent" && previousChar && !/\s/.test(previousChar) ? " " : "";
       content =
         content.slice(0, index) +
+        lead +
         insert +
         separator +
         content.slice(index + token.length);
-      index = content.indexOf(token, index + insert.length + separator.length);
+      index = content.indexOf(token, index + lead.length + insert.length + separator.length);
     }
   }
-  return content.trim();
+  const directories = references.filter((reference) =>
+    reference.kind === "directory" && (!reference.token || draft.includes(reference.token)),
+  );
+  const guidance = directories.length ? DIRECTORY_PROMPT_GUIDANCE : "";
+  const unpositioned = directories
+    .filter((reference) => !reference.token)
+    .map((reference) => directoryPromptReference(reference.path))
+    .join("\n");
+  return [content.trim(), guidance, unpositioned].filter(Boolean).join("\n");
 }
 
 /** Remove renderer-only inline reference tokens before a text transform. */

@@ -617,6 +617,13 @@ Host execution baseline:
 - Background output is drained before a terminal state is published, including
   output queued when the process exits or is stopped. UTF-8 characters split
   across pipe reads remain intact. Shutdown signals do not acquire output locks.
+- **Agent job controls are explicit and session-scoped.** In Agent mode,
+  `TaskList` includes retained background Bash tasks when the local Host supports
+  job RPCs. `TaskWait` and `TaskStop` accept `{ job: { kind: "bash", id } }`;
+  delegation controls remain the default when `job` is omitted. A wait timeout
+  or new user input never stops Bash; only an explicit Bash job reference to
+  `TaskStop` requests process termination. Remote workspaces and older Hosts
+  report job controls unavailable without changing delegation behavior.
 - **Todo and background tasks share one container** in the Composer, above the
   Plan/Ask decision surfaces and the input. The container has a single header
   carrying the todo progress summary, the running-task count, the tab list, and

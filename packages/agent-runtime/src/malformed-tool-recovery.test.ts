@@ -52,6 +52,27 @@ function fixture(reply: (round: number) => AssistantMessage) {
 }
 
 describe("malformed tool-call recovery", () => {
+  it.each([false, true])("reports literal text-form calls without suppressing structured siblings: %s", async (withSibling) => {
+    const text = 'I checked the workspace.\n<tool_call>\n<function=TodoWrite>\n<parameter=todos>\n[]\n</parameter>\n</function>\n</tool_call>';
+    const { runtime, host, requests, events } = fixture((round) => round === 1
+      ? assistant([{ type: "text", text }, ...(withSibling ? [call()] : [])])
+      : answer());
+    try {
+      await runtime.prompt("Track the requested work.");
+      expect(events).toContainEqual(expect.objectContaining({
+        type: "message_end",
+        message: expect.objectContaining({
+          content: text,
+          status: "error",
+          error: expect.objectContaining({ code: "TOOL_CALL_NOT_EXECUTED", message: expect.stringContaining("TodoWrite") }),
+        }),
+      }));
+      expect(host.call.mock.calls.filter(([method]) => method === "tools.execute")).toHaveLength(withSibling ? 1 : 0);
+      expect(requests).toHaveLength(withSibling ? 2 : 1);
+      expect(events.filter((event) => event.type === "tool_start" && event.toolName === "TodoWrite")).toHaveLength(0);
+    } finally { await runtime.dispose(); }
+  });
+
   it.each([
     ["empty name", { name: "" }],
     ["missing name", { name: undefined }],

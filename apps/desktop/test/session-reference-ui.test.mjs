@@ -141,6 +141,7 @@ const { MessageRow } = load(new URL("../src/features/chat/transcript/MessageRow.
   "react-i18next": { useTranslation: () => ({ t, i18n: { language: locale } }) },
   "@pi-desktop/shared": await import("@pi-desktop/shared"),
   "../../../hooks/use-preview-target": { useOpenChatFileRef: () => () => {} },
+  "../DirectoryReferenceCard": { DirectoryReferenceCard: () => null },
   "../../../lib/chat-links": { splitChatText: () => [] },
   "../../../components/Markdown": { Markdown: ({ source }) => source },
   "../../../components/icons": new Proxy({}, { get: () => Icon }),

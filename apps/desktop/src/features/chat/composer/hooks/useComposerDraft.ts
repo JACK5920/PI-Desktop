@@ -1,40 +1,41 @@
 import {
+  rewriteIdeographicCommaTrigger,
+} from "@pi-desktop/shared";
+import type { TFunction } from "i18next";
+import {
+  type Dispatch,
+  type RefObject,
+  type SetStateAction,
   useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
-  type Dispatch,
-  type RefObject,
-  type SetStateAction,
 } from "react";
-import type { TFunction } from "i18next";
-import {
-  rewriteIdeographicCommaTrigger,
-} from "@pi-desktop/shared";
-import { useAppStore } from "../../../../stores/app-store";
-import { sessionAllows } from "../../../../lib/remote-session-safety";
 import { api } from "../../../../lib/api";
-import type { ComposerDraftSnapshot } from "../../../../lib/composer-smart-stop";
 import {
-  HOME_DRAFT_KEY,
   captureComposerDraft,
   deleteComposerDraft,
   draftFileReference,
   draftKeyForSession,
   draftOwnerSessionId,
   flushScheduledHomeDraftAdopt,
+  HOME_DRAFT_KEY,
+  markComposerDraftEdited,
   pruneComposerDrafts,
   readComposerDraft,
   readComposerDraftRevision,
   sameDraftFileReference,
   snapshotComposerDraft,
   writeComposerDraft,
-  markComposerDraftEdited,
 } from "../../../../lib/composer-draft-cache";
+import type { ComposerDraftSnapshot } from "../../../../lib/composer-smart-stop";
+import { sessionAllows } from "../../../../lib/remote-session-safety";
+import { useAppStore } from "../../../../stores/app-store";
 import {
-  editorSelectionRange,
+  type ComposerFileReference,
   createFileReference,
+  editorSelectionRange,
   isEditableTextReference,
   isPersistedScratchReference,
   isPluginMark,
@@ -42,18 +43,17 @@ import {
   paintEditorValue,
   readEditorValue,
   setEditorCaret,
-  type ComposerFileReference,
 } from "../editor";
-import type { ComposerPrefill } from "../model";
-import { useComposerImagePreview, type ComposerImagePreviewController } from "./useComposerImagePreview";
-
 import { attachImageTokens } from "../image-attachments";
+import type { ComposerPrefill } from "../model";
+import { type ComposerImagePreviewController, useComposerImagePreview } from "./useComposerImagePreview";
 
 type ComposerSession = { id: string };
 
 export type ComposerDraftController = {
   imagePreview: ComposerImagePreviewController;
   removeImage: (id: string) => void;
+  removeDirectoryReference: (id: string) => void;
   ref: RefObject<HTMLDivElement | null>;
   draftKey: string;
   referenceSessionId: string;
@@ -729,6 +729,14 @@ export function useComposerDraft({
       if (inputBlocked) return;
       invalidateComposerTransforms();
       setDraftFileReferences((current) => current.filter((reference) => reference.id !== id));
+      ref.current?.focus();
+    },
+    removeDirectoryReference: (id) => {
+      if (inputBlocked) return;
+      invalidateComposerTransforms();
+      setDraftFileReferences((current) => current.filter((reference) =>
+        reference.id !== id || reference.kind !== "directory",
+      ));
       ref.current?.focus();
     },
     ref,

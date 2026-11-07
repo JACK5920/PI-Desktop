@@ -113,6 +113,7 @@ type RuntimeParams = {
   infiniteProviderRetry?: boolean;
   /** Session `/fast` switch AND the model's opt-in, resolved by main (ADR 0334). */
   fastMode?: boolean;
+  computerUseEnabled?: boolean;
   /** Opt-in TypeSafe classifier credential resolved by Electron main. */
   jevApiKey?: string;
   provider: RuntimeProviderConfig;
@@ -244,6 +245,7 @@ async function runtimeFor(
     subagentProviders,
     subagentModelKeys,
     jevApiKey: params.jevApiKey,
+    computerUseEnabled: params.computerUseEnabled === true,
     projectInstructions: params.projectInstructions,
     customSystemPrompt: params.customSystemPrompt,
     projectMemory: params.projectMemory,
@@ -317,6 +319,7 @@ async function runtimeFor(
     infiniteProviderRetry: params.infiniteProviderRetry === true,
     fastMode: params.fastMode === true,
     jevApiKey: params.jevApiKey,
+    computerUseEnabled: params.computerUseEnabled === true,
     history,
     compaction,
     compactionSettings: params.compactionSettings,

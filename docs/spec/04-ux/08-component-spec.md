@@ -3606,6 +3606,15 @@ reasoning-level control.
   above it is saved as UTF-8 in the session's scratch `pasted/` directory and
   inserts an inline temporary-file token at the paste position (D197, D209,
   D262, ADR 0059, ADR 0070, ADR 0131)
+- Pasting a native directory produces a removable folder card above the draft,
+  not a recursive copy or an attachment. Mixed file/folder paste preserves the
+  OS selection order; regular files continue through the existing bounded,
+  sender-bound scratch import. At send, each folder becomes an XML-escaped
+  `<dir>absolute/path</dir>` prompt marker with one instruction to inspect the
+  directory as needed. The transcript renders folder cards instead of raw
+  markers. This is context only: it does not widen Host file-access roots or
+  bypass the current permission mode. Native metadata is captured at paste
+  time, bounded to 20 items and 1 MiB; no clipboard polling/history is added.
 - The Composer `+` button opens one native file picker with no type-choice menu.
   While that picker or its import is in flight, repeated clicks are ignored so
   only one composer picker can be active at a time.
@@ -3706,7 +3715,7 @@ See [Live Voice](../03-runtime/live-voice.md) and
 [Live Work](../03-runtime/live-work-session.md) for the unchanged ownership,
 permission, and call-scoped work contracts.
 
-### 11.8 Slash commands, @ file references, and clipboard files (D123–D125, D197, D209, D262, D362, D397, ADR 0024, ADR 0059, ADR 0070, ADR 0131, ADR 0221, ADR 0222)
+### 11.8 Slash commands, @ file references, and clipboard files (D123–D125, D197, D209, D262, D362, D397, ADR 0024, ADR 0059, ADR 0070, ADR 0131, ADR 0221, ADR 0222, ADR 0348)
 
 The composer owns an inline autocomplete menu — one component serving two
 modes. Focus never leaves the textarea (D125).
@@ -3790,6 +3799,15 @@ Anatomy:
   may be incomplete — the bare `@`, until the first search for the token
   answers, and when a search is itself capped or unavailable, as in remote
   sessions; without a workspace the menu shows an "open a project" empty state.
+- In Agent mode, the same `@` menu adds an **Agents** group above Files, using
+  the active subagent catalog. A root file or directory shadows an identically
+  named agent. Plan and Goal do not show the group. Accepting an agent inserts
+  an atomic chip that serializes as `@name`; on send, Main resolves known
+  whole-token mentions against the launch catalog and instructs the existing
+  `Task` tool. The typed form remains the transcript command and validated
+  UTF-16 mention offsets render as chips. Skill and agent mentions compose;
+  app commands and leading templates keep precedence. Stop restores the typed
+  command. See ADR 0348.
 - Accepting commands and directories inserts text (`/name ` / `@dir/`);
   accepting a completed file inserts the inline chip rather than deleting the
   trigger. Immediately
@@ -3947,19 +3965,29 @@ there is no separate top-bar model selector.
 | Configured | shows the current model and reasoning level, clickable from the Composer |
 | No provider | muted model text with a settings entry in the Composer menu |
 | Running | remains available for next-turn configuration |
-| Dropdown open | model and reasoning entries open in-place submenus |
+| Dropdown open | one searchable menu shows a source rail when multiple sources exist, with models in the adjacent pane and reasoning controls in the footer |
 
 ### 12.4 Interactions
 
-- Click: opens the Composer menu with model and reasoning entries
+- Click: opens the Composer model × reasoning menu with a search field and
+  model list. When there is more than one source, a rail lists Recent (up to
+  six available models, newest first) and each enabled provider with its model
+  count. Selecting a source replaces the adjacent list; the list height stays
+  fixed to the tallest source so switching providers does not resize the menu.
 - Cached provider models are available on the first open after restart; opening
-  the menu begins hydration before the Model submenu is entered, and a
-  background refresh updates the list without clearing it first
+  the menu begins hydration, and a background refresh updates the list without
+  clearing it first.
+- Search spans all enabled providers and displays grouped matching results;
+  Escape clears a non-empty search first, then closes the menu on the next
+  Escape. The source rail is hidden when a single source is available.
+- A Manage models action in the menu opens Settings → Models and closes the
+  menu first.
 - Select: switches model for current session
 - On the home/new-session draft, selecting a model also updates the Composer's
   Thinking capability and level from that exact catalog model before the first
   message creates the session.
-- Keyboard: up/down arrow in dropdown, Enter to select, Escape to close
+- Keyboard: up/down arrow in the model list, Enter to select, Escape clears
+  search before closing; reduced-motion preferences disable pane/rail motion
 - Long option labels may ellipsize inside the compact menu; each option renders
   one display name only, falling back to the model ID when no display name is
   available. The native hover tooltip exposes that complete display name

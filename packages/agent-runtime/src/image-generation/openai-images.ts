@@ -144,7 +144,9 @@ export function openAIImagesAdapter(
 
 export function decodeImageBase64(data: string): Uint8Array {
   if (data.length > Math.ceil(MAX_IMAGE_BYTES / 3) * 4) throw imageError("IMAGE_TOO_LARGE");
-  if (!data.length || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(data))
+  // Check complete 4-character quanta by length. Repeating a 4-character
+  // group in this regex makes V8 recurse deeply on multi-megabyte images.
+  if (!data.length || data.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(data))
     throw imageError("IMAGE_INVALID_RESPONSE");
   return Buffer.from(data, "base64");
 }

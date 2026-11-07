@@ -1,6 +1,7 @@
 export * from "./activation.js";
 export * from "./protocol.js";
 export * from "./file-batches.js";
+export * from "./background-jobs.js";
 export * from "./errors.js";
 export * from "./rpc-error.js";
 export * from "./certificate-errors.js";
@@ -60,6 +61,7 @@ export * from "./image-dimensions.js";
 export * from "./speech.js";
 export * from "./gen-ui.js";
 export * from "./image-generation.js";
+export * from "./computer-use.js";
 export * from "./font-size.js";
 export * from "./chat-content-width.js";
 export * from "./radial-menu.js";

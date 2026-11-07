@@ -29,6 +29,7 @@ export type SettingsIpcDependencies = {
   applyUpdatePreference: (preference: UpdatePreference) => void;
   resolveEffectiveCommandShell: () => Promise<unknown>;
   liveCallService?: Pick<LiveCallService, "beginSettingsWrite" | "settingsWritten">;
+  stopComputerUse?: () => Promise<void>;
 };
 
 /** Register app settings and command-shell channels. */
@@ -49,6 +50,7 @@ export function registerSettingsIpc({
   applyUpdatePreference,
   resolveEffectiveCommandShell,
   liveCallService,
+  stopComputerUse,
 }: SettingsIpcDependencies): void {
   let host: HostProcess | null = null;
   let sidecar: AgentSidecar | null = null;
@@ -77,6 +79,9 @@ export function registerSettingsIpc({
     const prospectiveSettings = validatedSettings && typeof validatedSettings === "object" && !Array.isArray(validatedSettings)
       ? { ...currentSettings, ...(validatedSettings as Partial<AppSettings>) }
       : currentSettings;
+    if (currentSettings.computerUse?.enabled && !prospectiveSettings.computerUse?.enabled) {
+      await stopComputerUse?.();
+    }
     const releaseSettingsWrite = liveCallService?.beginSettingsWrite(prospectiveSettings);
     let result: AppSettings;
     try {

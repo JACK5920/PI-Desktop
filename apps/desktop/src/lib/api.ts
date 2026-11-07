@@ -1,3 +1,7 @@
+type ClipboardDirectoryPaste = {
+  items: Array<{ kind: "directory"; path: string; name: string } | { kind: "file"; name: string }>;
+  token: string | null;
+};
 import { projectPlanHistory } from "./plan-history";
 import { guardRemoteInvocation } from "./remote-ipc-safety";
 import { isRemoteSession, safeSessionSummary } from "./remote-session-safety";
@@ -33,6 +37,8 @@ import type {
   AppSettings,
   JevKeyCheckResult,
   CommandShellCatalog,
+  ComputerCapabilities,
+  ComputerGrantView,
   AppVersionInfo,
   BrowserAction,
   BrowserState,
@@ -58,8 +64,8 @@ import type {
   OnboardingState,
   OAuthLoginEvent,
   OAuthRespondInput,
-  OAuthStartResult,
   OAuthVendor,
+  OAuthStartResult,
   PluginSummary,
   PluginPermissionReview,
   PluginSettingDefinition,
@@ -876,6 +882,16 @@ export const api = {
   runImportModelConfigs: (items: ModelConfigImportCandidate[]) =>
     invoke<ImportRunResult>(IPC.invoke.modelConfigImportRun, items),
   getSettings: () => invoke<AppSettings>(IPC.invoke.settingsGet).then(normalizeSettings),
+  computerCapabilities: () => invoke<ComputerCapabilities>(IPC.invoke.computerCapabilities),
+  computerGrantDescribe: () => invoke<{ grant: ComputerGrantView | null }>(IPC.invoke.computerGrantDescribe),
+  computerGrantRevoke: (input: { sessionId: string; grantId: string }) =>
+    invoke<{ revoked: boolean; requested: boolean }>(IPC.invoke.computerGrantRevoke, input),
+  onComputerGrantChanged: (listener: (grant: ComputerGrantView | null) => void) => {
+    if (!window.piDesktop?.on) return () => undefined;
+    return window.piDesktop.on(IPC.event.computerGrantChanged, (payload) =>
+      listener((payload ?? null) as ComputerGrantView | null),
+    );
+  },
   getStorageInfo: () => invoke<StorageInfo>(IPC.invoke.storageGet),
   chooseStorageDirectory: () => invoke<string | null>(IPC.invoke.storageChoose),
   migrateStorage: (input: { path: string; language: string }) =>
@@ -1109,6 +1125,7 @@ export const api = {
     }),
   pickFiles: () =>
     invoke<{ token: string | null; canceled?: boolean }>(IPC.invoke.composerPickFiles),
+  readClipboardDirectories: () => invoke<ClipboardDirectoryPaste | null>(IPC.invoke.composerReadClipboardDirectories),
   getDroppedFilePath: (file: File) =>
     window.piDesktop?.getDroppedFilePath?.(file) ?? null,
   pickPhotos: () =>
@@ -1730,6 +1747,8 @@ export const api = {
       ...(sessionId ? { sessionId } : {}),
     }),
   fsReveal: (path: string, sessionId?: string) => invoke(IPC.invoke.fsReveal, { path, ...(sessionId ? { sessionId } : {}) }),
+  fsRevealDirectory: (path: string, sessionId: string) =>
+    invoke(IPC.invoke.fsReveal, { path, sessionId, directory: true }),
   fsOpen: (path: string, mimeType?: string, sessionId?: string) =>
     invoke(IPC.invoke.fsOpen, { path, mimeType, ...(sessionId ? { sessionId } : {}) }),
   fsIndex: (sessionId?: string) => invoke<FsIndexResult>(IPC.invoke.fsIndex, { ...(sessionId ? { sessionId } : {}) }),
@@ -1738,9 +1757,14 @@ export const api = {
   /**
    * Complete a file reference from chat text to a real file (D320 follow-up).
    * The main process owns the root order — project, session scratch,
-   * attachments — because only it can see the scratch store.
+   * attachments — because only it can see the scratch store. `allowDirectory`
+   * lets an exact reference name a real directory (issue #2113); shorthand
+   * resolution keeps answering files only.
    */
-  fsResolveRef: (ref: string, sessionId?: string) =>
+  fsResolveRef: (
+    ref: string,
+    sessionId?: string,
+  ) =>
     invoke<FsChatRefResolveResult>(IPC.invoke.fsResolveRef, {
       ref,
       ...(sessionId ? { sessionId } : {}),
@@ -2132,8 +2156,12 @@ export const api = {
       reason?: string;
       pluginId?: string;
       projectPath?: string | null;
-      sessionId?: string;
       selectSessionId?: string;
+      /**
+       * The one session whose transcript changed. A plugin message write names
+       * it so the shell can repaint an already open transcript (ADR 0339).
+       */
+      sessionId?: string;
     }) => void,
   ) => {
     if (!window.piDesktop?.on) return () => undefined;
@@ -2143,8 +2171,8 @@ export const api = {
           reason?: string;
           pluginId?: string;
           projectPath?: string | null;
-          sessionId?: string;
           selectSessionId?: string;
+          sessionId?: string;
         },
       ),
     );

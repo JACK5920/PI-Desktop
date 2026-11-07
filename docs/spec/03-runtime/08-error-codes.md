@@ -106,6 +106,7 @@ does not turn temporary thread pressure into a host process exit.
 | `CONTEXT_COMPACTION_FAILED` | no | automatic retained-tail recovery could not prepare, persist, or fit a checkpoint, or manual checkpoint summary generation / durable append failed; the guarded next provider request does not start |
 | `STREAM_FAILED` | yes | provider stream was terminated, closed prematurely, or otherwise ended before a complete response; up to ten same-turn retries may precede the terminal event |
 | `EMPTY_MODEL_RESPONSE` | yes | the model ended its turn with no tool call and no visible text twice: once as streamed, once after the automatic re-run; the first reply to a Host-ledger completion notice is exempt (spec 02-agent-runtime §5e, D446) |
+| `TOOL_CALL_NOT_EXECUTED` | no | a complete known-tool Qwen call was emitted as assistant text; the message shows a format diagnostic without executing text, retrying the provider or interrupting valid structured siblings |
 | `PROMPT_ENHANCEMENT_EMPTY` | no | the one-shot enhancement model returned no text |
 | `SPEECH_NOT_CONFIGURED` | no | host speech ASR or TTS is not bound in settings |
 | `SPEECH_PROTOCOL_UNSUPPORTED` | no | the speech protocol is unknown or does not support this role |
@@ -360,6 +361,37 @@ does not trigger automatic provider or billing fallback.
 | `LIVE_NETWORK_POLICY_UNSUPPORTED` | no | the desktop proxy route cannot be represented safely by the Live transport |
 | `LIVE_AUDIO_BACKPRESSURE` | no | bounded PCM or playback credits were exhausted |
 | `LIVE_EXECUTION_NOT_CONNECTED` | no | a provider requested an unsupported function/delegation execution path |
+
+### 3.10 Computer Use
+
+Computer Use errors are host-owned refusals or bounded-operation failures. They
+do not widen permission or retry past a refusal; a retry is appropriate only
+after the named transient condition has changed.
+
+| code | retriable | meaning |
+|---|---|---|
+| `COMPUTER_DISABLED` | no | Computer Use is disabled in Settings |
+| `COMPUTER_NOT_CONFIGURED` | no | no usable Computer Use model is configured |
+| `COMPUTER_NO_GRANT` | no | the session has no active desktop grant |
+| `COMPUTER_STOPPED_BY_USER` | no | the user stopped Computer Use; the host cooldown prevents immediate re-grant |
+| `COMPUTER_GRANT_IN_USE` | no | another session owns the single active desktop grant |
+| `COMPUTER_GRANT_EXPIRED` | no | the grant expired or was revoked |
+| `COMPUTER_BUDGET_EXHAUSTED` | no | the grant's bounded action budget is exhausted |
+| `COMPUTER_SCOPE_VIOLATION` | no | the requested action is outside the grant's current window scope |
+| `COMPUTER_SELF_TARGET_REFUSED` | no | the target is a PI-Desktop window and is never operable |
+| `COMPUTER_TARGET_DENYLISTED` | no | the target is refused by the host denylist |
+| `COMPUTER_SECURE_INPUT_REFUSED` | no | the OS or focused control reports secure/password input |
+| `COMPUTER_STALE_BASIS` | no | an element reference was produced from an obsolete inspection basis |
+| `COMPUTER_STALE_REVISION` | no | the bound window or its geometry changed after inspection |
+| `COMPUTER_ELEMENT_NOT_FOUND` | no | the requested accessibility element is no longer present |
+| `COMPUTER_ELEMENT_NOT_ACTIONABLE` | no | the element does not support the requested action |
+| `COMPUTER_INPUT_POLICY_DENIED` | no | the active input policy does not permit the requested synthesis |
+| `COMPUTER_OS_PERMISSION_MISSING` | no | the operating system has not granted the required accessibility/input permission |
+| `COMPUTER_TARGET_ELEVATED` | no | the target process runs at a higher integrity level than the host |
+| `COMPUTER_PLATFORM_UNSUPPORTED` | no | this platform has no native Computer Use backend |
+| `COMPUTER_CAPTURE_UNAVAILABLE` | no | the exact granted-window capture source is unavailable |
+| `COMPUTER_ACTION_REJECTED` | no | the host rejected an action that has no more specific refusal code |
+| `COMPUTER_TIMEOUT` | yes | a bounded native accessibility or action operation timed out |
 
 ## 4. Mapping rules
 

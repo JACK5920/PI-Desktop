@@ -278,6 +278,16 @@ re-executed. Other malformed context remains subject to strict validation.
 Tool token estimates are optional telemetry: an invalid call identity must not
 prevent the corresponding terminal tool event from being delivered.
 
+Complete Qwen-style `<tool_call><function=Name><parameter=...>...</parameter>
+</function></tool_call>` blocks emitted as assistant text for a known tool
+receive a visible `TOOL_CALL_NOT_EXECUTED` diagnostic on that response. The
+original text remains visible; the affected message has error status, while
+valid structured sibling calls and normal continuation remain unchanged. Text
+is never parsed into executable arguments, tools are never silently activated,
+and no provider retry is spent. Fenced, inline, quoted and indented examples,
+unknown tool names and incomplete blocks remain ordinary text. This is a
+conservative format diagnostic, not a general XML parser or proof of intent.
+
 Before surfacing a pre-stream `PROVIDER_ERROR` for HTTP 400/422 whose message
 ends in `(no body)`, the runtime makes at most one silent repair attempt with
 the generated output-limit fields removed: `max_tokens`,
@@ -1065,6 +1075,16 @@ core set rather than the on-demand catalog of §7.1:
 - `TaskStop(delegationIds?)` — stops running delegations (defaults to all);
   waits for each abort to settle, then persists `status: "stopped"` with
   `completedAt` on `details.stopped[]`. Stopped delegations read as `stopped`.
+
+In Agent mode, `Task`, `TaskList`, and their results also expose typed job
+references `{ kind: "delegation" | "bash", id }`. `TaskList` appends the
+current session's background Bash tasks when the Host advertises the local job
+RPC capability. Passing `{ job: { kind: "bash", id } }` to `TaskWait` reads a
+bounded stdout/stderr tail and terminal state; timeout and new user input leave
+the command running. `TaskStop` with that explicit reference requests stop and
+returns `stopRequested` until the supervisor confirms its terminal state.
+Without `job`, the existing delegation defaults remain unchanged. The shared
+job reference lets the model route ownership without ambiguous ID guessing.
 
 **Explicit desktop cancellation.** A running delegate can be stopped from its
 card or detail panel. The subagent group header also offers session-wide stop-all.

@@ -494,6 +494,16 @@ off | minimal | low | medium | high | xhigh | max
 取消表，因此 `tools.abort` / `agent.abort` 都无法触及它，输出按流保存在有界环形缓冲
 中。注册表位于宿主进程内，宿主关闭时会停止全部任务，因此应用退出不会残留孤儿进程。
 
+### 面向模型的后台作业控制
+
+`backgroundJobs.capabilities`、`backgroundJobs.list`、`backgroundJobs.wait` 和
+`backgroundJobs.stop` 是独立且按会话隔离的代理接口。每个请求都要带 `sessionId`；Host
+会验证会话存在、处于 Agent 模式且使用本地工作区。`list` 只返回该会话的任务；`wait` 和
+`stop` 必须指定任务 ID，并返回有界快照（命令最多 1 KiB，每个输出流最多 8 KiB）；单次
+RPC 等待最长 1 秒。等待不会停止进程，`stopRequested` 也不代表任务已结束；模型必须查看
+最终任务状态才能确认结果。这些方法不会把桌面端全局 `backgroundTasks.*` RPC 暴露给模型。
+远程工作区和旧 Host 会报告该能力不可用。
+
 输出块不会触发 `backgroundTasks.changed`；该事件仍用于生命周期状态失效通知，
 不承担高频日志传输。客户端只读取当前展开的输出。最终状态包含排空后的尾部输出，
 即使并发读取占用输出锁，关闭宿主仍会向每个任务发送停止信号。
