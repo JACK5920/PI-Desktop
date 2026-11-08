@@ -54,15 +54,20 @@ export const COMPUTER_LOOP_SYSTEM_PROMPT = [
   "You work in one window at a time: the one named as current. Switching to another window in the list is allowed.",
   "",
   "Answer with exactly one JSON object and nothing else. The schemas are:",
-  '{"kind":"action","action":{"kind":"click|double_click|right_click|set_value|press_keys|scroll|select","uid":"<id from the element list>","text":"...","keys":["cmd+a"],"scroll":{"dx":0,"dy":120},"option":"..."},"note":"short reason"}',
+  '{"kind":"action","action":{"kind":"click|double_click|right_click|hover|drag|set_value|type_text|press_keys|scroll|select","uid":"<id from the element list>","point":{"x":10,"y":20},"to":{"x":100,"y":120},"text":"...","keys":["ctrl+a"],"scroll":{"dx":0,"dy":3},"option":"..."},"note":"short reason"}',
   '{"kind":"switch","window":"<window id from the window list>","note":"short reason"}',
   '{"kind":"done","summary":"what is now true"}',
   '{"kind":"ask","question":"what you need from the user"}',
+  "For `done`, return only `kind` and `summary` (an optional `note` is accepted). For `switch`, return only `kind`, `window`, and optional `note`. For `action`, include only the fields required by that action; never put a final summary or unrelated fields inside `action`.",
   "",
   "Rules:",
   "- Address elements by `uid` from the element list. Use a point only when no element fits.",
+  "- Match the requested control by its observed role and label. Never substitute a neighboring field or click an unrelated element when the requested control is absent.",
   "- One action per answer. Do not batch, and do not invent a uid.",
-  "- `set_value` needs `text`; `press_keys` needs `keys`; `select` needs `option`; `scroll` needs `scroll`.",
+  "- `set_value` writes through an accessibility value pattern; `type_text` sends literal text to the focused target control and needs `text`; `press_keys` sends key chords and needs `keys`.",
+  "- Use `select` only on the exact list item or combo box being changed. For a closed combo box, issue `select` directly on the combo box; do not click it open first. The host searches that element and its own descendants only; it never searches the whole window for a matching label.",
+  "- `drag` needs `point` as its start and `to` as its destination, both relative to the current window; `hover` moves over the chosen element or point; `scroll` deltas are page-like UIA increments (maximum 100 increments per axis).",
+  "- After every action, inspect the new observation. Treat a host dispatch as an attempt, not proof that the application changed; only say `done` when the resulting state is visible in the next observation.",
   "- `switch` reads another window and costs a step but no budget. Every uid from the previous window stops working, so inspect what you switched to before acting on it.",
   "- A window marked refused can never be operated, and PI-Desktop's own windows are never a target. Do not retry one; it will not start working.",
   "- You cannot widen the scope, raise a budget, or disable a check. Asking for that fails the step.",
@@ -129,7 +134,7 @@ export function renderHistory(steps: readonly ComputerStepRecord[]): string {
     .map((step) => {
       const target = step.target ? ` on ${step.target}` : "";
       return step.ok
-        ? `${step.index}. ${step.action}${target}: ok`
+        ? `${step.index}. ${step.action}${target}: dispatched; confirm the result in the current observation`
         : `${step.index}. ${step.action}${target}: refused (${step.errorCode ?? "unknown"})`;
     })
     .join("\n");

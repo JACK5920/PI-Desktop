@@ -269,7 +269,10 @@ pub enum ActionKind {
     Click,
     DoubleClick,
     RightClick,
+    Hover,
+    Drag,
     SetValue,
+    TypeText,
     PressKeys,
     Scroll,
     Select,
@@ -287,7 +290,10 @@ impl ActionKind {
             ActionKind::Click => "click",
             ActionKind::DoubleClick => "double_click",
             ActionKind::RightClick => "right_click",
+            ActionKind::Hover => "hover",
+            ActionKind::Drag => "drag",
             ActionKind::SetValue => "set_value",
+            ActionKind::TypeText => "type_text",
             ActionKind::PressKeys => "press_keys",
             ActionKind::Scroll => "scroll",
             ActionKind::Select => "select",
@@ -324,6 +330,8 @@ pub struct Action {
     pub uid: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub point: Option<Point>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub to: Option<Point>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub basis: Option<Basis>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -386,6 +394,7 @@ pub enum Refusal {
     GrantExpired,
     BudgetExhausted,
     ScopeViolation,
+    TargetUnavailable,
     SelfTargetRefused,
     TargetDenylisted,
     SecureInputRefused,
@@ -411,6 +420,7 @@ impl Refusal {
             Refusal::GrantExpired => "COMPUTER_GRANT_EXPIRED",
             Refusal::BudgetExhausted => "COMPUTER_BUDGET_EXHAUSTED",
             Refusal::ScopeViolation => "COMPUTER_SCOPE_VIOLATION",
+            Refusal::TargetUnavailable => "COMPUTER_TARGET_UNAVAILABLE",
             Refusal::SelfTargetRefused => "COMPUTER_SELF_TARGET_REFUSED",
             Refusal::TargetDenylisted => "COMPUTER_TARGET_DENYLISTED",
             Refusal::SecureInputRefused => "COMPUTER_SECURE_INPUT_REFUSED",
@@ -440,6 +450,10 @@ impl Refusal {
             Refusal::GrantExpired => "the computer-use grant is no longer active".into(),
             Refusal::BudgetExhausted => "the grant's action budget is exhausted".into(),
             Refusal::ScopeViolation => "the request resolved outside the granted scope".into(),
+            Refusal::TargetUnavailable => {
+                "the requested window is temporarily unavailable; refresh the window list and retry"
+                    .into()
+            }
             Refusal::SelfTargetRefused => "PI-Desktop windows are never a target".into(),
             Refusal::TargetDenylisted => "the target is on the denylist".into(),
             Refusal::SecureInputRefused => "secure input is active".into(),
@@ -465,7 +479,7 @@ impl From<DesktopError> for Refusal {
             DesktopError::Unsupported => Refusal::PlatformUnsupported,
             DesktopError::PermissionMissing => Refusal::OsPermissionMissing,
             DesktopError::SecureInputRefused => Refusal::SecureInputRefused,
-            DesktopError::TargetGone => Refusal::ScopeViolation,
+            DesktopError::TargetGone => Refusal::TargetUnavailable,
             DesktopError::Elevated => Refusal::TargetElevated,
             DesktopError::ElementNotFound => Refusal::ElementNotFound,
             DesktopError::NotActionable => Refusal::ElementNotActionable,

@@ -369,6 +369,7 @@ Computer Use 错误是由 Host 管理的拒绝或有界操作失败。它们不�
 | `COMPUTER_GRANT_EXPIRED` | 否 | 授权已过期或已撤销 |
 | `COMPUTER_BUDGET_EXHAUSTED` | 否 | 授权允许的操作次数已用尽 |
 | `COMPUTER_SCOPE_VIOLATION` | 否 | 请求的操作超出授权当前绑定窗口的范围 |
+| `COMPUTER_TARGET_UNAVAILABLE` | 是 | 对所选窗口进行有界重试后仍无法解析或测量；刷新窗口列表后再试 |
 | `COMPUTER_SELF_TARGET_REFUSED` | 否 | 目标属于 PI-Desktop 窗口，始终禁止操作 |
 | `COMPUTER_TARGET_DENYLISTED` | 否 | Host 拒绝了命中禁止名单的目标 |
 | `COMPUTER_SECURE_INPUT_REFUSED` | 否 | 操作系统或焦点控件报告了安全/密码输入状态 |

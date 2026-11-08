@@ -592,6 +592,9 @@ impl Desktop for MacDesktop {
                 };
                 self.perform_ax_action(element, name)?;
             }
+            ActionKind::Hover | ActionKind::Drag | ActionKind::TypeText => {
+                return Err(DesktopError::Unsupported);
+            }
             ActionKind::PressKeys => unreachable!("handled above"),
         }
         Ok(Dispatched::AccessibilityAction)

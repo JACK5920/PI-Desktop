@@ -57,14 +57,27 @@ fn windows_backend_drives_only_the_isolated_fixture_window() {
         .as_nanos();
     let suffix = format!("{}-{nonce}", std::process::id());
     let title = format!("PI-CU-FIXTURE-{suffix}");
-    let script_path = std::env::temp_dir().join(format!("{title}.ps1"));
+    // Keep fixture artifacts inside this checkout's build output rather than
+    // creating another project/temp directory elsewhere on the machine.
+    let fixture_dir = std::env::current_exe()
+        .expect("test executable path")
+        .parent()
+        .expect("test executable directory")
+        .to_path_buf();
+    let script_path = fixture_dir.join(format!("{title}.ps1"));
+    let state_path = fixture_dir.join(format!("{title}.txt"));
+    let state_path_display = state_path.display().to_string();
+    let combo_state_path = fixture_dir.join(format!("{title}-combo.txt"));
+    let combo_state_display = combo_state_path.display().to_string();
+    let list_state_path = fixture_dir.join(format!("{title}-list.txt"));
+    let list_state_display = list_state_path.display().to_string();
     let script = format!(
         r#"Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 $form = New-Object System.Windows.Forms.Form
 $form.Text = '{title}'
 $form.StartPosition = 'CenterScreen'
-$form.Size = New-Object System.Drawing.Size(420, 180)
+$form.Size = New-Object System.Drawing.Size(520, 340)
 $label = New-Object System.Windows.Forms.Label
 $label.Name = 'FixtureStatus'
 $label.Text = 'CU-FIXTURE-IDLE'
@@ -76,9 +89,42 @@ $button.AccessibleName = 'CU-FIXTURE-ACTION'
 $button.Text = 'Run fixture action'
 $button.Location = New-Object System.Drawing.Point(16, 56)
 $button.add_Click({{ $label.Text = 'CU-FIXTURE-CLICKED' }})
+$textBox = New-Object System.Windows.Forms.TextBox
+$textBox.Name = 'FixtureText'
+$textBox.AccessibleName = 'CU-FIXTURE-EDIT'
+$textBox.Location = New-Object System.Drawing.Point(16, 100)
+$textBox.Width = 300
+$textBox.add_TextChanged({{ [System.IO.File]::WriteAllText('{state_path_display}', $textBox.Text) }})
+$combo = New-Object System.Windows.Forms.ComboBox
+$combo.Name = 'FixtureCombo'
+$combo.AccessibleName = 'CU-FIXTURE-COMBO'
+$combo.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
+[void]$combo.Items.Add('One')
+[void]$combo.Items.Add('Two')
+[void]$combo.Items.Add('Three')
+$combo.SelectedIndex = 0
+$combo.Location = New-Object System.Drawing.Point(16, 140)
+$combo.add_SelectedIndexChanged({{ [System.IO.File]::WriteAllText('{combo_state_display}', $combo.SelectedItem) }})
+$comboTimer = New-Object System.Windows.Forms.Timer
+$comboTimer.Interval = 50
+$comboTimer.add_Tick({{ [System.IO.File]::WriteAllText('{combo_state_display}', $combo.SelectedItem) }})
+$comboTimer.Start()
+$list = New-Object System.Windows.Forms.ListBox
+$list.Name = 'FixtureList'
+$list.AccessibleName = 'CU-FIXTURE-LIST'
+$list.Location = New-Object System.Drawing.Point(340, 18)
+$list.Size = New-Object System.Drawing.Size(140, 120)
+[void]$list.Items.Add('Alpha')
+[void]$list.Items.Add('Gamma')
+[void]$list.Items.Add('Epsilon')
+$list.SelectedIndex = 0
+$list.add_SelectedIndexChanged({{ [System.IO.File]::WriteAllText('{list_state_display}', $list.SelectedItem) }})
 $form.add_Shown({{ $form.Activate(); $button.Focus() | Out-Null }})
 $form.Controls.Add($label)
 $form.Controls.Add($button)
+$form.Controls.Add($textBox)
+$form.Controls.Add($combo)
+$form.Controls.Add($list)
 [System.Windows.Forms.Application]::Run($form)
 "#
     );
@@ -147,11 +193,131 @@ $form.Controls.Add($button)
             );
             thread::sleep(Duration::from_millis(50));
         }
+
+        let edit = desktop
+            .inspect(&target.target, 400)
+            .expect("inspect fixture text input")
+            .nodes
+            .into_iter()
+            .find(|item| item.label.as_deref() == Some("CU-FIXTURE-EDIT"))
+            .expect("UIA should identify the fixture Edit control");
+        assert_eq!(
+            edit.role, "edit",
+            "UIA control-type labels must match the role"
+        );
+        assert!(edit.actions.contains(&ActionKind::TypeText));
+        let expected = "Ab中文!@#";
+        desktop
+            .perform(
+                &target.target,
+                Some(&edit.uid),
+                &Action {
+                    kind: Some(ActionKind::TypeText),
+                    text: Some(expected.into()),
+                    ..Action::default()
+                },
+            )
+            .expect("send Unicode text to the verified foreground fixture");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if fs::read_to_string(&state_path).ok().as_deref() == Some(expected) {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "fixture text did not match exactly"
+            );
+            thread::sleep(Duration::from_millis(50));
+        }
+        desktop
+            .perform(
+                &target.target,
+                Some(&edit.uid),
+                &Action {
+                    kind: Some(ActionKind::PressKeys),
+                    keys: Some(vec!["A".into(), "!".into()]),
+                    ..Action::default()
+                },
+            )
+            .expect("send literal uppercase and punctuation key chords");
+        let expected = "Ab中文!@#A!";
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if fs::read_to_string(&state_path).ok().as_deref() == Some(expected) {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "press_keys did not preserve case and punctuation"
+            );
+            thread::sleep(Duration::from_millis(50));
+        }
+
+        let combo = desktop
+            .inspect(&target.target, 400)
+            .expect("inspect fixture combo box")
+            .nodes
+            .into_iter()
+            .find(|item| item.label.as_deref() == Some("CU-FIXTURE-COMBO"))
+            .expect("UIA should identify the fixture ComboBox");
+        assert!(
+            combo.role == "combo-box" || combo.actions.contains(&ActionKind::Select),
+            "a framework ComboBox with a generic UIA role must still expose Select"
+        );
+        assert!(combo.actions.contains(&ActionKind::Select));
+        desktop
+            .perform(
+                &target.target,
+                Some(&combo.uid),
+                &Action {
+                    kind: Some(ActionKind::Select),
+                    option: Some("Three".into()),
+                    ..Action::default()
+                },
+            )
+            .expect("select an option only within the addressed ComboBox");
+        assert_eq!(
+            fs::read_to_string(&combo_state_path).expect("read selected combo item"),
+            "Three",
+            "the intended option must change without touching another control"
+        );
+
+        let list = desktop
+            .inspect(&target.target, 400)
+            .expect("inspect fixture ListBox")
+            .nodes
+            .into_iter()
+            .find(|item| item.label.as_deref() == Some("CU-FIXTURE-LIST"))
+            .expect("UIA should identify the fixture ListBox");
+        assert_eq!(
+            list.role, "list",
+            "native ListBox Pane should retain its semantic role"
+        );
+        assert!(list.actions.contains(&ActionKind::Select));
+        desktop
+            .perform(
+                &target.target,
+                Some(&list.uid),
+                &Action {
+                    kind: Some(ActionKind::Select),
+                    option: Some("Gamma".into()),
+                    ..Action::default()
+                },
+            )
+            .expect("select an option only within the addressed ListBox");
+        assert_eq!(
+            fs::read_to_string(&list_state_path).expect("read selected list item"),
+            "Gamma",
+            "the exact requested list item must be selected"
+        );
     });
 
     let _ = child.kill();
     let _ = child.wait();
     let _ = fs::remove_file(script_path);
+    let _ = fs::remove_file(state_path);
+    let _ = fs::remove_file(combo_state_path);
+    let _ = fs::remove_file(list_state_path);
     if let Err(payload) = outcome {
         std::panic::resume_unwind(payload);
     }
@@ -159,6 +325,7 @@ $form.Controls.Add($button)
 
 struct FakeDesktop {
     targets: Mutex<Vec<RawTarget>>,
+    directly_resolved_target: Mutex<Option<RawTarget>>,
     measured: Mutex<Option<Measured>>,
     secure_input: Mutex<bool>,
     perform_result: Mutex<Result<Dispatched, DesktopError>>,
@@ -180,6 +347,7 @@ impl FakeDesktop {
             .unwrap_or_else(|| "com.example.app".into());
         Self {
             targets: Mutex::new(targets),
+            directly_resolved_target: Mutex::new(None),
             measured: Mutex::new(Some(Measured {
                 bounds,
                 app_key,
@@ -209,6 +377,10 @@ impl FakeDesktop {
         *self.targets.lock().unwrap() = targets;
     }
 
+    fn set_directly_resolved_target(&self, target: Option<RawTarget>) {
+        *self.directly_resolved_target.lock().unwrap() = target;
+    }
+
     fn performed_count(&self) -> usize {
         self.performed.lock().unwrap().len()
     }
@@ -231,6 +403,15 @@ impl Desktop for FakeDesktop {
         Ok(self.targets.lock().unwrap().clone())
     }
 
+    fn resolve_target(&self, target_id: &str) -> Result<Option<RawTarget>, DesktopError> {
+        Ok(self
+            .directly_resolved_target
+            .lock()
+            .unwrap()
+            .clone()
+            .filter(|item| item.target.target_id == target_id))
+    }
+
     fn measure(&self, _target: &TargetRef) -> Result<Measured, DesktopError> {
         self.measured
             .lock()
@@ -248,7 +429,10 @@ impl Desktop for FakeDesktop {
             return Err(error);
         }
         Ok(RawInspection {
-            nodes: vec![node("0.1", "AXButton", vec![ActionKind::Click])],
+            nodes: vec![
+                node("0.1", "AXButton", vec![ActionKind::Click]),
+                node("0.2", "AXTextField", vec![ActionKind::SetValue]),
+            ],
             truncated: false,
             fidelity: Fidelity::Full,
         })
@@ -789,7 +973,7 @@ fn a_target_that_became_another_application_revokes_the_grant() {
 }
 
 #[test]
-fn a_closed_window_is_a_scope_violation() {
+fn a_closed_window_is_reported_as_temporarily_unavailable() {
     let desktop = FakeDesktop::new(vec![target(5, "com.example.app", "Example", "w1")]);
     let mut grant = grant_for(&desktop, "w1");
     desktop.set_measured(None);
@@ -802,7 +986,7 @@ fn a_closed_window_is_a_scope_violation() {
         Instant::now(),
     )
     .expect_err("gone");
-    assert_eq!(error, Refusal::ScopeViolation);
+    assert_eq!(error, Refusal::TargetUnavailable);
 }
 
 #[test]
@@ -827,6 +1011,11 @@ fn malformed_actions_are_rejected_before_the_platform_sees_them() {
             ..Action::default()
         },
         Action {
+            kind: Some(ActionKind::TypeText),
+            uid: Some("0.1".into()),
+            ..Action::default()
+        },
+        Action {
             kind: Some(ActionKind::PressKeys),
             uid: Some("0.1".into()),
             keys: Some(vec![]),
@@ -846,6 +1035,16 @@ fn malformed_actions_are_rejected_before_the_platform_sees_them() {
         Action {
             kind: Some(ActionKind::Scroll),
             uid: Some("0.1".into()),
+            ..Action::default()
+        },
+        Action {
+            kind: Some(ActionKind::Drag),
+            uid: Some("0.1".into()),
+            point: Some(Point { x: 10.0, y: 10.0 }),
+            basis: Some(Basis {
+                revision: grant.revision,
+                bounds: grant.bounds,
+            }),
             ..Action::default()
         },
         Action {
@@ -981,6 +1180,310 @@ fn an_automatic_grant_skips_a_window_whose_tree_cannot_be_opened() {
 }
 
 #[test]
+fn a_desktop_grant_skips_a_window_that_exposes_only_its_root_node() {
+    struct RootOnlyFirst(FakeDesktop);
+    impl Desktop for RootOnlyFirst {
+        fn capabilities(&self) -> Capabilities {
+            self.0.capabilities()
+        }
+        fn list_targets(&self) -> Result<Vec<RawTarget>, DesktopError> {
+            self.0.list_targets()
+        }
+        fn measure(&self, target: &TargetRef) -> Result<Measured, DesktopError> {
+            let mut measured = self.0.measure(target)?;
+            measured.app_key = target.app_key.clone();
+            Ok(measured)
+        }
+        fn inspect(
+            &self,
+            target: &TargetRef,
+            _max_nodes: usize,
+        ) -> Result<RawInspection, DesktopError> {
+            let mut tree = self.0.inspect(target, 2)?;
+            if target.target_id == "root-only" {
+                tree.nodes.truncate(1);
+            }
+            Ok(tree)
+        }
+        fn secure_input_active(&self) -> bool {
+            self.0.secure_input_active()
+        }
+        fn perform(
+            &self,
+            target: &TargetRef,
+            uid: Option<&str>,
+            action: &Action,
+        ) -> Result<Dispatched, DesktopError> {
+            self.0.perform(target, uid, action)
+        }
+        fn self_pids(&self) -> Vec<i32> {
+            self.0.self_pids()
+        }
+    }
+    let desktop = RootOnlyFirst(FakeDesktop::new(vec![
+        target(19, "explorer.exe", "Program Manager", "root-only"),
+        target(20, "com.example.app", "Usable", "usable"),
+    ]));
+    let grant = policy::create_grant(
+        &desktop,
+        None,
+        &Denylist::default(),
+        GrantRequest {
+            target_id: None,
+            session_id: "root-only-test".into(),
+            input_policy: InputPolicy::AutonomousInScope,
+            capture: CaptureMode::A11yOnly,
+            action_budget: 3,
+            idle_expiry: Duration::from_secs(600),
+        },
+        Instant::now(),
+    )
+    .expect("grant the usable window");
+    assert_eq!(grant.target.target_id, "usable");
+}
+
+#[test]
+fn a_transient_uia_timeout_is_retried_before_grant_creation_fails() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct FirstInspectionTimesOut(FakeDesktop, AtomicUsize);
+    impl Desktop for FirstInspectionTimesOut {
+        fn capabilities(&self) -> Capabilities {
+            self.0.capabilities()
+        }
+        fn list_targets(&self) -> Result<Vec<RawTarget>, DesktopError> {
+            self.0.list_targets()
+        }
+        fn measure(&self, target: &TargetRef) -> Result<Measured, DesktopError> {
+            self.0.measure(target)
+        }
+        fn inspect(
+            &self,
+            target: &TargetRef,
+            max_nodes: usize,
+        ) -> Result<RawInspection, DesktopError> {
+            if self.1.fetch_add(1, Ordering::SeqCst) == 0 {
+                return Err(DesktopError::Timeout);
+            }
+            self.0.inspect(target, max_nodes)
+        }
+        fn secure_input_active(&self) -> bool {
+            self.0.secure_input_active()
+        }
+        fn perform(
+            &self,
+            target: &TargetRef,
+            uid: Option<&str>,
+            action: &Action,
+        ) -> Result<Dispatched, DesktopError> {
+            self.0.perform(target, uid, action)
+        }
+        fn self_pids(&self) -> Vec<i32> {
+            self.0.self_pids()
+        }
+    }
+
+    let desktop = FirstInspectionTimesOut(
+        FakeDesktop::new(vec![target(5, "com.example.app", "Example", "w1")]),
+        AtomicUsize::new(0),
+    );
+    let grant = policy::create_grant(
+        &desktop,
+        None,
+        &Denylist::default(),
+        GrantRequest {
+            target_id: None,
+            session_id: "transient-uia-timeout".into(),
+            input_policy: InputPolicy::AutonomousInScope,
+            capture: CaptureMode::A11yOnly,
+            action_budget: 3,
+            idle_expiry: Duration::from_secs(600),
+        },
+        Instant::now(),
+    )
+    .expect("a one-off UIA timeout must not become a scope refusal");
+    assert_eq!(grant.target.target_id, "w1");
+    assert_eq!(desktop.1.load(Ordering::SeqCst), 2);
+}
+
+#[test]
+fn a_transient_switch_measurement_retries_the_requested_window_not_another_one() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct FirstMeasureGone(FakeDesktop, AtomicUsize);
+    impl Desktop for FirstMeasureGone {
+        fn capabilities(&self) -> Capabilities {
+            self.0.capabilities()
+        }
+        fn list_targets(&self) -> Result<Vec<RawTarget>, DesktopError> {
+            self.0.list_targets()
+        }
+        fn measure(&self, target: &TargetRef) -> Result<Measured, DesktopError> {
+            if target.target_id == "w2" && self.1.fetch_add(1, Ordering::SeqCst) == 0 {
+                return Err(DesktopError::TargetGone);
+            }
+            let mut measured = self.0.measure(target)?;
+            measured.app_key = target.app_key.clone();
+            Ok(measured)
+        }
+        fn inspect(
+            &self,
+            target: &TargetRef,
+            max_nodes: usize,
+        ) -> Result<RawInspection, DesktopError> {
+            self.0.inspect(target, max_nodes)
+        }
+        fn secure_input_active(&self) -> bool {
+            self.0.secure_input_active()
+        }
+        fn perform(
+            &self,
+            target: &TargetRef,
+            uid: Option<&str>,
+            action: &Action,
+        ) -> Result<Dispatched, DesktopError> {
+            self.0.perform(target, uid, action)
+        }
+        fn self_pids(&self) -> Vec<i32> {
+            self.0.self_pids()
+        }
+    }
+
+    let desktop = FirstMeasureGone(
+        FakeDesktop::new(vec![
+            target(5, "com.example.one", "One", "w1"),
+            target(6, "com.example.two", "Two", "w2"),
+        ]),
+        AtomicUsize::new(0),
+    );
+    let mut grant = policy::create_grant(
+        &desktop,
+        None,
+        &Denylist::default(),
+        GrantRequest {
+            target_id: None,
+            session_id: "transient-switch".into(),
+            input_policy: InputPolicy::AutonomousInScope,
+            capture: CaptureMode::A11yOnly,
+            action_budget: 3,
+            idle_expiry: Duration::from_secs(600),
+        },
+        Instant::now(),
+    )
+    .expect("initial grant");
+    let inspection = policy::inspect_bound(
+        &desktop,
+        &mut grant,
+        &Denylist::default(),
+        Some("w2"),
+        None,
+        Instant::now(),
+    )
+    .expect("transient measurement should retry the requested target");
+    assert_eq!(grant.target.target_id, "w2");
+    assert_eq!(inspection.grant_id, grant.grant_id);
+    assert_eq!(desktop.1.load(Ordering::SeqCst), 2);
+}
+
+#[test]
+fn a_requested_window_omitted_from_two_enumerations_is_retried_without_substitution() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct TargetAppearsOnThirdEnumeration(FakeDesktop, AtomicUsize);
+    impl Desktop for TargetAppearsOnThirdEnumeration {
+        fn capabilities(&self) -> Capabilities {
+            self.0.capabilities()
+        }
+        fn list_targets(&self) -> Result<Vec<RawTarget>, DesktopError> {
+            let attempt = self.1.fetch_add(1, Ordering::SeqCst);
+            let targets = self.0.list_targets()?;
+            if attempt < 2 {
+                Ok(targets
+                    .into_iter()
+                    .filter(|item| item.target.target_id != "w2")
+                    .collect())
+            } else {
+                Ok(targets)
+            }
+        }
+        fn measure(&self, target: &TargetRef) -> Result<Measured, DesktopError> {
+            self.0.measure(target)
+        }
+        fn inspect(
+            &self,
+            target: &TargetRef,
+            max_nodes: usize,
+        ) -> Result<RawInspection, DesktopError> {
+            self.0.inspect(target, max_nodes)
+        }
+        fn secure_input_active(&self) -> bool {
+            self.0.secure_input_active()
+        }
+        fn perform(
+            &self,
+            target: &TargetRef,
+            uid: Option<&str>,
+            action: &Action,
+        ) -> Result<Dispatched, DesktopError> {
+            self.0.perform(target, uid, action)
+        }
+        fn self_pids(&self) -> Vec<i32> {
+            self.0.self_pids()
+        }
+    }
+
+    let desktop = TargetAppearsOnThirdEnumeration(
+        FakeDesktop::new(vec![
+            target(5, "com.example.one", "One", "w1"),
+            target(6, "com.example.two", "Two", "w2"),
+        ]),
+        AtomicUsize::new(0),
+    );
+    let grant = policy::create_grant(
+        &desktop,
+        None,
+        &Denylist::default(),
+        GrantRequest {
+            target_id: Some("w2".into()),
+            session_id: "transient-target-enumeration".into(),
+            input_policy: InputPolicy::AutonomousInScope,
+            capture: CaptureMode::A11yOnly,
+            action_budget: 3,
+            idle_expiry: Duration::from_secs(600),
+        },
+        Instant::now(),
+    )
+    .expect("the specifically requested target should resolve after transient omissions");
+
+    assert_eq!(grant.target.target_id, "w2");
+    assert_eq!(desktop.1.load(Ordering::SeqCst), 3);
+}
+
+#[test]
+fn a_live_exact_target_can_be_resolved_when_an_enumeration_snapshot_omits_it() {
+    let desktop = FakeDesktop::new(vec![target(5, "com.example.one", "One", "w1")]);
+    desktop.set_directly_resolved_target(Some(target(6, "com.example.two", "Two", "w2")));
+    let grant = policy::create_grant(
+        &desktop,
+        None,
+        &Denylist::default(),
+        GrantRequest {
+            target_id: Some("w2".into()),
+            session_id: "direct-target-resolution".into(),
+            input_policy: InputPolicy::AutonomousInScope,
+            capture: CaptureMode::A11yOnly,
+            action_budget: 3,
+            idle_expiry: Duration::from_secs(600),
+        },
+        Instant::now(),
+    )
+    .expect("resolve the exact live target instead of substituting the first enumerated window");
+
+    assert_eq!(grant.target.target_id, "w2");
+    assert_eq!(grant.target_label, "Two — Document");
+}
+
+#[test]
 fn a_desktop_grant_refuses_when_every_window_is_refused() {
     let desktop = FakeDesktop::new(vec![
         target(OWN_PID, "com.pi-desktop", "PI-Desktop", "self-window"),
@@ -1047,6 +1550,14 @@ fn a_window_that_cannot_be_read_does_not_become_the_bound_one() {
     let mut grant = desktop_grant(&desktop, &Denylist::default());
     assert_eq!(grant.target.target_id, "w1");
     let revision_before = grant.revision;
+    // The fake backend's measurement is intentionally one global value; move
+    // it to the requested target so this test exercises an unreadable UIA tree
+    // rather than the separate HWND identity-change refusal path.
+    desktop.set_measured(Some(Measured {
+        bounds: rect(20.0, 20.0, 500.0, 400.0),
+        app_key: "com.other.app".into(),
+        title: "Document".into(),
+    }));
     desktop.set_inspect_error(Some(DesktopError::TargetGone));
 
     let error = policy::inspect_bound(
@@ -1058,7 +1569,7 @@ fn a_window_that_cannot_be_read_does_not_become_the_bound_one() {
         Instant::now(),
     )
     .expect_err("the unreadable window must refuse");
-    assert_eq!(error, Refusal::ScopeViolation);
+    assert_eq!(error, Refusal::TargetUnavailable);
     assert_eq!(grant.target.target_id, "w1", "the grant stays where it was");
     assert_eq!(grant.target_label, "Example — Document");
     assert!(
@@ -1077,7 +1588,7 @@ fn a_window_that_cannot_be_read_does_not_become_the_bound_one() {
         Instant::now(),
     )
     .expect("the original window still inspects");
-    assert_eq!(inspection.nodes.len(), 1);
+    assert_eq!(inspection.nodes.len(), 2);
 }
 
 #[test]
@@ -1094,7 +1605,7 @@ fn a_rebind_re_applies_every_refusal() {
         ("self-window", Refusal::SelfTargetRefused),
         ("kc", Refusal::TargetDenylisted),
         ("notes", Refusal::TargetDenylisted),
-        ("no-such-window", Refusal::ScopeViolation),
+        ("no-such-window", Refusal::TargetUnavailable),
     ] {
         let error = policy::bind_target(&desktop, &mut grant, &denylist, target_id)
             .expect_err("refused rebind");

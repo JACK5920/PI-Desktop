@@ -96,7 +96,7 @@ Agent 以一条自然语言 `instruction` 加可选 `maxSteps` 调用它；`obse
 | `computer.inspect` | low | 绑定窗口的结构化无障碍树：role、name、是否有值、是否可用、是否聚焦、bounds、按授权生成的不透明 `uid`、声明的保真度；可选 `targetId` 先改绑窗口 |
 | `computer.act` | high | 重新测量绑定窗口后，执行一个已校验的动作，按 `uid` 寻址或按坐标配合 `basis` 寻址 |
 
-`computer.act` 支持 `click`、`double_click`、`right_click`、`set_value`、`press_keys`、`scroll` 与 `select`。每一项都优先通过平台无障碍动作派发，只有在不存在对应动作时才回退到面向窗口的事件。截取在 Main 中通过 Chromium 的 `desktopCapturer` 完成，按 host-core 测得的几何裁剪，并在 `a11y-only` 授权下被拒绝。
+`computer.act` 支持 `click`、`double_click`、`right_click`、`hover`、`drag`、`set_value`、`type_text`、`press_keys`、`scroll` 与 `select`。每一项都优先通过平台无障碍动作派发，只有在不存在对应动作时才回退到面向窗口的事件；派发成功本身不代表界面状态已改变，循环必须检查下一次观察结果后再报告完成。`set_value` 会回读值并在控件未保留目标字符串时报告失败。`scroll` 会按数值重复页面级 UIA 滚动增量（每个轴最多 100 次）。Windows 后端的悬停和拖动回退会向已验证的目标 HWND 投递事件；`type_text` 与 `press_keys` 仅在重新核实前台窗口属于授权目标进程后才使用系统键盘输入，无法聚焦目标时会拒绝输入。其他后端尚未实现这些新动作时会明确返回不支持。截取在 Main 中通过 Chromium 的 `desktopCapturer` 完成，按 host-core 测得的几何裁剪，并在 `a11y-only` 授权下被拒绝。
 
 元素身份以无障碍为先。`uid` 不透明、按授权生成，并在 revision 变化时失效。`inspect` 不返回元素取值，只返回是否有值，因此读取字段内容是一个用户能在转录中看到的显式 `inspect` 结果字段，而不是枚举的副作用。
 

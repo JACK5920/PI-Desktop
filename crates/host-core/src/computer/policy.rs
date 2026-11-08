@@ -6,6 +6,7 @@
 //! mode — the mode decides whether a grant may be minted and whether an input
 //! step needs a card, and both of those happen before a request arrives here.
 
+use std::thread;
 use std::time::{Duration, Instant};
 
 use super::backend::{Desktop, Measured, RawTarget};
@@ -14,6 +15,9 @@ use super::{
     GrantState, InputPolicy, Inspection, Node, Rect, Refusal, Target, TargetRefusal, MAX_NODES,
     MAX_TEXT_CHARS, MIN_IDLE_EXPIRY,
 };
+
+const TARGET_RESOLVE_ATTEMPTS: usize = 5;
+const TARGET_RESOLVE_RETRY_DELAY: Duration = Duration::from_millis(100);
 
 /// Application identifiers that may never be targeted, whatever the user
 /// configures. These are credential surfaces: driving them with synthetic
@@ -228,6 +232,88 @@ fn target_label(raw: &RawTarget) -> String {
     }
 }
 
+/// Resolve one host-minted window id from a fresh enumeration. A transient
+/// enumeration gap must not masquerade as an out-of-scope target, but retries
+/// stay pinned to the requested id and never substitute another window.
+fn find_target(desktop: &dyn Desktop, target_id: &str) -> ComputerResult<RawTarget> {
+    let requested_pid = target_id.split_once(':').map(|(pid, _)| pid);
+    let mut same_process_ids = Vec::<Vec<String>>::with_capacity(TARGET_RESOLVE_ATTEMPTS);
+    let mut enumeration_errors = Vec::<String>::new();
+    // Window enumeration and HWND revalidation can briefly disagree while a
+    // window is activating. Retry the exact host-issued id for a bounded
+    // interval; never substitute another window. A missing target is not a
+    // scope violation: the grant's scope check is performed separately below.
+    for attempt in 0..TARGET_RESOLVE_ATTEMPTS {
+        match desktop.list_targets() {
+            Ok(targets) => {
+                same_process_ids.push(
+                    targets
+                        .iter()
+                        .filter(|item| {
+                            requested_pid.is_some_and(|pid| {
+                                item.target.target_id.starts_with(&format!("{pid}:"))
+                            })
+                        })
+                        .map(|item| item.target.target_id.clone())
+                        .collect(),
+                );
+                if let Some(found) = targets
+                    .into_iter()
+                    .find(|item| item.target.target_id == target_id)
+                {
+                    return Ok(found);
+                }
+                // Some window managers briefly omit a still-live top-level
+                // HWND from EnumWindows during activation. Ask the platform
+                // backend to validate this exact previously observed ID
+                // directly; it may not substitute another window.
+                match desktop.resolve_target(target_id) {
+                    Ok(Some(found)) if found.target.target_id == target_id => return Ok(found),
+                    Ok(Some(found)) => tracing::warn!(
+                        stage = "resolve-target-id-mismatch",
+                        requested_target_id = target_id,
+                        resolved_target_id = %found.target.target_id,
+                        "backend returned a different target id; ignoring it"
+                    ),
+                    Ok(None) => {}
+                    Err(
+                        error @ (super::backend::DesktopError::Timeout
+                        | super::backend::DesktopError::TargetGone
+                        | super::backend::DesktopError::Failed(_)),
+                    ) => enumeration_errors.push(format!(
+                        "attempt {} direct resolution: {error:?}",
+                        attempt + 1
+                    )),
+                    Err(error) => return Err(Refusal::from(error)),
+                }
+                if attempt + 1 < TARGET_RESOLVE_ATTEMPTS {
+                    thread::sleep(TARGET_RESOLVE_RETRY_DELAY);
+                }
+            }
+            Err(
+                error @ (super::backend::DesktopError::Timeout
+                | super::backend::DesktopError::TargetGone
+                | super::backend::DesktopError::Failed(_)),
+            ) => {
+                enumeration_errors.push(format!("attempt {}: {error:?}", attempt + 1));
+                if attempt + 1 < TARGET_RESOLVE_ATTEMPTS {
+                    thread::sleep(TARGET_RESOLVE_RETRY_DELAY);
+                }
+            }
+            Err(error) => return Err(Refusal::from(error)),
+        }
+    }
+    tracing::warn!(
+        stage = "resolve-target",
+        target_id,
+        attempts = TARGET_RESOLVE_ATTEMPTS,
+        same_process_target_ids = ?same_process_ids,
+        enumeration_errors = ?enumeration_errors,
+        "computer-use target was not resolved"
+    );
+    Err(Refusal::TargetUnavailable)
+}
+
 /// The frontmost window this module does not refuse.
 ///
 /// Backends enumerate front-to-back, so the first survivor is the window the
@@ -244,18 +330,37 @@ fn frontmost_usable(
         .into_iter()
         .filter(|item| refusal_for_target(item, self_pids, denylist).is_none())
         .collect::<Vec<_>>();
-    // Prefer a window whose tree can actually be read, so the agent does not
-    // start bound to a window-server surface it can only switch away from.
-    // A desktop where nothing opens still binds the frontmost allowed window:
-    // the refusal then comes from the read, where it can be attributed.
-    allowed
-        .iter()
-        .find(|item| {
-            desktop.can_open_with_sensitive_input(&item.target, denylist.allows_sensitive_input())
-        })
-        .cloned()
-        .or_else(|| allowed.into_iter().next())
-        .ok_or(Refusal::ScopeViolation)
+    // Do not mistake a shell/window-server root for a usable application.
+    // `can_open` only proves UIA returned a root; an empty/single-node tree
+    // cannot give the agent a real control to operate. Some Windows providers
+    // time out briefly while another app is opening, so retry transient
+    // inspection failures before concluding that no usable window exists.
+    for item in &allowed {
+        for attempt in 0..3 {
+            match desktop.inspect_with_sensitive_input(
+                &item.target,
+                2,
+                denylist.allows_sensitive_input(),
+            ) {
+                Ok(tree) if tree.nodes.len() > 1 => return Ok(item.clone()),
+                Ok(_) => break, // A root-only tree is a stable, unusable target.
+                Err(super::backend::DesktopError::SecureInputRefused) => {
+                    return Err(Refusal::SecureInputRefused);
+                }
+                Err(
+                    super::backend::DesktopError::Timeout
+                    | super::backend::DesktopError::TargetGone
+                    | super::backend::DesktopError::Failed(_),
+                ) if attempt < 2 => thread::sleep(Duration::from_millis(35)),
+                Err(_) => break,
+            }
+        }
+    }
+    if allowed.is_empty() {
+        Err(Refusal::ScopeViolation)
+    } else {
+        Err(Refusal::TargetUnavailable)
+    }
 }
 
 /// Mint the single active grant.
@@ -279,11 +384,7 @@ pub fn create_grant(
     let self_pids = desktop.self_pids();
     let (scope, found) = match &request.target_id {
         Some(target_id) => {
-            let raw = desktop.list_targets().map_err(Refusal::from)?;
-            let found = raw
-                .into_iter()
-                .find(|item| &item.target.target_id == target_id)
-                .ok_or(Refusal::ScopeViolation)?;
+            let found = find_target(desktop, target_id)?;
             if let Some(reason) = refusal_for_target(&found, &self_pids, denylist) {
                 return Err(refusal_error(reason));
             }
@@ -347,11 +448,7 @@ pub fn bind_target(
         return Err(Refusal::ScopeViolation);
     }
     let self_pids = desktop.self_pids();
-    let raw = desktop.list_targets().map_err(Refusal::from)?;
-    let found = raw
-        .into_iter()
-        .find(|item| item.target.target_id == target_id)
-        .ok_or(Refusal::ScopeViolation)?;
+    let found = find_target(desktop, target_id)?;
     if let Some(reason) = refusal_for_target(&found, &self_pids, denylist) {
         return Err(refusal_error(reason));
     }
@@ -399,15 +496,45 @@ fn refresh(
     desktop: &dyn Desktop,
     grant: &mut Grant,
     denylist: &Denylist,
+    allow_desktop_rebind: bool,
 ) -> ComputerResult<Refreshed> {
     let measured = match desktop.measure(&grant.target) {
         Ok(measured) if measured.app_key == grant.target.app_key => measured,
+        Ok(_) => {
+            tracing::warn!(stage = "measure-target-identity", target_id = %grant.target.target_id, "computer-use target HWND now belongs to a different application");
+            if grant.scope != GrantScope::Desktop || !allow_desktop_rebind {
+                if grant.scope != GrantScope::Desktop {
+                    grant.state = GrantState::Revoked;
+                }
+                return Err(Refusal::ScopeViolation);
+            }
+            let self_pids = desktop.self_pids();
+            let found = frontmost_usable(desktop, &self_pids, denylist)?;
+            grant.revision = grant.revision.saturating_add(1);
+            grant.target_label = target_label(&found);
+            grant.bounds = found.bounds;
+            let measured = Measured {
+                bounds: found.bounds,
+                app_key: found.target.app_key.clone(),
+                title: found.title.clone(),
+            };
+            grant.target = found.target;
+            return Ok(Refreshed {
+                measured,
+                rebound: true,
+            });
+        }
         other => {
             // Either the window is gone, or its handle now belongs to a
             // different application: in both cases nothing the caller holds
             // still describes this window.
-            if grant.scope != GrantScope::Desktop {
-                grant.state = GrantState::Revoked;
+            if grant.scope != GrantScope::Desktop || !allow_desktop_rebind {
+                if grant.scope != GrantScope::Desktop {
+                    grant.state = GrantState::Revoked;
+                }
+                if let Err(error) = &other {
+                    tracing::warn!(stage = "measure-target", target_id = %grant.target.target_id, error = ?error, "computer-use target could not be measured");
+                }
                 return Err(other
                     .err()
                     .map(Refusal::from)
@@ -447,12 +574,24 @@ struct Refreshed {
     rebound: bool,
 }
 
+#[cfg(test)]
 pub fn inspect(
     desktop: &dyn Desktop,
     grant: &mut Grant,
     denylist: &Denylist,
     expected_revision: Option<u32>,
     now: Instant,
+) -> ComputerResult<Inspection> {
+    inspect_with_rebind(desktop, grant, denylist, expected_revision, now, true)
+}
+
+fn inspect_with_rebind(
+    desktop: &dyn Desktop,
+    grant: &mut Grant,
+    denylist: &Denylist,
+    expected_revision: Option<u32>,
+    now: Instant,
+    allow_desktop_rebind: bool,
 ) -> ComputerResult<Inspection> {
     if denylist
         .restrictions
@@ -461,7 +600,7 @@ pub fn inspect(
     {
         return Err(Refusal::SecureInputRefused);
     }
-    refresh(desktop, grant, denylist)?;
+    refresh(desktop, grant, denylist, allow_desktop_rebind)?;
     if let Some(expected) = expected_revision {
         if expected != grant.revision {
             return Err(Refusal::StaleRevision);
@@ -469,7 +608,10 @@ pub fn inspect(
     }
     let raw = desktop
         .inspect_with_sensitive_input(&grant.target, MAX_NODES, denylist.allows_sensitive_input())
-        .map_err(Refusal::from)?;
+        .map_err(|error| {
+            tracing::warn!(stage = "inspect-target", target_id = %grant.target.target_id, error = ?error, "computer-use target inspection failed");
+            Refusal::from(error)
+        })?;
     grant.last_activity = now;
     Ok(Inspection {
         grant_id: grant.grant_id.clone(),
@@ -508,7 +650,49 @@ pub fn inspect_bound(
         // A refused bind mutates nothing, so there is nothing to put back.
         bind_target(desktop, grant, denylist, target_id)?;
     }
-    match inspect(desktop, grant, denylist, expected_revision, now) {
+    // A requested switch must inspect that exact window. The generic desktop
+    // refresh path may rebind a stale desktop grant to a different frontmost
+    // window, which would make a switch appear successful on the wrong app.
+    let first = inspect_with_rebind(
+        desktop,
+        grant,
+        denylist,
+        expected_revision,
+        now,
+        target_id.is_none(),
+    );
+    let result = if matches!(
+        &first,
+        Err(Refusal::ScopeViolation | Refusal::TargetUnavailable)
+    ) {
+        if let Some(target_id) = target_id {
+            let expected = grant.target.clone();
+            let self_pids = desktop.self_pids();
+            let still_same_target = find_target(desktop, target_id).ok().filter(|item| {
+                item.target.pid == expected.pid
+                    && item.target.app_key == expected.app_key
+                    && refusal_for_target(item, &self_pids, denylist).is_none()
+            });
+            if let Some(found) = still_same_target {
+                if !grant.bounds.matches(&found.bounds) {
+                    grant.revision = grant.revision.saturating_add(1);
+                }
+                grant.target_label = target_label(&found);
+                grant.target = found.target;
+                grant.bounds = found.bounds;
+                thread::sleep(TARGET_RESOLVE_RETRY_DELAY);
+                tracing::info!(stage = "inspect-target-retry", target_id, "retrying inspection of the same validated window after a transient target failure");
+                inspect_with_rebind(desktop, grant, denylist, None, now, false)
+            } else {
+                first
+            }
+        } else {
+            first
+        }
+    } else {
+        first
+    };
+    match result {
         Ok(inspection) => Ok(inspection),
         Err(refusal) => {
             if let Some((target, label, bounds)) = restore {
@@ -581,6 +765,17 @@ pub fn validate_action(
                 ));
             }
         }
+        ActionKind::TypeText => {
+            let text = action
+                .text
+                .as_deref()
+                .ok_or_else(|| Refusal::ActionRejected("type_text without text".into()))?;
+            if text.chars().count() > MAX_TEXT_CHARS {
+                return Err(Refusal::ActionRejected(
+                    "text exceeds the step limit".into(),
+                ));
+            }
+        }
         ActionKind::PressKeys => {
             let keys = action
                 .keys
@@ -615,7 +810,22 @@ pub fn validate_action(
                 return Err(Refusal::ActionRejected("non-finite scroll delta".into()));
             }
         }
-        ActionKind::Click | ActionKind::DoubleClick | ActionKind::RightClick => {}
+        ActionKind::Drag => {
+            let to = action
+                .to
+                .ok_or_else(|| Refusal::ActionRejected("drag without destination".into()))?;
+            let basis = action
+                .basis
+                .ok_or_else(|| Refusal::ActionRejected("drag without a basis".into()))?;
+            validate_basis(grant, &basis, measured_bounds)?;
+            if !measured_bounds.contains(to.x, to.y) {
+                return Err(Refusal::ScopeViolation);
+            }
+        }
+        ActionKind::Click
+        | ActionKind::DoubleClick
+        | ActionKind::RightClick
+        | ActionKind::Hover => {}
     }
     Ok(kind)
 }
@@ -653,7 +863,7 @@ pub fn act(
     {
         return Err(Refusal::SecureInputRefused);
     }
-    let refreshed = refresh(desktop, grant, denylist)?;
+    let refreshed = refresh(desktop, grant, denylist, true)?;
     if refreshed.rebound {
         // A desktop grant whose window closed now describes another one. The
         // action was aimed at the window that is gone, so it is refused even if

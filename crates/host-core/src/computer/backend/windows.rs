@@ -1,6 +1,8 @@
 use std::collections::hash_map::DefaultHasher;
 use std::ffi::c_void;
 use std::hash::{Hash, Hasher};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use windows::core::{Interface, BOOL, BSTR, PWSTR};
 use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND, LPARAM, POINT, RECT, WPARAM};
@@ -23,19 +25,29 @@ use windows::Win32::System::Threading::{
 use windows::Win32::UI::Accessibility::{
     CUIAutomation8, IUIAutomation, IUIAutomation2, IUIAutomationElement, IUIAutomationElementArray,
     IUIAutomationExpandCollapsePattern, IUIAutomationInvokePattern, IUIAutomationScrollPattern,
-    IUIAutomationSelectionItemPattern, IUIAutomationTogglePattern, IUIAutomationValuePattern,
-    ScrollAmount, ScrollAmount_NoAmount, ScrollAmount_SmallDecrement, ScrollAmount_SmallIncrement,
-    TreeScope_Subtree, UIA_ExpandCollapsePatternId, UIA_InvokePatternId, UIA_ScrollPatternId,
-    UIA_SelectionItemPatternId, UIA_TogglePatternId, UIA_ValuePatternId,
+    IUIAutomationSelectionItemPattern, IUIAutomationSelectionPattern, IUIAutomationTogglePattern,
+    IUIAutomationValuePattern, ScrollAmount_LargeDecrement, ScrollAmount_LargeIncrement,
+    ScrollAmount_NoAmount, TreeScope_Subtree, UIA_ExpandCollapsePatternId, UIA_InvokePatternId,
+    UIA_ScrollPatternId, UIA_SelectionItemPatternId, UIA_SelectionPatternId, UIA_TogglePatternId,
+    UIA_ValuePatternId,
+};
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
+    KEYEVENTF_UNICODE, VIRTUAL_KEY,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetWindowRect, GetWindowTextW, GetWindowThreadProcessId, IsChild, IsWindowVisible,
-    PostMessageW, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP,
-    WM_RBUTTONDOWN, WM_RBUTTONUP,
+    EnumWindows, GetAncestor, GetClassNameW, GetDlgCtrlID, GetForegroundWindow, GetParent,
+    GetWindowRect, GetWindowTextW, GetWindowThreadProcessId, IsChild, IsWindowVisible,
+    PostMessageW, SendMessageW, SetForegroundWindow, CB_FINDSTRINGEXACT, CB_GETCURSEL,
+    CB_GETLBTEXT, CB_SHOWDROPDOWN, GA_ROOT, LB_FINDSTRINGEXACT, LB_GETCOUNT, LB_GETCURSEL,
+    LB_GETTEXT, LB_SETCURSEL, WM_COMMAND, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP,
+    WM_MOUSEMOVE, WM_RBUTTONDOWN, WM_RBUTTONUP,
 };
 
 use super::{Desktop, DesktopError, Dispatched, Measured, RawInspection, RawTarget, TargetRef};
-use crate::computer::{Action, ActionKind, Capabilities, Fidelity, Node, PermissionState, Rect};
+use crate::computer::{
+    Action, ActionKind, Capabilities, Fidelity, Node, PermissionState, Point, Rect,
+};
 
 const MAX_TREE_NODES: usize = 400;
 const UIA_TIMEOUT_MS: u32 = 2_000;
@@ -43,10 +55,11 @@ const MOD_CONTROL: u8 = 0x02;
 const MOD_SHIFT: u8 = 0x01;
 const MOD_ALT: u8 = 0x04;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct KeyChord {
     modifiers: u8,
     virtual_key: u16,
+    literal: Option<Vec<u16>>,
 }
 
 pub struct WindowsDesktop;
@@ -149,9 +162,14 @@ impl WindowsDesktop {
         // UIA may stop responding when an app exits mid-query. Each property
         // is individually fallible; absent identity/geometry yields a stable
         // but non-actionable node rather than guessed data.
-        let role_id = unsafe { element.CurrentControlType() }
+        let platform_role_id = unsafe { element.CurrentControlType() }
             .map(|value| value.0)
             .unwrap_or(0);
+        // WinForms and other providers may expose native ComboBox/ListBox
+        // HWNDs as a generic Pane with no SelectionItemPattern. Preserve the
+        // semantic role from the exact target-owned control class so the
+        // model/runtime can offer Select instead of rejecting it upstream.
+        let role_id = semantic_control_type(platform_role_id, element);
         let role = control_type_name(role_id).to_string();
         let name = unsafe { element.CurrentName() }
             .ok()
@@ -181,7 +199,7 @@ impl WindowsDesktop {
             }
             .is_ok()
             {
-                actions.extend([ActionKind::Click, ActionKind::DoubleClick]);
+                actions.push(ActionKind::Click);
             }
             if unsafe {
                 element.GetCurrentPatternAs::<IUIAutomationTogglePattern>(UIA_TogglePatternId)
@@ -196,6 +214,8 @@ impl WindowsDesktop {
                 )
             }
             .is_ok()
+                || (belongs_to_target
+                    && (is_combo_box_element(&element) || is_list_box_element(&element)))
             {
                 actions.push(ActionKind::Select);
             }
@@ -217,6 +237,20 @@ impl WindowsDesktop {
             }
             if has_value {
                 actions.push(ActionKind::SetValue);
+            }
+            if rect.is_some() {
+                // These operations have a window-scoped message fallback when
+                // the provider does not expose an equivalent UIA pattern.
+                actions.extend([
+                    ActionKind::Click,
+                    ActionKind::DoubleClick,
+                    ActionKind::RightClick,
+                    ActionKind::Hover,
+                    ActionKind::Drag,
+                ]);
+            }
+            if rect.is_some() && matches!(role_id, 50003 | 50004 | 50030) {
+                actions.push(ActionKind::TypeText);
             }
             // The final ownership/password check is repeated at dispatch time.
             actions.push(ActionKind::PressKeys);
@@ -313,14 +347,22 @@ impl WindowsDesktop {
         let (hwnd, pid) = self_element_hwnd(element)?;
         let target_hwnd = hwnd_from_u64(target.window);
         let is_descendant = unsafe { IsChild(target_hwnd, hwnd) }.as_bool();
-        element_belongs_to_target(
+        let directly_owned = element_belongs_to_target(
             hwnd.0 as usize,
             pid,
             target.window as usize,
             target.pid as u32,
             is_descendant,
-        )
-        .then_some(hwnd)
+        );
+        // UIA providers for an expanded ComboBox may report its dropdown
+        // popup HWND instead of the combo's child HWND. Because this element
+        // came from the bound window's UIA subtree, allow that specific
+        // control type when the popup is still owned by the same process.
+        // Do not grant the same exception to arbitrary controls/windows.
+        let combo_popup = unsafe { element.CurrentControlType() }
+            .is_ok_and(|control_type| control_type.0 == 50003)
+            && pid == target.pid as u32;
+        (directly_owned || combo_popup).then_some(hwnd)
     }
 
     fn click_targeted(
@@ -393,6 +435,35 @@ impl Desktop for WindowsDesktop {
 
     fn list_targets(&self) -> Result<Vec<RawTarget>, DesktopError> {
         self.enumerate()
+    }
+
+    fn resolve_target(&self, target_id: &str) -> Result<Option<RawTarget>, DesktopError> {
+        let mut parts = target_id.splitn(3, ':');
+        let (Some(pid_text), Some(hwnd_text), Some(expected_app_key)) =
+            (parts.next(), parts.next(), parts.next())
+        else {
+            return Ok(None);
+        };
+        let (Ok(pid), Ok(hwnd_value)) = (pid_text.parse::<u32>(), hwnd_text.parse::<usize>())
+        else {
+            return Ok(None);
+        };
+        if pid == 0
+            || hwnd_value == 0
+            || format!("{pid}:{hwnd_value}:{expected_app_key}") != target_id
+        {
+            return Ok(None);
+        }
+        let hwnd = hwnd_from_u64(hwnd_value as u64);
+        if !is_window_visible(hwnd) || unsafe { GetAncestor(hwnd, GA_ROOT) }.0 != hwnd.0 {
+            return Ok(None);
+        }
+        let mut actual_pid = 0u32;
+        unsafe { GetWindowThreadProcessId(hwnd, Some(&mut actual_pid)) };
+        if actual_pid != pid {
+            return Ok(None);
+        }
+        Ok(raw_target_for_window(hwnd).filter(|target| target.target.app_key == expected_app_key))
     }
 
     fn measure(&self, target: &TargetRef) -> Result<Measured, DesktopError> {
@@ -497,13 +568,26 @@ impl Desktop for WindowsDesktop {
                     element.GetCurrentPatternAs::<IUIAutomationValuePattern>(UIA_ValuePatternId)
                 }
                 .map_err(|_| DesktopError::NotActionable)?;
+                let expected = value;
                 let value = BSTR::from(value);
                 // SAFETY: UIA owns the target provider and copies the BSTR for
                 // this synchronous ValuePattern call.
                 unsafe { pattern.SetValue(&value) }.map_err(map_uia_error)?;
+                let actual = unsafe { pattern.CurrentValue() }.map_err(map_uia_error)?;
+                if actual.to_string() != expected {
+                    return Err(DesktopError::Failed(
+                        "the target did not retain the requested value".into(),
+                    ));
+                }
+            }
+            ActionKind::TypeText => {
+                let text = action.text.as_deref().ok_or(DesktopError::NotActionable)?;
+                unsafe { element.SetFocus() }.map_err(map_uia_error)?;
+                send_unicode_text(hwnd_from_u64(target.window), target.pid as u32, text)?;
+                return Ok(Dispatched::SystemInput);
             }
             ActionKind::Click | ActionKind::DoubleClick | ActionKind::RightClick => {
-                if kind != ActionKind::RightClick {
+                if kind == ActionKind::Click {
                     if let Ok(pattern) = unsafe {
                         element
                             .GetCurrentPatternAs::<IUIAutomationInvokePattern>(UIA_InvokePatternId)
@@ -511,9 +595,6 @@ impl Desktop for WindowsDesktop {
                         // SAFETY: the Invoke pattern is returned by the same
                         // element whose owner was verified above.
                         unsafe { pattern.Invoke() }.map_err(map_uia_error)?;
-                        if kind == ActionKind::DoubleClick {
-                            unsafe { pattern.Invoke() }.map_err(map_uia_error)?;
-                        }
                         return Ok(Dispatched::AccessibilityAction);
                     }
                     if let Ok(pattern) = unsafe {
@@ -529,13 +610,31 @@ impl Desktop for WindowsDesktop {
             }
             ActionKind::PressKeys => {
                 let keys = action.keys.as_ref().ok_or(DesktopError::NotActionable)?;
-                // Focus only the target UIA element; never use SendInput or
-                // mutate the system cursor. Messages are sent to its own HWND.
                 unsafe { element.SetFocus() }.map_err(map_uia_error)?;
                 for chord in keys {
                     let chord = parse_key_chord(chord).ok_or(DesktopError::NotActionable)?;
-                    post_key_chord(hwnd, chord)?;
+                    send_key_chord(hwnd_from_u64(target.window), target.pid as u32, chord)?;
                 }
+                return Ok(Dispatched::SystemInput);
+            }
+            ActionKind::Hover => {
+                let bounds = self.measure(target)?.bounds;
+                let point = action.point.unwrap_or_else(|| {
+                    let rect = unsafe { element.CurrentBoundingRectangle() }.ok();
+                    rect.map(|rect| Point {
+                        x: (rect.left + (rect.right - rect.left) / 2) as f64 - bounds.x,
+                        y: (rect.top + (rect.bottom - rect.top) / 2) as f64 - bounds.y,
+                    })
+                    .unwrap_or(Point { x: 0.0, y: 0.0 })
+                });
+                post_mouse_move(hwnd, bounds, point, false)?;
+                return Ok(Dispatched::WindowEvent);
+            }
+            ActionKind::Drag => {
+                let from = action.point.ok_or(DesktopError::NotActionable)?;
+                let to = action.to.ok_or(DesktopError::NotActionable)?;
+                let bounds = self.measure(target)?.bounds;
+                post_drag(hwnd, bounds, from, to)?;
                 return Ok(Dispatched::WindowEvent);
             }
             ActionKind::Scroll => {
@@ -544,36 +643,185 @@ impl Desktop for WindowsDesktop {
                     element.GetCurrentPatternAs::<IUIAutomationScrollPattern>(UIA_ScrollPatternId)
                 }
                 .map_err(|_| DesktopError::NotActionable)?;
-                let horizontal = scroll_amount(scroll.dx);
-                let vertical = scroll_amount(scroll.dy);
-                unsafe { pattern.Scroll(horizontal, vertical) }.map_err(map_uia_error)?;
+                let horizontal_steps = scroll_steps(scroll.dx)?;
+                let vertical_steps = scroll_steps(scroll.dy)?;
+                for _ in 0..horizontal_steps {
+                    let horizontal = if scroll.dx > 0.0 {
+                        ScrollAmount_LargeIncrement
+                    } else {
+                        ScrollAmount_LargeDecrement
+                    };
+                    unsafe { pattern.Scroll(horizontal, ScrollAmount_NoAmount) }
+                        .map_err(map_uia_error)?;
+                }
+                for _ in 0..vertical_steps {
+                    let vertical = if scroll.dy > 0.0 {
+                        ScrollAmount_LargeIncrement
+                    } else {
+                        ScrollAmount_LargeDecrement
+                    };
+                    unsafe { pattern.Scroll(ScrollAmount_NoAmount, vertical) }
+                        .map_err(map_uia_error)?;
+                }
             }
             ActionKind::Select => {
                 let option = action
                     .option
                     .as_deref()
                     .ok_or(DesktopError::NotActionable)?;
-                let (_, array) = self.elements(&automation, target)?;
-                let count = unsafe { array.Length() }.map_err(map_uia_error)?.max(0) as usize;
-                let mut selected = false;
-                for index in 0..count.min(MAX_TREE_NODES) {
-                    let candidate =
-                        unsafe { array.GetElement(index as i32) }.map_err(map_uia_error)?;
-                    if unsafe { candidate.CurrentName() }
+                let option_matches = |candidate: &IUIAutomationElement| {
+                    unsafe { candidate.CurrentName() }
                         .map(|name| name.iter().copied().eq(option.encode_utf16()))
                         .unwrap_or(false)
-                    {
+                };
+                let mut candidates = vec![element.clone()];
+                let condition =
+                    unsafe { automation.CreateTrueCondition() }.map_err(map_uia_error)?;
+                let descendants = unsafe { element.FindAll(TreeScope_Subtree, &condition) }
+                    .map_err(map_uia_error)?;
+                let count = unsafe { descendants.Length() }
+                    .map_err(map_uia_error)?
+                    .max(0) as usize;
+                candidates.extend(
+                    (0..count.min(MAX_TREE_NODES))
+                        .filter_map(|index| unsafe { descendants.GetElement(index as i32) }.ok()),
+                );
+                let mut selected = false;
+                let is_combo_box = is_combo_box_element(&element);
+                let is_list_box = is_list_box_element(&element);
+                if is_combo_box {
+                    unsafe { element.SetFocus() }.map_err(map_uia_error)?;
+                    selected = select_combo_option(hwnd, target.pid as u32, option)?;
+                    if !selected {
+                        selected = select_combo_option_by_keyboard(
+                            hwnd_from_u64(target.window),
+                            hwnd,
+                            target.pid as u32,
+                            option,
+                            &element,
+                        )?;
+                    }
+                }
+                if !selected && is_list_box {
+                    unsafe { element.SetFocus() }.map_err(map_uia_error)?;
+                    selected = select_list_box_option(
+                        hwnd_from_u64(target.window),
+                        hwnd,
+                        target.pid as u32,
+                        option,
+                    )?;
+                }
+                for candidate in candidates.into_iter().filter(|_| !selected) {
+                    if option_matches(&candidate) {
                         if let Ok(pattern) = unsafe {
                             candidate.GetCurrentPatternAs::<IUIAutomationSelectionItemPattern>(
                                 UIA_SelectionItemPatternId,
                             )
                         } {
-                            self.validate_element_owner(&candidate, target, allow_sensitive_input)?;
-                            unsafe { pattern.Select() }.map_err(map_uia_error)?;
-                            selected = true;
-                            break;
+                            let belongs_to_target = self
+                                .validate_element_owner(&candidate, target, allow_sensitive_input)
+                                .is_ok();
+                            // A standard ComboBox's expanded list can be a
+                            // transient popup HWND that is not a child of the
+                            // owning window. It is still safe to select an
+                            // option obtained from this ComboBox's UIA subtree
+                            // when the provider confirms it belongs to the
+                            // exact target process. Do not generalize this to
+                            // arbitrary elements found elsewhere in the app.
+                            let belongs_to_combo_popup = unsafe { element.CurrentControlType() }
+                                .is_ok_and(|control_type| control_type.0 == 50003)
+                                && self_element_hwnd(&candidate)
+                                    .is_some_and(|(_, pid)| pid == target.pid as u32)
+                                && (allow_sensitive_input
+                                    || unsafe { candidate.CurrentIsPassword() }
+                                        .map(|value| !value.as_bool())
+                                        .unwrap_or(false));
+                            if !belongs_to_target && !belongs_to_combo_popup {
+                                continue;
+                            }
+                            let deadline = Instant::now() + Duration::from_millis(500);
+                            if !unsafe { pattern.CurrentIsSelected() }
+                                .map_err(map_uia_error)?
+                                .as_bool()
+                            {
+                                if let Some((option_hwnd, option_pid)) =
+                                    self_element_hwnd(&candidate)
+                                {
+                                    if option_pid == target.pid as u32 {
+                                        // Clicking the actual option popup
+                                        // follows the native user interaction
+                                        // path and lets frameworks update their
+                                        // managed state (UIA Select alone may
+                                        // only update the native selection).
+                                        self.click_targeted(
+                                            &candidate,
+                                            option_hwnd,
+                                            target,
+                                            ActionKind::Click,
+                                        )?;
+                                    }
+                                }
+                            }
+                            while !unsafe { pattern.CurrentIsSelected() }
+                                .map_err(map_uia_error)?
+                                .as_bool()
+                                && Instant::now() < deadline
+                            {
+                                thread::sleep(Duration::from_millis(20));
+                            }
+                            if !unsafe { pattern.CurrentIsSelected() }
+                                .map_err(map_uia_error)?
+                                .as_bool()
+                            {
+                                unsafe { pattern.Select() }.map_err(map_uia_error)?;
+                            }
+                            if unsafe { pattern.CurrentIsSelected() }
+                                .map_err(map_uia_error)?
+                                .as_bool()
+                            {
+                                selected = true;
+                                break;
+                            }
                         }
                     }
+                }
+                if !selected && is_combo_box {
+                    // Standard combo-box dropdown items are often exposed in
+                    // a transient popup HWND rather than as descendants of the
+                    // bound window. Use native keyboard type-ahead on the exact
+                    // focused ComboBox instead of searching another control.
+                    unsafe { element.SetFocus() }.map_err(map_uia_error)?;
+                    let top = hwnd_from_u64(target.window);
+                    send_unicode_text(top, target.pid as u32, option)?;
+                    let enter = parse_key_chord("enter").ok_or(DesktopError::NotActionable)?;
+                    send_key_chord(top, target.pid as u32, enter)?;
+                    let selected_by_pattern = unsafe {
+                        element.GetCurrentPatternAs::<IUIAutomationSelectionPattern>(
+                            UIA_SelectionPatternId,
+                        )
+                    }
+                    .ok()
+                    .and_then(|pattern| unsafe { pattern.GetCurrentSelection() }.ok())
+                    .is_some_and(|selection| {
+                        let count = unsafe { selection.Length() }.unwrap_or(0).max(0) as usize;
+                        (0..count.min(MAX_TREE_NODES)).any(|index| {
+                            unsafe { selection.GetElement(index as i32) }
+                                .ok()
+                                .is_some_and(|item| option_matches(&item))
+                        })
+                    });
+                    let selected_by_value = unsafe {
+                        element.GetCurrentPatternAs::<IUIAutomationValuePattern>(UIA_ValuePatternId)
+                    }
+                    .ok()
+                    .and_then(|pattern| unsafe { pattern.CurrentValue() }.ok())
+                    .is_some_and(|value| value.to_string() == option);
+                    if !selected_by_pattern && !selected_by_value {
+                        return Err(DesktopError::Failed(
+                            "the requested combo-box option was not selected".into(),
+                        ));
+                    }
+                    selected = true;
                 }
                 if !selected {
                     return Err(DesktopError::NotActionable);
@@ -610,25 +858,27 @@ unsafe extern "system" fn collect_window(hwnd: HWND, lparam: LPARAM) -> BOOL {
     // SAFETY: EnumWindows passes the pointer created by enumerate() and calls
     // this callback synchronously before enumerate() returns.
     let targets = unsafe { &mut *(lparam.0 as *mut Vec<RawTarget>) };
-    if !unsafe { IsWindowVisible(hwnd) }.as_bool() {
-        return BOOL(1);
+    if let Some(target) = raw_target_for_window(hwnd) {
+        targets.push(target);
+    }
+    BOOL(1)
+}
+
+fn raw_target_for_window(hwnd: HWND) -> Option<RawTarget> {
+    if !is_window_visible(hwnd) {
+        return None;
     }
     let mut rect = RECT::default();
-    if unsafe { GetWindowRect(hwnd, &mut rect) }.is_err()
-        || rect.right <= rect.left
-        || rect.bottom <= rect.top
-    {
-        return BOOL(1);
+    unsafe { GetWindowRect(hwnd, &mut rect).ok()? };
+    if rect.right <= rect.left || rect.bottom <= rect.top {
+        return None;
     }
     let mut pid = 0u32;
     unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
     if pid == 0 {
-        return BOOL(1);
+        return None;
     }
-    let Some(app_key) = process_app_key(pid) else {
-        return BOOL(1);
-    };
-    let app_name = app_key.clone();
+    let app_key = process_app_key(pid)?;
     let elevated = match (
         process_integrity_level(unsafe { GetCurrentProcess() }),
         process_integrity_level_for_pid(pid),
@@ -636,14 +886,16 @@ unsafe extern "system" fn collect_window(hwnd: HWND, lparam: LPARAM) -> BOOL {
         (Some(host), Some(target)) => target_integrity_is_higher(host, target),
         _ => true,
     };
-    targets.push(RawTarget {
+    Some(RawTarget {
         target: TargetRef {
-            target_id: format!("{}:{}", pid, hwnd.0 as usize),
+            // Bind an old id to the observed executable too, so recycled
+            // PID/HWND values cannot silently target a different app.
+            target_id: format!("{}:{}:{}", pid, hwnd.0 as usize, app_key),
             pid: pid as i32,
             window: hwnd.0 as usize as u64,
-            app_key,
+            app_key: app_key.clone(),
         },
-        app_name,
+        app_name: app_key,
         title: window_title(hwnd),
         bounds: Rect {
             x: rect.left as f64,
@@ -652,8 +904,7 @@ unsafe extern "system" fn collect_window(hwnd: HWND, lparam: LPARAM) -> BOOL {
             height: (rect.bottom - rect.top) as f64,
         },
         elevated,
-    });
-    BOOL(1)
+    })
 }
 
 fn process_app_key(pid: u32) -> Option<String> {
@@ -820,10 +1071,37 @@ fn parse_key_chord(input: &str) -> Option<KeyChord> {
         }
         modifiers |= bit;
     }
-    let key = virtual_key(parts[parts.len() - 1])?;
+    let key_text = parts[parts.len() - 1];
+    let key = virtual_key(key_text).or_else(|| {
+        if modifiers & (MOD_CONTROL | MOD_ALT) == 0
+            && key_text.chars().count() == 1
+            && !key_text.chars().next()?.is_control()
+        {
+            Some(0)
+        } else {
+            None
+        }
+    })?;
+    let literal = if modifiers & (MOD_CONTROL | MOD_ALT) == 0 {
+        let mut chars = key_text.chars();
+        match (chars.next(), chars.next()) {
+            (Some(character), None) if !character.is_control() => {
+                let character = if modifiers & MOD_SHIFT != 0 {
+                    character.to_ascii_uppercase()
+                } else {
+                    character
+                };
+                Some(character.encode_utf16(&mut [0; 2]).to_vec())
+            }
+            _ => None,
+        }
+    } else {
+        None
+    };
     Some(KeyChord {
         modifiers,
         virtual_key: key,
+        literal,
     })
 }
 
@@ -861,48 +1139,414 @@ fn virtual_key(key: &str) -> Option<u16> {
     })
 }
 
-fn post_key_chord(hwnd: HWND, chord: KeyChord) -> Result<(), DesktopError> {
+fn send_key_chord(
+    target_window: HWND,
+    target_pid: u32,
+    chord: KeyChord,
+) -> Result<(), DesktopError> {
     let modifiers = [
         (MOD_CONTROL, 0x11u16),
         (MOD_SHIFT, 0x10u16),
         (MOD_ALT, 0x12u16),
     ];
-    // SAFETY: this HWND was just validated against the target's process and
-    // remains the sole recipient; no global keyboard API is used.
-    unsafe {
+    let mut inputs = Vec::new();
+    if let Some(units) = chord.literal {
+        for unit in units {
+            inputs.push(keyboard_input(0, unit, KEYEVENTF_UNICODE));
+            inputs.push(keyboard_input(0, unit, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP));
+        }
+    } else {
         for (flag, key) in modifiers {
             if chord.modifiers & flag != 0 {
-                PostMessageW(Some(hwnd), WM_KEYDOWN, WPARAM(key as usize), LPARAM(1))
-                    .map_err(map_uia_error)?;
+                inputs.push(keyboard_input(key, 0, KEYBD_EVENT_FLAGS(0)));
             }
         }
-        PostMessageW(
-            Some(hwnd),
-            WM_KEYDOWN,
-            WPARAM(chord.virtual_key as usize),
-            LPARAM(1),
-        )
-        .map_err(map_uia_error)?;
-        PostMessageW(
-            Some(hwnd),
-            WM_KEYUP,
-            WPARAM(chord.virtual_key as usize),
-            LPARAM(1isize << 30 | 1isize << 31),
-        )
-        .map_err(map_uia_error)?;
+        inputs.push(keyboard_input(chord.virtual_key, 0, KEYBD_EVENT_FLAGS(0)));
+        inputs.push(keyboard_input(chord.virtual_key, 0, KEYEVENTF_KEYUP));
         for (flag, key) in modifiers.into_iter().rev() {
             if chord.modifiers & flag != 0 {
-                PostMessageW(
-                    Some(hwnd),
-                    WM_KEYUP,
-                    WPARAM(key as usize),
-                    LPARAM(1isize << 30 | 1isize << 31),
-                )
-                .map_err(map_uia_error)?;
+                inputs.push(keyboard_input(key, 0, KEYEVENTF_KEYUP));
             }
         }
     }
+    send_keyboard_inputs(target_window, target_pid, &inputs)
+}
+
+fn send_unicode_text(target_window: HWND, target_pid: u32, text: &str) -> Result<(), DesktopError> {
+    let mut inputs = Vec::with_capacity(text.encode_utf16().count() * 2);
+    for unit in text.encode_utf16() {
+        inputs.push(keyboard_input(0, unit, KEYEVENTF_UNICODE));
+        inputs.push(keyboard_input(0, unit, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP));
+    }
+    send_keyboard_inputs(target_window, target_pid, &inputs)
+}
+
+fn keyboard_input(vk: u16, scan: u16, flags: KEYBD_EVENT_FLAGS) -> INPUT {
+    INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: VIRTUAL_KEY(vk),
+                wScan: scan,
+                dwFlags: flags,
+                time: 0,
+                dwExtraInfo: 0,
+            },
+        },
+    }
+}
+
+fn send_keyboard_inputs(
+    target_window: HWND,
+    target_pid: u32,
+    inputs: &[INPUT],
+) -> Result<(), DesktopError> {
+    ensure_target_foreground(target_window, target_pid)?;
+    if inputs.is_empty() {
+        return Ok(());
+    }
+    // SAFETY: the target window was just activated and its owning PID was
+    // verified. SendInput has no HWND parameter; activation plus an immediate
+    // foreground-owner re-check prevents typing into an unrelated app.
+    ensure_target_foreground(target_window, target_pid)?;
+    let sent = unsafe { SendInput(inputs, std::mem::size_of::<INPUT>() as i32) } as usize;
+    if sent != inputs.len() {
+        return Err(DesktopError::Failed(
+            "Windows accepted only part of the keyboard input".into(),
+        ));
+    }
     Ok(())
+}
+
+fn ensure_target_foreground(target_window: HWND, target_pid: u32) -> Result<(), DesktopError> {
+    let foreground = unsafe { GetForegroundWindow() };
+    let mut foreground_pid = 0u32;
+    if !foreground.0.is_null() {
+        unsafe { GetWindowThreadProcessId(foreground, Some(&mut foreground_pid)) };
+    }
+    if foreground_pid != target_pid {
+        let _ = unsafe { SetForegroundWindow(target_window) };
+        let foreground = unsafe { GetForegroundWindow() };
+        foreground_pid = 0;
+        if !foreground.0.is_null() {
+            unsafe { GetWindowThreadProcessId(foreground, Some(&mut foreground_pid)) };
+        }
+    }
+    if foreground_pid != target_pid {
+        return Err(DesktopError::Failed(
+            "the target window could not be safely brought to the foreground".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn client_lparam(hwnd: HWND, window_bounds: Rect, point: Point) -> Result<LPARAM, DesktopError> {
+    let mut screen = POINT {
+        x: (window_bounds.x + point.x).round() as i32,
+        y: (window_bounds.y + point.y).round() as i32,
+    };
+    if !unsafe { ScreenToClient(hwnd, &mut screen) }.as_bool() {
+        return Err(DesktopError::TargetGone);
+    }
+    Ok(make_lparam(screen.x, screen.y))
+}
+
+fn select_combo_option(hwnd: HWND, target_pid: u32, option: &str) -> Result<bool, DesktopError> {
+    if !is_combo_box_class(&window_class_name(hwnd)) {
+        return Ok(false);
+    }
+    let mut owner_pid = 0u32;
+    unsafe { GetWindowThreadProcessId(hwnd, Some(&mut owner_pid)) };
+    if owner_pid != target_pid {
+        return Err(DesktopError::ElementNotFound);
+    }
+    let mut option_wide = option.encode_utf16().collect::<Vec<_>>();
+    option_wide.push(0);
+    let index = unsafe {
+        SendMessageW(
+            hwnd,
+            CB_FINDSTRINGEXACT,
+            Some(WPARAM(usize::MAX)),
+            Some(LPARAM(option_wide.as_ptr() as isize)),
+        )
+    }
+    .0;
+    if index < 0 || index > 1_000 {
+        return Ok(false);
+    }
+    let current = unsafe { SendMessageW(hwnd, CB_GETCURSEL, Some(WPARAM(0)), None) }.0;
+    if current < 0 || current > 1_000 {
+        return Ok(false);
+    }
+    // Use real keyboard selection rather than CB_SETCURSEL: setting the
+    // native index directly can leave framework-owned state/events stale.
+    unsafe { SendMessageW(hwnd, CB_SHOWDROPDOWN, Some(WPARAM(1)), None) };
+    let key = if current < index { "down" } else { "up" };
+    for _ in 0..current.abs_diff(index) {
+        send_key_chord(
+            hwnd_from_u64(hwnd.0 as u64),
+            target_pid,
+            parse_key_chord(key).unwrap(),
+        )?;
+        thread::sleep(Duration::from_millis(25));
+    }
+    send_key_chord(
+        hwnd_from_u64(hwnd.0 as u64),
+        target_pid,
+        parse_key_chord("enter").ok_or(DesktopError::NotActionable)?,
+    )?;
+    let selected_index = unsafe { SendMessageW(hwnd, CB_GETCURSEL, Some(WPARAM(0)), None) }.0;
+    if selected_index != index {
+        return Ok(false);
+    }
+    let mut selected = vec![0u16; option.encode_utf16().count().saturating_add(2)];
+    let copied = unsafe {
+        SendMessageW(
+            hwnd,
+            CB_GETLBTEXT,
+            Some(WPARAM(index as usize)),
+            Some(LPARAM(selected.as_mut_ptr() as isize)),
+        )
+    }
+    .0;
+    Ok(copied >= 0 && String::from_utf16_lossy(&selected[..copied as usize]) == option)
+}
+
+/// WinForms may expose a ListBox as a generic Pane and omit UIA selection
+/// patterns. Resolve the exact option through the target-owned ListBox HWND,
+/// navigate with real keyboard input, then verify both the selected index and
+/// text. No text is typed into the target and no other control is searched.
+fn select_list_box_option(
+    target_window: HWND,
+    list_hwnd: HWND,
+    target_pid: u32,
+    option: &str,
+) -> Result<bool, DesktopError> {
+    let class_name = window_class_name(list_hwnd);
+    if !is_list_box_class(&class_name) {
+        return Ok(false);
+    }
+    let mut owner_pid = 0u32;
+    unsafe { GetWindowThreadProcessId(list_hwnd, Some(&mut owner_pid)) };
+    if owner_pid != target_pid {
+        return Err(DesktopError::ElementNotFound);
+    }
+    let mut option_wide = option.encode_utf16().collect::<Vec<_>>();
+    option_wide.push(0);
+    let index = unsafe {
+        SendMessageW(
+            list_hwnd,
+            LB_FINDSTRINGEXACT,
+            Some(WPARAM(usize::MAX)),
+            Some(LPARAM(option_wide.as_ptr() as isize)),
+        )
+    }
+    .0;
+    let count = unsafe { SendMessageW(list_hwnd, LB_GETCOUNT, Some(WPARAM(0)), None) }.0;
+    if index < 0 || count <= 0 || index >= count || index > 1_000 {
+        return Ok(false);
+    }
+    let parent = unsafe { GetParent(list_hwnd) }.map_err(map_uia_error)?;
+    if parent.0.is_null() {
+        return Err(DesktopError::ElementNotFound);
+    }
+    let mut parent_pid = 0u32;
+    unsafe { GetWindowThreadProcessId(parent, Some(&mut parent_pid)) };
+    if parent_pid != target_pid {
+        return Err(DesktopError::ElementNotFound);
+    }
+    // LB_SETCURSEL changes exactly this ListBox's selected item. A native
+    // list box does not notify its owner for that message, so relay the
+    // documented LBN_SELCHANGE notification through the verified parent to
+    // keep framework-owned SelectionChanged state in sync.
+    let result =
+        unsafe { SendMessageW(list_hwnd, LB_SETCURSEL, Some(WPARAM(index as usize)), None) }.0;
+    if result < 0 {
+        return Ok(false);
+    }
+    let control_id = unsafe { GetDlgCtrlID(list_hwnd) };
+    if control_id >= 0 {
+        let wparam = (1usize << 16) | control_id as u16 as usize;
+        let _ = unsafe {
+            SendMessageW(
+                parent,
+                WM_COMMAND,
+                Some(WPARAM(wparam)),
+                Some(LPARAM(list_hwnd.0 as isize)),
+            )
+        };
+    }
+    if list_box_value_matches(list_hwnd, index, option) {
+        return Ok(true);
+    }
+
+    let current = unsafe { SendMessageW(list_hwnd, LB_GETCURSEL, Some(WPARAM(0)), None) }.0;
+    if current != index {
+        let first = parse_key_chord("home").ok_or(DesktopError::NotActionable)?;
+        send_key_chord(target_window, target_pid, first)?;
+        let direction = if index >= 0 { "down" } else { "up" };
+        for _ in 0..index {
+            send_key_chord(
+                target_window,
+                target_pid,
+                parse_key_chord(direction).ok_or(DesktopError::NotActionable)?,
+            )?;
+        }
+    }
+    let selected_index = unsafe { SendMessageW(list_hwnd, LB_GETCURSEL, Some(WPARAM(0)), None) }.0;
+    if selected_index != index {
+        return Ok(false);
+    }
+    Ok(list_box_value_matches(list_hwnd, index, option))
+}
+
+fn list_box_value_matches(list_hwnd: HWND, index: isize, option: &str) -> bool {
+    let mut selected = vec![0u16; option.encode_utf16().count().saturating_add(2)];
+    let copied = unsafe {
+        SendMessageW(
+            list_hwnd,
+            LB_GETTEXT,
+            Some(WPARAM(index as usize)),
+            Some(LPARAM(selected.as_mut_ptr() as isize)),
+        )
+    }
+    .0;
+    copied >= 0 && String::from_utf16_lossy(&selected[..copied as usize]) == option
+}
+
+/// WinForms and some other frameworks expose their combo HWND as a generic
+/// `Pane` with no UIA patterns. Use foreground-verified keyboard type-ahead as
+/// the semantic fallback, then read the selected native item back. Typing into
+/// a closed unrelated control is never treated as success.
+fn select_combo_option_by_keyboard(
+    target_window: HWND,
+    combo_hwnd: HWND,
+    target_pid: u32,
+    option: &str,
+    element: &IUIAutomationElement,
+) -> Result<bool, DesktopError> {
+    let open = parse_key_chord("alt+down").ok_or(DesktopError::NotActionable)?;
+    send_key_chord(target_window, target_pid, open)?;
+    thread::sleep(Duration::from_millis(100));
+    send_unicode_text(target_window, target_pid, option)?;
+    let enter = parse_key_chord("enter").ok_or(DesktopError::NotActionable)?;
+    send_key_chord(target_window, target_pid, enter)?;
+    thread::sleep(Duration::from_millis(100));
+
+    let selected_index = unsafe { SendMessageW(combo_hwnd, CB_GETCURSEL, Some(WPARAM(0)), None) }.0;
+    if selected_index < 0 || selected_index > 1_000 {
+        return Ok(false);
+    }
+    let mut selected = vec![0u16; option.encode_utf16().count().saturating_add(2)];
+    let copied = unsafe {
+        SendMessageW(
+            combo_hwnd,
+            CB_GETLBTEXT,
+            Some(WPARAM(selected_index as usize)),
+            Some(LPARAM(selected.as_mut_ptr() as isize)),
+        )
+    }
+    .0;
+    let native_value_matches =
+        copied >= 0 && String::from_utf16_lossy(&selected[..copied as usize]) == option;
+    if native_value_matches {
+        return Ok(true);
+    }
+    let value_matches =
+        unsafe { element.GetCurrentPatternAs::<IUIAutomationValuePattern>(UIA_ValuePatternId) }
+            .ok()
+            .and_then(|pattern| unsafe { pattern.CurrentValue() }.ok())
+            .is_some_and(|value| value.to_string() == option);
+    if value_matches {
+        return Ok(true);
+    }
+    let selection_matches = unsafe {
+        element.GetCurrentPatternAs::<IUIAutomationSelectionPattern>(UIA_SelectionPatternId)
+    }
+    .ok()
+    .and_then(|pattern| unsafe { pattern.GetCurrentSelection() }.ok())
+    .is_some_and(|selection| {
+        let count = unsafe { selection.Length() }.unwrap_or(0).max(0) as usize;
+        (0..count.min(MAX_TREE_NODES)).any(|index| {
+            unsafe { selection.GetElement(index as i32) }
+                .ok()
+                .and_then(|item| unsafe { item.CurrentName() }.ok())
+                .is_some_and(|name| name.to_string() == option)
+        })
+    });
+    Ok(selection_matches)
+}
+
+fn is_combo_box_element(element: &IUIAutomationElement) -> bool {
+    unsafe { element.CurrentControlType() }.is_ok_and(|control_type| control_type.0 == 50003)
+        || self_element_hwnd(element)
+            .is_some_and(|(hwnd, _)| is_combo_box_class(&window_class_name(hwnd)))
+}
+
+fn is_list_box_element(element: &IUIAutomationElement) -> bool {
+    unsafe { element.CurrentControlType() }.is_ok_and(|control_type| control_type.0 == 50008)
+        || self_element_hwnd(element)
+            .is_some_and(|(hwnd, _)| is_list_box_class(&window_class_name(hwnd)))
+}
+
+fn semantic_control_type(platform_role_id: i32, element: &IUIAutomationElement) -> i32 {
+    if is_combo_box_element(element) {
+        50003
+    } else if is_list_box_element(element) {
+        50008
+    } else {
+        platform_role_id
+    }
+}
+
+fn is_combo_box_class(class_name: &str) -> bool {
+    class_name.to_ascii_lowercase().contains("combobox")
+}
+
+fn is_list_box_class(class_name: &str) -> bool {
+    class_name.eq_ignore_ascii_case("listbox")
+        || class_name.to_ascii_lowercase().contains(".listbox.")
+}
+
+fn window_class_name(hwnd: HWND) -> String {
+    let mut class_name = [0u16; 128];
+    let class_length = unsafe { GetClassNameW(hwnd, &mut class_name) }.max(0) as usize;
+    String::from_utf16_lossy(&class_name[..class_length.min(class_name.len())])
+}
+
+fn post_mouse_move(
+    hwnd: HWND,
+    window_bounds: Rect,
+    point: Point,
+    button_down: bool,
+) -> Result<(), DesktopError> {
+    let packed = client_lparam(hwnd, window_bounds, point)?;
+    let flags = if button_down { WPARAM(1) } else { WPARAM(0) };
+    unsafe { PostMessageW(Some(hwnd), WM_MOUSEMOVE, flags, packed) }.map_err(map_uia_error)
+}
+
+fn post_drag(hwnd: HWND, window_bounds: Rect, from: Point, to: Point) -> Result<(), DesktopError> {
+    let start = client_lparam(hwnd, window_bounds, from)?;
+    unsafe { PostMessageW(Some(hwnd), WM_LBUTTONDOWN, WPARAM(1), start) }.map_err(map_uia_error)?;
+    const INTERMEDIATE_STEPS: i32 = 8;
+    let movement = (|| {
+        for step in 1..=INTERMEDIATE_STEPS {
+            let ratio = step as f64 / INTERMEDIATE_STEPS as f64;
+            let point = Point {
+                x: from.x + (to.x - from.x) * ratio,
+                y: from.y + (to.y - from.y) * ratio,
+            };
+            post_mouse_move(hwnd, window_bounds, point, true)?;
+        }
+        Ok::<(), DesktopError>(())
+    })();
+    // Always attempt to release after a successful button-down, even when an
+    // intermediate message fails, so the target is not left in a drag state.
+    let release = client_lparam(hwnd, window_bounds, to).and_then(|end| unsafe {
+        PostMessageW(Some(hwnd), WM_LBUTTONUP, WPARAM(0), end).map_err(map_uia_error)
+    });
+    movement?;
+    release
 }
 
 fn node_fingerprint(index: usize, role: i32, name: Option<&str>, bounds: Option<Rect>) -> String {
@@ -919,44 +1563,46 @@ fn node_fingerprint(index: usize, role: i32, name: Option<&str>, bounds: Option<
 fn control_type_name(value: i32) -> &'static str {
     match value {
         50000 => "button",
-        50002 => "calendar",
-        50003 => "checkbox",
-        50004 => "combo-box",
-        50005 => "edit",
-        50006 => "hyperlink",
-        50007 => "image",
-        50008 => "list-item",
-        50009 => "list",
-        50010 => "menu",
-        50011 => "menu-bar",
-        50012 => "menu-item",
-        50013 => "progress-bar",
-        50014 => "radio-button",
-        50015 => "scroll-bar",
-        50016 => "slider",
-        50017 => "spinner",
-        50018 => "status-bar",
-        50019 => "tab",
-        50020 => "tab-item",
-        50021 => "text",
-        50022 => "tool-bar",
-        50023 => "tool-tip",
-        50024 => "tree",
-        50025 => "tree-item",
-        50026 => "custom",
-        50027 => "group",
-        50028 => "thumb",
-        50029 => "data-grid",
-        50030 => "data-item",
-        50031 => "document",
-        50032 => "split-button",
-        50033 => "window",
-        50034 => "pane",
-        50035 => "header",
-        50036 => "header-item",
-        50037 => "table",
-        50038 => "title-bar",
-        50039 => "separator",
+        50001 => "calendar",
+        50002 => "checkbox",
+        50003 => "combo-box",
+        50004 => "edit",
+        50005 => "hyperlink",
+        50006 => "image",
+        50007 => "list-item",
+        50008 => "list",
+        50009 => "menu",
+        50010 => "menu-bar",
+        50011 => "menu-item",
+        50012 => "progress-bar",
+        50013 => "radio-button",
+        50014 => "scroll-bar",
+        50015 => "slider",
+        50016 => "spinner",
+        50017 => "status-bar",
+        50018 => "tab",
+        50019 => "tab-item",
+        50020 => "text",
+        50021 => "tool-bar",
+        50022 => "tool-tip",
+        50023 => "tree",
+        50024 => "tree-item",
+        50025 => "custom",
+        50026 => "group",
+        50027 => "thumb",
+        50028 => "data-grid",
+        50029 => "data-item",
+        50030 => "document",
+        50031 => "split-button",
+        50032 => "window",
+        50033 => "pane",
+        50034 => "header",
+        50035 => "header-item",
+        50036 => "table",
+        50037 => "title-bar",
+        50038 => "separator",
+        50039 => "semantic-zoom",
+        50040 => "app-bar",
         _ => "unknown",
     }
 }
@@ -970,14 +1616,11 @@ fn relative_rect(value: RECT, target: Rect) -> Rect {
     }
 }
 
-fn scroll_amount(value: f64) -> ScrollAmount {
-    if value > 0.0 {
-        ScrollAmount_SmallIncrement
-    } else if value < 0.0 {
-        ScrollAmount_SmallDecrement
-    } else {
-        ScrollAmount_NoAmount
+fn scroll_steps(value: f64) -> Result<u32, DesktopError> {
+    if !value.is_finite() || value.abs() > 100.0 {
+        return Err(DesktopError::NotActionable);
     }
+    Ok(value.abs().ceil() as u32)
 }
 
 fn make_lparam(x: i32, y: i32) -> LPARAM {
@@ -999,10 +1642,33 @@ mod tests {
             Some(KeyChord {
                 modifiers: MOD_CONTROL | MOD_SHIFT,
                 virtual_key: 0x41,
+                literal: None,
             })
         );
+        assert_eq!(
+            parse_key_chord("A").unwrap().literal,
+            Some(vec![b'A' as u16])
+        );
+        assert_eq!(
+            parse_key_chord("!").unwrap().literal,
+            Some(vec![b'!' as u16])
+        );
+        assert_eq!(
+            parse_key_chord("shift+a").unwrap().literal,
+            Some(vec![b'A' as u16])
+        );
+        assert_eq!(parse_key_chord("字").unwrap().literal, Some(vec![0x5B57]));
         assert_eq!(parse_key_chord("win+r"), None);
         assert_eq!(parse_key_chord("ctrl+alt+shift+a"), None);
+    }
+
+    #[test]
+    fn scroll_delta_keeps_magnitude_and_rejects_unbounded_values() {
+        assert_eq!(scroll_steps(5.0), Ok(5));
+        assert_eq!(scroll_steps(-2.2), Ok(3));
+        assert_eq!(scroll_steps(0.0), Ok(0));
+        assert_eq!(scroll_steps(101.0), Err(DesktopError::NotActionable));
+        assert_eq!(scroll_steps(f64::NAN), Err(DesktopError::NotActionable));
     }
 
     #[test]
@@ -1053,5 +1719,37 @@ mod tests {
         assert!(!node_is_exposable(true, true, false));
         assert!(node_is_exposable(true, true, true));
         assert!(!node_is_exposable(false, true, true));
+    }
+
+    #[test]
+    fn uia_control_roles_use_the_documented_control_type_ids() {
+        assert_eq!(control_type_name(50000), "button");
+        assert_eq!(control_type_name(50002), "checkbox");
+        assert_eq!(control_type_name(50003), "combo-box");
+        assert_eq!(control_type_name(50004), "edit");
+        assert_eq!(control_type_name(50033), "pane");
+        assert_eq!(control_type_name(50040), "app-bar");
+    }
+
+    #[test]
+    fn combo_class_detection_covers_framework_subclasses_even_when_uia_role_is_pane() {
+        assert!(is_combo_box_class("COMBOBOX"));
+        assert!(is_combo_box_class(
+            "WindowsForms10.COMBOBOX.app.0.2bf8098_r8_ad1"
+        ));
+        assert!(!is_combo_box_class(
+            "WindowsForms10.EDIT.app.0.2bf8098_r8_ad1"
+        ));
+    }
+
+    #[test]
+    fn list_box_class_detection_covers_framework_subclasses() {
+        assert!(is_list_box_class("LISTBOX"));
+        assert!(is_list_box_class(
+            "WindowsForms10.LISTBOX.app.0.34f5582_r7_ad1"
+        ));
+        assert!(!is_list_box_class(
+            "WindowsForms10.COMBOBOX.app.0.34f5582_r7_ad1"
+        ));
     }
 }

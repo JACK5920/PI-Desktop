@@ -178,10 +178,18 @@ Underneath, main drives these host operations. They are not agent-facing.
 | `computer.inspect` | low | Structured accessibility tree of the bound window: role, name, value presence, enabled, focused, bounds, per-grant opaque `uid`, declared fidelity; an optional `targetId` binds another window first |
 | `computer.act` | high | One validated action addressed by `uid`, or by coordinates against a `basis`, after re-measuring the bound window |
 
-`computer.act` supports `click`, `double_click`, `right_click`, `set_value`,
-`press_keys`, `scroll`, and `select`. Each is dispatched through the platform
+`computer.act` supports `click`, `double_click`, `right_click`, `hover`, `drag`,
+`set_value`, `type_text`, `press_keys`, `scroll`, and `select`. Each is dispatched through the platform
 accessibility action when one exists, and falls back to a window-targeted event
-only when it does not. Capture is performed in main over Chromium's
+only when it does not. Successful dispatch is not itself proof the UI changed;
+the loop must inspect the next observation before reporting completion. `set_value`
+reads the value back and refuses if the provider did not retain the requested
+string. `scroll` preserves magnitude as repeated page-like UIA increments (at most 100 per
+axis). The Windows backend's hover and drag fallbacks post events to the verified
+target HWND. `type_text` and `press_keys` use OS keyboard input only after the
+foreground window is re-checked against the granted target process; failure to
+focus the target refuses input. Other backends may report these new actions
+unsupported until implemented. Capture is performed in main over Chromium's
 `desktopCapturer`, cropped to the geometry host-core measured, and is refused
 under an `a11y-only` grant.
 

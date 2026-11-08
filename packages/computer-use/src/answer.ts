@@ -20,7 +20,10 @@ export const COMPUTER_ACTION_KINDS: readonly ComputerActionKind[] = [
   "click",
   "double_click",
   "right_click",
+  "hover",
+  "drag",
   "set_value",
+  "type_text",
   "press_keys",
   "scroll",
   "select",
@@ -90,7 +93,11 @@ export function parseLoopAnswer(text: string): AnswerParse {
   if (kind === "done") {
     const summary = boundedString(value.summary, MAX_SUMMARY_CHARS);
     if (!summary) return reject("done without a summary");
-    if (Object.keys(value).some((key) => !["kind", "summary"].includes(key))) {
+    // Some providers attach a harmless reason/note to terminal answers. Accept
+    // that explicitly, but keep action and routing fields disallowed here.
+    const note = value.note === undefined ? undefined : boundedString(value.note, MAX_NOTE_CHARS);
+    if (value.note !== undefined && !note) return reject("malformed note");
+    if (Object.keys(value).some((key) => !["kind", "summary", "note"].includes(key))) {
       return reject("done with unexpected fields");
     }
     return { ok: true, answer: { kind: "done", summary } };
@@ -124,7 +131,7 @@ export function parseLoopAnswer(text: string): AnswerParse {
   const raw = value.action;
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return reject("action without a body");
   const body = raw as Record<string, unknown>;
-  const allowed = ["kind", "uid", "point", "text", "keys", "scroll", "option"];
+  const allowed = ["kind", "uid", "point", "to", "text", "keys", "scroll", "option"];
   if (Object.keys(body).some((key) => !allowed.includes(key))) {
     return reject("action body with unexpected fields");
   }
@@ -148,6 +155,14 @@ export function parseLoopAnswer(text: string): AnswerParse {
     if (typeof point.x !== "number" || typeof point.y !== "number") return reject("malformed point");
     if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return reject("non-finite point");
     action.point = { x: point.x, y: point.y };
+  }
+  if (body.to !== undefined) {
+    if (!body.to || typeof body.to !== "object" || Array.isArray(body.to)) return reject("malformed destination");
+    const point = body.to as Record<string, unknown>;
+    if (Object.keys(point).some((key) => !["x", "y"].includes(key))) return reject("malformed destination");
+    if (typeof point.x !== "number" || typeof point.y !== "number") return reject("malformed destination");
+    if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return reject("non-finite destination");
+    action.to = { x: point.x, y: point.y };
   }
   if (!action.uid && !action.point) return reject("action names neither an element nor a point");
 
@@ -188,9 +203,11 @@ export function parseLoopAnswer(text: string): AnswerParse {
   // Per-kind requirements, so a missing field is refused here rather than
   // becoming a host-side rejection one round trip later.
   if (action.kind === "set_value" && action.text === undefined) return reject("set_value without text");
+  if (action.kind === "type_text" && action.text === undefined) return reject("type_text without text");
   if (action.kind === "press_keys" && !action.keys) return reject("press_keys without keys");
   if (action.kind === "select" && !action.option) return reject("select without an option");
   if (action.kind === "scroll" && !action.scroll) return reject("scroll without a delta");
+  if (action.kind === "drag" && (!action.point || !action.to)) return reject("drag needs a start and destination");
 
   const note = value.note === undefined ? undefined : boundedString(value.note, MAX_NOTE_CHARS);
   if (value.note !== undefined && !note) return reject("malformed note");
@@ -222,7 +239,11 @@ export function validateAnswerAction(
     if (!node.enabled) return { ok: false, reason: "the element is disabled" };
     if (action.kind === "set_value") {
       if (!node.hasValue) return { ok: false, reason: "the element holds no value" };
-    } else if (action.kind !== "press_keys" && !node.actions.includes(action.kind)) {
+    } else if (
+      action.kind !== "press_keys" &&
+      !node.actions.includes(action.kind) &&
+      !(action.kind === "select" && isSemanticallySelectableRole(node.role))
+    ) {
       return { ok: false, reason: "the element does not offer that action" };
     }
   }
@@ -235,5 +256,23 @@ export function validateAnswerAction(
     // The basis is the host's own measurement, never the model's claim.
     next.basis = { revision: inspection.revision, bounds: inspection.bounds };
   }
+  if (action.to) {
+    const { width, height } = inspection.bounds;
+    if (action.to.x < 0 || action.to.y < 0 || action.to.x > width || action.to.y > height) {
+      return { ok: false, reason: "the drag destination is outside the scope" };
+    }
+    if (!action.point) return { ok: false, reason: "a drag needs a starting point" };
+  }
   return { ok: true, action: next, node };
+}
+
+/**
+ * Some native Windows controls are exposed by UIA as Pane and lose the
+ * SelectionItem pattern. Their semantic role still makes Select a reasonable
+ * request; the Host re-resolves the exact UID and independently checks the
+ * target-owned native control before dispatch, so this is not an authority
+ * bypass.
+ */
+function isSemanticallySelectableRole(role: string): boolean {
+  return role === "combo-box" || role === "list" || role === "list-item";
 }

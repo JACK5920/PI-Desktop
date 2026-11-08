@@ -291,7 +291,10 @@ export type ComputerActionKind =
   | "click"
   | "double_click"
   | "right_click"
+  | "hover"
+  | "drag"
   | "set_value"
+  | "type_text"
   | "press_keys"
   | "scroll"
   | "select";
@@ -309,6 +312,8 @@ export type ComputerAction = {
   uid?: string;
   /** Scope-relative coordinate; requires `basis` and is clamped to bounds. */
   point?: { x: number; y: number };
+  /** Destination for a scoped drag; `point` is its start. */
+  to?: { x: number; y: number };
   basis?: ComputerBasis;
   text?: string;
   /** Normalized chord list, e.g. `["cmd+a", "delete"]`. */
@@ -322,7 +327,7 @@ export type ComputerActResult = {
   revision: number;
   remainingBudget: number;
   /** What the backend actually dispatched, for the audit trail and the log. */
-  dispatched: "accessibility-action" | "window-event";
+  dispatched: "accessibility-action" | "window-event" | "system-input";
 };
 
 /** One step the loop completed, as reported back to the user-facing summary. */

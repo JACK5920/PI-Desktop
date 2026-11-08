@@ -77,6 +77,7 @@ const TERMINAL_CODES: Record<string, ComputerRunOutcome> = {
   COMPUTER_SELF_TARGET_REFUSED: "failed",
   COMPUTER_SECURE_INPUT_REFUSED: "failed",
   COMPUTER_TARGET_DENYLISTED: "failed",
+  COMPUTER_TARGET_UNAVAILABLE: "failed",
   COMPUTER_PLATFORM_UNSUPPORTED: "failed",
   COMPUTER_OS_PERMISSION_MISSING: "failed",
   COMPUTER_TARGET_ELEVATED: "failed",
@@ -89,6 +90,24 @@ function errorCode(error: unknown): string {
     if (typeof code === "string" && code.startsWith("COMPUTER_")) return code;
   }
   return "COMPUTER_ACTION_REJECTED";
+}
+
+/** Retry only a named target that the host says is temporarily unavailable. */
+async function observeWithTargetRetry(
+  deps: ComputerLoopDeps,
+  targetId?: string,
+): Promise<Observation> {
+  const attempts = targetId ? 3 : 1;
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await deps.observe(targetId);
+    } catch (error) {
+      if (errorCode(error) !== "COMPUTER_TARGET_UNAVAILABLE" || attempt + 1 >= attempts) throw error;
+      // Stay pinned to the exact host-issued id. Never fall back to the
+      // foreground window or silently select a different target.
+      await new Promise((resolve) => setTimeout(resolve, 100 * (attempt + 1)));
+    }
+  }
 }
 
 /** A short, value-free description of what a step acted on. */
@@ -170,7 +189,7 @@ export async function runComputerLoop(
   let observation: Observation;
   try {
     deps.onActivity?.({ phase: "observing", stepIndex: 0 });
-    observation = await deps.observe();
+    observation = await observeWithTargetRetry(deps);
   } catch (error) {
     const code = errorCode(error);
     deps.onActivity?.({ phase: "failed", errorCode: code });
@@ -222,7 +241,9 @@ export async function runComputerLoop(
             errorCode: "COMPUTER_ACTION_REJECTED",
           };
         }
-        index += 1;
+        // An unusable model response did not perform an action. Retry it
+        // against the same observation instead of burning the action-step
+        // budget; MAX_INVALID_ANSWERS still bounds malformed-output retries.
         continue;
       }
       invalidAnswers = 0;
@@ -246,7 +267,7 @@ export async function runComputerLoop(
         const label = windowLabel(observation, answer.window) ?? `window ${answer.window}`;
         try {
           deps.onActivity?.({ phase: "acting", stepIndex: index + 1, action: "switch", target: label });
-          observation = await deps.observe(answer.window);
+          observation = await observeWithTargetRetry(deps, answer.window);
           record({ index, action: "switch", ok: true, target: label });
           // The overlay frames the window being worked on, so it moves too.
           deps.onCursor?.({

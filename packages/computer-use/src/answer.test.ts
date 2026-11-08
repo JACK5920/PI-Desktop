@@ -79,6 +79,25 @@ describe("parseLoopAnswer", () => {
     });
   });
 
+  it("accepts a bounded explanatory note on a terminal answer", () => {
+    expect(parseLoopAnswer('{"kind":"done","summary":"saved","note":"verified"}')).toMatchObject({
+      ok: true,
+      answer: { kind: "done", summary: "saved" },
+    });
+    expect(parseLoopAnswer('{"kind":"done","summary":"saved","action":{"kind":"click"}}')).toMatchObject({
+      ok: false,
+    });
+  });
+
+  it("parses literal typing, hover, and a fully specified drag", () => {
+    expect(parseLoopAnswer('{"kind":"action","action":{"kind":"type_text","uid":"0.2#cd","text":"A中文!"}}'))
+      .toMatchObject({ ok: true, answer: { action: { kind: "type_text", text: "A中文!" } } });
+    expect(parseLoopAnswer('{"kind":"action","action":{"kind":"hover","point":{"x":10,"y":20}}}'))
+      .toMatchObject({ ok: true, answer: { action: { kind: "hover", point: { x: 10, y: 20 } } } });
+    expect(parseLoopAnswer('{"kind":"action","action":{"kind":"drag","point":{"x":10,"y":20},"to":{"x":30,"y":40}}}'))
+      .toMatchObject({ ok: true, answer: { action: { kind: "drag", point: { x: 10, y: 20 }, to: { x: 30, y: 40 } } } });
+  });
+
   it("refuses an unknown answer kind or action kind", () => {
     expect(parseLoopAnswer('{"kind":"shell","command":"rm -rf /"}')).toMatchObject({ ok: false });
     expect(parseLoopAnswer('{"kind":"action","action":{"kind":"drag","uid":"0.1#ab"}}')).toMatchObject({
@@ -101,10 +120,12 @@ describe("parseLoopAnswer", () => {
   it("requires the field each action kind needs", () => {
     for (const text of [
       '{"kind":"action","action":{"kind":"set_value","uid":"0.1#ab"}}',
+      '{"kind":"action","action":{"kind":"type_text","uid":"0.1#ab"}}',
       '{"kind":"action","action":{"kind":"press_keys","uid":"0.1#ab"}}',
       '{"kind":"action","action":{"kind":"select","uid":"0.1#ab"}}',
       '{"kind":"action","action":{"kind":"scroll","uid":"0.1#ab"}}',
       '{"kind":"action","action":{"kind":"click"}}',
+      '{"kind":"action","action":{"kind":"drag","point":{"x":1,"y":1}}}',
     ]) {
       expect(parseLoopAnswer(text), text).toMatchObject({ ok: false });
     }
@@ -144,6 +165,28 @@ describe("validateAnswerAction", () => {
     expect(result).toMatchObject({ ok: false });
   });
 
+  it("allows semantic Select for native combo/list controls with missing UIA patterns", () => {
+    for (const role of ["combo-box", "list", "list-item"]) {
+      const selectable = node({ role, actions: [] });
+      expect(
+        validateAnswerAction(
+          { kind: "select", uid: selectable.uid, option: "Three" },
+          inspection([selectable]),
+        ),
+      ).toMatchObject({ ok: true });
+    }
+  });
+
+  it("still refuses Select on an arbitrary pane without an advertised action", () => {
+    const pane = node({ role: "pane", actions: [] });
+    expect(
+      validateAnswerAction(
+        { kind: "select", uid: pane.uid, option: "Three" },
+        inspection([pane]),
+      ),
+    ).toMatchObject({ ok: false, reason: "the element does not offer that action" });
+  });
+
   it("refuses typing into an element that holds no value", () => {
     const result = validateAnswerAction({ kind: "set_value", uid: "0.1#ab", text: "hi" }, inspection());
     expect(result).toMatchObject({ ok: false });
@@ -167,6 +210,11 @@ describe("validateAnswerAction", () => {
     expect(validateAnswerAction({ kind: "click", point: { x: -1, y: 1 } }, inspection())).toMatchObject({
       ok: false,
     });
+  });
+
+  it("refuses a drag destination outside the measured scope", () => {
+    expect(validateAnswerAction({ kind: "drag", point: { x: 5, y: 5 }, to: { x: 900, y: 5 } }, inspection()))
+      .toMatchObject({ ok: false, reason: "the drag destination is outside the scope" });
   });
 
   it("refuses everything while secure input is active", () => {

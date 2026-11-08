@@ -59,6 +59,9 @@ pub enum Dispatched {
     AccessibilityAction,
     /// A window-targeted event was posted. Still no global pointer warp.
     WindowEvent,
+    /// OS keyboard input was synthesized after verifying the target is the
+    /// foreground process. The UI still needs to be observed for confirmation.
+    SystemInput,
 }
 
 /// Variants a given platform may never produce — `Elevated` is Windows-only,
@@ -104,6 +107,14 @@ pub trait Desktop: Send + Sync {
     /// can see but the picker silently dropped is indistinguishable from a bug.
     fn list_targets(&self) -> Result<Vec<RawTarget>, DesktopError>;
 
+    /// Resolve a previously issued target id against the live OS handle when
+    /// an enumeration snapshot temporarily omits it. Backends must validate
+    /// the handle and owner identity; unsupported implementations return
+    /// `None` and retain the enumeration-only behavior.
+    fn resolve_target(&self, _target_id: &str) -> Result<Option<RawTarget>, DesktopError> {
+        Ok(None)
+    }
+
     /// Re-read the live geometry and identity of one target.
     fn measure(&self, target: &TargetRef) -> Result<Measured, DesktopError>;
 
@@ -117,22 +128,6 @@ pub trait Desktop: Send + Sync {
         _allow_sensitive_input: bool,
     ) -> Result<RawInspection, DesktopError> {
         self.inspect(target, max_nodes)
-    }
-
-    /// Whether this target's tree can be opened at all.
-    ///
-    /// The window server enumerates surfaces that no accessibility client can
-    /// reach — Stage Manager's strip, overlay helpers — and they look exactly
-    /// like application windows in `list_targets`. Binding one is not a
-    /// security problem, it is a wasted turn, so the automatic grant asks this
-    /// before choosing. A one-node probe is the cheapest honest answer.
-    fn can_open_with_sensitive_input(
-        &self,
-        target: &TargetRef,
-        allow_sensitive_input: bool,
-    ) -> bool {
-        self.inspect_with_sensitive_input(target, 1, allow_sensitive_input)
-            .is_ok()
     }
 
     /// Whether the OS reports a secure input state right now. A backend that

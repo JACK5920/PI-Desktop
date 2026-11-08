@@ -151,6 +151,14 @@ describe("runComputerLoop", () => {
     expect(h.acted).toEqual([]);
   });
 
+  it("retries one malformed model answer without spending an action step", async () => {
+    const h = harness(["{not json}", '{"kind":"done","summary":"already saved"}']);
+    const result = await runComputerLoop({ instruction: "save", maxSteps: 1 }, h.deps);
+    expect(result.outcome).toBe("done");
+    expect(h.decisions).toBe(2);
+    expect(h.acted).toEqual([]);
+  });
+
   it("surfaces a question instead of guessing", async () => {
     const h = harness(['{"kind":"ask","question":"which document?"}']);
     const result = await runComputerLoop({ instruction: "save it" }, h.deps);
@@ -267,6 +275,34 @@ describe("runComputerLoop", () => {
     expect(result.summary).toContain("No action was dispatched.");
     // The overlay follows the window being worked on.
     expect(cursor.filter((event) => event.kind === "show")).toHaveLength(2);
+  });
+
+  it("retries a temporarily unavailable switch only against the requested target", async () => {
+    const observed: (string | undefined)[] = [];
+    let failures = 0;
+    let decisions = 0;
+    const deps: ComputerLoopDeps = {
+      observe: async (targetId) => {
+        observed.push(targetId);
+        if (targetId && failures++ < 2) throw coded("COMPUTER_TARGET_UNAVAILABLE");
+        return observation([saveButton], {
+          grant: grant(targetId ? { targetId, targetLabel: "Other — Inbox" } : {}),
+        });
+      },
+      act: async () => {
+        throw new Error("must not act");
+      },
+      decide: async () =>
+        [
+          '{"kind":"switch","window":"88:4"}',
+          '{"kind":"done","summary":"read it"}',
+        ][Math.min(decisions++, 1)],
+    };
+
+    const result = await runComputerLoop({ instruction: "read the inbox" }, deps);
+    expect(result.outcome).toBe("done");
+    expect(observed).toEqual([undefined, "88:4", "88:4", "88:4"]);
+    expect(result.steps).toEqual([expect.objectContaining({ action: "switch", ok: true })]);
   });
 
   it("reports a refused window and keeps the remaining steps", async () => {

@@ -386,6 +386,7 @@ after the named transient condition has changed.
 | `COMPUTER_GRANT_EXPIRED` | no | the grant expired or was revoked |
 | `COMPUTER_BUDGET_EXHAUSTED` | no | the grant's bounded action budget is exhausted |
 | `COMPUTER_SCOPE_VIOLATION` | no | the requested action is outside the grant's current window scope |
+| `COMPUTER_TARGET_UNAVAILABLE` | yes | the selected window could not be resolved or measured after bounded same-target retries; refresh the window list before retrying |
 | `COMPUTER_SELF_TARGET_REFUSED` | no | the target is a PI-Desktop window while the corresponding Settings restriction is enabled |
 | `COMPUTER_TARGET_DENYLISTED` | no | the target is on the built-in or user denylist while denylist enforcement is enabled |
 | `COMPUTER_SECURE_INPUT_REFUSED` | no | the OS or focused control reports secure/password input while its Settings restriction is enabled |
