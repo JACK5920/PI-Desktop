@@ -17,13 +17,14 @@ and that the other controls were not modified.
 |---|---|
 | Windows Pane class-role unit test | Passed: known classes map to documented UIA role IDs; unknown classes and already-specific UIA roles remain unchanged. |
 | Opt-in Windows UIA fixture | Passed: 50 exact target resolutions plus ten ComboBox selections and ten ListBox selections, with per-operation native-state readback and cross-control non-mutation checks. |
+| Agent Runtime → Sidecar → Main tool → Host → Windows fixture | Passed with `pnpm test:e2e:computer-use-runtime`: the first conversation request declared Computer; one tool call passed the Host gate; the Computer model produced one click, re-observed the fixture, then returned done; the fixture's state file confirmed the click; the Host grant was revoked. Main and Computer model requests used the local loopback fixture. |
 | `cargo fmt --check` | Passed. |
 
 This does not establish full Computer Use reliability. Target resolution was
 repeated 50 times in the fixture's initial live state, not across all three
-stress conditions proposed in the review. Repeated switch/grant behavior under
-varied host states, the real Agent Runtime → Sidecar → Main
-tool → Host → native-window path, and deterministic action postconditions remain
+stress conditions proposed in the review. The runtime path used a deterministic
+loopback model, not a third-party model/provider. Repeated switch/grant behavior
+under varied host states and general deterministic action postconditions remain
 separate acceptance items.
 
 ## Follow-up acceptance — 2026-11-08
