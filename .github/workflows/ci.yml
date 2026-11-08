@@ -79,6 +79,24 @@ jobs:
       - name: Test
         run: cargo test -p host-core --locked
 
+      - name: Install X11 and GTK accessibility fixture dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y at-spi2-core dbus-x11 gir1.2-gtk-3.0 python3-gi xvfb
+
+      - name: Verify Linux X11 target selection, AT-SPI action, and resulting UI state
+        run: |
+          xvfb-run -a dbus-run-session -- bash -euo pipefail -c '
+            export XDG_SESSION_TYPE=x11
+            export GDK_BACKEND=x11
+            export GTK_MODULES=atk-bridge
+            export PI_COMPUTER_USE_LINUX_E2E=1
+            python3 scripts/computer-use-linux-fixture.py &
+            fixture_pid=$!
+            trap "kill $fixture_pid 2>/dev/null || true" EXIT
+            cargo test -p host-core --locked --bin pi-desktop-host-core computer::backend::linux::tests::linux_backend_drives_gtk_fixture_through_atspi -- --exact --nocapture
+          '
+
   rust-windows:
     name: Rust host-core Windows / transcript cache E2E
     runs-on: windows-latest
