@@ -69,6 +69,10 @@ fn windows_backend_drives_only_the_isolated_fixture_window() {
     let secondary_script_path = fixture_dir.join(format!("{secondary_title}.ps1"));
     let state_path = fixture_dir.join(format!("{title}.txt"));
     let state_path_display = state_path.display().to_string();
+    let pointer_state_path = fixture_dir.join(format!("{title}-pointer.txt"));
+    let pointer_state_path_display = pointer_state_path.display().to_string();
+    let scroll_state_path = fixture_dir.join(format!("{title}-scroll.txt"));
+    let scroll_state_path_display = scroll_state_path.display().to_string();
     let combo_state_path = fixture_dir.join(format!("{title}-combo.txt"));
     let combo_state_display = combo_state_path.display().to_string();
     let list_state_path = fixture_dir.join(format!("{title}-list.txt"));
@@ -85,6 +89,15 @@ $label.Name = 'FixtureStatus'
 $label.Text = 'CU-FIXTURE-IDLE'
 $label.Location = New-Object System.Drawing.Point(16, 18)
 $label.AutoSize = $true
+$hoverTarget = New-Object System.Windows.Forms.Label
+$hoverTarget.Name = 'FixtureHover'
+$hoverTarget.AccessibleName = 'CU-FIXTURE-HOVER'
+$hoverTarget.Text = 'Hover target'
+$hoverTarget.Location = New-Object System.Drawing.Point(220, 18)
+$hoverTarget.AutoSize = $true
+$hoverTarget.add_MouseEnter({{ [System.IO.File]::WriteAllText('{pointer_state_path_display}', 'hover') }})
+$hoverTarget.add_MouseDoubleClick({{ [System.IO.File]::WriteAllText('{pointer_state_path_display}', 'double-click') }})
+$hoverTarget.add_MouseUp({{ param($sender, $event); if ($event.Button -eq [System.Windows.Forms.MouseButtons]::Right) {{ [System.IO.File]::WriteAllText('{pointer_state_path_display}', 'right-click') }} }})
 $button = New-Object System.Windows.Forms.Button
 $button.Name = 'FixtureAction'
 $button.AccessibleName = 'CU-FIXTURE-ACTION'
@@ -121,12 +134,40 @@ $list.Size = New-Object System.Drawing.Size(140, 120)
 [void]$list.Items.Add('Epsilon')
 $list.SelectedIndex = 0
 $list.add_SelectedIndexChanged({{ [System.IO.File]::WriteAllText('{list_state_display}', $list.SelectedItem) }})
+$scrollPanel = New-Object System.Windows.Forms.Panel
+$scrollPanel.Name = 'FixtureScroll'
+$scrollPanel.AccessibleName = 'CU-FIXTURE-SCROLL'
+$scrollPanel.Location = New-Object System.Drawing.Point(16, 180)
+$scrollPanel.Size = New-Object System.Drawing.Size(300, 100)
+$scrollPanel.AutoScroll = $true
+for ($i = 0; $i -lt 12; $i++) {{
+    $scrollLabel = New-Object System.Windows.Forms.Label
+    $scrollLabel.Text = "Scroll row $i"
+    $scrollLabel.Location = New-Object System.Drawing.Point(4, ($i * 24))
+    $scrollLabel.AutoSize = $true
+    $scrollPanel.Controls.Add($scrollLabel)
+}}
+$scrollPanel.add_Scroll({{ [System.IO.File]::WriteAllText('{scroll_state_path_display}', [string]$scrollPanel.VerticalScroll.Value) }})
+$dragTarget = New-Object System.Windows.Forms.Panel
+$dragTarget.Name = 'FixtureDrag'
+$dragTarget.AccessibleName = 'CU-FIXTURE-DRAG'
+$dragTarget.Location = New-Object System.Drawing.Point(340, 180)
+$dragTarget.Size = New-Object System.Drawing.Size(140, 100)
+$dragTarget.BorderStyle = [System.Windows.Forms.BorderStyle]::FixedSingle
+$script:fixtureDragging = $false
+$script:fixtureDragMoved = $false
+$dragTarget.add_MouseDown({{ param($sender, $event); if ($event.Button -eq [System.Windows.Forms.MouseButtons]::Left) {{ $script:fixtureDragging = $true; $script:fixtureDragMoved = $false }} }})
+$dragTarget.add_MouseMove({{ param($sender, $event); if ($script:fixtureDragging) {{ $script:fixtureDragMoved = $true }} }})
+$dragTarget.add_MouseUp({{ param($sender, $event); $script:fixtureDragging = $false; [System.IO.File]::WriteAllText('{pointer_state_path_display}', "drag-end:$script:fixtureDragMoved") }})
 $form.add_Shown({{ $form.Activate(); $button.Focus() | Out-Null }})
 $form.Controls.Add($label)
+$form.Controls.Add($hoverTarget)
 $form.Controls.Add($button)
 $form.Controls.Add($textBox)
 $form.Controls.Add($combo)
 $form.Controls.Add($list)
+$form.Controls.Add($scrollPanel)
+$form.Controls.Add($dragTarget)
 [System.Windows.Forms.Application]::Run($form)
 "#
     );
@@ -301,6 +342,129 @@ $form.Size = New-Object System.Drawing.Size(320, 180)
                 "fixture action did not update its label"
             );
             thread::sleep(Duration::from_millis(50));
+        }
+
+        // Exercise the native mouse-event fallbacks and verify observable
+        // state changes instead of treating a successful dispatch as proof.
+        let pointer_target = desktop
+            .inspect(&target.target, 400)
+            .expect("inspect pointer-action fixture")
+            .nodes
+            .into_iter()
+            .find(|item| item.label.as_deref() == Some("CU-FIXTURE-HOVER"))
+            .expect("fixture label is available for pointer actions");
+        for kind in [ActionKind::DoubleClick, ActionKind::RightClick] {
+            desktop
+                .perform(
+                    &target.target,
+                    Some(&pointer_target.uid),
+                    &Action {
+                        kind: Some(kind),
+                        ..Action::default()
+                    },
+                )
+                .unwrap_or_else(|error| panic!("dispatch {kind:?}: {error:?}"));
+            let expected = if kind == ActionKind::DoubleClick {
+                "double-click"
+            } else {
+                "right-click"
+            };
+            let deadline = Instant::now() + Duration::from_secs(3);
+            while fs::read_to_string(&pointer_state_path).ok().as_deref() != Some(expected) {
+                assert!(
+                    Instant::now() < deadline,
+                    "{kind:?} did not update fixture state"
+                );
+                thread::sleep(Duration::from_millis(25));
+            }
+        }
+
+        let hover = desktop
+            .inspect(&target.target, 400)
+            .expect("inspect hover fixture")
+            .nodes
+            .into_iter()
+            .find(|item| item.label.as_deref() == Some("CU-FIXTURE-HOVER"))
+            .expect("fixture hover target is accessible");
+        desktop
+            .perform(
+                &target.target,
+                Some(&hover.uid),
+                &Action {
+                    kind: Some(ActionKind::Hover),
+                    ..Action::default()
+                },
+            )
+            .expect("move pointer to fixture hover target");
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while fs::read_to_string(&pointer_state_path).ok().as_deref() != Some("hover") {
+            assert!(
+                Instant::now() < deadline,
+                "hover did not update fixture state"
+            );
+            thread::sleep(Duration::from_millis(25));
+        }
+
+        let scroll = desktop
+            .inspect(&target.target, 400)
+            .expect("inspect scroll fixture")
+            .nodes
+            .into_iter()
+            .find(|item| item.label.as_deref() == Some("CU-FIXTURE-SCROLL"))
+            .expect("fixture scroll panel is accessible");
+        assert!(
+            scroll.actions.contains(&ActionKind::Scroll),
+            "fixture must expose UIA ScrollPattern"
+        );
+        desktop
+            .perform(
+                &target.target,
+                Some(&scroll.uid),
+                &Action {
+                    kind: Some(ActionKind::Scroll),
+                    scroll: Some(Scroll { dx: 0.0, dy: 1.0 }),
+                    ..Action::default()
+                },
+            )
+            .expect("scroll fixture through UIA ScrollPattern");
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while fs::read_to_string(&scroll_state_path)
+            .ok()
+            .is_none_or(|value| value.trim().is_empty() || value.trim() == "0")
+        {
+            assert!(
+                Instant::now() < deadline,
+                "scroll did not change fixture state"
+            );
+            thread::sleep(Duration::from_millis(25));
+        }
+
+        let drag = desktop
+            .inspect(&target.target, 400)
+            .expect("inspect drag fixture")
+            .nodes
+            .into_iter()
+            .find(|item| item.label.as_deref() == Some("CU-FIXTURE-DRAG"))
+            .expect("fixture drag panel is accessible");
+        desktop
+            .perform(
+                &target.target,
+                Some(&drag.uid),
+                &Action {
+                    kind: Some(ActionKind::Drag),
+                    point: Some(Point { x: 350.0, y: 190.0 }),
+                    to: Some(Point { x: 420.0, y: 235.0 }),
+                    ..Action::default()
+                },
+            )
+            .expect("drag inside the isolated fixture panel");
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while fs::read_to_string(&pointer_state_path).ok().as_deref() != Some("drag-end:True") {
+            assert!(
+                Instant::now() < deadline,
+                "drag did not reach the fixture MouseUp handler"
+            );
+            thread::sleep(Duration::from_millis(25));
         }
 
         let edit = desktop
@@ -509,6 +673,8 @@ $form.Size = New-Object System.Drawing.Size(320, 180)
     let _ = fs::remove_file(script_path);
     let _ = fs::remove_file(secondary_script_path);
     let _ = fs::remove_file(state_path);
+    let _ = fs::remove_file(pointer_state_path);
+    let _ = fs::remove_file(scroll_state_path);
     let _ = fs::remove_file(combo_state_path);
     let _ = fs::remove_file(list_state_path);
     if let Err(payload) = outcome {
