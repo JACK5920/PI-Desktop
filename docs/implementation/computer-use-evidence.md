@@ -103,6 +103,25 @@ is written to disk or sent outside the local fixture.
 This proves the configured capture-and-transport path into an image-capable
 Computer model, not that a live third-party model correctly interprets pixels.
 
+## Text-only model with pixel capture — 2026-11-09
+
+The same E2E investigation confirmed that `deepseek-v4-pro` publishes only text
+input, while the pixel-enabled `deepseek-flash` route accepts the fixture image.
+The local Computer tool now checks the resolved model's effective input
+modalities before creating a Host grant. If pixel capture is selected for a
+text-only model, it returns `COMPUTER_MODEL_VISION_REQUIRED` with a direction to
+choose an image-capable Computer model or use accessibility-only capture. The
+check does not block text-only models when accessibility-only mode is selected.
+
+| Check | Result |
+|---|---|
+| Electron Main `agent-tool.test.ts` | Passed: 9 tests. The new regression confirms a text-only model is refused before grant creation/capture, while the supported image-input path continues to pass. |
+
+The model capability comes from the resolved provider/model metadata. A
+user-configured proxy should set its image-input override accurately; an
+incorrect capability declaration cannot prove the upstream endpoint accepts
+images.
+
 ## Follow-up acceptance — 2026-11-08
 
 The current target-selection regression is covered at both the model-loop and

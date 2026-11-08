@@ -30,12 +30,12 @@ const grant = {
   sessionId: "session-1", createdAt: "2026-11-07T00:00:00Z", expiresAt: "2026-11-07T00:15:00Z", state: "active",
 } as const;
 
-function hostFixture(enabled = true, configuredModel = true) {
+function hostFixture(enabled = true, configuredModel = true, computerUseOverrides: Record<string, unknown> = {}) {
   const calls: Array<{ method: string; params: unknown }> = [];
   const host = {
     async call<T>(method: string, params?: unknown): Promise<T> {
       calls.push({ method, params });
-      if (method === "settings.get") return { computerUse: { enabled, ...(configuredModel ? { model: { providerId: "p", modelId: "m" } } : {}) } } as T;
+      if (method === "settings.get") return { computerUse: { enabled, ...computerUseOverrides, ...(configuredModel ? { model: { providerId: "p", modelId: "m" } } : {}) } } as T;
       if (method === "computer.grantCreate") return grant as T;
       if (method === "computer.inspect") return {
         grantId: grant.grantId, revision: 1, bounds: grant.bounds, fidelity: "full",
@@ -91,6 +91,7 @@ describe("Computer local tool", () => {
       resolveProvider: async () => ({
         id: "p", name: "Pinned", modelId: "m", apiKey: "fixture-only",
         supportsReasoning: false, supportedThinkingLevels: ["off"],
+        modelConfig: { source: "generic", name: "Vision fixture", baseUrl: "http://fixture", reasoning: false, input: ["text", "image"], modalities: { input: ["text", "image"], output: ["text"] }, contextWindow: 100_000, maxTokens: 1000 },
       }),
       capture,
     });
@@ -150,6 +151,7 @@ describe("Computer local tool", () => {
       resolveProvider: async () => ({
         id: "p", name: "Pinned", modelId: "m", apiKey: "fixture-only",
         supportsReasoning: false, supportedThinkingLevels: ["off"],
+        modelConfig: { source: "generic", name: "Vision fixture", baseUrl: "http://fixture", reasoning: false, input: ["text", "image"], modalities: { input: ["text", "image"], output: ["text"] }, contextWindow: 100_000, maxTokens: 1000 },
       }),
       capture,
       cursorOverlay: { apply: applyCursor },
@@ -168,6 +170,35 @@ describe("Computer local tool", () => {
       expect.objectContaining({ type: "image", data: "fixture-pixels", mimeType: "image/png" }),
     ]));
     expect(applyCursor).toHaveBeenCalledWith(expect.objectContaining({ kind: "show", grantId: grant.grantId }));
+  });
+
+  it("fails clearly before granting when pixel mode is paired with a text-only model", async () => {
+    const { host, calls } = hostFixture(true, true, { defaultCapture: "a11y-and-pixels" });
+    const capture = vi.fn();
+    const handler = createComputerUseTool({
+      getHost: () => host,
+      resolveProvider: async () => ({
+        id: "p", name: "Text-only model", modelId: "text-model", apiKey: "fixture-only",
+        supportsReasoning: false, supportedThinkingLevels: ["off"],
+        modelConfig: { source: "generic", name: "Text-only model", baseUrl: "http://fixture", reasoning: false, input: ["text"], modalities: { input: ["text"], output: ["text"] }, contextWindow: 100_000, maxTokens: 1000 },
+      }),
+      capture,
+    });
+
+    const result = await handler({
+      sessionId: "session-1",
+      toolCallId: "tool-text-only-pixels",
+      args: { instruction: "Inspect the fixture" },
+      signal: new AbortController().signal,
+    });
+
+    expect(result).toMatchObject({ ok: false, errorCode: "COMPUTER_MODEL_VISION_REQUIRED" });
+    expect(result.content).toMatchObject({
+      message: expect.stringContaining("switch capture to accessibility-only"),
+    });
+    expect(calls.map((call) => call.method)).toEqual(["settings.get"]);
+    expect(capture).not.toHaveBeenCalled();
+    expect(computerRuntime.runComputerLoop).not.toHaveBeenCalled();
   });
 
   it("runs a bounded host-backed action loop with the dedicated provider and revokes its grant", async () => {
