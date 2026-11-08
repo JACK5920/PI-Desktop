@@ -17,15 +17,35 @@ and that the other controls were not modified.
 |---|---|
 | Windows Pane class-role unit test | Passed: known classes map to documented UIA role IDs; unknown classes and already-specific UIA roles remain unchanged. |
 | Opt-in Windows UIA fixture | Passed: 50 exact target resolutions plus ten ComboBox selections and ten ListBox selections, with per-operation native-state readback and cross-control non-mutation checks. |
-| Agent Runtime → Sidecar → Main tool → Host → Windows fixture | Passed with `pnpm test:e2e:computer-use-runtime`: the first conversation request declared Computer; one tool call passed the Host gate; the Computer model produced one click, re-observed the fixture, then returned done; the fixture's state file confirmed the click; the Host grant was revoked. Main and Computer model requests used the local loopback fixture. |
+| Agent Runtime → Sidecar → Main tool → Host → Windows fixture | Initially passed for one turn with a loopback model; see the 2026-11-09 repeatability acceptance below for the expanded three-cycle run. |
 | `cargo fmt --check` | Passed. |
 
 This does not establish full Computer Use reliability. Target resolution was
-repeated 50 times in the fixture's initial live state, not across all three
-stress conditions proposed in the review. The runtime path used a deterministic
-loopback model, not a third-party model/provider. Repeated switch/grant behavior
-under varied host states and general deterministic action postconditions remain
-separate acceptance items.
+repeated 50 times in the fixture's initial live state, not across varied window
+or process states. The runtime path used a deterministic loopback model, not a
+third-party model/provider. General action-specific postcondition guarantees
+remain a separate implementation and acceptance item.
+
+## Repeatability acceptance — 2026-11-09
+
+Expanded the same Agent Runtime → Sidecar → Main tool → Host → Windows fixture
+E2E to run three fresh Computer tool turns in one session. Each turn creates a
+new Host grant, declares Computer in the conversation model's first request,
+dispatches one UIA click, performs a second Host inspection, and revokes that
+grant before the next cycle. The fixture changes a native accessible label and writes
+the resulting state to a file; the harness checks the exact expected state
+after every turn, so an earlier turn's state cannot satisfy a later turn.
+
+| Check | Result |
+|---|---|
+| `pnpm test:e2e:computer-use-runtime` | Passed on the local Windows host: 3 Computer calls, 3 fresh grants, 3 UIA actions, 6 post/initial inspections, 3 revocations, and per-cycle native fixture state verified through `CU-RUNTIME-FIXTURE-CLICKED-3`. Both conversation and Computer model requests used the local loopback fixture. |
+| Windows UIA fixture | Passed on the local Windows host: exact target resolution and control-value tests passed in 3.30 seconds. |
+| `node --check scripts/e2e-computer-use-agent-runtime.mjs` and `git diff --check` | Passed before the repeated runtime E2E. |
+
+This verifies repeated grant lifecycle and post-action state observation on one
+stable target. It does not yet cover cold application restart, changing target
+availability while other processes start/stop, real provider/model routes, or
+action-specific verified/dispatched/failed semantics in the product UI.
 
 ## Follow-up acceptance — 2026-11-08
 

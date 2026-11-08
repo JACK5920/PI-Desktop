@@ -55,18 +55,20 @@ const { createComputerUseTool } = await import(
 const requests = [];
 let mainCalls = 0;
 let computerCalls = 0;
+let computerToolDeclarations = 0;
 let fixtureStatePath;
 let fixtureChild;
 let fixtureTitle;
 let fixtureOutput = "";
 const testRoot = await mkdtemp(join(tmpdir(), "pi-computer-agent-runtime-"));
 const computerRpcMethods = [];
+let activeCycle = 1;
 const server = createServer(async (request, response) => {
   const chunks = [];
   for await (const chunk of request) chunks.push(chunk);
   const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
   requests.push(body);
-  if (requests.length > 6) {
+  if (requests.length > 18) {
     response.writeHead(500).end("fixture request ceiling exceeded");
     return;
   }
@@ -79,7 +81,7 @@ const server = createServer(async (request, response) => {
   if (isComputerDecision) {
     computerCalls++;
     const transcript = JSON.stringify(messages);
-    if (transcript.includes("CU-RUNTIME-FIXTURE-CLICKED")) {
+    if (transcript.includes(`CU-RUNTIME-FIXTURE-CLICKED-${activeCycle}`)) {
       delta = { role: "assistant", content: JSON.stringify({ kind: "done", summary: "Verified fixture label changed." }) };
       finish = "stop";
     } else {
@@ -94,7 +96,10 @@ const server = createServer(async (request, response) => {
   } else {
     mainCalls++;
     const tool = (body.tools ?? []).find((candidate) => candidate.function?.name === "Computer");
-    const priorToolResult = messages.some((message) => message.role === "tool" || message.tool_call_id);
+    const latestUserIndex = messages.findLastIndex((message) => message.role === "user");
+    const currentTurnMessages = messages.slice(latestUserIndex + 1);
+    const priorToolResult = currentTurnMessages.some((message) => message.role === "tool" || message.tool_call_id);
+    if (tool && !priorToolResult) computerToolDeclarations++;
     if (tool && !priorToolResult) {
       delta = { role: "assistant", tool_calls: [{ index: 0, id: "computer-fixture-call", type: "function",
         function: { name: "Computer", arguments: JSON.stringify({ instruction: `Click the button in ${fixtureTitle}, then verify its status changed.` }) } }] };
@@ -149,7 +154,8 @@ $button.Name = 'FixtureAction'
 $button.AccessibleName = 'CU-RUNTIME-FIXTURE-ACTION'
 $button.Text = 'Change fixture status'
 $button.Location = New-Object System.Drawing.Point(20, 60)
-$button.add_Click({ $label.AccessibleName = 'CU-RUNTIME-FIXTURE-CLICKED'; $label.Text = 'CU-RUNTIME-FIXTURE-CLICKED'; [System.IO.File]::WriteAllText('${fixtureStatePath.replaceAll("'", "''")}', $label.Text) })
+$script:clickCount = 0
+$button.add_Click({ $script:clickCount++; $label.AccessibleName = "CU-RUNTIME-FIXTURE-CLICKED-$script:clickCount"; $label.Text = $label.AccessibleName; [System.IO.File]::WriteAllText('${fixtureStatePath.replaceAll("'", "''")}', $label.Text) })
 $form.Controls.Add($label)
 $form.Controls.Add($button)
 $form.add_Shown({ $form.Activate() | Out-Null })
@@ -201,51 +207,75 @@ $form.add_Shown({ $form.Activate() | Out-Null })
     const toolCalls = [];
     const turnErrors = [];
     let resolveTurn;
-    const ended = new Promise((resolve) => { resolveTurn = resolve; });
+    let ended;
     sidecar.onNotification((method, envelope) => {
       if (method !== "agent.event") return;
       if (envelope.event.type === "tool_start") toolCalls.push(envelope.event.toolName);
       if (envelope.event.type === "error") turnErrors.push(envelope.event.error);
       if (envelope.event.type === "agent_end") resolveTurn();
     });
+    const waitForTurn = async (turnEnded, cycle) => {
+      let timeout;
+      try {
+        await Promise.race([
+          turnEnded,
+          new Promise((_, reject) => {
+            timeout = setTimeout(() => reject(new Error(`cycle ${cycle} timed out: ${stderr}`)), 60_000);
+          }),
+        ]);
+      } finally {
+        clearTimeout(timeout);
+      }
+    };
     const computerTool = createComputerUseTool({
       getHost: () => ({ call: callHost }),
       resolveProvider: async () => runtimeProvider,
     });
     sidecar.setLocalTool("Computer", computerTool);
     try {
-      const turnId = await beginTurn(host, session.id);
-      const userMessageId = randomUUID();
-      const content = `Click the test button in ${fixtureTitle} and verify the visible result.`;
-      await host.call("session.appendMessage", { sessionId: session.id, turnId,
-        message: { id: userMessageId, role: "user", content, createdAt: new Date().toISOString() } });
-      await sidecar.call("agent.prompt", {
-        sessionId: session.id,
-        turnId,
-        userMessageId,
-        mode: "agent",
-        provider: runtimeProvider,
-        thinkingLevel: "off",
-        computerUseEnabled: true,
-        commandShell: { id: "bash", label: "Bash", dialect: "posix", available: true, isDefault: true },
-        projectPath: workspace,
-        content,
-      });
-      await Promise.race([ended, new Promise((_, reject) => setTimeout(() => reject(new Error(`turn timed out: ${stderr}`)), 60_000))]);
+      for (let cycle = 1; cycle <= 3; cycle++) {
+        activeCycle = cycle;
+        ended = new Promise((resolve) => { resolveTurn = resolve; });
+        const turnId = await beginTurn(host, session.id);
+        const userMessageId = randomUUID();
+        const content = `Click the test button in ${fixtureTitle} once, then verify its status changed for cycle ${cycle}.`;
+        await host.call("session.appendMessage", { sessionId: session.id, turnId,
+          message: { id: userMessageId, role: "user", content, createdAt: new Date().toISOString() } });
+        await sidecar.call("agent.prompt", {
+          sessionId: session.id,
+          turnId,
+          userMessageId,
+          mode: "agent",
+          provider: runtimeProvider,
+          thinkingLevel: "off",
+          computerUseEnabled: true,
+          commandShell: { id: "bash", label: "Bash", dialect: "posix", available: true, isDefault: true },
+          projectPath: workspace,
+          content,
+        });
+        await waitForTurn(ended, cycle);
+        assert.equal(await readFile(fixtureStatePath, "utf8"), `CU-RUNTIME-FIXTURE-CLICKED-${cycle}`,
+          `cycle ${cycle} must verify the native UIA post-action state; mainCalls=${mainCalls}; computerCalls=${computerCalls}; toolCalls=${JSON.stringify(toolCalls)}; rpc=${JSON.stringify(computerRpcMethods)}`);
+        await endTurn(host, turnId, "completed");
+      }
       assert.deepEqual(turnErrors, [], JSON.stringify(turnErrors));
-      assert.deepEqual(toolCalls, ["Computer"], "the real Agent Runtime must dispatch the Computer tool exactly once");
-      assert(requests[0]?.tools?.some((candidate) => candidate.function?.name === "Computer"), "Computer must be present in the first model request");
-      assert.equal(mainCalls, 2, "conversation model should call Computer then provide a final response");
-      assert.equal(computerCalls, 2, "dedicated Computer model must act, re-observe, then verify exactly once");
-      assert.equal(await readFile(fixtureStatePath, "utf8"), "CU-RUNTIME-FIXTURE-CLICKED");
-      assert(computerRpcMethods.includes("computer.grantCreate"));
-      assert.equal(computerRpcMethods.filter((method) => method === "computer.inspect").length, 2);
-      assert.equal(computerRpcMethods.filter((method) => method === "computer.act").length, 1);
-      assert.equal(computerRpcMethods.filter((method) => method === "computer.grantRevoke").length, 1);
-      await endTurn(host, turnId, "completed");
+      assert.deepEqual(toolCalls, ["Computer", "Computer", "Computer"], "the real Agent Runtime must dispatch Computer on each fresh turn");
+      assert.equal(computerToolDeclarations, 3, "each fresh turn's first model request must declare Computer");
+      assert.equal(mainCalls, 6, "each conversation turn should call Computer then provide a final response");
+      assert.equal(computerCalls, 6, "each Computer run must act, re-observe, then verify exactly once");
+      assert.equal(await readFile(fixtureStatePath, "utf8"), "CU-RUNTIME-FIXTURE-CLICKED-3");
+      assert.equal(computerRpcMethods.filter((method) => method === "computer.grantCreate").length, 3);
+      assert.equal(computerRpcMethods.filter((method) => method === "computer.inspect").length, 6);
+      assert.equal(computerRpcMethods.filter((method) => method === "computer.act").length, 3);
+      assert.equal(computerRpcMethods.filter((method) => method === "computer.grantRevoke").length, 3);
+      assert.deepEqual(
+        computerRpcMethods.filter((method) => ["computer.grantCreate", "computer.act", "computer.grantRevoke"].includes(method)),
+        ["computer.grantCreate", "computer.act", "computer.grantRevoke", "computer.grantCreate", "computer.act", "computer.grantRevoke", "computer.grantCreate", "computer.act", "computer.grantRevoke"],
+        "each grant must be revoked before the next cycle creates one",
+      );
       console.log(JSON.stringify({ ok: true, toolCalls, mainModelRequests: mainCalls, computerModelRequests: computerCalls,
         hostComputerRpcMethods: [...new Set(computerRpcMethods)],
-        fixtureState: "CU-RUNTIME-FIXTURE-CLICKED" }));
+        fixtureState: "CU-RUNTIME-FIXTURE-CLICKED-3", freshGrantCycles: 3 }));
     } finally {
       await sidecar.dispose();
     }
