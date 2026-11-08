@@ -12,6 +12,39 @@ it("computerUse settings accept the minimum shape", () => {
   expect(validateComputerUseSettings({ enabled: false })).toEqual({ enabled: false });
 });
 
+it("computerUse settings allow users to override application-level restrictions", () => {
+  expect(validateComputerUseSettings({
+    enabled: true,
+    restrictions: {
+      disableAll: true,
+      blockSelfTarget: false,
+      blockSecureInput: false,
+      enforceDenylist: false,
+      blockElevatedTargets: false,
+    },
+  })).toEqual({
+    enabled: true,
+    restrictions: {
+      disableAll: true,
+      blockSelfTarget: false,
+      blockSecureInput: false,
+      enforceDenylist: false,
+      blockElevatedTargets: false,
+    },
+  });
+});
+
+it("computerUse settings reject invalid restriction overrides", () => {
+  for (const restrictions of [
+    { disableAll: "yes" },
+    { blockSelfTarget: 0 },
+    { blockSecureInput: null },
+    { enforceDenylist: false, unknown: true },
+  ]) {
+    expect(() => validateComputerUseSettings({ enabled: true, restrictions })).toThrow(/invalid/);
+  }
+});
+
 it("runs are autonomous by default and still take pixels only on request", () => {
   // ADR 0344: the switch is the consent, so an unset policy must not imply a
   // per-step card that does not exist. Pixels stay opt-in, because they land

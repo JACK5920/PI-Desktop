@@ -31,6 +31,16 @@ export type ComputerGrantScope = "desktop" | "window";
 /** One `{ providerId, modelId }` the user picked, as in `imageGeneration`. */
 export type ComputerModelBinding = { providerId: string; modelId: string };
 
+/** User-overridable application-level policy guards. Missing values keep the existing defaults. */
+export type ComputerUseRestrictions = {
+  /** One switch that disables the guards below without erasing their individual values. */
+  disableAll?: boolean;
+  blockSelfTarget?: boolean;
+  blockSecureInput?: boolean;
+  enforceDenylist?: boolean;
+  blockElevatedTargets?: boolean;
+};
+
 export type ComputerUseSettings = {
   enabled: boolean;
   /** Absent means unconfigured; the tool refuses rather than falling back. */
@@ -47,6 +57,7 @@ export type ComputerUseSettings = {
   actionBudget?: number;
   /** Idle milliseconds before a grant closes itself. */
   idleExpiryMs?: number;
+  restrictions?: ComputerUseRestrictions;
 };
 
 export const COMPUTER_USE_DEFAULTS = {
@@ -100,6 +111,7 @@ export function validateComputerUseSettings(value: unknown): ComputerUseSettings
     "denylist",
     "actionBudget",
     "idleExpiryMs",
+    "restrictions",
   ];
   if (Object.keys(input).some((key) => !allowed.includes(key))) return invalid();
   if (typeof input.enabled !== "boolean") return invalid();
@@ -155,6 +167,20 @@ export function validateComputerUseSettings(value: unknown): ComputerUseSettings
       return invalid();
     }
     result.idleExpiryMs = input.idleExpiryMs;
+  }
+  if (input.restrictions !== undefined) {
+    if (!input.restrictions || typeof input.restrictions !== "object" || Array.isArray(input.restrictions)) return invalid();
+    const restrictions = input.restrictions as Record<string, unknown>;
+    const restrictionKeys = [
+      "disableAll",
+      "blockSelfTarget",
+      "blockSecureInput",
+      "enforceDenylist",
+      "blockElevatedTargets",
+    ];
+    if (Object.keys(restrictions).some((key) => !restrictionKeys.includes(key))) return invalid();
+    if (Object.values(restrictions).some((flag) => typeof flag !== "boolean")) return invalid();
+    result.restrictions = restrictions as ComputerUseRestrictions;
   }
   return result;
 }

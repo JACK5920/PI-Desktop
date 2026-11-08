@@ -369,7 +369,7 @@ fn click_uid(uid: &str) -> Action {
 }
 
 #[test]
-fn our_own_windows_are_never_targetable() {
+fn our_own_windows_are_blocked_by_default() {
     let desktop = FakeDesktop::new(vec![
         target(OWN_PID, "com.pi-desktop", "PI-Desktop", "self-window"),
         target(99, "com.example.app", "Example", "other-window"),
@@ -401,6 +401,35 @@ fn our_own_windows_are_never_targetable() {
 }
 
 #[test]
+fn explicit_settings_can_disable_each_application_target_refusal() {
+    let desktop = FakeDesktop::new(vec![
+        target(OWN_PID, "com.pi-desktop", "PI-Desktop", "self-window"),
+        target(
+            31,
+            "com.apple.keychainaccess",
+            "Keychain Access",
+            "credential-window",
+        ),
+        RawTarget {
+            elevated: true,
+            ..target(32, "admin-tool", "Admin Tool", "elevated-window")
+        },
+    ]);
+    let policy = Denylist::with_restrictions(
+        &[],
+        super::policy::Restrictions {
+            disable_all: true,
+            block_self_target: true,
+            block_secure_input: true,
+            enforce_denylist: true,
+            block_elevated_targets: true,
+        },
+    );
+    let listed = policy::list_targets(&desktop, &policy).expect("targets");
+    assert!(listed.iter().all(|item| item.refused_reason.is_none()));
+}
+
+#[test]
 fn a_renamed_self_process_is_still_refused() {
     // A helper process with a different pid but one of our app keys.
     let desktop = FakeDesktop::new(vec![target(
@@ -428,7 +457,7 @@ fn a_renamed_self_process_is_still_refused() {
 }
 
 #[test]
-fn built_in_credential_surfaces_cannot_be_allowlisted() {
+fn built_in_credential_surfaces_are_blocked_by_default() {
     let desktop = FakeDesktop::new(vec![target(
         31,
         "com.apple.keychainaccess",
@@ -488,6 +517,32 @@ fn secure_input_refuses_both_inspection_and_action() {
     .expect_err("act");
     assert_eq!(act, Refusal::SecureInputRefused);
     assert_eq!(desktop.performed_count(), 0, "nothing may be dispatched");
+}
+
+#[test]
+fn secure_input_block_can_be_disabled_by_user_policy() {
+    let desktop = FakeDesktop::new(vec![target(5, "com.example.app", "Example", "w1")]);
+    let mut grant = grant_for(&desktop, "w1");
+    desktop.set_secure_input(true);
+    let policy = Denylist::with_restrictions(
+        &[],
+        super::policy::Restrictions {
+            block_secure_input: false,
+            ..super::policy::Restrictions::default()
+        },
+    );
+
+    assert!(policy::inspect(&desktop, &mut grant, &policy, None, Instant::now()).is_ok());
+    assert!(policy::act(
+        &desktop,
+        &mut grant,
+        &policy,
+        None,
+        &click_uid("0.1"),
+        Instant::now(),
+    )
+    .is_ok());
+    assert_eq!(desktop.performed_count(), 1);
 }
 
 #[test]

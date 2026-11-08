@@ -8283,3 +8283,16 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
 - **Status:** Accepted. See ADR 0351 and the plugin permission/API specs. This
   supersedes the imported-session reach previously defined only by ADR 0200
   without changing the `.own` behavior.
+
+## 2026-11-08 — Make Computer Use application restrictions configurable (D690)
+
+- **Decision:** Keep current Computer Use restrictions enabled by default, but
+  expose independent Settings switches for self-target blocking, secure-input
+  blocking, target-denylist enforcement, and elevated-target blocking. Add a
+  master switch that disables those application-level restrictions without
+  erasing their individual values.
+- **Boundary:** The OS retains control of system permissions. Stop, request and
+  schema validation, native target ownership, and stale geometry checks remain
+  enforced. Host-core reads the saved policy for every Computer RPC.
+- **Status:** Accepted for implementation. See ADR 0353, which amends the
+  Computer Use refusals in ADR 0349 and ADR 0350.
