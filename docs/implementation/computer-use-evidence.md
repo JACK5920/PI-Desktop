@@ -207,7 +207,8 @@ acceptance across arbitrary providers or from the packaged end-user application.
 | Settings and live status | Settings allow explicit enablement/model selection, accessibility-only or granted-window pixels, and bounded parameters; the live widget exposes current grant state, capture mode, and Stop. |
 | Granted-window pixel capture | Chromium captures only the native window id in the Host grant; unmatched sources fail closed, and captured bytes are sent only to the separately bound Computer Use model. |
 | Cursor overlay | A click-through, non-authoritative overlay follows Host-validated action coordinates and is destroyed when the grant ends. |
-| macOS/Linux backends | Not implemented/accepted in this fork. |
+| macOS backend | An `AXUIElement` backend exists in source; this evidence set does not contain macOS device acceptance. |
+| Linux/X11 backend | An X11 identity/geometry plus AT-SPI tree/action backend is now in this branch. A GTK fixture acceptance is wired into Linux CI; its result is pending. Wayland input remains explicitly unsupported. |
 | Pixel capture and cursor overlay | Windows path implemented; no packaged-app or multi-display/DPI acceptance yet. |
 | Packaged desktop acceptance | Not complete. |
 
@@ -223,6 +224,8 @@ The following checks were run in the current worktree during this task:
 | `node --test apps/desktop/test/computer-use-settings-user-path.test.mjs` | Passed (settings, live Stop, and owner-scoped cancellation path). |
 | Electron Computer Use tool tests | Passed (pixel-mode forwarding, exact window-source matching, cursor event forwarding, and grant revoke). |
 | `cargo test -p host-core --locked` | Previously passed in this worktree: 1,220 passed, 0 failed, 2 ignored. |
+| Current Windows host-core targeted tests | Passed: 39 passed, 0 failed, 1 ignored. Linux-only backend tests are compiled/run by the Linux CI job, not this Windows result. |
+| Linux GTK/AT-SPI fixture acceptance | Added to `.github/workflows/ci.yml`; pending CI execution on this branch. It checks X11 target discovery, AT-SPI inspection, button invocation, and a changed accessible status label. |
 | `cargo clippy -p host-core --all-targets` | Previously passed; one pre-existing `filter_next` warning in `transcripts.rs`. |
 | Windows UIA fixture probe | Previously passed on this interactive Windows host, targeting only its own temporary harmless fixture window. |
 

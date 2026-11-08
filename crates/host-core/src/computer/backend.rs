@@ -10,6 +10,8 @@ use serde::{Deserialize, Serialize};
 
 use super::{Action, Capabilities, Fidelity, Node, PermissionState, Rect};
 
+#[cfg(target_os = "linux")]
+mod linux;
 #[cfg(target_os = "windows")]
 mod windows;
 
@@ -245,14 +247,11 @@ pub fn active() -> Box<dyn Desktop> {
     {
         Box::new(windows::WindowsDesktop::new())
     }
-    #[cfg(all(unix, not(target_os = "macos")))]
+    #[cfg(target_os = "linux")]
     {
-        Box::new(UnsupportedDesktop::new(
-            "linux",
-            "the Linux AT-SPI backend lands in stage 2",
-        ))
+        Box::new(linux::LinuxDesktop::new())
     }
-    #[cfg(not(any(target_os = "macos", target_os = "windows", unix)))]
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
     {
         Box::new(UnsupportedDesktop::new(
             "other",
