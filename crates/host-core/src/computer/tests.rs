@@ -17,6 +17,193 @@ use super::{
 
 const OWN_PID: i32 = 4_242;
 
+#[cfg(target_os = "windows")]
+#[derive(Default, Debug)]
+struct WindowsTargetTrialStats {
+    attempts: usize,
+    first_attempt_failures: usize,
+    recovered_within_100ms: usize,
+    unrecovered: usize,
+    late_recoveries: usize,
+    target_mismatches: usize,
+}
+
+#[cfg(target_os = "windows")]
+fn same_process_target_ids(desktop: &dyn Desktop, target_id: &str) -> Vec<String> {
+    let Some((pid, _)) = target_id.split_once(':') else {
+        return Vec::new();
+    };
+    desktop
+        .list_targets()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|item| item.target.target_id.starts_with(&format!("{pid}:")))
+        .map(|item| item.target.target_id)
+        .collect()
+}
+
+#[cfg(target_os = "windows")]
+fn fixture_pinned_grant(
+    desktop: &dyn Desktop,
+    target_id: &str,
+    session_id: String,
+) -> Result<super::Grant, Refusal> {
+    policy::create_grant(
+        desktop,
+        None,
+        &Denylist::default(),
+        GrantRequest {
+            target_id: Some(target_id.to_owned()),
+            session_id,
+            input_policy: InputPolicy::AutonomousInScope,
+            capture: CaptureMode::A11yOnly,
+            action_budget: 3,
+            idle_expiry: Duration::from_secs(600),
+        },
+        Instant::now(),
+    )
+}
+
+#[cfg(target_os = "windows")]
+fn record_pinned_grant_with_retry(
+    desktop: &dyn Desktop,
+    target_id: &str,
+    phase: &str,
+    trial: usize,
+    stats: &mut WindowsTargetTrialStats,
+) -> Option<super::Grant> {
+    stats.attempts += 1;
+    match fixture_pinned_grant(
+        desktop,
+        target_id,
+        format!("computer-target-{phase}-{trial}"),
+    ) {
+        Ok(grant) if grant.target.target_id == target_id => Some(grant),
+        first => {
+            stats.first_attempt_failures += 1;
+            let same_process_target_ids = same_process_target_ids(desktop, target_id);
+            let first_error = match first {
+                Ok(mut grant) => {
+                    stats.target_mismatches += 1;
+                    policy::revoke(&mut grant, false);
+                    "grant returned success for a different target id".to_owned()
+                }
+                Err(error) => format!("{error:?}"),
+            };
+            let retry_started = Instant::now();
+            match fixture_pinned_grant(
+                desktop,
+                target_id,
+                format!("computer-target-{phase}-{trial}-retry"),
+            ) {
+                Ok(grant) if grant.target.target_id == target_id => {
+                    let recovery_ms = retry_started.elapsed().as_millis();
+                    if recovery_ms <= 100 {
+                        stats.recovered_within_100ms += 1;
+                    } else {
+                        stats.late_recoveries += 1;
+                    }
+                    eprintln!(
+                        "COMPUTER_USE_TARGET_RETRY {}",
+                        serde_json::json!({
+                            "phase": phase,
+                            "trial": trial,
+                            "firstError": first_error,
+                            "sameProcessTargetIds": same_process_target_ids,
+                            "recoveryMs": recovery_ms,
+                        })
+                    );
+                    Some(grant)
+                }
+                retry => {
+                    stats.unrecovered += 1;
+                    let retry_error = format!("{retry:?}");
+                    if let Ok(mut grant) = retry {
+                        stats.target_mismatches += 1;
+                        policy::revoke(&mut grant, false);
+                    }
+                    eprintln!(
+                        "COMPUTER_USE_TARGET_FAILURE {}",
+                        serde_json::json!({
+                            "phase": phase,
+                            "trial": trial,
+                            "firstError": first_error,
+                            "retryError": retry_error,
+                            "sameProcessTargetIds": same_process_target_ids,
+                        })
+                    );
+                    None
+                }
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn record_bind_with_retry(
+    desktop: &dyn Desktop,
+    grant: &mut super::Grant,
+    target_id: &str,
+    phase: &str,
+    trial: usize,
+    stats: &mut WindowsTargetTrialStats,
+) -> bool {
+    stats.attempts += 1;
+    match policy::bind_target(desktop, grant, &Denylist::default(), target_id) {
+        Ok(()) if grant.target.target_id == target_id => true,
+        first => {
+            stats.first_attempt_failures += 1;
+            let same_process_target_ids = same_process_target_ids(desktop, target_id);
+            let first_error = match first {
+                Ok(()) => {
+                    stats.target_mismatches += 1;
+                    "bind returned success for a different target id".to_owned()
+                }
+                Err(error) => format!("{error:?}"),
+            };
+            let retry_started = Instant::now();
+            match policy::bind_target(desktop, grant, &Denylist::default(), target_id) {
+                Ok(()) if grant.target.target_id == target_id => {
+                    let recovery_ms = retry_started.elapsed().as_millis();
+                    if recovery_ms <= 100 {
+                        stats.recovered_within_100ms += 1;
+                    } else {
+                        stats.late_recoveries += 1;
+                    }
+                    eprintln!(
+                        "COMPUTER_USE_TARGET_RETRY {}",
+                        serde_json::json!({
+                            "phase": phase,
+                            "trial": trial,
+                            "firstError": first_error,
+                            "sameProcessTargetIds": same_process_target_ids,
+                            "recoveryMs": recovery_ms,
+                        })
+                    );
+                    true
+                }
+                retry => {
+                    stats.unrecovered += 1;
+                    if matches!(retry, Ok(())) {
+                        stats.target_mismatches += 1;
+                    }
+                    eprintln!(
+                        "COMPUTER_USE_TARGET_FAILURE {}",
+                        serde_json::json!({
+                            "phase": phase,
+                            "trial": trial,
+                            "firstError": first_error,
+                            "retryError": format!("{retry:?}"),
+                            "sameProcessTargetIds": same_process_target_ids,
+                        })
+                    );
+                    false
+                }
+            }
+        }
+    }
+}
+
 fn rect(x: f64, y: f64, width: f64, height: f64) -> Rect {
     Rect {
         x,
@@ -677,6 +864,305 @@ $form.Size = New-Object System.Drawing.Size(320, 180)
     let _ = fs::remove_file(scroll_state_path);
     let _ = fs::remove_file(combo_state_path);
     let _ = fs::remove_file(list_state_path);
+    if let Err(payload) = outcome {
+        std::panic::resume_unwind(payload);
+    }
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+#[ignore = "requires interactive Windows UIA device acceptance"]
+fn windows_backend_repeats_target_binding_under_three_start_conditions() {
+    use std::fs;
+    use std::os::windows::process::CommandExt;
+    use std::process::{Child, Command};
+    use std::thread;
+    use std::time::SystemTime;
+
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let nonce = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .expect("system clock is after the Unix epoch")
+        .as_nanos();
+    let suffix = format!("{}-{nonce}", std::process::id());
+    let primary_title = format!("PI-CU-TARGET-PRIMARY-{suffix}");
+    let secondary_title = format!("PI-CU-TARGET-SECONDARY-{suffix}");
+    let fixture_dir = std::env::current_exe()
+        .expect("test executable path")
+        .parent()
+        .expect("test executable directory")
+        .to_path_buf();
+    let primary_script = fixture_dir.join(format!("{primary_title}.ps1"));
+    let secondary_script = fixture_dir.join(format!("{secondary_title}.ps1"));
+    let churn_title = format!("PI-CU-TARGET-CHURN-{suffix}");
+    let churn_script = fixture_dir.join(format!("{churn_title}.ps1"));
+    let churn_ready = fixture_dir.join(format!("{churn_title}.ready"));
+    let primary_source = |title: &str| {
+        format!(
+            r#"Add-Type -AssemblyName System.Windows.Forms
+$form = New-Object System.Windows.Forms.Form
+$form.Text = '{title}'
+$form.StartPosition = 'CenterScreen'
+$form.Size = New-Object System.Drawing.Size(360, 200)
+$form.TopMost = $true
+$button = New-Object System.Windows.Forms.Button
+$button.Text = 'Isolated target fixture'
+$button.Location = New-Object System.Drawing.Point(24, 24)
+$form.Controls.Add($button)
+$form.add_Shown({{ $form.Activate(); $button.Focus() | Out-Null }})
+[System.Windows.Forms.Application]::Run($form)
+"#
+        )
+    };
+    fs::write(&primary_script, primary_source(&primary_title)).expect("write primary fixture");
+    fs::write(&secondary_script, primary_source(&secondary_title))
+        .expect("write secondary fixture");
+    fs::write(
+        &churn_script,
+        format!(
+            r#"Add-Type -AssemblyName System.Windows.Forms
+for ($i = 0; $i -lt 120; $i++) {{
+    $form = New-Object System.Windows.Forms.Form
+    $form.Text = '{churn_title}-$i'
+    $form.Size = New-Object System.Drawing.Size(240, 120)
+    $label = New-Object System.Windows.Forms.Label
+    $label.Text = 'Enumeration churn fixture'
+    $label.Location = New-Object System.Drawing.Point(12, 12)
+    $form.Controls.Add($label)
+    $form.Show()
+    [System.Windows.Forms.Application]::DoEvents()
+    if ($i -eq 0) {{ [System.IO.File]::WriteAllText('{ready}', 'ready') }}
+    Start-Sleep -Milliseconds 25
+    $form.Close()
+    [System.Windows.Forms.Application]::DoEvents()
+}}
+"#,
+            churn_title = churn_title,
+            ready = churn_ready.display().to_string().replace('\'', "''"),
+        ),
+    )
+    .expect("write window churn fixture");
+    let mut primary_child: Child = Command::new("powershell.exe")
+        .args(["-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-File"])
+        .arg(&primary_script)
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn()
+        .expect("start isolated primary target fixture");
+    let mut secondary_child: Option<Child> = None;
+    let mut churn_child: Option<Child> = None;
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let desktop = super::backend::active();
+        let target_for_title = |title: &str| {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            loop {
+                let targets = desktop
+                    .list_targets()
+                    .expect("enumerate target fixture windows");
+                if let Some(target) = targets.into_iter().find(|item| item.title == title) {
+                    break target;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "fixture window did not appear: {title}"
+                );
+                thread::sleep(Duration::from_millis(50));
+            }
+        };
+        let primary = target_for_title(&primary_title);
+        let primary_id = primary.target.target_id.clone();
+
+        // Starting from a fresh test/Host process: mint and revoke 50
+        // window-scoped grants using only the exact Host-issued target ID.
+        let mut phase_a = WindowsTargetTrialStats::default();
+        for trial in 0..50 {
+            if let Some(mut grant) = record_pinned_grant_with_retry(
+                desktop.as_ref(),
+                &primary_id,
+                "fresh-host",
+                trial,
+                &mut phase_a,
+            ) {
+                assert_eq!(grant.target.target_id, primary_id);
+                policy::revoke(&mut grant, false);
+            }
+        }
+
+        secondary_child = Some(
+            Command::new("powershell.exe")
+                .args(["-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-File"])
+                .arg(&secondary_script)
+                .creation_flags(CREATE_NO_WINDOW)
+                .spawn()
+                .expect("start second isolated target fixture"),
+        );
+        let secondary = target_for_title(&secondary_title);
+        let secondary_id = secondary.target.target_id;
+
+        let mut switch_grant = policy::create_grant(
+            desktop.as_ref(),
+            None,
+            &Denylist::default(),
+            GrantRequest {
+                target_id: None,
+                session_id: "computer-target-two-window-churn".into(),
+                input_policy: InputPolicy::AutonomousInScope,
+                capture: CaptureMode::A11yOnly,
+                action_budget: 3,
+                idle_expiry: Duration::from_secs(600),
+            },
+            Instant::now(),
+        )
+        .expect("mint desktop grant against a foreground fixture window");
+        assert_eq!(switch_grant.scope, super::GrantScope::Desktop);
+        let return_id = switch_grant.target.target_id.clone();
+        assert!(
+            return_id == primary_id || return_id == secondary_id,
+            "the freshly foregrounded fixture must be the desktop grant target; got {return_id}"
+        );
+        let switch_id = if return_id == primary_id {
+            secondary_id.as_str()
+        } else {
+            primary_id.as_str()
+        };
+        let mut phase_b = WindowsTargetTrialStats::default();
+        churn_child = Some(
+            Command::new("powershell.exe")
+                .args(["-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-File"])
+                .arg(&churn_script)
+                .creation_flags(CREATE_NO_WINDOW)
+                .spawn()
+                .expect("start transient-window churn fixture"),
+        );
+        let ready_deadline = Instant::now() + Duration::from_secs(5);
+        while !churn_ready.exists() {
+            assert!(
+                Instant::now() < ready_deadline,
+                "transient-window churn fixture did not start"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+        for trial in 0..50 {
+            let requested = if trial % 2 == 0 {
+                switch_id
+            } else {
+                &return_id
+            };
+            let _ = record_bind_with_retry(
+                desktop.as_ref(),
+                &mut switch_grant,
+                requested,
+                "two-window-churn",
+                trial,
+                &mut phase_b,
+            );
+        }
+        let churn_deadline = Instant::now() + Duration::from_secs(10);
+        while churn_child
+            .as_mut()
+            .is_some_and(|child| child.try_wait().expect("poll churn fixture").is_none())
+        {
+            assert!(
+                Instant::now() < churn_deadline,
+                "transient-window churn fixture did not finish"
+            );
+            thread::sleep(Duration::from_millis(20));
+        }
+        if let Some(mut churn) = churn_child.take() {
+            let _ = churn.wait();
+        }
+
+        // Simulate a sequence of agent grants being created and revoked, then
+        // re-run the 50 precise target transitions against the same two apps.
+        let mut phase_c = WindowsTargetTrialStats::default();
+        for trial in 0..10 {
+            if let Some(mut grant) = record_pinned_grant_with_retry(
+                desktop.as_ref(),
+                &primary_id,
+                "grant-churn-setup",
+                trial,
+                &mut phase_c,
+            ) {
+                policy::revoke(&mut grant, false);
+            }
+        }
+        for trial in 0..50 {
+            let requested = if trial % 2 == 0 {
+                switch_id
+            } else {
+                &return_id
+            };
+            let _ = record_bind_with_retry(
+                desktop.as_ref(),
+                &mut switch_grant,
+                requested,
+                "after-ten-grant-cycles",
+                trial,
+                &mut phase_c,
+            );
+        }
+        policy::revoke(&mut switch_grant, false);
+
+        let all_stats = [&phase_a, &phase_b, &phase_c];
+        let first_failures = all_stats
+            .iter()
+            .map(|stats| stats.first_attempt_failures)
+            .sum::<usize>();
+        let recovered = all_stats
+            .iter()
+            .map(|stats| stats.recovered_within_100ms)
+            .sum::<usize>();
+        let unrecovered = all_stats
+            .iter()
+            .map(|stats| stats.unrecovered)
+            .sum::<usize>();
+        let late_recoveries = all_stats
+            .iter()
+            .map(|stats| stats.late_recoveries)
+            .sum::<usize>();
+        let target_mismatches = all_stats
+            .iter()
+            .map(|stats| stats.target_mismatches)
+            .sum::<usize>();
+        eprintln!(
+            "COMPUTER_USE_TARGET_BASELINE {}",
+            serde_json::json!({
+                "freshHost": format!("{phase_a:?}"),
+                "twoWindowChurn": format!("{phase_b:?}"),
+                "afterTenGrantCycles": format!("{phase_c:?}"),
+                "firstAttemptFailures": first_failures,
+                "recoveredWithin100ms": recovered,
+                "unrecovered": unrecovered,
+                "lateRecoveries": late_recoveries,
+                "targetMismatches": target_mismatches,
+            })
+        );
+        assert!(
+            first_failures <= 3,
+            "150 target-selection trials plus 10 churn grants must have at most 3 first-attempt failures; A={phase_a:?}, B={phase_b:?}, C={phase_c:?}"
+        );
+        assert_eq!(unrecovered, 0, "all first-attempt failures must recover");
+        assert_eq!(late_recoveries, 0, "retries must recover within 100ms");
+        assert_eq!(recovered, first_failures);
+        assert_eq!(
+            target_mismatches, 0,
+            "a target ID must never bind to another window"
+        );
+    }));
+
+    let _ = primary_child.kill();
+    let _ = primary_child.wait();
+    if let Some(mut secondary) = secondary_child.take() {
+        let _ = secondary.kill();
+        let _ = secondary.wait();
+    }
+    if let Some(mut churn) = churn_child.take() {
+        let _ = churn.kill();
+        let _ = churn.wait();
+    }
+    let _ = fs::remove_file(primary_script);
+    let _ = fs::remove_file(secondary_script);
+    let _ = fs::remove_file(churn_script);
+    let _ = fs::remove_file(churn_ready);
     if let Err(payload) = outcome {
         std::panic::resume_unwind(payload);
     }

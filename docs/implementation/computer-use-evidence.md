@@ -228,6 +228,7 @@ The following checks were run in the current worktree during this task:
 | Linux GTK/AT-SPI fixture acceptance | Passed in CI workflow run `42525594538`. It verifies X11 target discovery, AT-SPI inspection, button invocation, and a changed accessible status label. |
 | `cargo clippy -p host-core --all-targets` | Previously passed; one pre-existing `filter_next` warning in `transcripts.rs`. |
 | Windows UIA fixture probe | Previously passed on this interactive Windows host, targeting only its own temporary harmless fixture window. |
+| Repeated Windows target-selection baseline | Passed in 3 independent test-process runs on 2026-11-09 using `cargo test -p host-core --locked computer::tests::windows_backend_repeats_target_binding_under_three_start_conditions -- --ignored --exact --nocapture`: each run covered 50 exact-ID pinned grants in a fresh test process, 50 alternating binds while two isolated target windows and a third process repeatedly opened/closed transient windows, then 10 create/revoke setup grants followed by 50 more binds. Across 480 target-resolution policy calls (450 scenario trials + 30 churn setup grants), first-attempt failures = 0, retries = 0, unrecovered failures = 0, late recoveries = 0, target mismatches = 0. The test cleans all fixture processes, scripts, and readiness markers. |
 
 The recursive `build:js` gate passed after the documentation links were
 corrected. VitePress still reports the repository's existing large-chunk and
@@ -238,6 +239,13 @@ The Windows fixture probe is not evidence that arbitrary applications have
 been accepted. It exercises only a temporary fixture window. The source-level
 and automated checks do not establish packaged-app behavior, pixel capture,
 macOS behavior, or a live model/provider run.
+
+The separate native action fixture exposed an intermittent double-click
+postcondition failure during this task. The target-selection baseline above
+passed independently, but mouse-action acceptance remains incomplete; one
+successful and four failed exploratory runs were observed before the baseline
+was isolated. At least one failed run left the fixture state unchanged, so a
+successful dispatch result must not be treated as proof of a completed click.
 
 ## Remaining acceptance
 
