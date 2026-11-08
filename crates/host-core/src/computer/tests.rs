@@ -154,6 +154,25 @@ $form.Controls.Add($list)
             );
             thread::sleep(Duration::from_millis(50));
         };
+        let canonical_target_id = target.target.target_id.clone();
+        assert!(
+            desktop
+                .resolve_target(&canonical_target_id)
+                .expect("resolve the exact host-issued target id")
+                .is_some(),
+            "a live fixture window must resolve from its exact host-issued id"
+        );
+        let display_label = format!(
+            "{canonical_target_id} {} — {}",
+            target.app_name, target.title
+        );
+        assert!(
+            desktop
+                .resolve_target(&display_label)
+                .expect("reject a UI label passed as a target id")
+                .is_none(),
+            "app name and title must never be accepted as part of a target id"
+        );
         let inspection = desktop
             .inspect(&target.target, 400)
             .expect("inspect isolated fixture UIA tree");

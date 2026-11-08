@@ -202,6 +202,91 @@ describe("Computer local tool", () => {
     unsubscribe();
   });
 
+  it("re-observes the real Host state after dispatch before the model can finish", async () => {
+    computerRuntime.runComputerLoop.mockImplementation(runBoundedComputerLoop);
+    let clicked = false;
+    let revision = 1;
+    let remainingBudget = 4;
+    const hostCalls: Array<{ method: string; params: unknown }> = [];
+    const host = {
+      async call<T>(method: string, params?: unknown): Promise<T> {
+        hostCalls.push({ method, params });
+        if (method === "settings.get") return { computerUse: { enabled: true, model: { providerId: "p", modelId: "m" } } } as T;
+        if (method === "computer.grantCreate") return { ...grant, revision } as T;
+        if (method === "computer.inspect") return {
+          grantId: grant.grantId,
+          revision,
+          bounds: grant.bounds,
+          fidelity: "full",
+          nodes: [{
+            uid: "button-1",
+            role: "button",
+            label: clicked ? "Continued" : "Continue",
+            hasValue: false,
+            enabled: true,
+            focused: false,
+            bounds: { x: 10, y: 10, width: 80, height: 30 },
+            actions: ["click"],
+          }],
+          truncated: false,
+          secureInput: false,
+        } as T;
+        if (method === "computer.grantDescribe") return { grant: { ...grant, revision, remainingBudget } } as T;
+        if (method === "computer.listTargets") return { targets: [{
+          targetId: grant.targetId,
+          appName: "Fixture",
+          title: "Computer Use State Fixture",
+          appKey: "fixture",
+          bounds: grant.bounds,
+        }] } as T;
+        if (method === "computer.act") {
+          const input = params as { action?: { kind?: string; uid?: string }; expectedRevision?: number };
+          expect(input.expectedRevision).toBe(revision);
+          expect(input.action).toEqual({ kind: "click", uid: "button-1" });
+          clicked = true;
+          revision += 1;
+          remainingBudget -= 1;
+          return { grantId: grant.grantId, revision, remainingBudget, dispatched: "accessibility-action" } as T;
+        }
+        if (method === "computer.grantRevoke") return { revoked: true } as T;
+        throw new Error(`Unexpected Host RPC: ${method}`);
+      },
+    };
+    const observations: string[] = [];
+    let modelCalls = 0;
+    computerRuntime.completeOneShot.mockImplementation(async (_provider: unknown, context: { messages: Array<{ content: unknown }> }) => {
+      const content = context.messages[0]?.content;
+      const message = typeof content === "string" ? content : "";
+      observations.push(message);
+      modelCalls += 1;
+      if (!clicked) return { text: '{"kind":"action","action":{"kind":"click","uid":"button-1"}}' };
+      expect(message).toContain('"Continued"');
+      return { text: '{"kind":"done","summary":"the fixture changed"}' };
+    });
+    const handler = createComputerUseTool({
+      getHost: () => host,
+      resolveProvider: async () => ({
+        id: "p", name: "Pinned", modelId: "m", apiKey: "fixture-only",
+        supportsReasoning: false, supportedThinkingLevels: ["off"],
+      }),
+    });
+
+    const result = await handler({
+      sessionId: "session-1",
+      toolCallId: "tool-state-verification",
+      args: { instruction: "Continue the fixture" },
+      signal: new AbortController().signal,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(modelCalls).toBe(2);
+    expect(observations[0]).toContain('"Continue"');
+    expect(observations[1]).toContain('"Continued"');
+    expect(hostCalls.filter((call) => call.method === "computer.inspect")).toHaveLength(2);
+    expect(hostCalls.filter((call) => call.method === "computer.act")).toHaveLength(1);
+    expect(hostCalls.at(-1)?.method).toBe("computer.grantRevoke");
+  });
+
   it("fails closed when Computer Use is disabled without minting a grant", async () => {
     const { host, calls } = hostFixture(false);
     const handler = createComputerUseTool({ getHost: () => host, resolveProvider: vi.fn() });

@@ -3,6 +3,29 @@
 This note records the current fork implementation and the evidence available
 for it. It contains no captured screen contents, window titles, or credentials.
 
+## Follow-up acceptance — 2026-11-08
+
+The current target-selection regression is covered at both the model-loop and
+native Host boundaries. The loop accepts only a host-issued window ID or the
+exact legacy display string for an item in the current observation, then always
+sends the canonical ID to Host. The Windows backend accepts the exact live ID
+and rejects the same ID with an app/title suffix.
+
+| Check | Result |
+|---|---|
+| `@pi-desktop/computer-use` tests and typecheck | Passed: 41 tests. |
+| Electron Main `agent-tool.test.ts` | Passed: 8 tests, including a scripted model/Host-RPC loop that confirms a second Host observation exposes the changed fixture state before the model returns `done`. |
+| Agent Runtime Computer tool registration | Passed: 1 targeted test; 407 unrelated tests skipped by the filter. Computer is present in the enabled Agent tool set and absent in disabled/Plan/Goal cases. |
+| Host Core `computer::` tests | Passed: 49; 1 interactive Windows fixture test ignored by the normal suite. |
+| `cargo fmt --check` | Passed. |
+| Opt-in Windows native UIA fixture: `windows_backend_drives_only_the_isolated_fixture_window` | Passed on this Windows host. It verifies exact target ID resolution and refusal of an ID polluted with the display label, then checks click, Unicode text, ComboBox selection, and ListBox selection against fixture state. |
+
+These checks establish a repeatable scripted-model and isolated-Windows-fixture
+baseline, not a live third-party model/provider or packaged-app acceptance. The
+next acceptance gap is running the same scenarios through the rebuilt desktop
+app with a recorded provider route and Host runtime logs, then retaining the
+run as an automated regression where the harness permits it.
+
 ## Implemented surfaces
 
 | Surface | Current state |
