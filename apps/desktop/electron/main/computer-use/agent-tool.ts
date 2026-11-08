@@ -13,7 +13,7 @@ import {
   type ComputerStepRecord,
   type ComputerTarget,
 } from "@pi-desktop/shared";
-import { completeOneShot, runComputerLoop, type RuntimeProviderConfig } from "@pi-desktop/agent-runtime";
+import { completeOneShot, runComputerLoop, visionFromModelConfig, type RuntimeProviderConfig } from "@pi-desktop/agent-runtime";
 import type { Context } from "@earendil-works/pi-ai";
 import type { LocalToolHandler } from "../agent-sidecar";
 import type { HostProcess } from "../host-process";
@@ -100,6 +100,12 @@ export function createComputerUseTool(options: {
     const provider = await options.resolveProvider(settings);
     if (!provider) return failure("COMPUTER_MODEL_NOT_CONFIGURED", "Choose a dedicated Computer Use model in Settings. The conversation model is not used as a fallback.");
     const captureMode = config.defaultCapture ?? COMPUTER_USE_DEFAULTS.capture;
+    if (captureMode === "a11y-and-pixels" && !visionFromModelConfig(provider.modelConfig)) {
+      return failure(
+        "COMPUTER_MODEL_VISION_REQUIRED",
+        "Pixel capture is enabled, but the selected Computer Use model is not configured for image input. Choose an image-capable model or switch capture to accessibility-only.",
+      );
+    }
     const capture = options.capture ?? captureGrantedWindow;
 
     signal.throwIfAborted();
