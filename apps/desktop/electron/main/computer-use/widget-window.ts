@@ -1,8 +1,8 @@
 import { app, BrowserWindow, screen } from "electron";
 import { join } from "node:path";
-import { IPC, type ComputerGrantView } from "@pi-desktop/shared";
+import { IPC, type ComputerGrantView, type ComputerRunActivity } from "@pi-desktop/shared";
 import { getModuleDirectory } from "../module-path";
-import { subscribeComputerUseRun } from "./active-run";
+import { subscribeComputerUseActivity, subscribeComputerUseRun } from "./active-run";
 
 export type ComputerUseWidget = {
   owns: (webContentsId: number) => boolean;
@@ -10,7 +10,8 @@ export type ComputerUseWidget = {
   close: () => void;
 };
 
-const DEFAULT_SIZE = { width: 390, height: 100 };
+const DEFAULT_SIZE = { width: 500, height: 80 };
+const TOP_OFFSET = 56;
 
 /** Desktop-level status/Stop chrome; native actions and authority stay in Main/Host. */
 export function createComputerUseWidget(): ComputerUseWidget {
@@ -18,26 +19,47 @@ export function createComputerUseWidget(): ComputerUseWidget {
   let creation: Promise<BrowserWindow | null> | null = null;
   let loaded = false;
   let latest: ComputerGrantView | null = null;
+  let latestActivity: ComputerRunActivity | null = null;
   let requestedVisible = false;
   let closingForShutdown = false;
   let size = DEFAULT_SIZE;
 
   const send = () => {
     if (window && !window.isDestroyed() && loaded) {
+      if (latest) positionAtActiveDisplay(window);
       window.webContents.send(IPC.event.computerGrantChanged, latest);
+      window.webContents.send(
+        IPC.event.computerActivityChanged,
+        latest && latestActivity?.grantId === latest.grantId ? latestActivity : null,
+      );
       if (latest && !window.isVisible()) window.showInactive();
       if (!latest && window.isVisible()) window.hide();
+    }
+  };
+
+  const positionAtActiveDisplay = (created: BrowserWindow) => {
+    const display = latest ? screen.getDisplayMatching(latest.bounds) : screen.getPrimaryDisplay();
+    const bounds = display.bounds;
+    const x = Math.max(bounds.x, Math.min(
+      Math.round(bounds.x + (bounds.width - size.width) / 2),
+      bounds.x + bounds.width - size.width,
+    ));
+    const y = Math.max(bounds.y, Math.min(bounds.y + TOP_OFFSET, bounds.y + bounds.height - size.height));
+    const next = { x, y, ...size };
+    const current = created.getBounds();
+    if (current.x !== next.x || current.y !== next.y || current.width !== next.width || current.height !== next.height) {
+      created.setBounds(next, false);
     }
   };
 
   const ensureWindow = async (): Promise<BrowserWindow | null> => {
     if (window && !window.isDestroyed()) return window;
     if (creation) return creation;
-    const bounds = screen.getPrimaryDisplay().workArea;
+    const bounds = screen.getPrimaryDisplay().bounds;
     const promise = (async () => {
       const created = new BrowserWindow({
-        x: bounds.x + bounds.width - size.width - 24,
-        y: bounds.y + 24,
+        x: bounds.x + Math.round((bounds.width - size.width) / 2),
+        y: bounds.y + TOP_OFFSET,
         ...size,
         title: "PI-Desktop Computer Use",
         show: false,
@@ -102,10 +124,15 @@ export function createComputerUseWidget(): ComputerUseWidget {
     return promise;
   };
 
-  const unsubscribe = subscribeComputerUseRun((run) => {
+  const unsubscribeRun = subscribeComputerUseRun((run) => {
     latest = run;
+    if (!run) latestActivity = null;
     if (run) void ensureWindow().then(send);
     else send();
+  });
+  const unsubscribeActivity = subscribeComputerUseActivity((activity) => {
+    latestActivity = activity;
+    send();
   });
 
   return {
@@ -125,17 +152,15 @@ export function createComputerUseWidget(): ComputerUseWidget {
       }
       void ensureWindow().then((created) => {
         if (!created || created.isDestroyed() || !requestedVisible) return;
-        const workArea = screen.getDisplayMatching(created.getBounds()).workArea;
-        const x = Math.max(workArea.x, Math.min(created.getBounds().x, workArea.x + workArea.width - size.width));
-        const y = Math.max(workArea.y, Math.min(created.getBounds().y, workArea.y + workArea.height - size.height));
-        created.setBounds({ x, y, ...size }, false);
+        positionAtActiveDisplay(created);
         if (!created.isVisible()) created.showInactive();
         send();
       });
     },
     close() {
       closingForShutdown = true;
-      unsubscribe();
+      unsubscribeRun();
+      unsubscribeActivity();
       const current = window;
       window = null;
       loaded = false;

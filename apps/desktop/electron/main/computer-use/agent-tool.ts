@@ -3,9 +3,14 @@ import {
   validateComputerToolArgs,
   type AppSettings,
   type ComputerActResult,
+  type ComputerActivityStep,
   type ComputerCursorEvent,
   type ComputerGrantView,
   type ComputerInspection,
+  type ComputerLoopActivity,
+  type ComputerRunActivity,
+  type ComputerRunPhase,
+  type ComputerStepRecord,
   type ComputerTarget,
 } from "@pi-desktop/shared";
 import { completeOneShot, runComputerLoop, type RuntimeProviderConfig } from "@pi-desktop/agent-runtime";
@@ -13,7 +18,11 @@ import type { Context } from "@earendil-works/pi-ai";
 import type { LocalToolHandler } from "../agent-sidecar";
 import type { HostProcess } from "../host-process";
 import { captureGrantedWindow } from "./capture";
-import { getActiveComputerUseRun, publishComputerUseRun } from "./active-run";
+import {
+  getActiveComputerUseRun,
+  publishComputerUseActivity,
+  publishComputerUseRun,
+} from "./active-run";
 
 function decisionContext(request: {
   instruction: string;
@@ -62,6 +71,17 @@ function codedError(error: unknown): Error & { code?: string } {
   });
 }
 
+function toActivityStep(step: ComputerStepRecord): ComputerActivityStep | null {
+  if (step.action === "observe" || step.action === "done" || step.action === "ask") return null;
+  return {
+    index: step.index + 1,
+    action: step.action,
+    ok: step.ok,
+    ...(step.ok && step.target ? { target: step.target.slice(0, 80) } : {}),
+    ...(step.errorCode?.startsWith("COMPUTER_") ? { errorCode: step.errorCode } : {}),
+  };
+}
+
 /** Main-process executor for the Agent Runtime's host-authorized Computer tool. */
 export function createComputerUseTool(options: {
   getHost: () => Pick<HostProcess, "call"> | null;
@@ -99,6 +119,18 @@ export function createComputerUseTool(options: {
       idleExpiryMs: config.idleExpiryMs ?? COMPUTER_USE_DEFAULTS.idleExpiryMs,
     });
     publishComputerUseRun({ grant, sessionId, toolCallId });
+    let loopActivity: ComputerLoopActivity = { phase: "starting" };
+    const recentSteps: ComputerActivityStep[] = [];
+    const publishActivity = (phase?: ComputerRunPhase, errorCode?: string) => {
+      const activity: ComputerRunActivity = {
+        grantId: grant.grantId,
+        ...(phase ? { phase } : loopActivity),
+        recentSteps: [...recentSteps],
+        ...(errorCode ? { errorCode } : {}),
+      };
+      publishComputerUseActivity(activity);
+    };
+    publishActivity("starting");
     try {
       const observe = async (targetId?: string) => {
         signal.throwIfAborted();
@@ -149,8 +181,8 @@ export function createComputerUseTool(options: {
           },
           decide: async (request) => {
             signal.throwIfAborted();
-          const context = decisionContext(request);
-          context.systemPrompt = request.system;
+            const context = decisionContext(request);
+            context.systemPrompt = request.system;
             return (await completeOneShot(provider, context, "off", {
               signal,
               sessionId,
@@ -158,8 +190,23 @@ export function createComputerUseTool(options: {
             })).text;
           },
           onCursor: (event) => options.cursorOverlay?.apply(event),
+          onActivity: (next) => {
+            loopActivity = {
+              ...next,
+              ...(next.target ? { target: next.target.slice(0, 80) } : {}),
+            };
+            publishActivity();
+          },
+          onStep: (step) => {
+            const safeStep = toActivityStep(step);
+            if (!safeStep) return;
+            recentSteps.push(safeStep);
+            if (recentSteps.length > 3) recentSteps.shift();
+            publishActivity();
+          },
         });
       signal.throwIfAborted();
+      publishActivity(result.outcome === "done" ? "completed" : result.outcome === "needs-user" ? "asking" : "failed", result.errorCode);
       return { ok: result.outcome === "done", isError: result.outcome !== "done", content: result };
     } finally {
       await host.call("computer.grantRevoke", { reason: "agent-finished" }).catch(() => undefined);

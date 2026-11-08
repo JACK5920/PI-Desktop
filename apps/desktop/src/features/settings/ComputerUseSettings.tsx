@@ -4,6 +4,7 @@ import type { AppSettings, ComputerCapabilities, ComputerModelBinding, ProviderP
 import { COMPUTER_ACTION_BUDGET_LIMIT, COMPUTER_USE_DEFAULTS } from "@pi-desktop/shared";
 import { Badge, Input, SettingsToggle } from "../../components/ui";
 import { SettingsMenuSelect } from "../../components/settings/SettingsMenuSelect";
+import { ComputerUseModelPicker } from "./ComputerUseModelPicker";
 import { api } from "../../lib/api";
 import { useAppStore } from "../../stores/app-store";
 import { SettingsCard, SettingsRow } from "./primitives";
@@ -111,17 +112,10 @@ export function ComputerUseSettingsSection({
         />
       </SettingsRow>
       <SettingsRow title={t("settings.computerUseModel")}>
-        <SettingsMenuSelect
-          label={t("settings.computerUseModel")}
+        <ComputerUseModelPicker
+          providers={providers}
           value={selectedBinding}
-          busy={busy || loading}
-          options={[
-            { id: "", label: t("settings.computerUseModelUnset") },
-            ...availableBindings.map((binding) => {
-              const provider = providers.find((entry) => entry.id === binding.providerId);
-              return { id: bindingId(binding), label: `${provider?.name ?? binding.providerId} · ${binding.modelId}` };
-            }),
-          ]}
+          disabled={busy || loading}
           onChange={(value) => {
             const next = availableBindings.find((item) => bindingId(item) === value);
             void saveComputerUse({ model: next ?? null });

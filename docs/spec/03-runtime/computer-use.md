@@ -333,15 +333,35 @@ never a no-op reported as success.
   windows or mint a grant, so neither surface exists to be bypassed.
 - The grant indicator is visible for the whole life of a grant, names the window
   bound right now and follows every rebind, shows the remaining budget and the
-  capture mode, and carries Stop. It stays visible while the app is in the
+  capture mode, and carries Stop. It is a top-centred, blue, pill-shaped activity
+  surface with the current phase/action and a bounded trail of recent actions.
+  Activity text is ephemeral UI state: it contains no screenshots, entered text,
+  model prose, or transcript content. It stays visible while the app is in the
   background, and it is absent whenever no grant is live.
 - Stop revokes the grant and aborts the turn that holds it when that turn
   belongs to the session on screen. It never aborts another session's work.
-- The cursor overlay appears with the first observation of a grant, re-frames
-  the window on a switch, and closes with the grant.
+- The click-through cursor overlay appears with the first observation of a
+  grant, covers the full display containing the currently bound target, and
+  follows that display on a switch. Its window, document, and root backgrounds
+  remain transparent so desktop content stays visible and usable. The visual
+  effect is limited to a soft blue perimeter glow; it does not place a dark or
+  colored wash over the display. The virtual cursor keeps its blue halo and
+  click pulse. The overlay closes with the grant. The status pill's Stop control
+  remains the only interactive element in these surfaces.
 
 Component-level wording for the indicator, the overlay, and the doctor view
 lands with the implementing change.
+
+The dedicated Computer Use model control uses the Composer's searchable model
+catalog, provider grouping, configured aliases, and model identity labels. Its
+selection is scoped to `computerUse.model`; it must not change the active chat
+session model. The separate Computer Use binding remains visible as a distinct
+setting because it controls which model receives desktop observations.
+
+The perimeter glow is intentionally broad and clearly visible (approximately
+100–240 CSS pixels from each display edge), with a stronger blue inner bloom
+and softer outer falloff. The center remains untinted, and the full-display
+overlay remains transparent and click-through.
 
 ## Audit and privacy
 

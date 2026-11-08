@@ -3165,6 +3165,26 @@ sklm: {
   },
   "computerUse": {
     "widgetTitle": "Computer Use active",
+    "activityPhase": {
+      "starting": "Starting computer control",
+      "observing": "Checking the screen",
+      "thinking": "Planning next action",
+      "acting": "Performing action",
+      "asking": "Needs your input",
+      "completed": "Computer task finished",
+      "failed": "Computer task stopped"
+    },
+    "activityAction": {
+      "click": "Click",
+      "double_click": "Double-click",
+      "right_click": "Right-click",
+      "set_value": "Entering text",
+      "press_keys": "Pressing keys",
+      "scroll": "Scroll",
+      "select": "Select",
+      "switch": "Switch window"
+    },
+    "recentSteps": "Recent",
     "widgetBudget": "{{count}} actions left",
     "captureA11yOnly": "Accessibility only",
     "stop": "Stop",

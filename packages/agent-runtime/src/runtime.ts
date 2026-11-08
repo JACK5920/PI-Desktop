@@ -4313,7 +4313,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
       name === SUBAGENT_LIST_TOOL_NAME ||
       name === SUBAGENT_STOP_TOOL_NAME ||
       (this.mode === "agent"
-        ? AGENT_CORE_TOOL_NAMES.has(name)
+        ? AGENT_CORE_TOOL_NAMES.has(name) || (name === "Computer" && this.computerUseEnabled)
         : proposalKindForMode(this.mode)
           ? new Set([
               "Read",

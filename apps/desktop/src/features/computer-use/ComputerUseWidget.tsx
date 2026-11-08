@@ -1,23 +1,41 @@
-import { useEffect, useLayoutEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../../lib/api";
 import { applyAppLanguage } from "../../lib/app-language";
-import type { ComputerGrantView } from "@pi-desktop/shared";
+import type { ComputerGrantView, ComputerRunActivity } from "@pi-desktop/shared";
 import { Button } from "../../components/ui";
 import "../../styles/computer-use-widget.css";
 
 export function ComputerUseWidget() {
   const { t } = useTranslation();
   const [grant, setGrant] = useState<ComputerGrantView | null>(null);
+  const [activity, setActivity] = useState<ComputerRunActivity | null>(null);
+  const grantIdRef = useRef<string | null>(null);
   const [stopping, setStopping] = useState(false);
   const [error, setError] = useState(false);
 
-  useLayoutEffect(() => api.onComputerGrantChanged(setGrant), []);
+  useLayoutEffect(() => {
+    const unsubscribeGrant = api.onComputerGrantChanged((next) => {
+      grantIdRef.current = next?.grantId ?? null;
+      setGrant(next);
+      setActivity((current) => next && current?.grantId === next.grantId ? current : null);
+    });
+    const unsubscribeActivity = api.onComputerActivityChanged((next) => {
+      setActivity(next?.grantId === grantIdRef.current ? next : null);
+    });
+    return () => {
+      unsubscribeGrant();
+      unsubscribeActivity();
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
     void api.computerGrantDescribe().then(({ grant: current }) => {
-      if (!cancelled) setGrant(current);
+      if (!cancelled) {
+        grantIdRef.current = current?.grantId ?? null;
+        setGrant(current);
+      }
     }).catch(() => {
       if (!cancelled) setError(true);
     });
@@ -48,14 +66,27 @@ export function ComputerUseWidget() {
     }
   };
 
+  const phase = activity?.phase ?? "starting";
+  const phaseText = t(`computerUse.activityPhase.${phase}`);
+  const actionText = activity?.action ? t(`computerUse.activityAction.${activity.action}`) : null;
+  const currentActivity = [phaseText, actionText, activity?.target ?? grant?.targetLabel]
+    .filter((part): part is string => Boolean(part))
+    .join(" · ");
+  const recentActivity = activity?.recentSteps.slice(-2).map((step) => {
+    const action = t(`computerUse.activityAction.${step.action}`);
+    return step.target ? `${action} · ${step.target}` : action;
+  }).join("  ›  ");
+
   return (
     <section className="computer-use-widget" aria-label={t("computerUse.widgetTitle")}>
       {grant ? (
         <>
           <div className="computer-use-widget-copy">
             <strong>{t("computerUse.widgetTitle")}</strong>
-            <span className="computer-use-widget-target" title={grant.targetLabel}>{grant.targetLabel}</span>
+            <span className="computer-use-widget-target" title={currentActivity}>{currentActivity}</span>
             <span className="computer-use-widget-meta">
+              {recentActivity ? `${t("computerUse.recentSteps")}: ${recentActivity}` : null}
+              {recentActivity ? " · " : null}
               {t("computerUse.widgetBudget", { count: grant.remainingBudget })} · {grant.capture === "a11y-and-pixels"
                 ? t("settings.computerUseAccessibilityAndPixels")
                 : t("computerUse.captureA11yOnly")}

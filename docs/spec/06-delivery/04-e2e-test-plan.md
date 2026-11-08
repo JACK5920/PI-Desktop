@@ -20219,17 +20219,30 @@ their separate platform acceptance.
   default, bind a dedicated enabled provider/model, set bounded limits, enable
   the feature, select accessibility-only and then granted-window pixel
   capture, and start a fixture Agent run. Confirm the live indicator shows
-  the bound target, capture mode, and remaining action budget; confirm the
-  click-through cursor follows the fixture action. Stop it, then try a stale grant
-  id and another session id. Finally disable Computer Use while a fixture run
-  is active.
+  the bound target, live phase/action, recent action trail, capture mode, and
+  remaining action budget; confirm the status pill is top-centred on the active
+  target's display and its Stop control remains interactive. Confirm the
+  click-through overlay covers that full display with a transparent background
+  and blue perimeter glow, leaving the fixture window visibly unchanged and
+  actionable, while its virtual cursor follows the fixture action without
+  changing the real pointer. On a multi-display fixture, switch targets and
+  verify both surfaces move to the display containing the newly bound target. Confirm
+  activity contains no entered text, model prose, or captured pixels. Stop it,
+  then try a stale grant id and another session id. Finally disable Computer
+  Use while a fixture run is active.
 - **Expected:** Saving settings does not create a grant. The active indicator
   appears only while a grant is live. Stop and disabling revoke the grant and
   cancel only its owning Agent run; stale or cross-session requests do not
-  revoke or abort anything. Pixel mode sends only the exact Host-bound window
-  image to the dedicated model; a missing/mismatched source sends no image.
-  The cursor overlay is visual-only, click-through, and disappears when its
-  grant ends.
+  revoke or abort anything. Activity events are grant-scoped and clear on
+  revoke, failure, cancellation, and renderer teardown; stale events cannot
+  move or keep visible the full-display overlay. Pixel mode sends only the exact
+  Host-bound window image to the dedicated model; a missing/mismatched source
+  sends no image. The cursor overlay is visual-only, click-through, and
+  disappears when its grant ends.
+- The dedicated-model control uses the Composer model catalog's search and
+  configured alias display, while saving only the exact Computer Use
+  provider/model binding. The overlay glow spans a broad blue perimeter with
+  a soft falloff and leaves the center untinted.
 - **Coverage:** Settings form, Main IPC owner policy, Host grant lifecycle,
   and the ordinary Agent abort path. `pnpm test:e2e:computer-use-settings`
   exercises the production React Settings section and Stop widget in an

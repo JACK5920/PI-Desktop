@@ -12,6 +12,7 @@ const writes: unknown[] = [];
 const stopRequests: unknown[] = [];
 const fixtureCalls: string[] = [];
 const grantListeners = new Set<(grant: unknown) => void>();
+const activityListeners = new Set<(activity: unknown) => void>();
 const grant = {
   grantId: "fixture-grant-1",
   sessionId: "fixture-session-1",
@@ -24,14 +25,18 @@ window.piDesktop = {
   platform: "win32",
   on(channel, listener) {
     if (channel === IPC.event.computerGrantChanged) grantListeners.add(listener);
-    return () => grantListeners.delete(listener);
+    if (channel === IPC.event.computerActivityChanged) activityListeners.add(listener);
+    return () => {
+      grantListeners.delete(listener);
+      activityListeners.delete(listener);
+    };
   },
   async invoke(channel, input) {
     fixtureCalls.push(channel);
     let data: unknown;
     switch (channel) {
       case IPC.invoke.providersList:
-        data = { providers: [{ id: "fixture-provider", name: "Fixture Provider", enabled: true, baseUrl: "https://fixture.invalid", models: [{ id: "fixture-model" }] }] };
+        data = { providers: [{ id: "fixture-provider", name: "Fixture Provider", enabled: true, baseUrl: "https://fixture.invalid", models: [{ id: "fixture-model", alias: "Fixture Alias" }] }] };
         break;
       case IPC.invoke.computerCapabilities:
         data = { platform: "windows", backend: "supported", fidelity: "bounded", accessibility: "granted" };
@@ -109,15 +114,28 @@ async function runSettingsProbe() {
     throw new Error("Missing dedicated-model validation hint when no binding is configured");
   }
   model.click();
-  await waitUntil(() => [...document.querySelectorAll("button")].some((button) => button.textContent?.includes("fixture-model")), "model option");
-  [...document.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent?.includes("fixture-model"))?.click();
+  await waitUntil(() => Boolean(document.querySelector('input[aria-label="Search models"]')), "searchable model selector");
+  const modelSearch = requireElement<HTMLInputElement>('input[aria-label="Search models"]');
+  modelSearch.value = "Fixture Alias";
+  modelSearch.dispatchEvent(new Event("input", { bubbles: true }));
+  await waitUntil(() => [...document.querySelectorAll("button")].some((button) => button.textContent?.includes("Fixture Alias")), "aliased model option");
+  const modelOption = [...document.querySelectorAll<HTMLButtonElement>('button[role="menuitemradio"]')]
+    .find((button) => button.textContent?.includes("Fixture Alias"));
+  if (!modelOption) throw new Error("Computer Use model picker did not display the same configured alias as the chat picker");
+  modelOption.click();
   await waitUntil(() => writes.length === 2, "dedicated model save");
   const modelPatch = writes[1] as any;
   if (modelPatch?.computerUse?.model?.providerId !== "fixture-provider" || modelPatch?.computerUse?.model?.modelId !== "fixture-model") {
     throw new Error("Dedicated model selection did not persist its provider/model binding");
   }
+  if (Object.hasOwn(modelPatch ?? {}, "activeSession") || Object.hasOwn(modelPatch ?? {}, "session")) {
+    throw new Error("Dedicated model selection unexpectedly changed the active chat session");
+  }
 
   await waitUntil(() => !requireElement<HTMLButtonElement>('button[aria-label="Dedicated model"]').disabled, "model save completion");
+  if (!requireElement<HTMLButtonElement>('button[aria-label="Dedicated model"]').textContent?.includes("Fixture Alias")) {
+    throw new Error("Selected Computer Use model name does not match the Composer alias display");
+  }
   const actionBudget = requireElement<HTMLInputElement>('input[aria-label="Maximum actions"]');
   const idleMinutes = requireElement<HTMLInputElement>('input[aria-label="Idle expiry (minutes)"]');
   if (actionBudget.value !== "40" || idleMinutes.value !== "15") throw new Error("Computer Use limits do not show their documented defaults");
@@ -129,6 +147,18 @@ async function runSettingsProbe() {
 async function runStopWidgetProbe() {
   flushSync(() => root.render(<ComputerUseWidget />));
   await waitUntil(() => document.body.textContent?.includes("Fixture App — Main Window") ?? false, "live grant indicator");
+  for (const listener of activityListeners) listener({
+    grantId: "fixture-grant-1",
+    phase: "acting",
+    stepIndex: 1,
+    action: "click",
+    target: "Continue",
+    recentSteps: [{ index: 1, action: "click", target: "Continue", ok: true }],
+  });
+  await waitUntil(() => document.body.textContent?.includes("Performing action · Click · Continue") ?? false, "live action status");
+  if (!document.body.textContent?.includes("Recent: Click · Continue")) {
+    throw new Error("Recent Computer Use activity trail is not visible");
+  }
   const stop = requireElement<HTMLButtonElement>(".computer-use-widget-stop");
   stop.click();
   await waitUntil(() => stopRequests.length === 1, "Stop IPC request");

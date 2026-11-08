@@ -139,6 +139,7 @@ export const IPC = {
     computerRequestPermission: "pi-desktop/computer/permission/request",
     computerGrantRevoke: "pi-desktop/computer/grant/revoke",
     computerGrantDescribe: "pi-desktop/computer/grant/describe",
+    computerCursorReady: "pi-desktop/computer/cursor/ready",
     agentCompact: "pi-desktop/agent/compact",
     agentAbort: "pi-desktop/agent/abort",
     agentStopSubagents: "pi-desktop/agent/stop-subagents",
@@ -550,6 +551,7 @@ export const IPC = {
     liveVoiceWidgetState: "pi-desktop/voice/live/event/widgetState",
     liveVoiceWidgetAction: "pi-desktop/voice/live/event/widgetAction",
     computerGrantChanged: "pi-desktop/computer/event/grantChanged",
+    computerActivityChanged: "pi-desktop/computer/event/activityChanged",
     computerCursor: "pi-desktop/computer/event/cursor",
   },
 } as const;

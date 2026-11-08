@@ -3,6 +3,30 @@
   inset: 0;
   overflow: hidden;
   pointer-events: none;
+  isolation: isolate;
+}
+
+html[data-surface="computer-use-cursor"],
+html[data-surface="computer-use-cursor"] body,
+html[data-surface="computer-use-cursor"] #root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  margin: 0;
+  background: transparent;
+}
+
+.computer-cursor-surface::after {
+  position: absolute;
+  inset: 0;
+  content: "";
+  pointer-events: none;
+  border: 1px solid rgb(51 156 255 / 56%);
+  box-shadow:
+    inset 0 0 96px 18px rgb(51 156 255 / 40%),
+    inset 0 0 160px 18px rgb(51 156 255 / 22%),
+    inset 0 0 240px 24px rgb(51 156 255 / 10%);
+  animation: computer-screen-edge-pulse 1.8s ease-in-out infinite alternate;
 }
 
 .computer-cursor {
@@ -15,6 +39,11 @@
   color: #fff;
   filter: drop-shadow(0 1px 3px rgb(0 0 0 / 70%));
   transition: left 110ms ease-out, top 110ms ease-out;
+}
+
+@keyframes computer-screen-edge-pulse {
+  from { opacity: .82; }
+  to { opacity: 1; }
 }
 
 .computer-cursor-pointer {
@@ -51,6 +80,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .computer-cursor-surface::after { animation: none; }
   .computer-cursor { transition: none; }
   .computer-cursor.is-pulsing .computer-cursor-pointer { animation: none; }
 }
