@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import test from "node:test";
 import { buildDevelopmentHostCore } from "../../../scripts/dev-electron.mjs";
 
@@ -44,7 +45,7 @@ test("direct Electron dev launch builds the debug Host before starting Electron"
 
   assert.deepEqual(invocation, [
     "cargo-test",
-    ["build", "--manifest-path", "C:\\PI-Desktop-dev\\Cargo.toml", "-p", "host-core"],
+    ["build", "--manifest-path", join("C:\\PI-Desktop-dev", "Cargo.toml"), "-p", "host-core"],
     { cwd: "C:\\PI-Desktop-dev", stdio: "inherit" },
   ]);
 
