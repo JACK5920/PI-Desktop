@@ -155,13 +155,17 @@ $form.Controls.Add($list)
             thread::sleep(Duration::from_millis(50));
         };
         let canonical_target_id = target.target.target_id.clone();
-        assert!(
-            desktop
-                .resolve_target(&canonical_target_id)
-                .expect("resolve the exact host-issued target id")
-                .is_some(),
-            "a live fixture window must resolve from its exact host-issued id"
-        );
+        for attempt in 0..50 {
+            assert!(
+                desktop
+                    .resolve_target(&canonical_target_id)
+                    .unwrap_or_else(|error| {
+                        panic!("resolve exact fixture target on attempt {attempt}: {error:?}")
+                    })
+                    .is_some(),
+                "a live fixture window must resolve from its exact host-issued id"
+            );
+        }
         let display_label = format!(
             "{canonical_target_id} {} — {}",
             target.app_name, target.title
@@ -284,22 +288,33 @@ $form.Controls.Add($list)
             "a framework ComboBox with a generic UIA role must still expose Select"
         );
         assert!(combo.actions.contains(&ActionKind::Select));
-        desktop
-            .perform(
-                &target.target,
-                Some(&combo.uid),
-                &Action {
-                    kind: Some(ActionKind::Select),
-                    option: Some("Three".into()),
-                    ..Action::default()
-                },
-            )
-            .expect("select an option only within the addressed ComboBox");
-        assert_eq!(
-            fs::read_to_string(&combo_state_path).expect("read selected combo item"),
-            "Three",
-            "the intended option must change without touching another control"
-        );
+        let combo_options = ["One", "Two", "Three"];
+        for index in 0..10 {
+            let option = combo_options[index % combo_options.len()];
+            desktop
+                .perform(
+                    &target.target,
+                    Some(&combo.uid),
+                    &Action {
+                        kind: Some(ActionKind::Select),
+                        option: Some(option.into()),
+                        ..Action::default()
+                    },
+                )
+                .unwrap_or_else(|error| {
+                    panic!("ComboBox select {index} ({option}) failed: {error:?}")
+                });
+            assert_eq!(
+                fs::read_to_string(&combo_state_path).expect("read selected combo item"),
+                option,
+                "ComboBox select {index} must reach the requested native value"
+            );
+            assert_eq!(
+                fs::read_to_string(&state_path).expect("read text input state"),
+                "Ab中文!@#A!",
+                "ComboBox selection must not type into the Edit control"
+            );
+        }
 
         let list = desktop
             .inspect(&target.target, 400)
@@ -313,22 +328,33 @@ $form.Controls.Add($list)
             "native ListBox Pane should retain its semantic role"
         );
         assert!(list.actions.contains(&ActionKind::Select));
-        desktop
-            .perform(
-                &target.target,
-                Some(&list.uid),
-                &Action {
-                    kind: Some(ActionKind::Select),
-                    option: Some("Gamma".into()),
-                    ..Action::default()
-                },
-            )
-            .expect("select an option only within the addressed ListBox");
-        assert_eq!(
-            fs::read_to_string(&list_state_path).expect("read selected list item"),
-            "Gamma",
-            "the exact requested list item must be selected"
-        );
+        let list_options = ["Alpha", "Gamma", "Epsilon"];
+        for index in 0..10 {
+            let option = list_options[(index * 2) % list_options.len()];
+            desktop
+                .perform(
+                    &target.target,
+                    Some(&list.uid),
+                    &Action {
+                        kind: Some(ActionKind::Select),
+                        option: Some(option.into()),
+                        ..Action::default()
+                    },
+                )
+                .unwrap_or_else(|error| {
+                    panic!("ListBox select {index} ({option}) failed: {error:?}")
+                });
+            assert_eq!(
+                fs::read_to_string(&list_state_path).expect("read selected list item"),
+                option,
+                "ListBox select {index} must reach the requested native value"
+            );
+            assert_eq!(
+                fs::read_to_string(&combo_state_path).expect("read selected combo item"),
+                combo_options[9 % combo_options.len()],
+                "ListBox selection must not alter the ComboBox"
+            );
+        }
     });
 
     let _ = child.kill();

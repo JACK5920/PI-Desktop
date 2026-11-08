@@ -3,6 +3,29 @@
 This note records the current fork implementation and the evidence available
 for it. It contains no captured screen contents, window titles, or credentials.
 
+## Reliability follow-up — 2026-11-08
+
+The Windows UIA mapper now recovers a small allowlist of semantic roles when a
+provider reports a generic Pane: Win32 Button, Edit, Static, ComboBox, and
+ListBox classes. A Button with TogglePattern is classified as a CheckBox. Other
+unknown Pane classes remain Panes; role inference does not use labels or parent
+classes. The isolated WinForms fixture now selects ten values in each of its
+ComboBox and ListBox controls and checks the native value after every selection
+and that the other controls were not modified.
+
+| Check | Result |
+|---|---|
+| Windows Pane class-role unit test | Passed: known classes map to documented UIA role IDs; unknown classes and already-specific UIA roles remain unchanged. |
+| Opt-in Windows UIA fixture | Passed: 50 exact target resolutions plus ten ComboBox selections and ten ListBox selections, with per-operation native-state readback and cross-control non-mutation checks. |
+| `cargo fmt --check` | Passed. |
+
+This does not establish full Computer Use reliability. Target resolution was
+repeated 50 times in the fixture's initial live state, not across all three
+stress conditions proposed in the review. Repeated switch/grant behavior under
+varied host states, the real Agent Runtime → Sidecar → Main
+tool → Host → native-window path, and deterministic action postconditions remain
+separate acceptance items.
+
 ## Follow-up acceptance — 2026-11-08
 
 The current target-selection regression is covered at both the model-loop and
