@@ -357,9 +357,11 @@ catalog, provider grouping, configured aliases, and model identity labels. Its
 selection is scoped to `computerUse.model`; it must not change the active chat
 session model. The separate Computer Use binding remains visible as a distinct
 setting because it controls which model receives desktop observations. The
-popup is wider than the compact Composer dropdown (up to 460 CSS pixels) so
-provider and model names remain readable; it opens to the right when space
-allows and remains clamped to the viewport.
+popup is wider than the compact Composer dropdown (up to 520 CSS pixels), with
+a capped 184 CSS-pixel provider rail, so ordinary provider and model names
+remain readable without allowing long names to expand the UI indefinitely. It
+opens to the right when space allows and remains clamped to the viewport; very
+long provider labels remain ellipsized with their full name available on hover.
 
 The perimeter glow is intentionally broad and clearly visible (approximately
 100–240 CSS pixels from each display edge), with a stronger blue inner bloom

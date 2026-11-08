@@ -20241,9 +20241,10 @@ their separate platform acceptance.
   disappears when its grant ends.
 - The dedicated-model control uses the Composer model catalog's search and
   configured alias display, while saving only the exact Computer Use
-  provider/model binding. Its popup is wide enough to read model names and is
-  viewport-clamped. The overlay glow spans a broad blue perimeter with a soft
-  falloff and leaves the center untinted.
+  provider/model binding. Its popup and provider rail have bounded widths wide
+  enough to read ordinary provider names and remain viewport-clamped; unusually
+  long names do not expand the UI without limit. The overlay glow spans a broad
+  blue perimeter with a soft falloff and leaves the center untinted.
 - **Coverage:** Settings form, Main IPC owner policy, Host grant lifecycle,
   and the ordinary Agent abort path. `pnpm test:e2e:computer-use-settings`
   exercises the production React Settings section and Stop widget in an

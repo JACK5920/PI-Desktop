@@ -36,7 +36,10 @@ window.piDesktop = {
     let data: unknown;
     switch (channel) {
       case IPC.invoke.providersList:
-        data = { providers: [{ id: "fixture-provider", name: "Fixture Provider", enabled: true, baseUrl: "https://fixture.invalid", models: [{ id: "fixture-model", alias: "Fixture Alias" }] }] };
+        data = { providers: [
+          { id: "fixture-provider", name: "Fixture Provider", enabled: true, baseUrl: "https://fixture.invalid", models: [{ id: "fixture-model", alias: "Fixture Alias" }] },
+          { id: "fixture-command-provider", name: "Command Chain Provider", enabled: true, baseUrl: "https://command.fixture.invalid", models: [{ id: "command-model" }] },
+        ] };
         break;
       case IPC.invoke.computerCapabilities:
         data = { platform: "windows", backend: "supported", fidelity: "bounded", accessibility: "granted" };
@@ -116,9 +119,12 @@ async function runSettingsProbe() {
   model.click();
   await waitUntil(() => Boolean(document.querySelector('input[aria-label="Search models"]')), "searchable model selector");
   const modelMenu = requireElement<HTMLElement>(".computer-use-model-menu");
-  if (modelMenu.getBoundingClientRect().width < 420) {
+  if (modelMenu.getBoundingClientRect().width < 480 || modelMenu.getBoundingClientRect().width > 540) {
     throw new Error(`Dedicated model menu is too narrow to read model names (${modelMenu.getBoundingClientRect().width}px)`);
   }
+  const sourceRail = requireElement<HTMLElement>(".computer-use-model-menu .composer-model-body[data-rail]");
+  const railWidth = Number.parseFloat(getComputedStyle(sourceRail).gridTemplateColumns.split(" ")[0] ?? "0");
+  if (railWidth < 180 || railWidth > 200) throw new Error(`Provider names have an unsuitable rail width (${railWidth}px)`);
   const modelSearch = requireElement<HTMLInputElement>('input[aria-label="Search models"]');
   modelSearch.value = "Fixture Alias";
   modelSearch.dispatchEvent(new Event("input", { bubbles: true }));
