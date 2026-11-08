@@ -441,6 +441,63 @@ $form.Size = New-Object System.Drawing.Size(320, 180)
                 "ListBox selection must not alter the ComboBox"
             );
         }
+
+        // Close the bound target, then reopen a same-title replacement. A
+        // stale window ID must stay invalid; matching by title must not
+        // silently retarget it to the replacement process.
+        let _ = child.kill();
+        let _ = child.wait();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            if desktop
+                .resolve_target(&canonical_target_id)
+                .expect("check the closed target id")
+                .is_none()
+            {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "closed target id remained resolvable"
+            );
+            thread::sleep(Duration::from_millis(50));
+        }
+        child = Command::new("powershell.exe")
+            .args(["-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-File"])
+            .arg(&script_path)
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn()
+            .expect("reopen isolated fixture with the same title");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let replacement = loop {
+            let targets = desktop.list_targets().expect("enumerate reopened fixture");
+            if let Some(replacement) = targets.iter().find(|candidate| candidate.title == title) {
+                break replacement.clone();
+            }
+            assert!(
+                Instant::now() < deadline,
+                "replacement fixture did not appear: {title}"
+            );
+            thread::sleep(Duration::from_millis(50));
+        };
+        assert_ne!(
+            replacement.target.target_id, canonical_target_id,
+            "a same-title replacement process must receive a new target id"
+        );
+        assert!(
+            desktop
+                .resolve_target(&canonical_target_id)
+                .expect("reject the stale id after same-title replacement")
+                .is_none(),
+            "the old id must not alias a replacement window"
+        );
+        assert!(
+            desktop
+                .resolve_target(&replacement.target.target_id)
+                .expect("resolve the new host-issued target id")
+                .is_some(),
+            "the replacement is usable only through its new exact id"
+        );
     }));
 
     let _ = child.kill();

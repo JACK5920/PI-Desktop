@@ -62,7 +62,7 @@ actions are deterministically verified.
 | `@pi-desktop/computer-use` typecheck | Passed. |
 | Repeated runtime E2E | Passed again after the loop change: three fresh turns still each dispatch, re-observe, verify the fixture state, and revoke. |
 | Documentation checks | Passed: 89 English/Chinese pairs and 640 documentation pages. |
-| Windows UIA target resolution during unrelated process churn | Passed: with a second isolated WinForms process/window added then removed, the original exact target ID remained present and resolvable; the fixture passed in 4.25 seconds. |
+| Windows UIA target resolution and recovery | Passed: an unrelated isolated process/window was added then removed without invalidating the original exact ID; after closing that target and reopening a same-title fixture, the old ID stayed invalid and the replacement required a new ID. The fixture passed in 5.46 seconds. |
 
 Generic action-specific result statuses and recovery under changing window/process
 availability remain unfinished.
