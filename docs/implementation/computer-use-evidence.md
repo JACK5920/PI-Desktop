@@ -67,6 +67,24 @@ actions are deterministically verified.
 Generic action-specific result statuses and recovery under changing window/process
 availability remain unfinished.
 
+## Distinct model-route acceptance — 2026-11-09
+
+The Agent Runtime E2E now binds the ordinary conversation to `deepseek-flash`
+and the Computer Use setting to a separate provider/model binding,
+`deepseek-v4-pro`. Both point only to the local loopback fixture; no external
+account, credential, or live third-party request is used. The fixture asserts
+the model ID on every request across all three consecutive Computer-use turns,
+so this verifies application routing and tool-loop dispatch independently of
+provider availability.
+
+| Check | Result |
+|---|---|
+| `corepack pnpm test:e2e:computer-use-runtime` | Passed: six conversation requests used `deepseek-flash`; six Computer decision requests used `deepseek-v4-pro`; all three native UIA fixture actions, state readbacks, and grant revocations passed. |
+| `git diff --check` | Passed. |
+
+Live behavior across real provider routes and packaged desktop acceptance remain
+separate acceptance gaps.
+
 ## Follow-up acceptance — 2026-11-08
 
 The current target-selection regression is covered at both the model-loop and
