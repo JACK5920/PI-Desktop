@@ -110,6 +110,23 @@ async function observeWithTargetRetry(
   }
 }
 
+/** Resolve a model switch request only against this observation's host-issued windows. */
+function resolveSwitchTarget(observation: Observation, requested: string): string | undefined {
+  const windows = observation.windows ?? [];
+  const exact = windows.find((window) => window.targetId === requested);
+  if (exact) return exact.targetId;
+
+  // Compatibility for models that copied the old rendered `id label — title`
+  // string into the id field. Accept only the exact display string generated
+  // from one item in this observation; never prefix-match or parse arbitrary
+  // text into a target, and always pass the canonical opaque id to Host.
+  const copiedDisplay = windows.find((window) => {
+    const title = window.title.trim() ? ` — ${window.title}` : "";
+    return requested === `${window.targetId} ${window.appName}${title}`;
+  });
+  return copiedDisplay?.targetId;
+}
+
 /** A short, value-free description of what a step acted on. */
 function describeTarget(action: ComputerAction, label?: string): string | undefined {
   if (label) return label;
@@ -264,10 +281,18 @@ export async function runComputerLoop(
       }
 
       if (answer.kind === "switch") {
-        const label = windowLabel(observation, answer.window) ?? `window ${answer.window}`;
+        const targetId = resolveSwitchTarget(observation, answer.window);
+        const label = targetId
+          ? windowLabel(observation, targetId) ?? `window ${targetId}`
+          : `window ${answer.window}`;
         try {
+          if (!targetId) {
+            throw Object.assign(new Error("switch target is not an exact id or displayed entry from the current observation"), {
+              code: "COMPUTER_TARGET_UNAVAILABLE",
+            });
+          }
           deps.onActivity?.({ phase: "acting", stepIndex: index + 1, action: "switch", target: label });
-          observation = await observeWithTargetRetry(deps, answer.window);
+          observation = await observeWithTargetRetry(deps, targetId);
           record({ index, action: "switch", ok: true, target: label });
           // The overlay frames the window being worked on, so it moves too.
           deps.onCursor?.({

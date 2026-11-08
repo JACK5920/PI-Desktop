@@ -55,13 +55,14 @@ export const COMPUTER_LOOP_SYSTEM_PROMPT = [
   "",
   "Answer with exactly one JSON object and nothing else. The schemas are:",
   '{"kind":"action","action":{"kind":"click|double_click|right_click|hover|drag|set_value|type_text|press_keys|scroll|select","uid":"<id from the element list>","point":{"x":10,"y":20},"to":{"x":100,"y":120},"text":"...","keys":["ctrl+a"],"scroll":{"dx":0,"dy":3},"option":"..."},"note":"short reason"}',
-  '{"kind":"switch","window":"<window id from the window list>","note":"short reason"}',
+  '{"kind":"switch","window":"<exact window_id value from the window list>","note":"short reason"}',
   '{"kind":"done","summary":"what is now true"}',
   '{"kind":"ask","question":"what you need from the user"}',
   "For `done`, return only `kind` and `summary` (an optional `note` is accepted). For `switch`, return only `kind`, `window`, and optional `note`. For `action`, include only the fields required by that action; never put a final summary or unrelated fields inside `action`.",
   "",
   "Rules:",
   "- Address elements by `uid` from the element list. Use a point only when no element fits.",
+  "- For `switch`, copy only the exact `window_id` value. The app label and title are display-only and must never be included in `window`.",
   "- Match the requested control by its observed role and label. Never substitute a neighboring field or click an unrelated element when the requested control is absent.",
   "- One action per answer. Do not batch, and do not invent a uid.",
   "- `set_value` writes through an accessibility value pattern; `type_text` sends literal text to the focused target control and needs `text`; `press_keys` sends key chords and needs `keys`.",
@@ -97,7 +98,10 @@ function renderWindow(window: ComputerTarget, currentId: string): string {
     window.refusedReason ? `refused: ${window.refusedReason}` : undefined,
   ].filter((mark): mark is string => Boolean(mark));
   const suffix = marks.length > 0 ? ` (${marks.join(", ")})` : "";
-  return `window=${window.targetId} ${window.appName}${title}${suffix}`;
+  // Keep the opaque id as a visibly separate field. Models sometimes copy
+  // the human-readable app/title suffix into `switch.window`; the loop still
+  // canonicalizes against this exact host-issued entry before calling Host.
+  return `window_id=${JSON.stringify(window.targetId)} label=${JSON.stringify(`${window.appName}${title}`)}${suffix}`;
 }
 
 export function renderObservation(observation: Observation): string {

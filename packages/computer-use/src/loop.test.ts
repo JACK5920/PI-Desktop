@@ -277,6 +277,57 @@ describe("runComputerLoop", () => {
     expect(cursor.filter((event) => event.kind === "show")).toHaveLength(2);
   });
 
+  it("canonicalizes a copied window label to its exact host-issued id", async () => {
+    const observed: (string | undefined)[] = [];
+    let decisions = 0;
+    let renderedObservation = "";
+    const entry = { targetId: "35316:855254:probe.exe", appName: "probe.exe", title: "CU Probe Target", appKey: "probe.exe", bounds: grant().bounds };
+    const deps: ComputerLoopDeps = {
+      observe: async (targetId) => {
+        observed.push(targetId);
+        return observation([saveButton], {
+          grant: grant(targetId ? { targetId, targetLabel: "probe.exe — CU Probe Target" } : {}),
+          windows: [entry],
+        });
+      },
+      act: async () => { throw new Error("must not act"); },
+      decide: async (request) => {
+        renderedObservation = request.observation;
+        return [
+          '{"kind":"switch","window":"35316:855254:probe.exe probe.exe — CU Probe Target"}',
+          '{"kind":"done","summary":"read it"}',
+        ][Math.min(decisions++, 1)];
+      },
+    };
+
+    const result = await runComputerLoop({ instruction: "read the target" }, deps);
+    expect(result.outcome).toBe("done");
+    expect(observed).toEqual([undefined, "35316:855254:probe.exe"]);
+    expect(renderedObservation).toContain('window_id="35316:855254:probe.exe" label="probe.exe — CU Probe Target"');
+  });
+
+  it("does not prefix-match or send an unrecognized window label to Host", async () => {
+    const observed: (string | undefined)[] = [];
+    let decisions = 0;
+    const entry = { targetId: "35316:855254:probe.exe", appName: "probe.exe", title: "CU Probe Target", appKey: "probe.exe", bounds: grant().bounds };
+    const deps: ComputerLoopDeps = {
+      observe: async (targetId) => {
+        observed.push(targetId);
+        return observation([saveButton], { windows: [entry] });
+      },
+      act: async () => { throw new Error("must not act"); },
+      decide: async () => [
+        '{"kind":"switch","window":"35316:855254:probe.exe unexpected suffix"}',
+        '{"kind":"done","summary":"stopped safely"}',
+      ][Math.min(decisions++, 1)],
+    };
+
+    const result = await runComputerLoop({ instruction: "read the target" }, deps);
+    expect(result.outcome).toBe("done");
+    expect(observed).toEqual([undefined]);
+    expect(result.steps[0]).toMatchObject({ action: "switch", ok: false, errorCode: "COMPUTER_TARGET_UNAVAILABLE" });
+  });
+
   it("retries a temporarily unavailable switch only against the requested target", async () => {
     const observed: (string | undefined)[] = [];
     let failures = 0;
@@ -287,6 +338,7 @@ describe("runComputerLoop", () => {
         if (targetId && failures++ < 2) throw coded("COMPUTER_TARGET_UNAVAILABLE");
         return observation([saveButton], {
           grant: grant(targetId ? { targetId, targetLabel: "Other — Inbox" } : {}),
+          windows: [{ targetId: "88:4", appName: "Other", title: "Inbox", appKey: "other", bounds: grant().bounds }],
         });
       },
       act: async () => {
@@ -311,7 +363,7 @@ describe("runComputerLoop", () => {
     const deps: ComputerLoopDeps = {
       observe: async (targetId) => {
         if (targetId) throw coded("COMPUTER_SELF_TARGET_REFUSED");
-        return observation();
+        return observation([], { windows: [{ targetId: "self", appName: "PI-Desktop", title: "", appKey: "pi", bounds: grant().bounds, refusedReason: "self" }] });
       },
       act: async () => {
         throw new Error("must not act");
@@ -332,7 +384,7 @@ describe("runComputerLoop", () => {
     const deps: ComputerLoopDeps = {
       observe: async (targetId) => {
         if (targetId) throw coded("COMPUTER_GRANT_EXPIRED");
-        return observation();
+        return observation([], { windows: [{ targetId: "88:4", appName: "Other", title: "Inbox", appKey: "other", bounds: grant().bounds }] });
       },
       act: async () => {
         throw new Error("must not act");
