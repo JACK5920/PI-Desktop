@@ -165,17 +165,23 @@ impl WindowsDesktop {
         let platform_role_id = unsafe { element.CurrentControlType() }
             .map(|value| value.0)
             .unwrap_or(0);
-        // WinForms and other providers may expose native ComboBox/ListBox
-        // HWNDs as a generic Pane with no SelectionItemPattern. Preserve the
-        // semantic role from the exact target-owned control class so the
-        // model/runtime can offer Select instead of rejecting it upstream.
-        let role_id = semantic_control_type(platform_role_id, element);
+        // Some providers expose native Win32 controls as generic Panes. When
+        // that happens, recover only well-known roles from the control's own
+        // native class and patterns; never infer from a label or a parent.
+        let target_control_hwnd = self.target_element_hwnd(element, target);
+        let class_name = target_control_hwnd.map(window_class_name);
+        let toggle_pattern = unsafe {
+            element.GetCurrentPatternAs::<IUIAutomationTogglePattern>(UIA_TogglePatternId)
+        }
+        .is_ok();
+        let role_id =
+            semantic_control_type(platform_role_id, class_name.as_deref(), toggle_pattern);
         let role = control_type_name(role_id).to_string();
         let name = unsafe { element.CurrentName() }
             .ok()
             .map(|value| value.to_string())
             .filter(|value| !value.trim().is_empty());
-        let belongs_to_target = self.target_element_hwnd(element, target).is_some();
+        let belongs_to_target = target_control_hwnd.is_some();
         let password = unsafe { element.CurrentIsPassword() }
             .map(|value| value.as_bool())
             .unwrap_or(true);
@@ -1489,11 +1495,30 @@ fn is_list_box_element(element: &IUIAutomationElement) -> bool {
             .is_some_and(|(hwnd, _)| is_list_box_class(&window_class_name(hwnd)))
 }
 
-fn semantic_control_type(platform_role_id: i32, element: &IUIAutomationElement) -> i32 {
-    if is_combo_box_element(element) {
+fn semantic_control_type(
+    platform_role_id: i32,
+    class_name: Option<&str>,
+    has_toggle_pattern: bool,
+) -> i32 {
+    if platform_role_id != 50033 {
+        return platform_role_id;
+    }
+    let Some(class_name) = class_name else {
+        return platform_role_id;
+    };
+    let class_name = class_name.to_ascii_lowercase();
+    if is_combo_box_class(&class_name) {
         50003
-    } else if is_list_box_element(element) {
+    } else if is_list_box_class(&class_name) {
         50008
+    } else if is_edit_class(&class_name) {
+        50004
+    } else if is_static_class(&class_name) {
+        50020
+    } else if is_button_class(&class_name) && has_toggle_pattern {
+        50002
+    } else if is_button_class(&class_name) {
+        50000
     } else {
         platform_role_id
     }
@@ -1506,6 +1531,18 @@ fn is_combo_box_class(class_name: &str) -> bool {
 fn is_list_box_class(class_name: &str) -> bool {
     class_name.eq_ignore_ascii_case("listbox")
         || class_name.to_ascii_lowercase().contains(".listbox.")
+}
+
+fn is_edit_class(class_name: &str) -> bool {
+    class_name == "edit" || class_name.contains(".edit.")
+}
+
+fn is_static_class(class_name: &str) -> bool {
+    class_name == "static" || class_name.contains(".static.")
+}
+
+fn is_button_class(class_name: &str) -> bool {
+    class_name == "button" || class_name.contains(".button.")
 }
 
 fn window_class_name(hwnd: HWND) -> String {
@@ -1740,6 +1777,43 @@ mod tests {
         assert!(!is_combo_box_class(
             "WindowsForms10.EDIT.app.0.2bf8098_r8_ad1"
         ));
+    }
+
+    #[test]
+    fn pane_roles_are_recovered_only_from_known_native_control_classes() {
+        assert_eq!(
+            semantic_control_type(50033, Some("WindowsForms10.BUTTON.app"), false),
+            50000
+        );
+        assert_eq!(
+            semantic_control_type(50033, Some("WindowsForms10.BUTTON.app"), true),
+            50002
+        );
+        assert_eq!(
+            semantic_control_type(50033, Some("WindowsForms10.EDIT.app"), false),
+            50004
+        );
+        assert_eq!(
+            semantic_control_type(50033, Some("WindowsForms10.STATIC.app"), false),
+            50020
+        );
+        assert_eq!(
+            semantic_control_type(50033, Some("WindowsForms10.COMBOBOX.app"), false),
+            50003
+        );
+        assert_eq!(
+            semantic_control_type(50033, Some("WindowsForms10.LISTBOX.app"), false),
+            50008
+        );
+        assert_eq!(
+            semantic_control_type(50033, Some("CustomCanvas"), false),
+            50033
+        );
+        assert_eq!(
+            semantic_control_type(50004, Some("WindowsForms10.BUTTON.app"), false),
+            50004
+        );
+        assert_eq!(semantic_control_type(50033, None, false), 50033);
     }
 
     #[test]
