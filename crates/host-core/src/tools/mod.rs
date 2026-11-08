@@ -1275,9 +1275,9 @@ pub async fn execute_tool_with_file_lease(
         }
     }
     let result: Result<Value, hashline::ToolError> = match tool_name {
-        // Authorize the desktop-owned image request through the normal host gate.
-        // Only the trusted desktop runner performs the external call.
-        "GenerateImages" => Ok(serde_json::json!({ "authorized": true })),
+        // Authorize desktop-owned local tools through the normal host gate.
+        // Only the trusted desktop process executes them after this check.
+        "GenerateImages" | "Computer" => Ok(serde_json::json!({ "authorized": true })),
         "Read" | "Glob" | "Grep" | "Write" | "Edit" => {
             run_file_tool(
                 workspace,
@@ -3365,6 +3365,24 @@ mod tests {
 
     fn plain_read(content: &str) -> String {
         hashline::strip_write_markup(content)
+    }
+
+    #[tokio::test]
+    async fn computer_local_tool_passes_host_execution_gate_after_authorization() {
+        // The trusted desktop runner calls tools.execute for normal permission
+        // evaluation before it runs the local Computer handler. Host-core must
+        // acknowledge this gate instead of treating Computer as an unknown tool.
+        let result = execute_tool(
+            None,
+            None,
+            "Computer",
+            &serde_json::json!({ "instruction": "inspect the current window" }),
+            5_000,
+        )
+        .await;
+
+        assert!(result.ok, "Computer host gate failed: {:?}", result.content);
+        assert_eq!(result.content["authorized"], true);
     }
 
     #[test]
