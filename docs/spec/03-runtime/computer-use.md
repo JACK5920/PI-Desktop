@@ -3,7 +3,8 @@
 > Status: The Windows implementation includes the UIA backend, host-authorized bounded loop, explicit granted-window pixel capture, click-through cursor visualization, and Settings/Stop controls. macOS/Linux native backends, macOS permission request UX, and packaged-app acceptance remain pending. This page is the
 > authoritative contract for the capability described in
 > [ADR 0349](../../adr/0349-os-computer-use-capability.md) and amended by
-> [ADR 0350](../../adr/0350-computer-use-whole-desktop-grant.md). The agent is
+> [ADR 0350](../../adr/0350-computer-use-whole-desktop-grant.md) and
+> [ADR 0353](../../adr/0353-configurable-computer-use-restrictions.md). The agent is
 > the only caller; the spoken entry point is specified here and built in
 > stage 3. This contract has been approved for implementation in the fork;
 > the Windows backend currently supports bounded UIA reads and target-scoped actions;
@@ -17,8 +18,8 @@ user's machine. It is disabled by default and it is separate from the embedded
 `Browser` tool. Enabling it in Settings is the authorisation: from then on the
 agent may start a desktop-wide grant itself, work in one window at a time, and
 move between windows the host does not refuse (ADR 0350). The user is not asked
-which window, and the capability's bounds are the refusals, the action budget,
-the idle expiry, and Stop.
+which window, and the capability's bounds are the configurable application
+refusals, action budget, idle expiry, operating-system permissions, and Stop.
 
 The spoken entry point is deliberately not wired in stage 1. When it lands,
 Live Voice gains no authority of its own — a spoken request becomes a work
@@ -123,26 +124,33 @@ Rules:
 - Grants are never persisted. A restart, a renderer reload, or a window
   navigation leaves no grant behind.
 
-## Absolute refusals
+## Configurable application restrictions
 
-These two refusals are not reachable by any permission mode, setting, grant
-option, or `auto` policy:
+The Settings page exposes four application-level guards under Computer Use:
 
-1. **The capability never targets PI-Desktop's own windows** — approval cards,
-   settings, secrets surfaces, the Live Voice widget, plugin views. Synthetic
-   input into this application is a direct permission-broker bypass.
-2. **Capture and synthesis both refuse while the OS reports a secure input
-   state, or while the focused element is a password field.** The refusal is
-   reported as a code; the field's content never reaches a snapshot, a
-   screenshot, or a log.
+| Setting | Default | Effect when disabled |
+|---|---:|---|
+| Block PI-Desktop windows | on | PI-Desktop windows may be listed, inspected, and operated |
+| Block password and secure-input surfaces | on | Secure-input state and password controls may reach inspection, pixel capture, and input |
+| Enforce target denylist | on | Built-in and user-added denied application identifiers no longer refuse a target |
+| Block elevated windows | on | Targets with higher integrity may be selected when the OS backend permits it |
 
-A user-editable application denylist sits on top of these. Its built-in
-credential-surface entries — the platform keychain and credential UI, and the
-OS authentication dialogs — cannot be removed.
+Each restriction can be changed independently. **Disable all application
+restrictions** overrides the four switches without erasing their saved values;
+turning it off restores the per-item choices. Existing installations default
+to all four restrictions enabled. Settings are read by host-core on every
+Computer RPC, so a change applies to subsequent operations in an active grant.
 
-These refusals define the desktop scope rather than punching holes in it: "the
-whole desktop" means every window the host does not refuse, re-checked on every
-bind, so a refused window never becomes reachable by waiting or by switching.
+These switches only change PI-Desktop policy. Windows accessibility/UAC and
+other operating-system permissions remain controlled by the OS. Stop remains
+available and revokes the active grant; request/schema validation, native
+window ownership checks, and stale-coordinate checks remain in force so the
+host does not dispatch malformed or misaddressed input.
+
+When secure-input blocking is disabled, password-field names and accessible
+values the backend exposes can be included in model context, and pixel capture
+can include the bound window as configured. The setting does not log entered
+text or screenshots. This behavior is explicit and user-controlled.
 
 ## Tool contract
 

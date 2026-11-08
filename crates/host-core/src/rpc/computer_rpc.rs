@@ -36,13 +36,15 @@ fn string_param(params: &Value, key: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-/// Settings are the user's; the built-in credential denylist is not, so it is
-/// added inside `Denylist` and cannot be removed by a settings write.
+/// Application-level restrictions are host-owned and re-read for every RPC.
 async fn denylist_from_settings(state: &Arc<Mutex<AppState>>) -> policy::Denylist {
     let st = state.lock().await;
     let stored = st.db.get_setting("app").ok().flatten();
+    computer_policy_from_settings(stored.as_ref())
+}
+
+fn computer_policy_from_settings(stored: Option<&Value>) -> policy::Denylist {
     let entries = stored
-        .as_ref()
         .and_then(|value| value.get("computerUse"))
         .and_then(|value| value.get("denylist"))
         .and_then(Value::as_array)
@@ -54,7 +56,70 @@ async fn denylist_from_settings(state: &Arc<Mutex<AppState>>) -> policy::Denylis
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    policy::Denylist::new(&entries)
+    let restrictions = stored
+        .and_then(|value| value.get("computerUse"))
+        .and_then(|value| value.get("restrictions"));
+    let read = |key: &str, default: bool| {
+        restrictions
+            .and_then(|value| value.get(key))
+            .and_then(Value::as_bool)
+            .unwrap_or(default)
+    };
+    policy::Denylist::with_restrictions(
+        &entries,
+        policy::Restrictions {
+            disable_all: read("disableAll", false),
+            block_self_target: read("blockSelfTarget", true),
+            block_secure_input: read("blockSecureInput", true),
+            enforce_denylist: read("enforceDenylist", true),
+            block_elevated_targets: read("blockElevatedTargets", true),
+        },
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::computer_policy_from_settings;
+    use serde_json::json;
+
+    #[test]
+    fn missing_settings_keep_existing_computer_restrictions() {
+        let policy = computer_policy_from_settings(None);
+        assert!(policy.refuses("credentialuibroker.exe", "Credential UI"));
+        assert!(!policy.allows_sensitive_input());
+    }
+
+    #[test]
+    fn master_and_individual_switches_are_read_from_app_settings() {
+        let stored = json!({
+            "computerUse": {
+                "denylist": ["private-window"],
+                "restrictions": {
+                    "disableAll": true,
+                    "blockSelfTarget": true,
+                    "blockSecureInput": true,
+                    "enforceDenylist": true,
+                    "blockElevatedTargets": true
+                }
+            }
+        });
+        let policy = computer_policy_from_settings(Some(&stored));
+        assert!(!policy.refuses("credentialuibroker.exe", "Credential UI"));
+        assert!(!policy.refuses("private-window", "Private Window"));
+        assert!(policy.allows_sensitive_input());
+    }
+
+    #[test]
+    fn individual_restrictions_override_only_their_own_defaults() {
+        let stored = json!({
+            "computerUse": {
+                "restrictions": { "blockSecureInput": false }
+            }
+        });
+        let policy = computer_policy_from_settings(Some(&stored));
+        assert!(policy.refuses("credentialuibroker.exe", "Credential UI"));
+        assert!(policy.allows_sensitive_input());
+    }
 }
 
 async fn settings_enabled(state: &Arc<Mutex<AppState>>) -> bool {

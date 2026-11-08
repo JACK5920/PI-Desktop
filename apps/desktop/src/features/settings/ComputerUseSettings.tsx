@@ -49,6 +49,7 @@ export function ComputerUseSettingsSection({
   const { t } = useTranslation();
   const showToast = useAppStore((state) => state.showToast);
   const computerUse = settings.computerUse ?? { enabled: false };
+  const restrictions = computerUse.restrictions ?? {};
   const [providers, setProviders] = useState<ProviderPublic[]>([]);
   const [capabilities, setCapabilities] = useState<ComputerCapabilities | null>(null);
   const [loading, setLoading] = useState(true);
@@ -91,6 +92,10 @@ export function ComputerUseSettingsSection({
     } finally {
       setBusy(false);
     }
+  };
+
+  const saveRestrictions = (patch: NonNullable<typeof computerUse.restrictions>) => {
+    void saveComputerUse({ restrictions: { ...restrictions, ...patch } });
   };
 
   const saveLimits = async () => {
@@ -142,6 +147,36 @@ export function ComputerUseSettingsSection({
             }
           }}
         />
+      </SettingsRow>
+      <SettingsRow title={t("settings.computerUseRestrictions")}>
+        <div className="computer-use-settings-restrictions">
+          <div className="computer-use-settings-restriction-row">
+            <SettingsToggle
+              checked={restrictions.disableAll ?? false}
+              label={t("settings.computerUseDisableAllRestrictions")}
+              disabled={busy || loading}
+              onChange={() => saveRestrictions({ disableAll: !(restrictions.disableAll ?? false) })}
+            />
+            <span>{t("settings.computerUseDisableAllRestrictions")}</span>
+          </div>
+          <p className="computer-use-settings-notice">{t("settings.computerUseDisableAllRestrictionsDescription")}</p>
+          {([
+            ["blockSelfTarget", "computerUseBlockSelfTarget"],
+            ["blockSecureInput", "computerUseBlockSecureInput"],
+            ["enforceDenylist", "computerUseEnforceDenylist"],
+            ["blockElevatedTargets", "computerUseBlockElevatedTargets"],
+          ] as const).map(([key, labelKey]) => (
+            <div className="computer-use-settings-restriction-row" key={key}>
+              <SettingsToggle
+                checked={restrictions[key] ?? true}
+                label={t(`settings.${labelKey}`)}
+                disabled={busy || loading || (restrictions.disableAll ?? false)}
+                onChange={() => saveRestrictions({ [key]: !(restrictions[key] ?? true) })}
+              />
+              <span>{t(`settings.${labelKey}`)}</span>
+            </div>
+          ))}
+        </div>
       </SettingsRow>
       <SettingsRow title={t("settings.computerUseLimits")}>
         <div className="computer-use-settings-limits">

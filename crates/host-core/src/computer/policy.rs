@@ -46,30 +46,81 @@ pub fn built_in_denylist() -> &'static [&'static str] {
     ]
 }
 
-/// The denylist in force: the built-in credential surfaces, which cannot be
-/// removed, plus whatever the user added.
-#[derive(Debug, Clone, Default)]
+/// Application-level restrictions configured by the user.
+#[derive(Debug, Clone, Copy)]
+pub struct Restrictions {
+    pub disable_all: bool,
+    pub block_self_target: bool,
+    pub block_secure_input: bool,
+    pub enforce_denylist: bool,
+    pub block_elevated_targets: bool,
+}
+
+impl Default for Restrictions {
+    fn default() -> Self {
+        Self {
+            disable_all: false,
+            block_self_target: true,
+            block_secure_input: true,
+            enforce_denylist: true,
+            block_elevated_targets: true,
+        }
+    }
+}
+
+impl Restrictions {
+    fn is_enabled(self, setting: bool) -> bool {
+        !self.disable_all && setting
+    }
+}
+
+/// Target policies combine the configured denylist with the user's switches.
+#[derive(Debug, Clone)]
 pub struct Denylist {
     user: Vec<String>,
+    restrictions: Restrictions,
+}
+
+impl Default for Denylist {
+    fn default() -> Self {
+        Self::new(&[])
+    }
 }
 
 impl Denylist {
     pub fn new(user_entries: &[String]) -> Self {
+        Self::with_restrictions(user_entries, Restrictions::default())
+    }
+
+    pub fn with_restrictions(user_entries: &[String], restrictions: Restrictions) -> Self {
         Self {
             user: user_entries
                 .iter()
                 .map(|entry| entry.trim().to_ascii_lowercase())
                 .filter(|entry| !entry.is_empty())
                 .collect(),
+            restrictions,
         }
     }
 
     pub fn refuses(&self, app_key: &str, app_name: &str) -> bool {
+        if !self
+            .restrictions
+            .is_enabled(self.restrictions.enforce_denylist)
+        {
+            return false;
+        }
         let key = app_key.trim().to_ascii_lowercase();
         let name = app_name.trim().to_ascii_lowercase();
         let hits = |entry: &str| !entry.is_empty() && (key.contains(entry) || name.contains(entry));
         built_in_denylist().iter().any(|entry| hits(entry))
             || self.user.iter().any(|entry| hits(entry))
+    }
+
+    pub fn allows_sensitive_input(&self) -> bool {
+        !self
+            .restrictions
+            .is_enabled(self.restrictions.block_secure_input)
     }
 }
 
@@ -84,28 +135,37 @@ const SELF_APP_KEYS: &[&str] = &[
 
 /// Why this window cannot be picked, or `None` when it can.
 ///
-/// The self-target check comes first and is unconditional: a PI-Desktop window
-/// is refused even if the user added it to an allowlist, because synthetic
-/// input into our own approval cards bypasses the permission broker entirely.
+/// Refusals follow the policy snapshot read from the user's settings.
 pub fn refusal_for_target(
     raw: &RawTarget,
     self_pids: &[i32],
     denylist: &Denylist,
 ) -> Option<TargetRefusal> {
-    if self_pids.contains(&raw.target.pid) {
+    if denylist
+        .restrictions
+        .is_enabled(denylist.restrictions.block_self_target)
+        && self_pids.contains(&raw.target.pid)
+    {
         return Some(TargetRefusal::SelfTarget);
     }
     let key = raw.target.app_key.trim().to_ascii_lowercase();
-    if SELF_APP_KEYS
-        .iter()
-        .any(|entry| key == *entry || key.starts_with(entry))
+    if denylist
+        .restrictions
+        .is_enabled(denylist.restrictions.block_self_target)
+        && SELF_APP_KEYS
+            .iter()
+            .any(|entry| key == *entry || key.starts_with(entry))
     {
         return Some(TargetRefusal::SelfTarget);
     }
     if denylist.refuses(&raw.target.app_key, &raw.app_name) {
         return Some(TargetRefusal::Denylisted);
     }
-    if raw.elevated {
+    if denylist
+        .restrictions
+        .is_enabled(denylist.restrictions.block_elevated_targets)
+        && raw.elevated
+    {
         return Some(TargetRefusal::Elevated);
     }
     None
@@ -190,7 +250,9 @@ fn frontmost_usable(
     // the refusal then comes from the read, where it can be attributed.
     allowed
         .iter()
-        .find(|item| desktop.can_open(&item.target))
+        .find(|item| {
+            desktop.can_open_with_sensitive_input(&item.target, denylist.allows_sensitive_input())
+        })
         .cloned()
         .or_else(|| allowed.into_iter().next())
         .ok_or(Refusal::ScopeViolation)
@@ -392,7 +454,11 @@ pub fn inspect(
     expected_revision: Option<u32>,
     now: Instant,
 ) -> ComputerResult<Inspection> {
-    if desktop.secure_input_active() {
+    if denylist
+        .restrictions
+        .is_enabled(denylist.restrictions.block_secure_input)
+        && desktop.secure_input_active()
+    {
         return Err(Refusal::SecureInputRefused);
     }
     refresh(desktop, grant, denylist)?;
@@ -402,7 +468,7 @@ pub fn inspect(
         }
     }
     let raw = desktop
-        .inspect(&grant.target, MAX_NODES)
+        .inspect_with_sensitive_input(&grant.target, MAX_NODES, denylist.allows_sensitive_input())
         .map_err(Refusal::from)?;
     grant.last_activity = now;
     Ok(Inspection {
@@ -580,7 +646,11 @@ pub fn act(
     action: &Action,
     now: Instant,
 ) -> ComputerResult<ActResult> {
-    if desktop.secure_input_active() {
+    if denylist
+        .restrictions
+        .is_enabled(denylist.restrictions.block_secure_input)
+        && desktop.secure_input_active()
+    {
         return Err(Refusal::SecureInputRefused);
     }
     let refreshed = refresh(desktop, grant, denylist)?;
@@ -598,7 +668,12 @@ pub fn act(
     }
     let kind = validate_action(grant, action, &measured.bounds)?;
     let dispatched = desktop
-        .perform(&grant.target, action.uid.as_deref(), action)
+        .perform_with_sensitive_input(
+            &grant.target,
+            action.uid.as_deref(),
+            action,
+            denylist.allows_sensitive_input(),
+        )
         .map_err(Refusal::from)?;
     // The budget is spent on a dispatch that happened, not on an attempt that
     // was refused: a window that rejects every action must not silently burn

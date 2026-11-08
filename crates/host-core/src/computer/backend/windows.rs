@@ -144,6 +144,7 @@ impl WindowsDesktop {
         index: usize,
         target: &TargetRef,
         target_bounds: Rect,
+        allow_sensitive_input: bool,
     ) -> Result<Node, DesktopError> {
         // UIA may stop responding when an app exits mid-query. Each property
         // is individually fallible; absent identity/geometry yields a stable
@@ -174,7 +175,7 @@ impl WindowsDesktop {
             unsafe { element.GetCurrentPatternAs::<IUIAutomationValuePattern>(UIA_ValuePatternId) }
                 .is_ok();
         let mut actions = Vec::new();
-        if node_is_exposable(belongs_to_target, password) {
+        if node_is_exposable(belongs_to_target, password, allow_sensitive_input) {
             if unsafe {
                 element.GetCurrentPatternAs::<IUIAutomationInvokePattern>(UIA_InvokePatternId)
             }
@@ -224,7 +225,7 @@ impl WindowsDesktop {
         Ok(Node {
             uid: fingerprint,
             role,
-            label: if password || !belongs_to_target {
+            label: if (password && !allow_sensitive_input) || !belongs_to_target {
                 None
             } else {
                 name
@@ -243,13 +244,18 @@ impl WindowsDesktop {
         automation: &IUIAutomation,
         target: &TargetRef,
         uid: &str,
+        allow_sensitive_input: bool,
     ) -> Result<IUIAutomationElement, DesktopError> {
         let (bounds, array) = self.elements(automation, target)?;
         let count = unsafe { array.Length() }.map_err(map_uia_error)?.max(0) as usize;
         let count = count.min(MAX_TREE_NODES);
         for index in 0..count {
             let element = unsafe { array.GetElement(index as i32) }.map_err(map_uia_error)?;
-            if self.node_for(&element, index, target, bounds)?.uid == uid {
+            if self
+                .node_for(&element, index, target, bounds, allow_sensitive_input)?
+                .uid
+                == uid
+            {
                 return Ok(element);
             }
         }
@@ -262,9 +268,10 @@ impl WindowsDesktop {
         target: &TargetRef,
         uid: Option<&str>,
         action: &Action,
+        allow_sensitive_input: bool,
     ) -> Result<IUIAutomationElement, DesktopError> {
         if let Some(uid) = uid {
-            return self.find_element(automation, target, uid);
+            return self.find_element(automation, target, uid, allow_sensitive_input);
         }
         let point = action.point.ok_or(DesktopError::NotActionable)?;
         let bounds = self.measure(target)?.bounds;
@@ -275,7 +282,7 @@ impl WindowsDesktop {
         // SAFETY: coordinates have already been range-checked against the
         // current bound window by policy::act; UIA resolves the current element.
         let element = unsafe { automation.ElementFromPoint(point) }.map_err(map_uia_error)?;
-        self.validate_element_owner(&element, target)?;
+        self.validate_element_owner(&element, target, allow_sensitive_input)?;
         Ok(element)
     }
 
@@ -283,13 +290,15 @@ impl WindowsDesktop {
         &self,
         element: &IUIAutomationElement,
         target: &TargetRef,
+        allow_sensitive_input: bool,
     ) -> Result<HWND, DesktopError> {
         let hwnd = self
             .target_element_hwnd(element, target)
             .ok_or(DesktopError::ElementNotFound)?;
-        if unsafe { element.CurrentIsPassword() }
-            .map(|value| value.as_bool())
-            .unwrap_or(true)
+        if !allow_sensitive_input
+            && unsafe { element.CurrentIsPassword() }
+                .map(|value| value.as_bool())
+                .unwrap_or(true)
         {
             return Err(DesktopError::SecureInputRefused);
         }
@@ -407,7 +416,16 @@ impl Desktop for WindowsDesktop {
     }
 
     fn inspect(&self, target: &TargetRef, max_nodes: usize) -> Result<RawInspection, DesktopError> {
-        if self.secure_input_active() {
+        self.inspect_with_sensitive_input(target, max_nodes, false)
+    }
+
+    fn inspect_with_sensitive_input(
+        &self,
+        target: &TargetRef,
+        max_nodes: usize,
+        allow_sensitive_input: bool,
+    ) -> Result<RawInspection, DesktopError> {
+        if !allow_sensitive_input && self.secure_input_active() {
             return Err(DesktopError::SecureInputRefused);
         }
         let (_apartment, automation) = self.automation()?;
@@ -417,7 +435,7 @@ impl Desktop for WindowsDesktop {
         let mut nodes = Vec::with_capacity(count.min(limit));
         for index in 0..count.min(limit) {
             let element = unsafe { array.GetElement(index as i32) }.map_err(map_uia_error)?;
-            nodes.push(self.node_for(&element, index, target, bounds)?);
+            nodes.push(self.node_for(&element, index, target, bounds, allow_sensitive_input)?);
         }
         Ok(RawInspection {
             nodes,
@@ -449,12 +467,28 @@ impl Desktop for WindowsDesktop {
         uid: Option<&str>,
         action: &Action,
     ) -> Result<Dispatched, DesktopError> {
-        if self.secure_input_active() {
+        self.perform_with_sensitive_input(target, uid, action, false)
+    }
+
+    fn perform_with_sensitive_input(
+        &self,
+        target: &TargetRef,
+        uid: Option<&str>,
+        action: &Action,
+        allow_sensitive_input: bool,
+    ) -> Result<Dispatched, DesktopError> {
+        if !allow_sensitive_input && self.secure_input_active() {
             return Err(DesktopError::SecureInputRefused);
         }
         let (_apartment, automation) = self.automation()?;
-        let element = self.target_element_for_action(&automation, target, uid, action)?;
-        let hwnd = self.validate_element_owner(&element, target)?;
+        let element = self.target_element_for_action(
+            &automation,
+            target,
+            uid,
+            action,
+            allow_sensitive_input,
+        )?;
+        let hwnd = self.validate_element_owner(&element, target, allow_sensitive_input)?;
         let kind = action.kind.ok_or(DesktopError::NotActionable)?;
         match kind {
             ActionKind::SetValue => {
@@ -534,7 +568,7 @@ impl Desktop for WindowsDesktop {
                                 UIA_SelectionItemPatternId,
                             )
                         } {
-                            self.validate_element_owner(&candidate, target)?;
+                            self.validate_element_owner(&candidate, target, allow_sensitive_input)?;
                             unsafe { pattern.Select() }.map_err(map_uia_error)?;
                             selected = true;
                             break;
@@ -699,8 +733,8 @@ fn target_integrity_is_higher(host: u32, target: u32) -> bool {
     target > host
 }
 
-fn node_is_exposable(belongs_to_target: bool, password: bool) -> bool {
-    belongs_to_target && !password
+fn node_is_exposable(belongs_to_target: bool, password: bool, allow_sensitive_input: bool) -> bool {
+    belongs_to_target && (!password || allow_sensitive_input)
 }
 
 fn window_title(hwnd: HWND) -> String {
@@ -1014,9 +1048,10 @@ mod tests {
 
     #[test]
     fn only_non_password_nodes_owned_by_the_bound_window_are_exposed() {
-        assert!(node_is_exposable(true, false));
-        assert!(!node_is_exposable(false, false));
-        assert!(!node_is_exposable(true, true));
-        assert!(!node_is_exposable(false, true));
+        assert!(node_is_exposable(true, false, false));
+        assert!(!node_is_exposable(false, false, true));
+        assert!(!node_is_exposable(true, true, false));
+        assert!(node_is_exposable(true, true, true));
+        assert!(!node_is_exposable(false, true, true));
     }
 }

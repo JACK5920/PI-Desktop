@@ -109,6 +109,16 @@ pub trait Desktop: Send + Sync {
 
     fn inspect(&self, target: &TargetRef, max_nodes: usize) -> Result<RawInspection, DesktopError>;
 
+    /// Inspect with an explicit user policy for secure input surfaces.
+    fn inspect_with_sensitive_input(
+        &self,
+        target: &TargetRef,
+        max_nodes: usize,
+        _allow_sensitive_input: bool,
+    ) -> Result<RawInspection, DesktopError> {
+        self.inspect(target, max_nodes)
+    }
+
     /// Whether this target's tree can be opened at all.
     ///
     /// The window server enumerates surfaces that no accessibility client can
@@ -116,8 +126,13 @@ pub trait Desktop: Send + Sync {
     /// like application windows in `list_targets`. Binding one is not a
     /// security problem, it is a wasted turn, so the automatic grant asks this
     /// before choosing. A one-node probe is the cheapest honest answer.
-    fn can_open(&self, target: &TargetRef) -> bool {
-        self.inspect(target, 1).is_ok()
+    fn can_open_with_sensitive_input(
+        &self,
+        target: &TargetRef,
+        allow_sensitive_input: bool,
+    ) -> bool {
+        self.inspect_with_sensitive_input(target, 1, allow_sensitive_input)
+            .is_ok()
     }
 
     /// Whether the OS reports a secure input state right now. A backend that
@@ -131,6 +146,17 @@ pub trait Desktop: Send + Sync {
         uid: Option<&str>,
         action: &Action,
     ) -> Result<Dispatched, DesktopError>;
+
+    /// Dispatch with an explicit user policy for secure input surfaces.
+    fn perform_with_sensitive_input(
+        &self,
+        target: &TargetRef,
+        uid: Option<&str>,
+        action: &Action,
+        _allow_sensitive_input: bool,
+    ) -> Result<Dispatched, DesktopError> {
+        self.perform(target, uid, action)
+    }
 
     /// Process ids that belong to this application, so policy can refuse our
     /// own windows without trusting a name comparison.

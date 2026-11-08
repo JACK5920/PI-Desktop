@@ -20264,6 +20264,27 @@ their separate platform acceptance.
   Windows UIA fixture acceptance passed locally. Full packaged-app acceptance
   remains pending.
 
+### E2E-COMPUTER-use-configurable-application-restrictions-v1
+
+- **Preconditions:** Use a disposable profile and deterministic Host target
+  fixtures representing a PI-Desktop window, a denylisted app, an elevated
+  target, and a secure-input/password control. Do not use a real credential.
+- **Steps:** Open Settings → Computer Use. Verify all four application
+  restrictions default to enabled. Disable one restriction and verify only its
+  corresponding Host policy changes. Enable “Disable all application
+  restrictions” and verify individual values are preserved but temporarily
+  overridden. Turn the master switch off and verify the individual values
+  resume. During a fixture grant, change one restriction and issue the next
+  inspect/act request to verify the Host re-reads the setting.
+- **Expected:** The Settings form persists each boolean in the existing app
+  settings object. Host target enumeration, grant creation, rebinding,
+  inspection, and actions obey the effective settings. Missing fields preserve
+  the original restrictions. Windows OS permissions, Stop, request/schema
+  validation, target ownership, and stale-basis checks remain in force.
+- **Coverage:** `pnpm test:e2e:computer-use-settings`, shared settings
+  validation tests, and host-core Computer policy tests. The fixture is
+  synthetic; credential data and real desktop targets are never used.
+
 ### E2E-CHAT-transcript-history-loading-anchor
 
 - **Preconditions:** Production `ChatTranscript` in an isolated Electron window;

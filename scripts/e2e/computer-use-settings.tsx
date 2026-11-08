@@ -169,6 +169,35 @@ async function runSettingsProbe() {
   if ((writes[3] as any)?.computerUse?.idleExpiryMs !== 24 * 60 * 60_000) {
     throw new Error("Long Computer Use idle expiry was capped or not persisted");
   }
+  const restrictionLabels = [
+    "Block PI-Desktop windows",
+    "Block password and secure-input surfaces",
+    "Enforce target denylist",
+    "Block elevated windows",
+  ];
+  for (const label of restrictionLabels) {
+    const toggle = requireElement<HTMLButtonElement>(`[role="switch"][aria-label="${label}"]`);
+    if (toggle.getAttribute("aria-checked") !== "true") throw new Error(`Restriction default is not enabled: ${label}`);
+  }
+  const disableAll = requireElement<HTMLButtonElement>('[role="switch"][aria-label="Disable all application restrictions"]');
+  await waitUntil(() => !disableAll.disabled, "restriction control availability");
+  disableAll.click();
+  await waitUntil(() => writes.length === 5, "disable all restriction save");
+  const allPatch = writes[4] as any;
+  if (allPatch?.computerUse?.restrictions?.disableAll !== true) throw new Error("Master restriction switch did not persist");
+  if (!requireElement<HTMLButtonElement>('[role="switch"][aria-label="Block PI-Desktop windows"]').disabled) {
+    throw new Error("Individual restriction switch stayed active under the master override");
+  }
+  await waitUntil(() => !disableAll.disabled, "restriction save completion");
+  disableAll.click();
+  await waitUntil(() => writes.length === 6, "restore individual restriction mode");
+  const selfTarget = requireElement<HTMLButtonElement>('[role="switch"][aria-label="Block PI-Desktop windows"]');
+  await waitUntil(() => !selfTarget.disabled, "individual restriction availability");
+  selfTarget.click();
+  await waitUntil(() => writes.length === 7, "individual restriction save");
+  if ((writes[6] as any)?.computerUse?.restrictions?.blockSelfTarget !== false) {
+    throw new Error("Individual restriction switch did not persist its own value");
+  }
   if (!document.body.textContent?.includes("windows · supported · bounded")) throw new Error("Platform capability diagnostics are not visible");
   if (stopRequests.length !== 0) throw new Error("Settings interactions unexpectedly created a Stop request");
   return { writes, stopRequests: stopRequests.length };

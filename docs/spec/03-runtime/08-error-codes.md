@@ -386,16 +386,16 @@ after the named transient condition has changed.
 | `COMPUTER_GRANT_EXPIRED` | no | the grant expired or was revoked |
 | `COMPUTER_BUDGET_EXHAUSTED` | no | the grant's bounded action budget is exhausted |
 | `COMPUTER_SCOPE_VIOLATION` | no | the requested action is outside the grant's current window scope |
-| `COMPUTER_SELF_TARGET_REFUSED` | no | the target is a PI-Desktop window and is never operable |
-| `COMPUTER_TARGET_DENYLISTED` | no | the target is refused by the host denylist |
-| `COMPUTER_SECURE_INPUT_REFUSED` | no | the OS or focused control reports secure/password input |
+| `COMPUTER_SELF_TARGET_REFUSED` | no | the target is a PI-Desktop window while the corresponding Settings restriction is enabled |
+| `COMPUTER_TARGET_DENYLISTED` | no | the target is on the built-in or user denylist while denylist enforcement is enabled |
+| `COMPUTER_SECURE_INPUT_REFUSED` | no | the OS or focused control reports secure/password input while its Settings restriction is enabled |
 | `COMPUTER_STALE_BASIS` | no | an element reference was produced from an obsolete inspection basis |
 | `COMPUTER_STALE_REVISION` | no | the bound window or its geometry changed after inspection |
 | `COMPUTER_ELEMENT_NOT_FOUND` | no | the requested accessibility element is no longer present |
 | `COMPUTER_ELEMENT_NOT_ACTIONABLE` | no | the element does not support the requested action |
 | `COMPUTER_INPUT_POLICY_DENIED` | no | the active input policy does not permit the requested synthesis |
 | `COMPUTER_OS_PERMISSION_MISSING` | no | the operating system has not granted the required accessibility/input permission |
-| `COMPUTER_TARGET_ELEVATED` | no | the target process runs at a higher integrity level than the host |
+| `COMPUTER_TARGET_ELEVATED` | no | the target process runs at a higher integrity level than the host while the corresponding Settings restriction is enabled |
 | `COMPUTER_PLATFORM_UNSUPPORTED` | no | this platform has no native Computer Use backend |
 | `COMPUTER_CAPTURE_UNAVAILABLE` | no | the exact granted-window capture source is unavailable |
 | `COMPUTER_ACTION_REJECTED` | no | the host rejected an action that has no more specific refusal code |
