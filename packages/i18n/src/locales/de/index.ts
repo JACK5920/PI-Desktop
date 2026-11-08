@@ -1689,6 +1689,8 @@ sklm: {
     "computerUseCaptureDescription": "Screenshots werden nur auf ausdrückliche Auswahl aufgenommen und auf das freigegebene Fenster begrenzt.",
     "computerUseAccessibilityOnly": "Nur Bedienungshilfen · keine Screenshots",
     "computerUseAccessibilityAndPixels": "Bedienungshilfen und Screenshot des freigegebenen Fensters",
+    "computerUseVisionChecking": "Prüfe, ob das ausgewählte Computer-Use-Modell Bilder verarbeiten kann …",
+    "computerUseVisionUnsupported": "Das ausgewählte Computer-Use-Modell unterstützt keine Bildeingabe. Wähle ein bildfähiges Modell oder wechsle zu Bedienungshilfen ohne Screenshots.",
     "computerUseLimits": "Laufzeitlimits",
     "computerUseLimitsDescription": "Begrenze die Anzahl der Eingabeaktionen pro Freigabe und deren Leerlaufzeit.",
     "computerUseRestrictions": "Anwendungsbeschränkungen",

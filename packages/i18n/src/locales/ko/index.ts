@@ -1701,6 +1701,8 @@ sklm: {
     "computerUseCaptureDescription": "Screenshots are captured only when selected and are limited to the granted window.",
     "computerUseAccessibilityOnly": "Accessibility only · no screenshots",
     "computerUseAccessibilityAndPixels": "Accessibility and screenshot of the granted window",
+    "computerUseVisionChecking": "선택한 Computer Use 모델의 이미지 입력 지원을 확인하는 중…",
+    "computerUseVisionUnsupported": "선택한 Computer Use 모델은 이미지 입력을 지원하지 않습니다. 이미지 지원 모델을 선택하거나 접근성 전용 모드로 전환하세요.",
     "computerUseLimits": "Run limits",
     "computerUseLimitsDescription": "Bound the number of input actions in one grant and how long it may stay idle.",
     "computerUseRestrictions": "앱 제한",

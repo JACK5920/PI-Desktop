@@ -1689,6 +1689,8 @@ sklm: {
     "computerUseCaptureDescription": "Las capturas solo se toman si se seleccionan y se limitan a la ventana autorizada.",
     "computerUseAccessibilityOnly": "Solo accesibilidad · sin capturas",
     "computerUseAccessibilityAndPixels": "Accesibilidad y captura de la ventana autorizada",
+    "computerUseVisionChecking": "Comprobando si el modelo seleccionado para el uso del ordenador admite imágenes…",
+    "computerUseVisionUnsupported": "El modelo seleccionado no admite imágenes. Elige un modelo con visión o cambia a solo accesibilidad.",
     "computerUseLimits": "Límites de ejecución",
     "computerUseLimitsDescription": "Limita las acciones de entrada por permiso y su tiempo de inactividad.",
     "computerUseRestrictions": "Restricciones de la aplicación",

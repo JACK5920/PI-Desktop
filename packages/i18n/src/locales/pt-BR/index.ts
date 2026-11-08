@@ -1658,6 +1658,8 @@ export const ptBR = {
     "computerUseCaptureDescription": "As capturas são feitas somente quando selecionadas e ficam limitadas à janela autorizada.",
     "computerUseAccessibilityOnly": "Accessibility only · no screenshots",
     "computerUseAccessibilityAndPixels": "Acessibilidade e captura da janela autorizada",
+    "computerUseVisionChecking": "Verificando se o modelo selecionado de Computer Use aceita imagens…",
+    "computerUseVisionUnsupported": "O modelo selecionado de Computer Use não aceita imagens. Escolha um modelo com visão ou use somente acessibilidade.",
     "computerUseLimits": "Run limits",
     "computerUseLimitsDescription": "Bound the number of input actions in one grant and how long it may stay idle.",
     "computerUseRestrictions": "Restrições do aplicativo",
