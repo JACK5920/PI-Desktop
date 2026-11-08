@@ -20216,7 +20216,8 @@ their separate platform acceptance.
 - **Preconditions:** Use a disposable profile and a deterministic Computer Use
   fixture; do not operate the user's live desktop.
 - **Path:** Open Settings → Computer Use, confirm Computer Use is disabled by
-  default, bind a dedicated enabled provider/model, set bounded limits, enable
+  default, bind a dedicated enabled provider/model, save an action budget above
+  200 and idle expiry above 60 minutes, verify both persist, enable
   the feature, select accessibility-only and then granted-window pixel
   capture, and start a fixture Agent run. Confirm the live indicator shows
   the bound target, live phase/action, recent action trail, capture mode, and
@@ -20245,6 +20246,9 @@ their separate platform acceptance.
   enough to read ordinary provider names and remain viewport-clamped; unusually
   long names do not expand the UI without limit. The overlay glow spans a broad
   blue perimeter with a soft falloff and leaves the center untinted.
+- Action budget and idle expiry retain defaults of 40 and 15 minutes but have
+  no product maximum. Positive exact integers persist through settings and the
+  host grant; non-safe JSON integers are rejected rather than rounded.
 - **Coverage:** Settings form, Main IPC owner policy, Host grant lifecycle,
   and the ordinary Agent abort path. `pnpm test:e2e:computer-use-settings`
   exercises the production React Settings section and Stop widget in an

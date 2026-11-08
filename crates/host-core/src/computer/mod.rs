@@ -26,6 +26,7 @@ mod tests;
 
 use std::time::{Duration, Instant};
 
+use chrono::Datelike;
 use serde::{Deserialize, Serialize};
 
 pub use backend::{DesktopError, Dispatched, TargetRef};
@@ -38,11 +39,8 @@ pub const MAX_NODES: usize = 400;
 pub const MAX_LABEL_CHARS: usize = 200;
 /// Hard ceiling on text one step may type.
 pub const MAX_TEXT_CHARS: usize = 2_000;
-/// Clamp on any caller-supplied action budget.
-pub const MAX_ACTION_BUDGET: u32 = 200;
 pub const DEFAULT_ACTION_BUDGET: u32 = 40;
 pub const DEFAULT_IDLE_EXPIRY: Duration = Duration::from_secs(15 * 60);
-pub const MAX_IDLE_EXPIRY: Duration = Duration::from_secs(60 * 60);
 pub const MIN_IDLE_EXPIRY: Duration = Duration::from_secs(30);
 /// How long a user Stop keeps the agent from minting a new grant. Short enough
 /// not to look broken, long enough that Stop ends the run rather than one call.
@@ -174,7 +172,7 @@ pub struct GrantView {
     pub bounds: Rect,
     pub input_policy: InputPolicy,
     pub capture: CaptureMode,
-    pub remaining_budget: u32,
+    pub remaining_budget: u64,
     pub session_id: String,
     pub created_at: String,
     pub expires_at: String,
@@ -195,7 +193,7 @@ pub struct Grant {
     pub bounds: Rect,
     pub input_policy: InputPolicy,
     pub capture: CaptureMode,
-    pub remaining_budget: u32,
+    pub remaining_budget: u64,
     pub session_id: String,
     pub created_at: String,
     pub last_activity: Instant,
@@ -245,7 +243,18 @@ fn expiry_iso(
     let base = chrono::DateTime::parse_from_rfc3339(created_at)
         .map(|value| value.with_timezone(&chrono::Utc))
         .unwrap_or_else(|_| chrono::Utc::now());
-    let deadline = chrono::Utc::now() + chrono::Duration::from_std(remaining).unwrap_or_default();
+    let unbounded_display_deadline = "9999-12-31T23:59:59.999Z";
+    let Ok(delta) = chrono::Duration::from_std(remaining) else {
+        return unbounded_display_deadline.into();
+    };
+    let Some(deadline) = chrono::Utc::now().checked_add_signed(delta) else {
+        return unbounded_display_deadline.into();
+    };
+    // RFC 3339 has a four-digit year. Keep accepting long idle durations, but
+    // saturate their display-only deadline instead of emitting an invalid date.
+    if deadline.year() > 9999 {
+        return unbounded_display_deadline.into();
+    }
     // A malformed `created_at` must not produce a deadline in the past.
     if deadline < base {
         base.to_rfc3339()
@@ -361,7 +370,7 @@ pub struct Inspection {
 pub struct ActResult {
     pub grant_id: String,
     pub revision: u32,
-    pub remaining_budget: u32,
+    pub remaining_budget: u64,
     pub dispatched: Dispatched,
 }
 

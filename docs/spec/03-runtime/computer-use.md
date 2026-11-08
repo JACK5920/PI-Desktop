@@ -81,6 +81,14 @@ that has no live grant.
 | `actionBudget` | Remaining input actions before the grant closes |
 | `idleExpiry` | Wall-clock bound; a grant with no action closes itself |
 
+Computer Use Settings defaults to 40 actions and a 15-minute idle expiry.
+These are defaults, not upper caps. Users may configure any positive,
+JavaScript-safe integer action budget and any idle expiry of at least 30
+seconds; there is no product maximum. The Settings idle-expiry field is in
+whole minutes. The host stores action budgets in an unsigned 64-bit counter
+and does not clamp either user value. A value too large for an exact JSON
+integer is rejected by the settings validator rather than rounded silently.
+
 Rules:
 
 - A `desktop` grant starts bound to the frontmost window the host does not

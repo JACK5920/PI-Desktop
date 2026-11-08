@@ -65,7 +65,6 @@ export const COMPUTER_USE_DEFAULTS = {
   maxStepsPerCall: number;
 };
 
-export const COMPUTER_ACTION_BUDGET_LIMIT = 200;
 /**
  * Ceiling on one `Computer` call. The loop makes a model request per step, so
  * the default RPC timeout would cut a legitimate multi-step task short.
@@ -140,9 +139,8 @@ export function validateComputerUseSettings(value: unknown): ComputerUseSettings
   if (input.actionBudget !== undefined) {
     if (
       typeof input.actionBudget !== "number"
-      || !Number.isInteger(input.actionBudget)
+      || !Number.isSafeInteger(input.actionBudget)
       || input.actionBudget < 1
-      || input.actionBudget > COMPUTER_ACTION_BUDGET_LIMIT
     ) {
       return invalid();
     }
@@ -151,9 +149,8 @@ export function validateComputerUseSettings(value: unknown): ComputerUseSettings
   if (input.idleExpiryMs !== undefined) {
     if (
       typeof input.idleExpiryMs !== "number"
-      || !Number.isInteger(input.idleExpiryMs)
+      || !Number.isSafeInteger(input.idleExpiryMs)
       || input.idleExpiryMs < 30_000
-      || input.idleExpiryMs > 60 * 60_000
     ) {
       return invalid();
     }

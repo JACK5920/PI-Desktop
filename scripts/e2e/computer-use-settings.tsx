@@ -95,6 +95,14 @@ function requireElement<T extends Element>(selector: string): T {
   return element;
 }
 
+function setInputValue(input: HTMLInputElement, value: string): void {
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+  if (!setter) throw new Error("Missing native input value setter");
+  setter.call(input, value);
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  input.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
 async function waitUntil(predicate: () => boolean, label: string): Promise<void> {
   const deadline = performance.now() + 5_000;
   while (!predicate()) {
@@ -120,7 +128,7 @@ async function runSettingsProbe() {
   await waitUntil(() => Boolean(document.querySelector('input[aria-label="Search models"]')), "searchable model selector");
   const modelMenu = requireElement<HTMLElement>(".computer-use-model-menu");
   if (modelMenu.getBoundingClientRect().width < 480 || modelMenu.getBoundingClientRect().width > 540) {
-    throw new Error(`Dedicated model menu is too narrow to read model names (${modelMenu.getBoundingClientRect().width}px)`);
+  throw new Error(`Dedicated model menu is too narrow to read model names (${modelMenu.getBoundingClientRect().width}px)`);
   }
   const sourceRail = requireElement<HTMLElement>(".computer-use-model-menu .composer-model-body[data-rail]");
   const railWidth = Number.parseFloat(getComputedStyle(sourceRail).gridTemplateColumns.split(" ")[0] ?? "0");
@@ -149,6 +157,18 @@ async function runSettingsProbe() {
   const actionBudget = requireElement<HTMLInputElement>('input[aria-label="Maximum actions"]');
   const idleMinutes = requireElement<HTMLInputElement>('input[aria-label="Idle expiry (minutes)"]');
   if (actionBudget.value !== "40" || idleMinutes.value !== "15") throw new Error("Computer Use limits do not show their documented defaults");
+  setInputValue(actionBudget, "10000000");
+  actionBudget.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+  await waitUntil(() => writes.length === 3, "large Computer Use action budget save");
+  if ((writes[2] as any)?.computerUse?.actionBudget !== 10_000_000) {
+    throw new Error("Large Computer Use action budget was capped or not persisted");
+  }
+  setInputValue(idleMinutes, "1440");
+  idleMinutes.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+  await waitUntil(() => writes.length === 4, "long Computer Use idle expiry save");
+  if ((writes[3] as any)?.computerUse?.idleExpiryMs !== 24 * 60 * 60_000) {
+    throw new Error("Long Computer Use idle expiry was capped or not persisted");
+  }
   if (!document.body.textContent?.includes("windows · supported · bounded")) throw new Error("Platform capability diagnostics are not visible");
   if (stopRequests.length !== 0) throw new Error("Settings interactions unexpectedly created a Stop request");
   return { writes, stopRequests: stopRequests.length };
