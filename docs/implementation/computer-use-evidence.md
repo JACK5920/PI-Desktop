@@ -43,9 +43,29 @@ after every turn, so an earlier turn's state cannot satisfy a later turn.
 | `node --check scripts/e2e-computer-use-agent-runtime.mjs` and `git diff --check` | Passed before the repeated runtime E2E. |
 
 This verifies repeated grant lifecycle and post-action state observation on one
-stable target. It does not yet cover cold application restart, changing target
-availability while other processes start/stop, real provider/model routes, or
-action-specific verified/dispatched/failed semantics in the product UI.
+stable target. It does not yet cover cold application restart, the target itself
+becoming unavailable/reappearing, real provider/model routes, or action-specific
+verified/dispatched/failed semantics in the product UI.
+
+## Final-step observation — 2026-11-09
+
+The bounded loop now re-inspects after every dispatched action even when that
+action consumes the final step allowed for a tool call. Previously the loop
+could return `step-limit` immediately after dispatch without ever obtaining the
+resulting state. The step remains accurately labeled as dispatched; this change
+ensures the final state is captured, but does not claim that arbitrary UI
+actions are deterministically verified.
+
+| Check | Result |
+|---|---|
+| `@pi-desktop/computer-use` tests | Passed: 42 tests, including a regression where the final action changes the fixture observation before `step-limit` is returned. |
+| `@pi-desktop/computer-use` typecheck | Passed. |
+| Repeated runtime E2E | Passed again after the loop change: three fresh turns still each dispatch, re-observe, verify the fixture state, and revoke. |
+| Documentation checks | Passed: 89 English/Chinese pairs and 640 documentation pages. |
+| Windows UIA target resolution and recovery | Passed: an unrelated isolated process/window was added then removed without invalidating the original exact ID; after closing that target and reopening a same-title fixture, the old ID stayed invalid and the replacement required a new ID. The fixture passed in 5.46 seconds. |
+
+Generic action-specific result statuses and recovery under changing window/process
+availability remain unfinished.
 
 ## Follow-up acceptance — 2026-11-08
 

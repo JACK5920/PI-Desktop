@@ -143,6 +143,24 @@ describe("runComputerLoop", () => {
     expect(result.summary).toContain("may be unfinished");
   });
 
+  it("re-observes the final action even when it reaches the per-call step limit", async () => {
+    let dispatched = false;
+    const observedStates: string[] = [];
+    const h = harness(['{"kind":"action","action":{"kind":"click","uid":"0.1#ab"}}'], {
+      act: () => { dispatched = true; },
+      observe: () => {
+        const label = dispatched ? "CU-FIXTURE-AFTER" : "CU-FIXTURE-BEFORE";
+        observedStates.push(label);
+        return observation([{ ...saveButton, label }]);
+      },
+    });
+
+    const result = await runComputerLoop({ instruction: "click once", maxSteps: 1 }, h.deps);
+
+    expect(result.outcome).toBe("step-limit");
+    expect(observedStates).toEqual(["CU-FIXTURE-BEFORE", "CU-FIXTURE-AFTER"]);
+  });
+
   it("gives up after repeated unusable answers", async () => {
     const h = harness(["I clicked Save for you."]);
     const result = await runComputerLoop({ instruction: "save" }, h.deps);
