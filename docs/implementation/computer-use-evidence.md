@@ -47,6 +47,25 @@ stable target. It does not yet cover cold application restart, changing target
 availability while other processes start/stop, real provider/model routes, or
 action-specific verified/dispatched/failed semantics in the product UI.
 
+## Final-step observation — 2026-11-09
+
+The bounded loop now re-inspects after every dispatched action even when that
+action consumes the final step allowed for a tool call. Previously the loop
+could return `step-limit` immediately after dispatch without ever obtaining the
+resulting state. The step remains accurately labeled as dispatched; this change
+ensures the final state is captured, but does not claim that arbitrary UI
+actions are deterministically verified.
+
+| Check | Result |
+|---|---|
+| `@pi-desktop/computer-use` tests | Passed: 42 tests, including a regression where the final action changes the fixture observation before `step-limit` is returned. |
+| `@pi-desktop/computer-use` typecheck | Passed. |
+| Repeated runtime E2E | Passed again after the loop change: three fresh turns still each dispatch, re-observe, verify the fixture state, and revoke. |
+| Documentation checks | Passed: 89 English/Chinese pairs and 640 documentation pages. |
+
+Generic action-specific result statuses and recovery under changing window/process
+availability remain unfinished.
+
 ## Follow-up acceptance — 2026-11-08
 
 The current target-selection regression is covered at both the model-loop and

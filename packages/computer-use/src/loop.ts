@@ -444,8 +444,11 @@ export async function runComputerLoop(
       }
 
       index += 1;
-      if (index >= maxSteps) break;
       observation = await deps.observe();
+      // Always capture the state after a dispatched action, including the
+      // final action at the per-call limit. Otherwise a caller can receive a
+      // step-limit result without the action's outcome ever being observed.
+      if (index >= maxSteps) break;
     }
 
     return { outcome: "step-limit", summary: summarize("step-limit", steps), steps };
