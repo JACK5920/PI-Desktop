@@ -57,6 +57,7 @@ fn windows_backend_drives_only_the_isolated_fixture_window() {
         .as_nanos();
     let suffix = format!("{}-{nonce}", std::process::id());
     let title = format!("PI-CU-FIXTURE-{suffix}");
+    let secondary_title = format!("PI-CU-SECONDARY-{suffix}");
     // Keep fixture artifacts inside this checkout's build output rather than
     // creating another project/temp directory elsewhere on the machine.
     let fixture_dir = std::env::current_exe()
@@ -65,6 +66,7 @@ fn windows_backend_drives_only_the_isolated_fixture_window() {
         .expect("test executable directory")
         .to_path_buf();
     let script_path = fixture_dir.join(format!("{title}.ps1"));
+    let secondary_script_path = fixture_dir.join(format!("{secondary_title}.ps1"));
     let state_path = fixture_dir.join(format!("{title}.txt"));
     let state_path_display = state_path.display().to_string();
     let combo_state_path = fixture_dir.join(format!("{title}-combo.txt"));
@@ -129,14 +131,28 @@ $form.Controls.Add($list)
 "#
     );
     fs::write(&script_path, script).expect("write isolated fixture application script");
+    fs::write(
+        &secondary_script_path,
+        format!(
+            r#"Add-Type -AssemblyName System.Windows.Forms
+$form = New-Object System.Windows.Forms.Form
+$form.Text = '{secondary_title}'
+$form.StartPosition = 'CenterScreen'
+$form.Size = New-Object System.Drawing.Size(320, 180)
+[System.Windows.Forms.Application]::Run($form)
+"#
+        ),
+    )
+    .expect("write isolated secondary-window fixture script");
     let mut child: Child = Command::new("powershell.exe")
         .args(["-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-File"])
         .arg(&script_path)
         .creation_flags(CREATE_NO_WINDOW)
         .spawn()
         .expect("start isolated Windows Forms fixture");
+    let mut secondary_child: Option<Child> = None;
 
-    let outcome = std::panic::catch_unwind(|| {
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let desktop = super::backend::active();
         let capabilities = desktop.capabilities();
         assert_eq!(capabilities.platform, "win32");
@@ -177,6 +193,76 @@ $form.Controls.Add($list)
                 .is_none(),
             "app name and title must never be accepted as part of a target id"
         );
+
+        // Add and remove another independent process while the original
+        // target remains live. Its exact host-issued id must stay resolvable;
+        // enumeration churn must not redirect it to the new foreground window.
+        secondary_child = Some(
+            Command::new("powershell.exe")
+                .args(["-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-File"])
+                .arg(&secondary_script_path)
+                .creation_flags(CREATE_NO_WINDOW)
+                .spawn()
+                .expect("start isolated secondary-window fixture"),
+        );
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let targets = desktop
+                .list_targets()
+                .expect("enumerate windows with second process");
+            if targets
+                .iter()
+                .any(|candidate| candidate.title == secondary_title)
+            {
+                assert!(
+                    targets.iter().any(|candidate| candidate.target.target_id == canonical_target_id),
+                    "the original target must remain in enumeration while another fixture process starts"
+                );
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "secondary fixture did not appear: {secondary_title}"
+            );
+            thread::sleep(Duration::from_millis(50));
+        }
+        assert_eq!(
+            desktop
+                .resolve_target(&canonical_target_id)
+                .expect("resolve original id while second process is live")
+                .map(|resolved| resolved.target.target_id),
+            Some(canonical_target_id.clone()),
+            "starting another process must not substitute the foreground window for the exact target"
+        );
+        let mut secondary = secondary_child
+            .take()
+            .expect("secondary fixture process handle");
+        let _ = secondary.kill();
+        let _ = secondary.wait();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let targets = desktop
+                .list_targets()
+                .expect("enumerate windows after second process exits");
+            if !targets
+                .iter()
+                .any(|candidate| candidate.title == secondary_title)
+            {
+                assert!(
+                    desktop
+                        .resolve_target(&canonical_target_id)
+                        .expect("resolve original id after second process exits")
+                        .is_some(),
+                    "the original target must remain resolvable after unrelated window removal"
+                );
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "secondary fixture remained after its process exited"
+            );
+            thread::sleep(Duration::from_millis(50));
+        }
         let inspection = desktop
             .inspect(&target.target, 400)
             .expect("inspect isolated fixture UIA tree");
@@ -355,11 +441,16 @@ $form.Controls.Add($list)
                 "ListBox selection must not alter the ComboBox"
             );
         }
-    });
+    }));
 
     let _ = child.kill();
     let _ = child.wait();
+    if let Some(mut secondary) = secondary_child.take() {
+        let _ = secondary.kill();
+        let _ = secondary.wait();
+    }
     let _ = fs::remove_file(script_path);
+    let _ = fs::remove_file(secondary_script_path);
     let _ = fs::remove_file(state_path);
     let _ = fs::remove_file(combo_state_path);
     let _ = fs::remove_file(list_state_path);

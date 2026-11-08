@@ -43,9 +43,9 @@ after every turn, so an earlier turn's state cannot satisfy a later turn.
 | `node --check scripts/e2e-computer-use-agent-runtime.mjs` and `git diff --check` | Passed before the repeated runtime E2E. |
 
 This verifies repeated grant lifecycle and post-action state observation on one
-stable target. It does not yet cover cold application restart, changing target
-availability while other processes start/stop, real provider/model routes, or
-action-specific verified/dispatched/failed semantics in the product UI.
+stable target. It does not yet cover cold application restart, the target itself
+becoming unavailable/reappearing, real provider/model routes, or action-specific
+verified/dispatched/failed semantics in the product UI.
 
 ## Final-step observation — 2026-11-09
 
@@ -62,6 +62,7 @@ actions are deterministically verified.
 | `@pi-desktop/computer-use` typecheck | Passed. |
 | Repeated runtime E2E | Passed again after the loop change: three fresh turns still each dispatch, re-observe, verify the fixture state, and revoke. |
 | Documentation checks | Passed: 89 English/Chinese pairs and 640 documentation pages. |
+| Windows UIA target resolution during unrelated process churn | Passed: with a second isolated WinForms process/window added then removed, the original exact target ID remained present and resolvable; the fixture passed in 4.25 seconds. |
 
 Generic action-specific result statuses and recovery under changing window/process
 availability remain unfinished.
