@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { buildDevelopmentHostCore } from "../../../scripts/dev-electron.mjs";
 
 const desktopPackageUrl = new URL("../package.json", import.meta.url);
 const dependencyBuild = "pnpm --filter '@pi-desktop/desktop^...' build";
@@ -30,6 +31,27 @@ test("desktop dev builds all workspace dependencies before Electron starts", asy
   assert.ok(
     predev.indexOf(depsScript) < predev.indexOf(hostBuild),
     "workspace dependency builds must complete before the desktop boot sequence continues",
+  );
+});
+
+test("direct Electron dev launch builds the debug Host before starting Electron", async () => {
+  let invocation;
+  buildDevelopmentHostCore({
+    root: "C:\\PI-Desktop-dev",
+    cargo: "cargo-test",
+    run: (...args) => { invocation = args; },
+  });
+
+  assert.deepEqual(invocation, [
+    "cargo-test",
+    ["build", "--manifest-path", "C:\\PI-Desktop-dev\\Cargo.toml", "-p", "host-core"],
+    { cwd: "C:\\PI-Desktop-dev", stdio: "inherit" },
+  ]);
+
+  const launcher = await readFile(new URL("../../../scripts/dev-electron.mjs", import.meta.url), "utf8");
+  assert.ok(
+    launcher.indexOf("buildDevelopmentHostCore();") < launcher.indexOf("const child = spawn("),
+    "the standalone desktop Test launcher must rebuild host-core before launching Electron",
   );
 });
 
