@@ -19,4 +19,16 @@ describe("computer cursor events", () => {
     expect(reduceComputerCursorEvent(moved, { kind: "press", grantId: "g1", x: 80, y: 90, action: "click" }))
       .toMatchObject({ x: 80, y: 90, pulse: 1 });
   });
+
+  it("keeps target bounds separate from the full display overlay origin", () => {
+    const displayBounds = { x: -1920, y: 0, width: 1920, height: 1080 };
+    const state = reduceComputerCursorEvent(null, {
+      kind: "show",
+      grantId: "g1",
+      bounds,
+      displayBounds,
+    });
+
+    expect(state).toMatchObject({ bounds, displayBounds, x: 220, y: 150 });
+  });
 });

@@ -95,6 +95,14 @@
   visibility: hidden;
 }
 
+.computer-use-model-menu {
+  width: min(520px, calc(100vw - 24px));
+}
+
+.computer-use-model-menu .composer-model-body[data-rail] {
+  grid-template-columns: 184px minmax(0, 1fr);
+}
+
 .composer-permission-menu.is-open,
 .composer-mode-menu.is-open,
 .composer-model-menu.is-open {

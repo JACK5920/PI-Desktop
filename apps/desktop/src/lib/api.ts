@@ -39,6 +39,7 @@ import type {
   CommandShellCatalog,
   ComputerCapabilities,
   ComputerGrantView,
+  ComputerRunActivity,
   AppVersionInfo,
   BrowserAction,
   BrowserState,
@@ -892,6 +893,12 @@ export const api = {
     if (!window.piDesktop?.on) return () => undefined;
     return window.piDesktop.on(IPC.event.computerGrantChanged, (payload) =>
       listener((payload ?? null) as ComputerGrantView | null),
+    );
+  },
+  onComputerActivityChanged: (listener: (activity: ComputerRunActivity | null) => void) => {
+    if (!window.piDesktop?.on) return () => undefined;
+    return window.piDesktop.on(IPC.event.computerActivityChanged, (payload) =>
+      listener((payload ?? null) as ComputerRunActivity | null),
     );
   },
   getStorageInfo: () => invoke<StorageInfo>(IPC.invoke.storageGet),

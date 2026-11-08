@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { AppSettings, ComputerCapabilities, ComputerModelBinding, ProviderPublic } from "@pi-desktop/shared";
-import { COMPUTER_ACTION_BUDGET_LIMIT, COMPUTER_USE_DEFAULTS } from "@pi-desktop/shared";
+import { COMPUTER_USE_DEFAULTS } from "@pi-desktop/shared";
 import { Badge, Input, SettingsToggle } from "../../components/ui";
 import { SettingsMenuSelect } from "../../components/settings/SettingsMenuSelect";
+import { ComputerUseModelPicker } from "./ComputerUseModelPicker";
 import { api } from "../../lib/api";
 import { useAppStore } from "../../stores/app-store";
 import { SettingsCard, SettingsRow } from "./primitives";
@@ -95,9 +96,10 @@ export function ComputerUseSettingsSection({
   const saveLimits = async () => {
     const actionBudget = Number(actionBudgetDraft);
     const idleMinutes = Number(idleMinutesDraft);
-    if (!Number.isInteger(actionBudget) || actionBudget < 1 || actionBudget > COMPUTER_ACTION_BUDGET_LIMIT) return;
-    if (!Number.isInteger(idleMinutes) || idleMinutes < 1 || idleMinutes > 60) return;
-    await saveComputerUse({ actionBudget, idleExpiryMs: idleMinutes * 60_000 });
+    const idleExpiryMs = idleMinutes * 60_000;
+    if (!Number.isSafeInteger(actionBudget) || actionBudget < 1) return;
+    if (!Number.isSafeInteger(idleMinutes) || idleMinutes < 1 || !Number.isSafeInteger(idleExpiryMs)) return;
+    await saveComputerUse({ actionBudget, idleExpiryMs });
   };
 
   return (
@@ -111,17 +113,10 @@ export function ComputerUseSettingsSection({
         />
       </SettingsRow>
       <SettingsRow title={t("settings.computerUseModel")}>
-        <SettingsMenuSelect
-          label={t("settings.computerUseModel")}
+        <ComputerUseModelPicker
+          providers={providers}
           value={selectedBinding}
-          busy={busy || loading}
-          options={[
-            { id: "", label: t("settings.computerUseModelUnset") },
-            ...availableBindings.map((binding) => {
-              const provider = providers.find((entry) => entry.id === binding.providerId);
-              return { id: bindingId(binding), label: `${provider?.name ?? binding.providerId} · ${binding.modelId}` };
-            }),
-          ]}
+          disabled={busy || loading}
           onChange={(value) => {
             const next = availableBindings.find((item) => bindingId(item) === value);
             void saveComputerUse({ model: next ?? null });
@@ -152,11 +147,11 @@ export function ComputerUseSettingsSection({
         <div className="computer-use-settings-limits">
           <label>
             <span>{t("settings.computerUseActionBudget")}</span>
-            <Input aria-label={t("settings.computerUseActionBudget")} type="number" min={1} max={COMPUTER_ACTION_BUDGET_LIMIT} step={1} value={actionBudgetDraft} disabled={busy} onChange={(event) => setActionBudgetDraft(event.target.value)} onBlur={() => void saveLimits()} />
+            <Input aria-label={t("settings.computerUseActionBudget")} type="number" min={1} step={1} value={actionBudgetDraft} disabled={busy} onChange={(event) => setActionBudgetDraft(event.target.value)} onBlur={() => void saveLimits()} />
           </label>
           <label>
             <span>{t("settings.computerUseIdleMinutes")}</span>
-            <Input aria-label={t("settings.computerUseIdleMinutes")} type="number" min={1} max={60} step={1} value={idleMinutesDraft} disabled={busy} onChange={(event) => setIdleMinutesDraft(event.target.value)} onBlur={() => void saveLimits()} />
+            <Input aria-label={t("settings.computerUseIdleMinutes")} type="number" min={1} step={1} value={idleMinutesDraft} disabled={busy} onChange={(event) => setIdleMinutesDraft(event.target.value)} onBlur={() => void saveLimits()} />
           </label>
         </div>
       </SettingsRow>

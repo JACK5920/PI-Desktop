@@ -244,6 +244,8 @@ describe("Computer tool registration", () => {
 
     const enabled = createRuntime({ computerUseEnabled: true });
     expect((enabled as unknown as { toolCatalog: Map<string, AgentTool> }).toolCatalog.has("Computer")).toBe(true);
+    expect((enabled as unknown as { agent: { state: { tools: AgentTool[] } } }).agent.state.tools.some((tool) => tool.name === "Computer")).toBe(true);
+    expect((enabled as unknown as { deferredToolNames: Set<string> }).deferredToolNames.has("Computer")).toBe(false);
     await enabled.dispose();
 
     const plan = createRuntime({ computerUseEnabled: true, mode: "plan" });

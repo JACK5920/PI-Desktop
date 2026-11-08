@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ComputerAction, ComputerCursorEvent, ComputerGrantView, ComputerNode } from "@pi-desktop/shared";
+import type { ComputerAction, ComputerCursorEvent, ComputerGrantView, ComputerLoopActivity, ComputerNode } from "@pi-desktop/shared";
 
 import { runComputerLoop, type ComputerLoopDeps } from "./loop.js";
 import type { Observation } from "./prompt.js";
@@ -55,12 +55,14 @@ type Harness = {
   deps: ComputerLoopDeps;
   acted: ComputerAction[];
   cursor: ComputerCursorEvent[];
+  activity: ComputerLoopActivity[];
   decisions: number;
 };
 
 function harness(answers: string[], options: { act?: () => void; observe?: () => Observation } = {}): Harness {
   const acted: ComputerAction[] = [];
   const cursor: ComputerCursorEvent[] = [];
+  const activity: ComputerLoopActivity[] = [];
   const state = { decisions: 0 };
   const deps: ComputerLoopDeps = {
     observe: async () => (options.observe ? options.observe() : observation()),
@@ -75,11 +77,13 @@ function harness(answers: string[], options: { act?: () => void; observe?: () =>
       return answer;
     },
     onCursor: (event) => cursor.push(event),
+    onActivity: (event) => activity.push(event),
   };
   return {
     deps,
     acted,
     cursor,
+    activity,
     get decisions() {
       return state.decisions;
     },
@@ -103,6 +107,23 @@ describe("runComputerLoop", () => {
     // The model's claim is labelled, never presented as the loop's own report.
     expect(result.summary).toContain("Model's account: saved");
     expect(result.summary).toContain("Dispatched 1 of 1 action");
+  });
+
+  it("publishes truthful phases and the current action without exposing typed text", async () => {
+    const input: ComputerNode = { ...saveButton, role: "AXTextField", label: "Input", hasValue: true, actions: ["set_value"] };
+    const h = harness([
+      '{"kind":"action","action":{"kind":"set_value","uid":"0.1#ab","text":"secret value"}}',
+      '{"kind":"done","summary":"saved"}',
+    ], { observe: () => observation([input]) });
+
+    await runComputerLoop({ instruction: "set the value" }, h.deps);
+
+    expect(h.activity).toEqual(expect.arrayContaining([
+      expect.objectContaining({ phase: "observing" }),
+      expect.objectContaining({ phase: "thinking" }),
+      expect.objectContaining({ phase: "acting", action: "set_value", target: "Input" }),
+    ]));
+    expect(JSON.stringify(h.activity)).not.toContain("secret value");
   });
 
   it("observeOnly describes the scope and dispatches nothing", async () => {

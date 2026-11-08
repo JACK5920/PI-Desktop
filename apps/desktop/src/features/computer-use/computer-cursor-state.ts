@@ -3,6 +3,7 @@ import type { ComputerCursorEvent, ComputerRect } from "@pi-desktop/shared";
 export type ComputerCursorState = {
   grantId: string;
   bounds: ComputerRect;
+  displayBounds: ComputerRect;
   x: number;
   y: number;
   label?: string;
@@ -17,6 +18,7 @@ export function reduceComputerCursorEvent(
   if (event.kind === "show") return {
     grantId: event.grantId,
     bounds: event.bounds,
+    displayBounds: event.displayBounds ?? event.bounds,
     x: event.bounds.x + event.bounds.width / 2,
     y: event.bounds.y + event.bounds.height / 2,
     pulse: current?.pulse ?? 0,

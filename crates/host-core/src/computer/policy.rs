@@ -11,8 +11,8 @@ use std::time::{Duration, Instant};
 use super::backend::{Desktop, Measured, RawTarget};
 use super::{
     ActResult, Action, ActionKind, Basis, CaptureMode, ComputerResult, Grant, GrantScope,
-    GrantState, InputPolicy, Inspection, Node, Rect, Refusal, Target, TargetRefusal,
-    MAX_ACTION_BUDGET, MAX_IDLE_EXPIRY, MAX_NODES, MAX_TEXT_CHARS, MIN_IDLE_EXPIRY,
+    GrantState, InputPolicy, Inspection, Node, Rect, Refusal, Target, TargetRefusal, MAX_NODES,
+    MAX_TEXT_CHARS, MIN_IDLE_EXPIRY,
 };
 
 /// Application identifiers that may never be targeted, whatever the user
@@ -141,7 +141,7 @@ pub struct GrantRequest {
     pub session_id: String,
     pub input_policy: InputPolicy,
     pub capture: CaptureMode,
-    pub action_budget: u32,
+    pub action_budget: u64,
     pub idle_expiry: Duration,
 }
 
@@ -241,11 +241,11 @@ pub fn create_grant(
         bounds: found.bounds,
         input_policy: request.input_policy,
         capture: request.capture,
-        remaining_budget: request.action_budget.clamp(1, MAX_ACTION_BUDGET),
+        remaining_budget: request.action_budget.max(1),
         session_id: request.session_id,
         created_at: chrono::Utc::now().to_rfc3339(),
         last_activity: now,
-        idle_expiry: request.idle_expiry.clamp(MIN_IDLE_EXPIRY, MAX_IDLE_EXPIRY),
+        idle_expiry: request.idle_expiry.max(MIN_IDLE_EXPIRY),
         state: GrantState::Active,
     })
 }

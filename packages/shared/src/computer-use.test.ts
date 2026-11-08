@@ -1,6 +1,5 @@
 import { expect, it } from "vitest";
 import {
-  COMPUTER_ACTION_BUDGET_LIMIT,
   COMPUTER_MAX_STEPS_LIMIT,
   COMPUTER_USE_DEFAULTS,
   needsAccessibilityRequest,
@@ -42,6 +41,17 @@ it("computerUse settings keep an explicit model binding", () => {
   expect(value.denylist).toEqual(["com.apple.keychainaccess"]);
 });
 
+it("computerUse grant budgets have no product upper limit", () => {
+  expect(validateComputerUseSettings({
+    enabled: true,
+    actionBudget: 10_000_000,
+    idleExpiryMs: 24 * 60 * 60_000,
+  })).toMatchObject({
+    actionBudget: 10_000_000,
+    idleExpiryMs: 24 * 60 * 60_000,
+  });
+});
+
 it("computerUse settings distinguish an absent binding from a cleared one", () => {
   expect(validateComputerUseSettings({ enabled: true }).model).toBe(undefined);
   expect(validateComputerUseSettings({ enabled: true, model: null }).model).toBe(null);
@@ -58,9 +68,10 @@ it("computerUse settings reject unknown keys and bad values", () => {
     { enabled: true, defaultCapture: "pixels" },
     { enabled: true, denylist: "com.apple" },
     { enabled: true, actionBudget: 0 },
-    { enabled: true, actionBudget: COMPUTER_ACTION_BUDGET_LIMIT + 1 },
+    { enabled: true, actionBudget: Number.MAX_SAFE_INTEGER + 1 },
     { enabled: true, actionBudget: 1.5 },
     { enabled: true, idleExpiryMs: 1_000 },
+    { enabled: true, idleExpiryMs: Number.MAX_SAFE_INTEGER + 1 },
     [],
     null,
     "enabled",

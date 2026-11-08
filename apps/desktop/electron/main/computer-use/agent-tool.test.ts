@@ -14,7 +14,11 @@ vi.mock("@pi-desktop/agent-runtime", async (importOriginal) => ({
 
 import { createComputerUseTool } from "./agent-tool";
 import { captureSourceIdFor } from "./capture";
-import { getActiveComputerUseRun, publishComputerUseRun } from "./active-run";
+import {
+  getActiveComputerUseRun,
+  publishComputerUseRun,
+  subscribeComputerUseActivity,
+} from "./active-run";
 import { registerComputerUseIpc } from "../ipc/computer-use-ipc";
 import type { IpcRegistrar } from "../ipc/types";
 import type { HostProcess } from "../host-process";
@@ -168,8 +172,11 @@ describe("Computer local tool", () => {
 
   it("runs a bounded host-backed action loop with the dedicated provider and revokes its grant", async () => {
     computerRuntime.runComputerLoop.mockImplementation(async (_input, deps) => {
+      deps.onActivity({ phase: "observing", stepIndex: 0 });
       await deps.observe();
+      deps.onActivity({ phase: "acting", stepIndex: 1, action: "click", target: "Continue" });
       await deps.act({ kind: "click", uid: "button-1" }, 1);
+      deps.onStep({ index: 0, action: "click", ok: true, target: "Continue" });
       await deps.decide({ system: "system", instruction: "Continue", observation: "fixture", history: "" });
       return { outcome: "done", summary: "continued", steps: [] };
     });
@@ -178,6 +185,8 @@ describe("Computer local tool", () => {
     const handler = createComputerUseTool({ getHost: () => host, resolveProvider: async () => ({
       id: "p", name: "Pinned", modelId: "m", apiKey: "key", supportsReasoning: false, supportedThinkingLevels: ["off"],
     }) });
+    const activities: unknown[] = [];
+    const unsubscribe = subscribeComputerUseActivity((activity) => activities.push(activity));
 
     const result = await handler({ sessionId: "session-1", toolCallId: "tool-1", args: { instruction: "Continue" }, signal: new AbortController().signal });
 
@@ -185,6 +194,12 @@ describe("Computer local tool", () => {
     expect(calls.map(({ method }) => method)).toContain("computer.act");
     expect(calls.at(-1)?.method).toBe("computer.grantRevoke");
     expect(computerRuntime.completeOneShot).toHaveBeenCalledOnce();
+    expect(activities).toEqual(expect.arrayContaining([
+      expect.objectContaining({ phase: "acting", action: "click", target: "Continue" }),
+      expect.objectContaining({ phase: "completed" }),
+    ]));
+    expect(getActiveComputerUseRun()).toBeNull();
+    unsubscribe();
   });
 
   it("fails closed when Computer Use is disabled without minting a grant", async () => {

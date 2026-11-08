@@ -332,6 +332,34 @@ fn desktop_grant(desktop: &FakeDesktop, denylist: &Denylist) -> Grant {
     .expect("desktop grant")
 }
 
+#[test]
+fn grant_keeps_large_user_selected_budget_and_idle_expiry() {
+    let desktop = FakeDesktop::new(vec![target(10, "com.example.app", "Example", "window-1")]);
+    let idle_expiry = Duration::from_millis(9_007_199_254_740_991);
+    let grant = policy::create_grant(
+        &desktop,
+        None,
+        &Denylist::default(),
+        GrantRequest {
+            target_id: Some("window-1".into()),
+            session_id: "session-1".into(),
+            input_policy: InputPolicy::AutonomousInScope,
+            capture: CaptureMode::A11yOnly,
+            action_budget: 10_000_000,
+            idle_expiry,
+        },
+        Instant::now(),
+    )
+    .expect("large valid grant settings");
+
+    assert_eq!(grant.remaining_budget, 10_000_000);
+    assert_eq!(grant.idle_expiry, idle_expiry);
+    assert_eq!(
+        grant.view(Instant::now()).expires_at,
+        "9999-12-31T23:59:59.999Z",
+    );
+}
+
 fn click_uid(uid: &str) -> Action {
     Action {
         kind: Some(ActionKind::Click),

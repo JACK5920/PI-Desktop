@@ -148,8 +148,7 @@ pub(crate) async fn handle(
             let action_budget = params
                 .get("actionBudget")
                 .and_then(Value::as_u64)
-                .unwrap_or(computer::DEFAULT_ACTION_BUDGET as u64)
-                .min(computer::MAX_ACTION_BUDGET as u64) as u32;
+                .unwrap_or(computer::DEFAULT_ACTION_BUDGET as u64);
             let idle_expiry = params
                 .get("idleExpiryMs")
                 .and_then(Value::as_u64)

@@ -17,6 +17,7 @@ import {
   type ComputerAction,
   type ComputerActResult,
   type ComputerCursorEvent,
+  type ComputerLoopActivity,
   type ComputerRunOutcome,
   type ComputerRunResult,
   type ComputerStepRecord,
@@ -43,6 +44,7 @@ export type ComputerLoopDeps = {
   decide: (request: DecisionRequest) => Promise<string>;
   onStep?: (step: ComputerStepRecord) => void;
   onCursor?: (event: ComputerCursorEvent) => void;
+  onActivity?: (activity: ComputerLoopActivity) => void;
 };
 
 export type ComputerLoopInput = {
@@ -167,9 +169,11 @@ export async function runComputerLoop(
 
   let observation: Observation;
   try {
+    deps.onActivity?.({ phase: "observing", stepIndex: 0 });
     observation = await deps.observe();
   } catch (error) {
     const code = errorCode(error);
+    deps.onActivity?.({ phase: "failed", errorCode: code });
     return {
       outcome: TERMINAL_CODES[code] ?? "failed",
       summary: summarize("failed", steps, undefined, code),
@@ -198,6 +202,7 @@ export async function runComputerLoop(
     while (index < maxSteps) {
       const request = buildDecisionRequest(input.instruction, observation, steps);
       let answer: LoopAnswer;
+      deps.onActivity?.({ phase: "thinking", stepIndex: index + 1 });
       const raw = await deps.decide(request);
       const parsed = parseLoopAnswer(raw);
       if (!parsed.ok) {
@@ -227,6 +232,7 @@ export async function runComputerLoop(
         return { outcome: "done", summary: summarize("done", steps, answer.summary), steps };
       }
       if (answer.kind === "ask") {
+        deps.onActivity?.({ phase: "asking", stepIndex: index + 1 });
         record({ index, action: "ask", ok: true, target: answer.question });
         return {
           outcome: "needs-user",
@@ -239,6 +245,7 @@ export async function runComputerLoop(
       if (answer.kind === "switch") {
         const label = windowLabel(observation, answer.window) ?? `window ${answer.window}`;
         try {
+          deps.onActivity?.({ phase: "acting", stepIndex: index + 1, action: "switch", target: label });
           observation = await deps.observe(answer.window);
           record({ index, action: "switch", ok: true, target: label });
           // The overlay frames the window being worked on, so it moves too.
@@ -304,6 +311,12 @@ export async function runComputerLoop(
 
       const target = describeTarget(validated.action, validated.node?.label);
       const bounds = validated.node?.bounds;
+      deps.onActivity?.({
+        phase: "acting",
+        stepIndex: index + 1,
+        action: validated.action.kind,
+        ...(target ? { target } : {}),
+      });
       if (bounds) {
         deps.onCursor?.({
           kind: "move",

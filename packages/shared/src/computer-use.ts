@@ -65,7 +65,6 @@ export const COMPUTER_USE_DEFAULTS = {
   maxStepsPerCall: number;
 };
 
-export const COMPUTER_ACTION_BUDGET_LIMIT = 200;
 /**
  * Ceiling on one `Computer` call. The loop makes a model request per step, so
  * the default RPC timeout would cut a legitimate multi-step task short.
@@ -140,9 +139,8 @@ export function validateComputerUseSettings(value: unknown): ComputerUseSettings
   if (input.actionBudget !== undefined) {
     if (
       typeof input.actionBudget !== "number"
-      || !Number.isInteger(input.actionBudget)
+      || !Number.isSafeInteger(input.actionBudget)
       || input.actionBudget < 1
-      || input.actionBudget > COMPUTER_ACTION_BUDGET_LIMIT
     ) {
       return invalid();
     }
@@ -151,9 +149,8 @@ export function validateComputerUseSettings(value: unknown): ComputerUseSettings
   if (input.idleExpiryMs !== undefined) {
     if (
       typeof input.idleExpiryMs !== "number"
-      || !Number.isInteger(input.idleExpiryMs)
+      || !Number.isSafeInteger(input.idleExpiryMs)
       || input.idleExpiryMs < 30_000
-      || input.idleExpiryMs > 60 * 60_000
     ) {
       return invalid();
     }
@@ -332,13 +329,38 @@ export type ComputerRunResult = {
   errorCode?: string;
 };
 
+/** Sanitized, ephemeral UI status. It is not written to the transcript or audit log. */
+export type ComputerRunPhase = "starting" | "observing" | "thinking" | "acting" | "asking" | "completed" | "failed";
+
+/** Recent input steps omit entered text and model-generated prose by construction. */
+export type ComputerActivityStep = {
+  index: number;
+  action: ComputerActionKind | "switch";
+  target?: string;
+  ok: boolean;
+  errorCode?: string;
+};
+
+export type ComputerRunActivity = {
+  grantId: string;
+  phase: ComputerRunPhase;
+  stepIndex?: number;
+  action?: ComputerActionKind | "switch";
+  target?: string;
+  errorCode?: string;
+  recentSteps: ComputerActivityStep[];
+};
+
+/** A loop progress update before the outer runner attaches the Host grant id. */
+export type ComputerLoopActivity = Omit<ComputerRunActivity, "grantId" | "recentSteps">;
+
 /**
  * Draw commands for the cursor overlay. The overlay is a click-through window
  * that visualizes where the agent is acting; it carries no authority, so these
  * payloads are screen coordinates and a label, never an element reference.
  */
 export type ComputerCursorEvent =
-  | { kind: "show"; grantId: string; bounds: ComputerRect }
+  | { kind: "show"; grantId: string; bounds: ComputerRect; displayBounds?: ComputerRect }
   | { kind: "move"; grantId: string; x: number; y: number; label?: string }
   | { kind: "press"; grantId: string; x: number; y: number; action: ComputerActionKind }
   | { kind: "type"; grantId: string; x: number; y: number; chars: number }

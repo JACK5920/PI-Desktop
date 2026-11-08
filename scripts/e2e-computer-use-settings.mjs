@@ -79,7 +79,7 @@ app.whenReady().then(async () => {
   assert(line, `Electron fixture returned no result (exit=${code}): ${output.slice(-5000)}`);
   const result = JSON.parse(line.slice("COMPUTER_USE_SETTINGS_PATH ".length));
   assert.equal(code, 0, output.slice(-5000));
-  assert.equal(result.settings.writes.length, 2);
+  assert.equal(result.settings.writes.length, 4);
   assert.equal(result.settings.stopRequests, 0);
   assert.equal(result.stop.stopRequests.length, 1);
   assert.equal(result.stop.stopRequests[0].sessionId, "fixture-session-1");
