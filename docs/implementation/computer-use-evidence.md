@@ -176,6 +176,26 @@ This is native fixture acceptance, not acceptance for arbitrary applications or
 the packaged desktop app. The rebuilt-app/provider-route acceptance gap above
 remains open.
 
+## No-op action recovery — 2026-11-09
+
+The opt-in `scripts/e2e-computer-use-agent-runtime.mjs` acceptance was extended
+so its deterministic local model first issues a valid hover that cannot change
+the fixture, then must use the newly observed UIA node to click the button and
+confirm the changed state. It runs the real Electron Agent Sidecar, Rust Host,
+Host RPC and Windows UIA fixture, while only the two local loopback model
+endpoints are deterministic fixtures. Three fresh-grant cycles passed, with
+the expected `hover → click → done` sequence and three independent final state
+checks. The test also now extracts the UID from the exact current node line;
+this avoids selecting stale or unrelated UIDs from prior observations or action
+history.
+
+| Check | Result |
+|---|---|
+| `node scripts/e2e-computer-use-agent-runtime.mjs` | Passed locally on 2026-11-09; 3 cycles, 9 Computer-model requests, 6 native actions, 9 Host observations, 9 granted-window images, and final fixture state `CU-RUNTIME-FIXTURE-CLICKED-3`. |
+
+This remains local interactive Windows fixture acceptance. It does not claim
+acceptance across arbitrary providers or from the packaged end-user application.
+
 ## Implemented surfaces
 
 | Surface | Current state |
