@@ -38,6 +38,17 @@ function resolveElectronInstallation() {
   };
 }
 
+export function buildDevelopmentHostCore({
+  root = ROOT,
+  cargo = process.env.CARGO || "cargo",
+  run = execFileSync,
+} = {}) {
+  run(cargo, ["build", "--manifest-path", join(root, "Cargo.toml"), "-p", "host-core"], {
+    cwd: root,
+    stdio: "inherit",
+  });
+}
+
 function setPlistString(plistPath, key, value) {
   execFileSync("plutil", ["-replace", key, "-string", value, plistPath]);
 }
@@ -152,6 +163,11 @@ export function prepareMacDevelopmentBundle({
 
 function run() {
   const env = { ...process.env, PI_DESKTOP_DEV: "1" };
+  // The desktop Test shortcut invokes this script directly, bypassing pnpm's
+  // `predev` lifecycle. Build the debug Host here as well so Electron cannot
+  // silently pick up an older `target/debug` binary ahead of a newer release
+  // binary after a source change.
+  buildDevelopmentHostCore();
   // Electron 43+ downloads its platform binary when its package is resolved.
   // electron-vite requires the resulting path.txt marker on every platform.
   const electron = resolveElectronInstallation();
