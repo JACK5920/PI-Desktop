@@ -122,10 +122,10 @@ export function ComputerUseModelPicker({
       className="computer-use-model-picker"
       open={open}
       onClose={() => setOpen(false)}
-      menuClassName="composer-model-menu"
+      menuClassName="composer-model-menu computer-use-model-menu"
       label={t("settings.computerUseModel")}
       role="menu"
-      align="end"
+      align="start"
       side="bottom"
       initialFocus="input"
       onMenuKeyDown={onMenuKeyDown}

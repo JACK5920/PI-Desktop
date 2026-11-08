@@ -115,6 +115,10 @@ async function runSettingsProbe() {
   }
   model.click();
   await waitUntil(() => Boolean(document.querySelector('input[aria-label="Search models"]')), "searchable model selector");
+  const modelMenu = requireElement<HTMLElement>(".computer-use-model-menu");
+  if (modelMenu.getBoundingClientRect().width < 420) {
+    throw new Error(`Dedicated model menu is too narrow to read model names (${modelMenu.getBoundingClientRect().width}px)`);
+  }
   const modelSearch = requireElement<HTMLInputElement>('input[aria-label="Search models"]');
   modelSearch.value = "Fixture Alias";
   modelSearch.dispatchEvent(new Event("input", { bubbles: true }));

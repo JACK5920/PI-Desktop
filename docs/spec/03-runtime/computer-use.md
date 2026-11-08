@@ -356,7 +356,10 @@ The dedicated Computer Use model control uses the Composer's searchable model
 catalog, provider grouping, configured aliases, and model identity labels. Its
 selection is scoped to `computerUse.model`; it must not change the active chat
 session model. The separate Computer Use binding remains visible as a distinct
-setting because it controls which model receives desktop observations.
+setting because it controls which model receives desktop observations. The
+popup is wider than the compact Composer dropdown (up to 460 CSS pixels) so
+provider and model names remain readable; it opens to the right when space
+allows and remains clamped to the viewport.
 
 The perimeter glow is intentionally broad and clearly visible (approximately
 100–240 CSS pixels from each display edge), with a stronger blue inner bloom

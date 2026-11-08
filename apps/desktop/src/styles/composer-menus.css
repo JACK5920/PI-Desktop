@@ -95,6 +95,10 @@
   visibility: hidden;
 }
 
+.computer-use-model-menu {
+  width: min(460px, calc(100vw - 24px));
+}
+
 .composer-permission-menu.is-open,
 .composer-mode-menu.is-open,
 .composer-model-menu.is-open {
