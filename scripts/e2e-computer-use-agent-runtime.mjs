@@ -53,6 +53,7 @@ const { createComputerUseTool } = await import(
 );
 
 const requests = [];
+const routedModels = { conversation: [], computer: [] };
 let mainCalls = 0;
 let computerCalls = 0;
 let computerToolDeclarations = 0;
@@ -73,9 +74,8 @@ const server = createServer(async (request, response) => {
     return;
   }
   const messages = body.messages ?? [];
-  const isComputerDecision = messages.some((message) =>
-    JSON.stringify(message).includes("Observation:"),
-  );
+  const isComputerDecision = JSON.stringify(messages.at(-1) ?? {}).includes("Observation:");
+  routedModels[isComputerDecision ? "computer" : "conversation"].push(body.model);
   let delta;
   let finish;
   if (isComputerDecision) {
@@ -111,8 +111,8 @@ const server = createServer(async (request, response) => {
   }
   response.writeHead(200, { "content-type": "text/event-stream" });
   response.end(
-    `data: ${JSON.stringify({ id: "computer-fixture", model: "deepseek-flash", choices: [{ index: 0, delta, finish_reason: null }] })}\n\n` +
-    `data: ${JSON.stringify({ id: "computer-fixture", model: "deepseek-flash", choices: [{ index: 0, delta: {}, finish_reason: finish }] })}\n\n` +
+    `data: ${JSON.stringify({ id: "computer-fixture", model: body.model, choices: [{ index: 0, delta, finish_reason: null }] })}\n\n` +
+    `data: ${JSON.stringify({ id: "computer-fixture", model: body.model, choices: [{ index: 0, delta: {}, finish_reason: finish }] })}\n\n` +
     "data: [DONE]\n\n",
   );
 });
@@ -120,12 +120,14 @@ await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 const endpoint = `http://127.0.0.1:${server.address().port}/v1`;
 const model = Object.values(DEEPSEEK_MODELS).find((candidate) => candidate.id === "deepseek-flash");
 assert(model, "DeepSeek fixture model metadata missing");
+const computerModel = Object.values(DEEPSEEK_MODELS).find((candidate) => candidate.id === "deepseek-v4-pro");
+assert(computerModel, "Distinct Computer fixture model metadata missing");
 const runtimeProvider = {
-  id: "computer-e2e-fixture",
-  name: "Computer E2E fixture",
-  modelId: model.id,
+  id: "computer-e2e-computer-model",
+  name: "Computer E2E computer model",
+  modelId: computerModel.id,
   baseUrl: endpoint,
-  modelConfig: modelConfigFromPi(model),
+  modelConfig: modelConfigFromPi(computerModel),
   apiKey: "fixture-only",
   authKind: "api_key",
   supportsReasoning: false,
@@ -165,7 +167,7 @@ $form.add_Shown({ $form.Activate() | Out-Null })
     fixtureChild.stdout.on("data", (chunk) => { fixtureOutput += String(chunk); });
     fixtureChild.stderr.on("data", (chunk) => { fixtureOutput += String(chunk); });
     const providerRow = await host.call("providers.create", {
-      name: "Computer E2E fixture",
+      name: "Computer E2E conversation model",
       type: "openai_compatible",
       protocol: "openai_compatible",
       authKind: "none",
@@ -173,7 +175,16 @@ $form.add_Shown({ $form.Activate() | Out-Null })
       defaultModelId: model.id,
       apiStyle: "chat_completions",
     });
-    const binding = { providerId: providerRow.provider.id, modelId: model.id };
+    const computerProviderRow = await host.call("providers.create", {
+      name: "Computer E2E computer model",
+      type: "openai_compatible",
+      protocol: "openai_compatible",
+      authKind: "none",
+      baseUrl: endpoint,
+      defaultModelId: computerModel.id,
+      apiStyle: "chat_completions",
+    });
+    const binding = { providerId: computerProviderRow.provider.id, modelId: computerModel.id };
     await host.call("settings.set", {
       defaultPermissionMode: "auto",
       computerUse: { enabled: true, model: binding, defaultInputPolicy: "autonomous-in-scope", defaultCapture: "a11y-only" },
@@ -229,7 +240,11 @@ $form.add_Shown({ $form.Activate() | Out-Null })
     };
     const computerTool = createComputerUseTool({
       getHost: () => ({ call: callHost }),
-      resolveProvider: async () => runtimeProvider,
+      resolveProvider: async (settings) => {
+        assert.equal(settings.computerUse.model.providerId, computerProviderRow.provider.id);
+        assert.equal(settings.computerUse.model.modelId, computerModel.id);
+        return runtimeProvider;
+      },
     });
     sidecar.setLocalTool("Computer", computerTool);
     try {
@@ -246,7 +261,12 @@ $form.add_Shown({ $form.Activate() | Out-Null })
           turnId,
           userMessageId,
           mode: "agent",
-          provider: runtimeProvider,
+          provider: {
+            ...runtimeProvider,
+            id: providerRow.provider.id,
+            modelId: model.id,
+            modelConfig: modelConfigFromPi(model),
+          },
           thinkingLevel: "off",
           computerUseEnabled: true,
           commandShell: { id: "bash", label: "Bash", dialect: "posix", available: true, isDefault: true },
@@ -263,6 +283,8 @@ $form.add_Shown({ $form.Activate() | Out-Null })
       assert.equal(computerToolDeclarations, 3, "each fresh turn's first model request must declare Computer");
       assert.equal(mainCalls, 6, "each conversation turn should call Computer then provide a final response");
       assert.equal(computerCalls, 6, "each Computer run must act, re-observe, then verify exactly once");
+      assert.deepEqual(routedModels.conversation, Array(6).fill(model.id), "conversation requests must use the selected chat model");
+      assert.deepEqual(routedModels.computer, Array(6).fill(computerModel.id), "Computer decisions must use the separately selected Computer model");
       assert.equal(await readFile(fixtureStatePath, "utf8"), "CU-RUNTIME-FIXTURE-CLICKED-3");
       assert.equal(computerRpcMethods.filter((method) => method === "computer.grantCreate").length, 3);
       assert.equal(computerRpcMethods.filter((method) => method === "computer.inspect").length, 6);
@@ -274,6 +296,7 @@ $form.add_Shown({ $form.Activate() | Out-Null })
         "each grant must be revoked before the next cycle creates one",
       );
       console.log(JSON.stringify({ ok: true, toolCalls, mainModelRequests: mainCalls, computerModelRequests: computerCalls,
+        routedModels,
         hostComputerRpcMethods: [...new Set(computerRpcMethods)],
         fixtureState: "CU-RUNTIME-FIXTURE-CLICKED-3", freshGrantCycles: 3 }));
     } finally {
