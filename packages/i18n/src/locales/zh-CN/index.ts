@@ -1683,6 +1683,8 @@ sklm: {
     computerUseCaptureDescription: "仅在明确选择截图模式后捕获画面，且只将当前授权窗口的截图发送给专用模型。",
     computerUseAccessibilityOnly: "仅辅助功能信息 · 不截图",
     computerUseAccessibilityAndPixels: "辅助功能信息 + 已授权窗口截图",
+    computerUseVisionChecking: "正在检查所选电脑操作模型是否支持图片输入…",
+    computerUseVisionUnsupported: "所选电脑操作模型不支持图片输入。请选择支持图片的模型，或切换为仅使用辅助功能信息。",
     computerUseLimits: "运行限制",
     computerUseLimitsDescription: "限制一次授权中的输入操作数量，以及授权空闲多久后过期。",
     computerUseRestrictions: "应用层限制",

@@ -122,6 +122,19 @@ user-configured proxy should set its image-input override accurately; an
 incorrect capability declaration cannot prove the upstream endpoint accepts
 images.
 
+The Computer Use Settings page now checks the selected model when pixel capture
+is active and shows a localized warning for a known text-only model, or a
+localized checking status while metadata is being looked up. The warning keeps
+the existing capture choice intact so the user can switch the model or choose
+accessibility-only capture. A pure selection test covers per-model override
+precedence, provider-default fallback, and catalog fallback.
+
+| Check | Result |
+|---|---|
+| Computer Use model vision capability tests | Passed: 3 tests covering explicit per-model image overrides, provider default-model capability, catalog fallback, and unknown model metadata. |
+| Desktop TypeScript typecheck | Passed. |
+| i18n TypeScript typecheck | Passed. |
+
 ## Follow-up acceptance — 2026-11-08
 
 The current target-selection regression is covered at both the model-loop and

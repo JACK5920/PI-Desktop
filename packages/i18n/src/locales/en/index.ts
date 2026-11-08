@@ -1705,6 +1705,8 @@ sklm: {
     computerUseCaptureDescription: "Screenshots are captured only when selected and are limited to the granted window.",
     computerUseAccessibilityOnly: "Accessibility only · no screenshots",
     computerUseAccessibilityAndPixels: "Accessibility and screenshot of the granted window",
+    computerUseVisionChecking: "Checking whether the selected Computer Use model accepts images…",
+    computerUseVisionUnsupported: "The selected Computer Use model does not accept images. Choose an image-capable model or switch to accessibility-only capture.",
     computerUseLimits: "Run limits",
     computerUseLimitsDescription: "Bound the number of input actions in one grant and how long it may stay idle.",
     computerUseRestrictions: "Application-level restrictions",

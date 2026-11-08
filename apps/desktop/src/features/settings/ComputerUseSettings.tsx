@@ -5,6 +5,7 @@ import { COMPUTER_USE_DEFAULTS } from "@pi-desktop/shared";
 import { Badge, Input, SettingsToggle } from "../../components/ui";
 import { SettingsMenuSelect } from "../../components/settings/SettingsMenuSelect";
 import { ComputerUseModelPicker } from "./ComputerUseModelPicker";
+import { computerModelSupportsVision } from "./computer-use-model-vision";
 import { api } from "../../lib/api";
 import { useAppStore } from "../../stores/app-store";
 import { SettingsCard, SettingsRow } from "./primitives";
@@ -56,11 +57,41 @@ export function ComputerUseSettingsSection({
   const [busy, setBusy] = useState(false);
   const [actionBudgetDraft, setActionBudgetDraft] = useState(String(computerUse.actionBudget ?? COMPUTER_USE_DEFAULTS.actionBudget));
   const [idleMinutesDraft, setIdleMinutesDraft] = useState(String(Math.round((computerUse.idleExpiryMs ?? COMPUTER_USE_DEFAULTS.idleExpiryMs) / 60_000)));
+  const [visionSupport, setVisionSupport] = useState<"loading" | "supported" | "unsupported" | null>(null);
   const availableBindings = useMemo(() => modelBindings(providers), [providers]);
   const currentBinding = computerUse.model ?? null;
+  const selectedProvider = currentBinding ? providers.find((provider) => provider.id === currentBinding.providerId) : undefined;
   const selectedBinding = currentBinding && availableBindings.some((item) => bindingId(item) === bindingId(currentBinding))
     ? bindingId(currentBinding)
     : "";
+
+  useEffect(() => {
+    let cancelled = false;
+    if (computerUse.defaultCapture !== "a11y-and-pixels" || !selectedProvider || !currentBinding) {
+      setVisionSupport(null);
+      return () => { cancelled = true; };
+    }
+    const known = computerModelSupportsVision(selectedProvider, currentBinding.modelId);
+    if (known !== null) {
+      setVisionSupport(known ? "supported" : "unsupported");
+      return () => { cancelled = true; };
+    }
+
+    setVisionSupport("loading");
+    void api.lookupProviderModel({
+      modelId: currentBinding.modelId,
+      providerId: selectedProvider.id,
+      vendorKey: selectedProvider.vendorKey,
+      baseUrl: selectedProvider.baseUrl,
+    }).then(({ info }) => {
+      if (cancelled) return;
+      const supportsVision = computerModelSupportsVision(selectedProvider, currentBinding.modelId, info);
+      setVisionSupport(supportsVision === null ? null : supportsVision ? "supported" : "unsupported");
+    }).catch(() => {
+      if (!cancelled) setVisionSupport(null);
+    });
+    return () => { cancelled = true; };
+  }, [computerUse.defaultCapture, currentBinding?.modelId, currentBinding?.providerId, selectedProvider]);
 
   useEffect(() => {
     let cancelled = false;
@@ -148,6 +179,12 @@ export function ComputerUseSettingsSection({
           }}
         />
       </SettingsRow>
+      {visionSupport === "loading" ? (
+        <p className="computer-use-settings-notice" role="status">{t("settings.computerUseVisionChecking")}</p>
+      ) : null}
+      {visionSupport === "unsupported" ? (
+        <p className="computer-use-settings-notice" role="alert">{t("settings.computerUseVisionUnsupported")}</p>
+      ) : null}
       <SettingsRow title={t("settings.computerUseRestrictions")}>
         <div className="computer-use-settings-restrictions">
           <div className="computer-use-settings-restriction-row">

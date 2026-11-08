@@ -1683,6 +1683,8 @@ sklm: {
     "computerUseCaptureDescription": "Screenshots are captured only when selected and are limited to the granted window.",
     "computerUseAccessibilityOnly": "Accessibility only · no screenshots",
     "computerUseAccessibilityAndPixels": "Accessibility and screenshot of the granted window",
+    "computerUseVisionChecking": "正在檢查所選電腦操作模型是否支援圖片輸入…",
+    "computerUseVisionUnsupported": "所選電腦操作模型不支援圖片輸入。請選擇支援圖片的模型，或切換為僅使用輔助使用資訊。",
     "computerUseLimits": "Run limits",
     "computerUseLimitsDescription": "Bound the number of input actions in one grant and how long it may stay idle.",
     "computerUseRestrictions": "應用程式限制",
