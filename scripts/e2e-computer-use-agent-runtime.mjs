@@ -54,6 +54,7 @@ const { createComputerUseTool } = await import(
 
 const requests = [];
 const routedModels = { conversation: [], computer: [] };
+let computerImageRequests = 0;
 let mainCalls = 0;
 let computerCalls = 0;
 let computerToolDeclarations = 0;
@@ -76,6 +77,9 @@ const server = createServer(async (request, response) => {
   const messages = body.messages ?? [];
   const isComputerDecision = JSON.stringify(messages.at(-1) ?? {}).includes("Observation:");
   routedModels[isComputerDecision ? "computer" : "conversation"].push(body.model);
+  if (isComputerDecision && messages.some((message) =>
+    Array.isArray(message.content) && message.content.some((part) => part.type === "image_url"),
+  )) computerImageRequests++;
   let delta;
   let finish;
   if (isComputerDecision) {
@@ -118,9 +122,9 @@ const server = createServer(async (request, response) => {
 });
 await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 const endpoint = `http://127.0.0.1:${server.address().port}/v1`;
-const model = Object.values(DEEPSEEK_MODELS).find((candidate) => candidate.id === "deepseek-flash");
+const model = Object.values(DEEPSEEK_MODELS).find((candidate) => candidate.id === "deepseek-v4-pro");
 assert(model, "DeepSeek fixture model metadata missing");
-const computerModel = Object.values(DEEPSEEK_MODELS).find((candidate) => candidate.id === "deepseek-v4-pro");
+const computerModel = Object.values(DEEPSEEK_MODELS).find((candidate) => candidate.id === "deepseek-flash");
 assert(computerModel, "Distinct Computer fixture model metadata missing");
 const runtimeProvider = {
   id: "computer-e2e-computer-model",
@@ -187,7 +191,7 @@ $form.add_Shown({ $form.Activate() | Out-Null })
     const binding = { providerId: computerProviderRow.provider.id, modelId: computerModel.id };
     await host.call("settings.set", {
       defaultPermissionMode: "auto",
-      computerUse: { enabled: true, model: binding, defaultInputPolicy: "autonomous-in-scope", defaultCapture: "a11y-only" },
+      computerUse: { enabled: true, model: binding, defaultInputPolicy: "autonomous-in-scope", defaultCapture: "a11y-and-pixels" },
     });
     const callHost = async (method, params) => {
       if (method.startsWith("computer.")) computerRpcMethods.push(method);
@@ -285,6 +289,7 @@ $form.add_Shown({ $form.Activate() | Out-Null })
       assert.equal(computerCalls, 6, "each Computer run must act, re-observe, then verify exactly once");
       assert.deepEqual(routedModels.conversation, Array(6).fill(model.id), "conversation requests must use the selected chat model");
       assert.deepEqual(routedModels.computer, Array(6).fill(computerModel.id), "Computer decisions must use the separately selected Computer model");
+      assert.equal(computerImageRequests, 6, "each Computer decision must receive the exact granted-window image alongside the UIA observation");
       assert.equal(await readFile(fixtureStatePath, "utf8"), "CU-RUNTIME-FIXTURE-CLICKED-3");
       assert.equal(computerRpcMethods.filter((method) => method === "computer.grantCreate").length, 3);
       assert.equal(computerRpcMethods.filter((method) => method === "computer.inspect").length, 6);
@@ -297,6 +302,7 @@ $form.add_Shown({ $form.Activate() | Out-Null })
       );
       console.log(JSON.stringify({ ok: true, toolCalls, mainModelRequests: mainCalls, computerModelRequests: computerCalls,
         routedModels,
+        computerImageRequests,
         hostComputerRpcMethods: [...new Set(computerRpcMethods)],
         fixtureState: "CU-RUNTIME-FIXTURE-CLICKED-3", freshGrantCycles: 3 }));
     } finally {

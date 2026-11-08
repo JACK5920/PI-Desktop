@@ -85,6 +85,24 @@ provider availability.
 Live behavior across real provider routes and packaged desktop acceptance remain
 separate acceptance gaps.
 
+## Granted-window visual input acceptance — 2026-11-09
+
+Extended the same three-cycle Windows UIA runtime scenario to select
+`a11y-and-pixels`. The ordinary conversation remains on the text-only
+`deepseek-v4-pro` fixture model while the separately configured Computer model
+is image-capable `deepseek-flash`. The loopback endpoint asserts that all six
+Computer decision requests contain an image block; the conversation requests
+remain separately counted. The capture path resolves the Host-issued native
+window ID and transmits only the bounded fixture-window thumbnail. No screenshot
+is written to disk or sent outside the local fixture.
+
+| Check | Result |
+|---|---|
+| `corepack pnpm test:e2e:computer-use-runtime` | Passed on Windows: 6/6 Computer decision requests included an image block; 6/6 conversation requests remained on the separate text-only model; all 3 UIA actions, post-action readbacks, and grant revocations passed. |
+
+This proves the configured capture-and-transport path into an image-capable
+Computer model, not that a live third-party model correctly interprets pixels.
+
 ## Follow-up acceptance — 2026-11-08
 
 The current target-selection regression is covered at both the model-loop and
