@@ -158,6 +158,24 @@ next acceptance gap is running the same scenarios through the rebuilt desktop
 app with a recorded provider route and Host runtime logs, then retaining the
 run as an automated regression where the harness permits it.
 
+## Native Windows input coverage — 2026-11-09
+
+The opt-in isolated WinForms fixture now exercises each Windows pointer action
+through the native UIA backend and checks an effect reported by the fixture,
+not merely a successful dispatch: double-click and right-click event handlers,
+hover entry, drag movement plus release, and a nonzero UIA ScrollPattern value.
+The existing click, Unicode text, key chord, ComboBox, and ListBox checks remain
+in the same fixture. The test is still ignored by ordinary CI because it opens
+a visible window and requires an interactive Windows desktop.
+
+| Check | Result |
+|---|---|
+| Opt-in Windows native UIA fixture | Passed locally on 2026-11-09; verifies double-click, right-click, hover, drag movement/release, and scrolling using fixture-owned state. |
+
+This is native fixture acceptance, not acceptance for arbitrary applications or
+the packaged desktop app. The rebuilt-app/provider-route acceptance gap above
+remains open.
+
 ## Implemented surfaces
 
 | Surface | Current state |
