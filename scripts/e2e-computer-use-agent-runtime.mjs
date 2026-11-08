@@ -57,6 +57,10 @@ const routedModels = { conversation: [], computer: [] };
 let computerImageRequests = 0;
 let mainCalls = 0;
 let computerCalls = 0;
+let noOpActionSentForCycle = false;
+let clickSentForCycle = false;
+const computerActions = [];
+const computerDecisions = [];
 let computerToolDeclarations = 0;
 let fixtureStatePath;
 let fixtureChild;
@@ -85,16 +89,39 @@ const server = createServer(async (request, response) => {
   if (isComputerDecision) {
     computerCalls++;
     const transcript = JSON.stringify(messages);
-    if (transcript.includes(`CU-RUNTIME-FIXTURE-CLICKED-${activeCycle}`)) {
+    const clickedMarkerPresent = transcript.includes(`CU-RUNTIME-FIXTURE-CLICKED-${activeCycle}`);
+    computerDecisions.push({
+      cycle: activeCycle,
+      noOpSent: noOpActionSentForCycle,
+      clickSent: clickSentForCycle,
+      clickedMarkerPresent,
+    });
+    if (clickSentForCycle && clickedMarkerPresent) {
       delta = { role: "assistant", content: JSON.stringify({ kind: "done", summary: "Verified fixture label changed." }) };
       finish = "stop";
     } else {
-      const latestObservation = messages.map((message) => JSON.stringify(message)).join("\n");
-      const markerIndex = latestObservation.lastIndexOf("CU-RUNTIME-FIXTURE-ACTION");
-      const before = latestObservation.slice(0, markerIndex);
-      const uid = [...before.matchAll(/uid=([^\s",]+)/g)].at(-1)?.[1];
+      const latestPrompt = messages.at(-1)?.content;
+      const latestObservation = typeof latestPrompt === "string"
+        ? latestPrompt
+        : Array.isArray(latestPrompt)
+          ? latestPrompt
+              .map((part) => (part?.type === "text" && typeof part.text === "string" ? part.text : ""))
+              .join("\n")
+          : JSON.stringify(latestPrompt ?? "");
+      const nodeLine = latestObservation.split(/\r?\n/).find((line) =>
+        line.includes('"CU-RUNTIME-FIXTURE-ACTION"') && line.includes("uid="),
+      );
+      const uid = nodeLine?.match(/\buid=([^\s·]+)/)?.[1];
       if (!uid) throw new Error("Computer observation did not include the fixture button UID");
-      delta = { role: "assistant", content: JSON.stringify({ kind: "action", action: { kind: "click", uid } }) };
+      // Inject one valid but intentionally non-mutating action per fresh
+      // grant. The next model decision must be based on a new Host
+      // observation, then choose the state-changing click.
+      const kind = noOpActionSentForCycle ? "click" : "hover";
+      computerDecisions.at(-1).uid = uid;
+      computerDecisions.at(-1).action = kind;
+      if (kind === "hover") noOpActionSentForCycle = true;
+      else clickSentForCycle = true;
+      delta = { role: "assistant", content: JSON.stringify({ kind: "action", action: { kind, uid } }) };
       finish = "stop";
     }
   } else {
@@ -195,6 +222,7 @@ $form.add_Shown({ $form.Activate() | Out-Null })
     });
     const callHost = async (method, params) => {
       if (method.startsWith("computer.")) computerRpcMethods.push(method);
+      if (method === "computer.act") computerActions.push(params.action?.kind);
       return host.call(method, params);
     };
     const deadline = Date.now() + 15_000;
@@ -254,6 +282,8 @@ $form.add_Shown({ $form.Activate() | Out-Null })
     try {
       for (let cycle = 1; cycle <= 3; cycle++) {
         activeCycle = cycle;
+        noOpActionSentForCycle = false;
+        clickSentForCycle = false;
         ended = new Promise((resolve) => { resolveTurn = resolve; });
         const turnId = await beginTurn(host, session.id);
         const userMessageId = randomUUID();
@@ -278,31 +308,39 @@ $form.add_Shown({ $form.Activate() | Out-Null })
           content,
         });
         await waitForTurn(ended, cycle);
-        assert.equal(await readFile(fixtureStatePath, "utf8"), `CU-RUNTIME-FIXTURE-CLICKED-${cycle}`,
-          `cycle ${cycle} must verify the native UIA post-action state; mainCalls=${mainCalls}; computerCalls=${computerCalls}; toolCalls=${JSON.stringify(toolCalls)}; rpc=${JSON.stringify(computerRpcMethods)}`);
+        const observedFixtureState = await readFile(fixtureStatePath, "utf8").catch((error) => `<${error.code}>`);
+        assert.equal(
+          observedFixtureState,
+          `CU-RUNTIME-FIXTURE-CLICKED-${cycle}`,
+          `cycle ${cycle} must verify the native UIA post-action state; state=${observedFixtureState}; mainCalls=${mainCalls}; computerCalls=${computerCalls}; computerActions=${JSON.stringify(computerActions)}; computerDecisions=${JSON.stringify(computerDecisions)}; toolCalls=${JSON.stringify(toolCalls)}; turnErrors=${JSON.stringify(turnErrors)}; rpc=${JSON.stringify(computerRpcMethods)}`,
+        );
         await endTurn(host, turnId, "completed");
       }
       assert.deepEqual(turnErrors, [], JSON.stringify(turnErrors));
       assert.deepEqual(toolCalls, ["Computer", "Computer", "Computer"], "the real Agent Runtime must dispatch Computer on each fresh turn");
       assert.equal(computerToolDeclarations, 3, "each fresh turn's first model request must declare Computer");
       assert.equal(mainCalls, 6, "each conversation turn should call Computer then provide a final response");
-      assert.equal(computerCalls, 6, "each Computer run must act, re-observe, then verify exactly once");
+      assert.equal(computerCalls, 9, "each Computer run must re-observe after a non-mutating action, recover with a click, then verify");
+      assert.deepEqual(computerActions, ["hover", "click", "hover", "click", "hover", "click"],
+        "each fresh grant must recover from a valid no-op action using a fresh observation before clicking");
       assert.deepEqual(routedModels.conversation, Array(6).fill(model.id), "conversation requests must use the selected chat model");
-      assert.deepEqual(routedModels.computer, Array(6).fill(computerModel.id), "Computer decisions must use the separately selected Computer model");
-      assert.equal(computerImageRequests, 6, "each Computer decision must receive the exact granted-window image alongside the UIA observation");
+      assert.deepEqual(routedModels.computer, Array(9).fill(computerModel.id), "Computer decisions must use the separately selected Computer model");
+      assert.equal(computerImageRequests, 9, "each Computer decision must receive the exact granted-window image alongside the UIA observation");
       assert.equal(await readFile(fixtureStatePath, "utf8"), "CU-RUNTIME-FIXTURE-CLICKED-3");
       assert.equal(computerRpcMethods.filter((method) => method === "computer.grantCreate").length, 3);
-      assert.equal(computerRpcMethods.filter((method) => method === "computer.inspect").length, 6);
-      assert.equal(computerRpcMethods.filter((method) => method === "computer.act").length, 3);
+      assert.equal(computerRpcMethods.filter((method) => method === "computer.inspect").length, 9);
+      assert.equal(computerRpcMethods.filter((method) => method === "computer.act").length, 6);
       assert.equal(computerRpcMethods.filter((method) => method === "computer.grantRevoke").length, 3);
       assert.deepEqual(
         computerRpcMethods.filter((method) => ["computer.grantCreate", "computer.act", "computer.grantRevoke"].includes(method)),
-        ["computer.grantCreate", "computer.act", "computer.grantRevoke", "computer.grantCreate", "computer.act", "computer.grantRevoke", "computer.grantCreate", "computer.act", "computer.grantRevoke"],
+        ["computer.grantCreate", "computer.act", "computer.act", "computer.grantRevoke", "computer.grantCreate", "computer.act", "computer.act", "computer.grantRevoke", "computer.grantCreate", "computer.act", "computer.act", "computer.grantRevoke"],
         "each grant must be revoked before the next cycle creates one",
       );
       console.log(JSON.stringify({ ok: true, toolCalls, mainModelRequests: mainCalls, computerModelRequests: computerCalls,
         routedModels,
         computerImageRequests,
+        computerActions,
+        computerDecisions,
         hostComputerRpcMethods: [...new Set(computerRpcMethods)],
         fixtureState: "CU-RUNTIME-FIXTURE-CLICKED-3", freshGrantCycles: 3 }));
     } finally {
