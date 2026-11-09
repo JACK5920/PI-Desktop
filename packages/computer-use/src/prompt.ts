@@ -29,6 +29,8 @@ export type Observation = {
   windows?: ComputerTarget[];
   /** Present only under an `a11y-and-pixels` grant. */
   capture?: { mimeType: string; base64: string };
+  /** State of a requested pixel capture for this exact target. */
+  captureStatus?: "captured" | "unavailable";
 };
 
 /** The label for a window id, for a step record that names what it moved to. */
@@ -56,9 +58,9 @@ export const COMPUTER_LOOP_SYSTEM_PROMPT = [
   "Answer with exactly one JSON object and nothing else. The schemas are:",
   '{"kind":"action","action":{"kind":"click|double_click|right_click|hover|drag|set_value|type_text|press_keys|scroll|select","uid":"<id from the element list>","point":{"x":10,"y":20},"to":{"x":100,"y":120},"text":"...","keys":["ctrl+a"],"scroll":{"dx":0,"dy":3},"option":"..."},"note":"short reason"}',
   '{"kind":"switch","window":"<exact window_id value from the window list>","note":"short reason"}',
-  '{"kind":"done","summary":"what is now true"}',
+  '{"kind":"done","summary":"what is now true","evidence":["<uid from the latest observation>"]}',
   '{"kind":"ask","question":"what you need from the user"}',
-  "For `done`, return only `kind` and `summary` (an optional `note` is accepted). For `switch`, return only `kind`, `window`, and optional `note`. For `action`, include only the fields required by that action; never put a final summary or unrelated fields inside `action`.",
+  "For `done`, return `kind`, `summary`, and `evidence`: one or more exact element UIDs copied from the latest observation that support the result. The loop checks every UID against that latest Host observation. Never cite an older observation, invent a UID, or claim completion without UIA evidence. If the interface has no relevant accessible evidence, use `ask` to explain that completion cannot be verified; a screenshot alone is not a structured verification.",
   "",
   "Rules:",
   "- Address elements by `uid` from the element list. Use a point only when no element fits.",
@@ -68,7 +70,7 @@ export const COMPUTER_LOOP_SYSTEM_PROMPT = [
   "- `set_value` writes through an accessibility value pattern; `type_text` sends literal text to the focused target control and needs `text`; `press_keys` sends key chords and needs `keys`.",
   "- Use `select` only on the exact list item or combo box being changed. For a closed combo box, issue `select` directly on the combo box; do not click it open first. The host searches that element and its own descendants only; it never searches the whole window for a matching label.",
   "- `drag` needs `point` as its start and `to` as its destination, both relative to the current window; `hover` moves over the chosen element or point; `scroll` deltas are page-like UIA increments (maximum 100 increments per axis).",
-  "- After every action, inspect the new observation. Treat a host dispatch as an attempt, not proof that the application changed; only say `done` when the resulting state is visible in the next observation.",
+  "- After every action, inspect the new observation. Treat a host dispatch as an attempt, not proof that the application changed; only say `done` when the resulting state is visible in the next observation and cite its exact current UIA UID in `evidence`.",
   "- `switch` reads another window and costs a step but no budget. Every uid from the previous window stops working, so inspect what you switched to before acting on it.",
   "- A window marked refused can never be operated, and PI-Desktop's own windows are never a target. Do not retry one; it will not start working.",
   "- You cannot widen the scope, raise a budget, or disable a check. Asking for that fails the step.",
@@ -116,6 +118,11 @@ export function renderObservation(observation: Observation): string {
     inspection.truncated
       ? `Element list truncated at ${COMPUTER_MAX_NODES} entries.`
       : undefined,
+    observation.captureStatus === "captured"
+      ? "Pixel capture is available for this exact window observation."
+      : observation.captureStatus === "unavailable"
+        ? "Pixel capture was requested but is unavailable for this observation. Use only the listed accessibility data; do not claim visual inspection."
+        : undefined,
   ].filter((line): line is string => Boolean(line));
   const nodes = inspection.nodes.map(renderNode);
   const windows = (observation.windows ?? [])
@@ -137,9 +144,11 @@ export function renderHistory(steps: readonly ComputerStepRecord[]): string {
   return steps
     .map((step) => {
       const target = step.target ? ` on ${step.target}` : "";
+      const verification = step.verification ? `; verification=${step.verification}` : "";
+      const evidence = step.evidenceCount ? `; current UIA evidence=${step.evidenceCount} element(s)` : "";
       return step.ok
-        ? `${step.index}. ${step.action}${target}: dispatched; confirm the result in the current observation`
-        : `${step.index}. ${step.action}${target}: refused (${step.errorCode ?? "unknown"})`;
+        ? `${step.index}. ${step.action}${target}: dispatched${verification}${evidence}`
+        : `${step.index}. ${step.action}${target}: refused (${step.errorCode ?? "unknown"})${verification}`;
     })
     .join("\n");
 }

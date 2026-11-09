@@ -37,13 +37,17 @@ describe("Computer Use activity state", () => {
       phase: "acting",
       action: "click",
       target: "A".repeat(200),
-      recentSteps: [{ index: 1, action: "click", target: "B".repeat(200), ok: true }],
+      verification: "observed-change",
+      captureStatus: "unavailable",
+      recentSteps: [{ index: 1, action: "click", target: "B".repeat(200), ok: true, verification: "dispatched" }],
     });
     expect(getActiveComputerUseActivity()).toMatchObject({
       grantId: grant.grantId,
       phase: "acting",
       target: "A".repeat(80),
-      recentSteps: [{ target: "B".repeat(80) }],
+      verification: "observed-change",
+      captureStatus: "unavailable",
+      recentSteps: [{ target: "B".repeat(80), verification: "dispatched" }],
     });
 
     publishComputerUseActivity({

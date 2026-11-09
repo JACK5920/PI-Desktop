@@ -212,11 +212,27 @@ async function runStopWidgetProbe() {
     stepIndex: 1,
     action: "click",
     target: "Continue",
-    recentSteps: [{ index: 1, action: "click", target: "Continue", ok: true }],
+    verification: "dispatched",
+    captureStatus: "unavailable",
+    recentSteps: [{ index: 1, action: "click", target: "Continue", ok: true, verification: "dispatched" }],
   });
-  await waitUntil(() => document.body.textContent?.includes("Performing action · Click · Continue") ?? false, "live action status");
-  if (!document.body.textContent?.includes("Recent: Click · Continue")) {
-    throw new Error("Recent Computer Use activity trail is not visible");
+  await waitUntil(() => document.body.textContent?.includes("Performing action · Click · Dispatched · Continue") ?? false, "live action status");
+  await waitUntil(() => document.body.textContent?.includes("Screenshot unavailable; using accessibility only") ?? false, "visible pixel-capture fallback status");
+  if (!document.body.textContent?.includes("Recent: Click · Continue · Dispatched")) {
+    throw new Error("Recent Computer Use activity trail does not show dispatch state");
+  }
+  for (const listener of activityListeners) listener({
+    grantId: "fixture-grant-1",
+    phase: "verifying",
+    verification: "model-confirmed",
+    recentSteps: [
+      { index: 1, action: "click", target: "Continue", ok: true, verification: "observed-change" },
+      { index: 2, action: "done", ok: true, verification: "model-confirmed", evidenceCount: 1 },
+    ],
+  });
+  await waitUntil(() => document.body.textContent?.includes("Checking completion evidence · Model confirmed with current UIA evidence · Fixture App — Main Window") ?? false, "live completion verification status");
+  if (!document.body.textContent?.includes("Completion evidence · Model confirmed with current UIA evidence")) {
+    throw new Error("Recent Computer Use activity trail does not show validated completion evidence");
   }
   const stop = requireElement<HTMLButtonElement>(".computer-use-widget-stop");
   stop.click();

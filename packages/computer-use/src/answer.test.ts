@@ -63,9 +63,9 @@ describe("parseLoopAnswer", () => {
   });
 
   it("parses the three answer kinds", () => {
-    expect(parseLoopAnswer('{"kind":"done","summary":"dark mode is on"}')).toEqual({
+    expect(parseLoopAnswer('{"kind":"done","summary":"dark mode is on","evidence":["0.1#ab"]}')).toEqual({
       ok: true,
-      answer: { kind: "done", summary: "dark mode is on" },
+      answer: { kind: "done", summary: "dark mode is on", evidence: ["0.1#ab"] },
     });
     expect(parseLoopAnswer('{"kind":"ask","question":"which account?"}')).toEqual({
       ok: true,
@@ -80,13 +80,32 @@ describe("parseLoopAnswer", () => {
   });
 
   it("accepts a bounded explanatory note on a terminal answer", () => {
-    expect(parseLoopAnswer('{"kind":"done","summary":"saved","note":"verified"}')).toMatchObject({
+    expect(parseLoopAnswer('{"kind":"done","summary":"saved","note":"verified","evidence":["0.1#ab"]}')).toMatchObject({
       ok: true,
       answer: { kind: "done", summary: "saved" },
     });
     expect(parseLoopAnswer('{"kind":"done","summary":"saved","action":{"kind":"click"}}')).toMatchObject({
       ok: false,
     });
+  });
+
+  it("parses absent evidence as empty so the loop can report an unverified completion", () => {
+    expect(parseLoopAnswer('{"kind":"done","summary":"saved"}')).toEqual({
+      ok: true,
+      answer: { kind: "done", summary: "saved", evidence: [] },
+    });
+  });
+
+  it("rejects malformed, repeated, or excessive completion evidence", () => {
+    for (const text of [
+      '{"kind":"done","summary":"saved","evidence":"0.1#ab"}',
+      '{"kind":"done","summary":"saved","evidence":null}',
+      '{"kind":"done","summary":"saved","evidence":[""]}',
+      '{"kind":"done","summary":"saved","evidence":["0.1#ab","0.1#ab"]}',
+      `{"kind":"done","summary":"saved","evidence":${JSON.stringify(Array.from({ length: 9 }, (_, i) => `uid-${i}`))}}`,
+    ]) {
+      expect(parseLoopAnswer(text), text).toMatchObject({ ok: false });
+    }
   });
 
   it("parses literal typing, hover, and a fully specified drag", () => {

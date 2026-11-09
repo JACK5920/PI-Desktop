@@ -3211,6 +3211,8 @@ importConfirm: "İçe aktarılan uzantılar ajan sürecinde, ajanın kendi araç
       "observing": "Checking the screen",
       "thinking": "Planning next action",
       "acting": "Performing action",
+      "verifying": "Tamamlama kanıtı denetleniyor",
+      "unverified": "Tamamlama doğrulanmadı",
       "asking": "Needs your input",
       "completed": "Computer task finished",
       "failed": "Computer task stopped"
@@ -3228,9 +3230,25 @@ importConfirm: "İçe aktarılan uzantılar ajan sürecinde, ajanın kendi araç
       "select": "Select",
       "switch": "Switch window"
     },
+    "completionCheck": "Tamamlama kanıtı",
+    "verificationStatus": {
+      "observed": "Gözlemlendi",
+
+      "observation-only": "Yalnızca gözlem",
+      "dispatched": "Gönderildi",
+      "observed-change": "UIA durumu değişti",
+      "observed-no-change": "UIA durum değişikliği algılanmadı",
+      "model-confirmed": "Model güncel UIA kanıtıyla doğruladı",
+      "unverified": "Doğrulanmadı",
+      "refused": "Reddedildi"
+    },
     "recentSteps": "Recent",
     "widgetBudget": "{{count}} actions left",
     "captureA11yOnly": "Accessibility only",
+    "captureStatus": {
+      "captured": "Bu adım için ekran görüntüsü alındı",
+      "unavailable": "Ekran görüntüsü kullanılamıyor; yalnızca erişilebilirlik kullanılıyor"
+    },
     "stop": "Stop",
     "stopping": "Stopping…",
     "stopFailed": "Could not stop the active desktop run. Try again.",

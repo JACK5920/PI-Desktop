@@ -72,13 +72,15 @@ function codedError(error: unknown): Error & { code?: string } {
 }
 
 function toActivityStep(step: ComputerStepRecord): ComputerActivityStep | null {
-  if (step.action === "observe" || step.action === "done" || step.action === "ask") return null;
+  if (step.action === "observe" || step.action === "ask") return null;
   return {
     index: step.index + 1,
     action: step.action,
     ok: step.ok,
     ...(step.ok && step.target ? { target: step.target.slice(0, 80) } : {}),
     ...(step.errorCode?.startsWith("COMPUTER_") ? { errorCode: step.errorCode } : {}),
+    ...(step.verification ? { verification: step.verification } : {}),
+    ...(step.evidenceCount ? { evidenceCount: step.evidenceCount } : {}),
   };
 }
 
@@ -126,11 +128,14 @@ export function createComputerUseTool(options: {
     });
     publishComputerUseRun({ grant, sessionId, toolCallId });
     let loopActivity: ComputerLoopActivity = { phase: "starting" };
+    let captureStatus: ComputerRunActivity["captureStatus"];
     const recentSteps: ComputerActivityStep[] = [];
     const publishActivity = (phase?: ComputerRunPhase, errorCode?: string) => {
       const activity: ComputerRunActivity = {
         grantId: grant.grantId,
         ...(phase ? { phase } : loopActivity),
+        ...(loopActivity.verification ? { verification: loopActivity.verification } : {}),
+        ...(captureStatus ? { captureStatus } : {}),
         recentSteps: [...recentSteps],
         ...(errorCode ? { errorCode } : {}),
       };
@@ -156,14 +161,29 @@ export function createComputerUseTool(options: {
             code: "COMPUTER_SECURE_INPUT_REFUSED",
           });
         }
-        const pixels = activeGrant.capture === "a11y-and-pixels"
-          ? await capture({ targetId: activeGrant.targetId, bounds: activeGrant.bounds })
-          : undefined;
+        let pixels: Awaited<ReturnType<typeof capture>> = undefined;
+        if (activeGrant.capture === "a11y-and-pixels") {
+          try {
+            pixels = await capture({ targetId: activeGrant.targetId, bounds: activeGrant.bounds });
+          } catch {
+            pixels = undefined;
+          }
+          captureStatus = pixels ? "captured" : "unavailable";
+          publishActivity();
+        } else {
+          captureStatus = undefined;
+        }
         return {
           grant: activeGrant,
           inspection,
-          windows: targets.targets,
+          // A window-scoped grant must not reveal unrelated top-level window
+          // titles to the bound model. Legacy grants without `scope` are
+          // window-scoped by contract; only desktop grants may enumerate peers.
+          windows: activeGrant.scope === "desktop"
+            ? targets.targets
+            : targets.targets.filter((target) => target.targetId === activeGrant.targetId),
           ...(pixels ? { capture: pixels } : {}),
+          ...(captureStatus ? { captureStatus } : {}),
         };
       };
       const result = await runComputerLoop({ instruction: input.instruction, maxSteps: input.maxSteps, observeOnly: input.observeOnly }, {
@@ -206,13 +226,20 @@ export function createComputerUseTool(options: {
           onStep: (step) => {
             const safeStep = toActivityStep(step);
             if (!safeStep) return;
-            recentSteps.push(safeStep);
+            const existingIndex = recentSteps.findIndex((item) => item.index === safeStep.index && item.action === safeStep.action);
+            if (existingIndex >= 0) recentSteps[existingIndex] = safeStep;
+            else recentSteps.push(safeStep);
             if (recentSteps.length > 3) recentSteps.shift();
+            if (step.verification) loopActivity = { ...loopActivity, verification: step.verification };
             publishActivity();
           },
         });
       signal.throwIfAborted();
-      publishActivity(result.outcome === "done" ? "completed" : result.outcome === "needs-user" ? "asking" : "failed", result.errorCode);
+      loopActivity = { ...loopActivity, ...(result.verification ? { verification: result.verification } : {}) };
+      publishActivity(
+        result.outcome === "done" ? "completed" : result.outcome === "needs-user" ? "asking" : result.outcome === "unverified" ? "unverified" : "failed",
+        result.errorCode,
+      );
       return { ok: result.outcome === "done", isError: result.outcome !== "done", content: result };
     } finally {
       await host.call("computer.grantRevoke", { reason: "agent-finished" }).catch(() => undefined);

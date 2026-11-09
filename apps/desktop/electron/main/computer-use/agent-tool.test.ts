@@ -32,17 +32,18 @@ const grant = {
 
 function hostFixture(enabled = true, configuredModel = true, computerUseOverrides: Record<string, unknown> = {}) {
   const calls: Array<{ method: string; params: unknown }> = [];
+  const fixtureCapture = computerUseOverrides.defaultCapture === "a11y-and-pixels" ? "a11y-and-pixels" : grant.capture;
   const host = {
     async call<T>(method: string, params?: unknown): Promise<T> {
       calls.push({ method, params });
       if (method === "settings.get") return { computerUse: { enabled, ...computerUseOverrides, ...(configuredModel ? { model: { providerId: "p", modelId: "m" } } : {}) } } as T;
-      if (method === "computer.grantCreate") return grant as T;
+      if (method === "computer.grantCreate") return { ...grant, capture: fixtureCapture } as T;
       if (method === "computer.inspect") return {
         grantId: grant.grantId, revision: 1, bounds: grant.bounds, fidelity: "full",
         nodes: [{ uid: "button-1", role: "button", label: "Continue", hasValue: false, enabled: true, focused: false, bounds: { x: 10, y: 10, width: 80, height: 30 }, actions: ["click"] }],
         truncated: false, secureInput: false,
       } as T;
-      if (method === "computer.grantDescribe") return { grant } as T;
+      if (method === "computer.grantDescribe") return { grant: { ...grant, capture: fixtureCapture } } as T;
       if (method === "computer.listTargets") return { targets: [] } as T;
       if (method === "computer.act") return { grantId: grant.grantId, revision: 1, remainingBudget: 3, dispatched: "accessibility-action" } as T;
       return { revoked: true } as T;
@@ -112,8 +113,11 @@ describe("Computer local tool", () => {
     const capture = vi.fn(async () => ({ mimeType: "image/png", base64: "fixture-pixels" }));
     const applyCursor = vi.fn();
     const content: unknown[] = [];
+    const activities: unknown[] = [];
+    const unsubscribe = subscribeComputerUseActivity((activity) => activities.push(activity));
     computerRuntime.runComputerLoop.mockImplementation(async (_input, deps) => {
       const observation = await deps.observe();
+      expect(observation.captureStatus).toBe("captured");
       await deps.decide({
         system: "system",
         instruction: "Inspect the fixture",
@@ -170,6 +174,41 @@ describe("Computer local tool", () => {
       expect.objectContaining({ type: "image", data: "fixture-pixels", mimeType: "image/png" }),
     ]));
     expect(applyCursor).toHaveBeenCalledWith(expect.objectContaining({ kind: "show", grantId: grant.grantId }));
+    expect(activities).toContainEqual(expect.objectContaining({ captureStatus: "captured" }));
+    unsubscribe();
+  });
+
+  it("continues with UIA and reports when requested pixel capture is unavailable", async () => {
+    const { host } = hostFixture(true, true, { defaultCapture: "a11y-and-pixels" });
+    const capture = vi.fn(async () => undefined);
+    const observations: unknown[] = [];
+    const activities: unknown[] = [];
+    const unsubscribe = subscribeComputerUseActivity((activity) => activities.push(activity));
+    computerRuntime.runComputerLoop.mockImplementation(async (_input, deps) => {
+      observations.push(await deps.observe());
+      return { outcome: "done", summary: "fixture inspected", steps: [], verification: "observation-only" };
+    });
+    const handler = createComputerUseTool({
+      getHost: () => host,
+      resolveProvider: async () => ({
+        id: "p", name: "Vision fixture", modelId: "m", apiKey: "fixture-only",
+        supportsReasoning: false, supportedThinkingLevels: ["off"],
+        modelConfig: { source: "generic", name: "Vision fixture", baseUrl: "http://fixture", reasoning: false, input: ["text", "image"], modalities: { input: ["text", "image"], output: ["text"] }, contextWindow: 100_000, maxTokens: 1000 },
+      }),
+      capture,
+    });
+
+    const result = await handler({
+      sessionId: "session-1",
+      toolCallId: "tool-pixels-unavailable",
+      args: { instruction: "Inspect the fixture" },
+      signal: new AbortController().signal,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(observations[0]).toMatchObject({ captureStatus: "unavailable" });
+    expect(activities).toContainEqual(expect.objectContaining({ captureStatus: "unavailable" }));
+    unsubscribe();
   });
 
   it("fails clearly before granting when pixel mode is paired with a text-only model", async () => {
@@ -209,7 +248,7 @@ describe("Computer local tool", () => {
       await deps.act({ kind: "click", uid: "button-1" }, 1);
       deps.onStep({ index: 0, action: "click", ok: true, target: "Continue" });
       await deps.decide({ system: "system", instruction: "Continue", observation: "fixture", history: "" });
-      return { outcome: "done", summary: "continued", steps: [] };
+      return { outcome: "done", summary: "continued", steps: [], verification: "model-confirmed" };
     });
     computerRuntime.completeOneShot.mockResolvedValue({ text: JSON.stringify({ kind: "done", summary: "continued" }) });
     const { host, calls } = hostFixture();
@@ -227,7 +266,7 @@ describe("Computer local tool", () => {
     expect(computerRuntime.completeOneShot).toHaveBeenCalledOnce();
     expect(activities).toEqual(expect.arrayContaining([
       expect.objectContaining({ phase: "acting", action: "click", target: "Continue" }),
-      expect.objectContaining({ phase: "completed" }),
+      expect.objectContaining({ phase: "completed", verification: "model-confirmed" }),
     ]));
     expect(getActiveComputerUseRun()).toBeNull();
     unsubscribe();
@@ -292,7 +331,7 @@ describe("Computer local tool", () => {
       modelCalls += 1;
       if (!clicked) return { text: '{"kind":"action","action":{"kind":"click","uid":"button-1"}}' };
       expect(message).toContain('"Continued"');
-      return { text: '{"kind":"done","summary":"the fixture changed"}' };
+      return { text: '{"kind":"done","summary":"the fixture changed","evidence":["button-1"]}' };
     });
     const handler = createComputerUseTool({
       getHost: () => host,
@@ -313,9 +352,41 @@ describe("Computer local tool", () => {
     expect(modelCalls).toBe(2);
     expect(observations[0]).toContain('"Continue"');
     expect(observations[1]).toContain('"Continued"');
-    expect(hostCalls.filter((call) => call.method === "computer.inspect")).toHaveLength(2);
+    expect(hostCalls.filter((call) => call.method === "computer.inspect")).toHaveLength(3);
     expect(hostCalls.filter((call) => call.method === "computer.act")).toHaveLength(1);
     expect(hostCalls.at(-1)?.method).toBe("computer.grantRevoke");
+  });
+
+  it("surfaces unverified completion and never retries an input action when UIA evidence is missing", async () => {
+    computerRuntime.runComputerLoop.mockImplementation(runBoundedComputerLoop);
+    computerRuntime.completeOneShot.mockResolvedValue({ text: '{"kind":"done","summary":"the task is complete"}' });
+    const { host, calls } = hostFixture();
+    const handler = createComputerUseTool({
+      getHost: () => host,
+      resolveProvider: async () => ({
+        id: "p", name: "Pinned", modelId: "m", apiKey: "fixture-only",
+        supportsReasoning: false, supportedThinkingLevels: ["off"],
+      }),
+    });
+    const activities: Array<{ phase?: string; verification?: string }> = [];
+    const unsubscribe = subscribeComputerUseActivity((activity) => {
+      if (activity) activities.push({ phase: activity.phase, verification: activity.verification });
+    });
+
+    const result = await handler({
+      sessionId: "session-1",
+      toolCallId: "tool-unverified-completion",
+      args: { instruction: "Do the task" },
+      signal: new AbortController().signal,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.content).toMatchObject({ outcome: "unverified", verification: "unverified" });
+    expect(calls.filter(({ method }) => method === "computer.act")).toHaveLength(0);
+    expect(calls.filter(({ method }) => method === "computer.inspect")).toHaveLength(3);
+    expect(calls.at(-1)?.method).toBe("computer.grantRevoke");
+    expect(activities).toContainEqual({ phase: "unverified", verification: "unverified" });
+    unsubscribe();
   });
 
   it("fails closed when Computer Use is disabled without minting a grant", async () => {

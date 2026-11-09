@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ComputerAction, ComputerCursorEvent, ComputerGrantView, ComputerLoopActivity, ComputerNode } from "@pi-desktop/shared";
 
 import { runComputerLoop, type ComputerLoopDeps } from "./loop.js";
-import type { Observation } from "./prompt.js";
+import { renderObservation, type Observation } from "./prompt.js";
 
 function grant(overrides: Partial<ComputerGrantView> = {}): ComputerGrantView {
   return {
@@ -95,13 +95,20 @@ function coded(code: string): Error & { code: string } {
 }
 
 describe("runComputerLoop", () => {
+  it("tells the model when requested pixel capture is unavailable", () => {
+    const rendered = renderObservation(observation([], { captureStatus: "unavailable" }));
+    expect(rendered).toContain("Pixel capture was requested but is unavailable for this observation.");
+    expect(rendered).toContain("Use only the listed accessibility data; do not claim visual inspection.");
+  });
+
   it("acts once and stops on done", async () => {
     const h = harness([
       '{"kind":"action","action":{"kind":"click","uid":"0.1#ab"}}',
-      '{"kind":"done","summary":"saved"}',
+      '{"kind":"done","summary":"saved","evidence":["0.1#ab"]}',
     ]);
     const result = await runComputerLoop({ instruction: "save the document" }, h.deps);
     expect(result.outcome).toBe("done");
+    expect(result.verification).toBe("model-confirmed");
     expect(h.acted).toEqual([{ kind: "click", uid: "0.1#ab" }]);
     expect(result.steps.filter((step) => step.ok && step.action === "click")).toHaveLength(1);
     // The model's claim is labelled, never presented as the loop's own report.
@@ -109,11 +116,120 @@ describe("runComputerLoop", () => {
     expect(result.summary).toContain("Dispatched 1 of 1 action");
   });
 
+  it("marks a successful action as dispatched and then compares the fresh UIA state", async () => {
+    let clicked = false;
+    const h = harness([
+      '{"kind":"action","action":{"kind":"click","uid":"0.1#ab"}}',
+      '{"kind":"done","summary":"saved","evidence":["0.1#ab"]}',
+    ], {
+      act: () => { clicked = true; },
+      observe: () => observation([{ ...saveButton, label: clicked ? "Saved" : "Save" }]),
+    });
+
+    const result = await runComputerLoop({ instruction: "save the document" }, h.deps);
+
+    expect(result.steps).toContainEqual(expect.objectContaining({ action: "click", verification: "observed-change" }));
+    expect(result.steps).toContainEqual(expect.objectContaining({ action: "done", verification: "model-confirmed", evidenceCount: 1 }));
+    expect(h.activity).toContainEqual(expect.objectContaining({ phase: "observing", verification: "observed-change" }));
+    expect(result.verification).toBe("model-confirmed");
+  });
+
+  it("does not replay a non-idempotent action when the UIA tree shows no change", async () => {
+    const h = harness([
+      '{"kind":"action","action":{"kind":"click","uid":"0.1#ab"}}',
+      '{"kind":"done","summary":"the requested state is visible","evidence":["0.1#ab"]}',
+    ]);
+
+    const result = await runComputerLoop({ instruction: "click once" }, h.deps);
+
+    expect(h.acted).toHaveLength(1);
+    expect(result.steps).toContainEqual(expect.objectContaining({ action: "click", verification: "observed-no-change" }));
+    expect(result.outcome).toBe("done");
+    expect(result.verification).toBe("model-confirmed");
+  });
+
+  it("re-observes stale completion evidence and accepts only a UID in the latest Host observation", async () => {
+    let observations = 0;
+    const h = harness([
+      '{"kind":"action","action":{"kind":"hover","uid":"0.1#ab"}}',
+      '{"kind":"done","summary":"finished","evidence":["0.1#ab"]}',
+      '{"kind":"done","summary":"finished","evidence":["0.2#cd"]}',
+    ], {
+      act: () => undefined,
+      observe: () => {
+        observations += 1;
+        const oldNode = { ...saveButton, actions: ["hover"] as ComputerNode["actions"] };
+        return observation([observations === 1 ? oldNode : { ...saveButton, uid: "0.2#cd", label: "Saved" }]);
+      },
+    });
+
+    const result = await runComputerLoop({ instruction: "check the document" }, h.deps);
+
+    expect(observations).toBe(4);
+    expect(h.decisions).toBe(3);
+    expect(h.acted).toEqual([{ kind: "hover", uid: "0.1#ab" }]);
+    expect(result.outcome).toBe("done");
+    expect(result.verification).toBe("model-confirmed");
+    expect(result.steps).toContainEqual(expect.objectContaining({ action: "done", ok: false, verification: "unverified" }));
+    expect(result.steps).toContainEqual(expect.objectContaining({ action: "done", ok: true, verification: "model-confirmed" }));
+  });
+
+  it("returns an explicit unverified outcome when the model cannot cite current UIA evidence", async () => {
+    const h = harness(['{"kind":"done","summary":"finished"}']);
+
+    const result = await runComputerLoop({ instruction: "check the document" }, h.deps);
+
+    expect(h.decisions).toBe(2);
+    expect(h.activity.filter((event) => event.phase === "observing")).toHaveLength(5);
+    expect(h.acted).toEqual([]);
+    expect(result.outcome).toBe("unverified");
+    expect(result.verification).toBe("unverified");
+    expect(result.summary).toContain("without claiming completion");
+    expect(result.steps.filter((step) => step.action === "done")).toHaveLength(2);
+  });
+
+  it("rejects evidence if the accessible UI changes while the model is answering", async () => {
+    let observations = 0;
+    const h = harness([
+      '{"kind":"done","summary":"finished","evidence":["0.1#ab"]}',
+      '{"kind":"done","summary":"finished","evidence":["0.1#ab"]}',
+    ], {
+      observe: () => {
+        observations += 1;
+        return observation([{ ...saveButton, label: observations === 1 ? "Ready" : "Saved" }]);
+      },
+    });
+
+    const result = await runComputerLoop({ instruction: "check the saved state" }, h.deps);
+
+    expect(observations).toBe(3);
+    expect(h.decisions).toBe(2);
+    expect(h.acted).toEqual([]);
+    expect(result.outcome).toBe("done");
+    expect(result.steps).toContainEqual(expect.objectContaining({ action: "done", ok: false, verification: "unverified" }));
+    expect(result.verification).toBe("model-confirmed");
+  });
+
+  it("does not treat a screenshot by itself as structured completion evidence", async () => {
+    const h = harness(['{"kind":"done","summary":"the visual task is complete"}'], {
+      observe: () => observation([], {
+        grant: grant({ capture: "a11y-and-pixels" }),
+        capture: { mimeType: "image/png", base64: "fixture-only" },
+      }),
+    });
+
+    const result = await runComputerLoop({ instruction: "confirm the visual state" }, h.deps);
+
+    expect(result.outcome).toBe("unverified");
+    expect(result.verification).toBe("unverified");
+    expect(h.acted).toEqual([]);
+  });
+
   it("publishes truthful phases and the current action without exposing typed text", async () => {
     const input: ComputerNode = { ...saveButton, role: "AXTextField", label: "Input", hasValue: true, actions: ["set_value"] };
     const h = harness([
       '{"kind":"action","action":{"kind":"set_value","uid":"0.1#ab","text":"secret value"}}',
-      '{"kind":"done","summary":"saved"}',
+      '{"kind":"done","summary":"saved","evidence":["0.1#ab"]}',
     ], { observe: () => observation([input]) });
 
     await runComputerLoop({ instruction: "set the value" }, h.deps);
@@ -170,7 +286,7 @@ describe("runComputerLoop", () => {
   });
 
   it("retries one malformed model answer without spending an action step", async () => {
-    const h = harness(["{not json}", '{"kind":"done","summary":"already saved"}']);
+    const h = harness(["{not json}", '{"kind":"done","summary":"already saved","evidence":["0.1#ab"]}']);
     const result = await runComputerLoop({ instruction: "save", maxSteps: 1 }, h.deps);
     expect(result.outcome).toBe("done");
     expect(h.decisions).toBe(2);
@@ -221,7 +337,7 @@ describe("runComputerLoop", () => {
   it("refuses an invented uid without reaching the host", async () => {
     const h = harness([
       '{"kind":"action","action":{"kind":"click","uid":"9.9#ff"}}',
-      '{"kind":"done","summary":"gave up"}',
+      '{"kind":"done","summary":"gave up","evidence":["0.1#ab"]}',
     ]);
     const result = await runComputerLoop({ instruction: "save" }, h.deps);
     expect(h.acted).toEqual([]);
@@ -236,7 +352,7 @@ describe("runComputerLoop", () => {
       act: async () => {
         throw new Error("must not act");
       },
-      decide: async () => '{"kind":"done","summary":"x"}',
+      decide: async () => '{"kind":"done","summary":"x","evidence":["0.1#ab"]}',
     };
     const result = await runComputerLoop({ instruction: "save" }, deps);
     expect(result.outcome).toBe("failed");
@@ -246,7 +362,7 @@ describe("runComputerLoop", () => {
   it("draws the cursor around each action and hides it at the end", async () => {
     const h = harness([
       '{"kind":"action","action":{"kind":"click","uid":"0.1#ab"}}',
-      '{"kind":"done","summary":"saved"}',
+      '{"kind":"done","summary":"saved","evidence":["0.1#ab"]}',
     ]);
     await runComputerLoop({ instruction: "save" }, h.deps);
     const kinds = h.cursor.map((event) => event.kind);
@@ -262,7 +378,7 @@ describe("runComputerLoop", () => {
   it("switches to another window without spending an action", async () => {
     const asked: (string | undefined)[] = [];
     const cursor: ComputerCursorEvent[] = [];
-    const answers = ['{"kind":"switch","window":"88:4","note":"the task is over there"}', '{"kind":"done","summary":"read it"}'];
+    const answers = ['{"kind":"switch","window":"88:4","note":"the task is over there"}', '{"kind":"done","summary":"read it","evidence":["0.1#ab"]}'];
     let decisions = 0;
     const deps: ComputerLoopDeps = {
       observe: async (targetId) => {
@@ -287,7 +403,7 @@ describe("runComputerLoop", () => {
     };
     const result = await runComputerLoop({ instruction: "read the inbox" }, deps);
     expect(result.outcome).toBe("done");
-    expect(asked).toEqual([undefined, "88:4"]);
+    expect(asked).toEqual([undefined, "88:4", "88:4"]);
     expect(result.steps[0]).toMatchObject({ action: "switch", ok: true, target: "Other — Inbox" });
     // A switch is a read: it must not read as work done on the machine.
     expect(result.summary).toContain("No action was dispatched.");
@@ -313,14 +429,14 @@ describe("runComputerLoop", () => {
         renderedObservation = request.observation;
         return [
           '{"kind":"switch","window":"35316:855254:probe.exe probe.exe — CU Probe Target"}',
-          '{"kind":"done","summary":"read it"}',
+          '{"kind":"done","summary":"read it","evidence":["0.1#ab"]}',
         ][Math.min(decisions++, 1)];
       },
     };
 
     const result = await runComputerLoop({ instruction: "read the target" }, deps);
     expect(result.outcome).toBe("done");
-    expect(observed).toEqual([undefined, "35316:855254:probe.exe"]);
+    expect(observed).toEqual([undefined, "35316:855254:probe.exe", "35316:855254:probe.exe"]);
     expect(renderedObservation).toContain('window_id="35316:855254:probe.exe" label="probe.exe — CU Probe Target"');
   });
 
@@ -336,13 +452,13 @@ describe("runComputerLoop", () => {
       act: async () => { throw new Error("must not act"); },
       decide: async () => [
         '{"kind":"switch","window":"35316:855254:probe.exe unexpected suffix"}',
-        '{"kind":"done","summary":"stopped safely"}',
+        '{"kind":"done","summary":"stopped safely","evidence":["0.1#ab"]}',
       ][Math.min(decisions++, 1)],
     };
 
     const result = await runComputerLoop({ instruction: "read the target" }, deps);
     expect(result.outcome).toBe("done");
-    expect(observed).toEqual([undefined]);
+    expect(observed).toEqual([undefined, grant().targetId]);
     expect(result.steps[0]).toMatchObject({ action: "switch", ok: false, errorCode: "COMPUTER_TARGET_UNAVAILABLE" });
   });
 
@@ -365,22 +481,26 @@ describe("runComputerLoop", () => {
       decide: async () =>
         [
           '{"kind":"switch","window":"88:4"}',
-          '{"kind":"done","summary":"read it"}',
+          '{"kind":"done","summary":"read it","evidence":["0.1#ab"]}',
         ][Math.min(decisions++, 1)],
     };
 
     const result = await runComputerLoop({ instruction: "read the inbox" }, deps);
     expect(result.outcome).toBe("done");
-    expect(observed).toEqual([undefined, "88:4", "88:4", "88:4"]);
-    expect(result.steps).toEqual([expect.objectContaining({ action: "switch", ok: true })]);
+    expect(observed).toEqual([undefined, "88:4", "88:4", "88:4", "88:4"]);
+    expect(result.steps).toEqual([
+      expect.objectContaining({ action: "switch", ok: true }),
+      expect.objectContaining({ action: "done", ok: true, verification: "model-confirmed" }),
+    ]);
   });
 
-  it("reports a refused window and keeps the remaining steps", async () => {
-    const answers = ['{"kind":"switch","window":"self"}', '{"kind":"done","summary":"left it alone"}'];
+  it("reports a refused window but does not claim done without current UIA evidence", async () => {
+    const answers = ['{"kind":"switch","window":"self"}', '{"kind":"done","summary":"left it alone","evidence":["0.1#ab"]}'];
     let decisions = 0;
     const deps: ComputerLoopDeps = {
       observe: async (targetId) => {
-        if (targetId) throw coded("COMPUTER_SELF_TARGET_REFUSED");
+        if (targetId === "self") throw coded("COMPUTER_SELF_TARGET_REFUSED");
+        if (targetId && targetId !== grant().targetId) throw coded("COMPUTER_TARGET_UNAVAILABLE");
         return observation([], { windows: [{ targetId: "self", appName: "PI-Desktop", title: "", appKey: "pi", bounds: grant().bounds, refusedReason: "self" }] });
       },
       act: async () => {
@@ -389,8 +509,7 @@ describe("runComputerLoop", () => {
       decide: async () => answers[Math.min(decisions++, answers.length - 1)],
     };
     const result = await runComputerLoop({ instruction: "click PI-Desktop's own approve button" }, deps);
-    // The refusal is the model's problem to work around, not a failed run.
-    expect(result.outcome).toBe("done");
+    expect(result.outcome).toBe("unverified");
     expect(result.steps[0]).toMatchObject({
       action: "switch",
       ok: false,

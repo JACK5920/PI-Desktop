@@ -69,12 +69,15 @@ export function ComputerUseWidget() {
   const phase = activity?.phase ?? "starting";
   const phaseText = t(`computerUse.activityPhase.${phase}`);
   const actionText = activity?.action ? t(`computerUse.activityAction.${activity.action}`) : null;
-  const currentActivity = [phaseText, actionText, activity?.target ?? grant?.targetLabel]
+  const verificationText = activity?.verification ? t(`computerUse.verificationStatus.${activity.verification}`) : null;
+  const captureStatusText = activity?.captureStatus ? t(`computerUse.captureStatus.${activity.captureStatus}`) : null;
+  const currentActivity = [phaseText, actionText, verificationText, activity?.target ?? grant?.targetLabel]
     .filter((part): part is string => Boolean(part))
     .join(" · ");
   const recentActivity = activity?.recentSteps.slice(-2).map((step) => {
-    const action = t(`computerUse.activityAction.${step.action}`);
-    return step.target ? `${action} · ${step.target}` : action;
+    const action = step.action === "done" ? t("computerUse.completionCheck") : t(`computerUse.activityAction.${step.action}`);
+    const status = step.verification ? t(`computerUse.verificationStatus.${step.verification}`) : null;
+    return [action, step.target, status].filter((part): part is string => Boolean(part)).join(" · ");
   }).join("  ›  ");
 
   return (
@@ -83,10 +86,11 @@ export function ComputerUseWidget() {
         <>
           <div className="computer-use-widget-copy">
             <strong>{t("computerUse.widgetTitle")}</strong>
-            <span className="computer-use-widget-target" title={currentActivity}>{currentActivity}</span>
+            <span className="computer-use-widget-target" title={currentActivity} aria-live="polite">{currentActivity}</span>
             <span className="computer-use-widget-meta">
               {recentActivity ? `${t("computerUse.recentSteps")}: ${recentActivity}` : null}
               {recentActivity ? " · " : null}
+              {captureStatusText ? `${captureStatusText} · ` : null}
               {t("computerUse.widgetBudget", { count: grant.remainingBudget })} · {grant.capture === "a11y-and-pixels"
                 ? t("settings.computerUseAccessibilityAndPixels")
                 : t("computerUse.captureA11yOnly")}

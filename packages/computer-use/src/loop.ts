@@ -17,10 +17,12 @@ import {
   type ComputerAction,
   type ComputerActResult,
   type ComputerCursorEvent,
+  type ComputerInspection,
   type ComputerLoopActivity,
   type ComputerRunOutcome,
   type ComputerRunResult,
   type ComputerStepRecord,
+  type ComputerUseVerification,
 } from "@pi-desktop/shared";
 
 import { parseLoopAnswer, validateAnswerAction, type LoopAnswer } from "./answer.js";
@@ -144,12 +146,13 @@ function summarize(
   // Reading is not doing: observations and window switches never appear as
   // something the agent changed on the user's machine.
   const ran = steps.filter((step) => step.action !== "observe" && step.action !== "switch");
-  const done = ran.filter((step) => step.ok);
+  const actions = ran.filter((step) => step.action !== "done" && step.action !== "ask");
+  const done = actions.filter((step) => step.ok);
   const lines: string[] = [];
   lines.push(
-    ran.length === 0
+    actions.length === 0
       ? "No action was dispatched."
-      : `Dispatched ${done.length} of ${ran.length} action${ran.length === 1 ? "" : "s"}: ${done
+      : `Dispatched ${done.length} of ${actions.length} action${actions.length === 1 ? "" : "s"}: ${done
           .map((step) => (step.target ? `${step.action} on ${step.target}` : step.action))
           .join("; ") || "none succeeded"}.`,
   );
@@ -171,6 +174,9 @@ function summarize(
     case "needs-user":
       lines.push("Stopped to ask the user a question.");
       break;
+    case "unverified":
+      lines.push("Stopped without claiming completion because current UIA evidence could not be verified; no input action was replayed.");
+      break;
     case "failed":
       lines.push(`Stopped after a refusal${errorCodeValue ? ` (${errorCodeValue})` : ""}.`);
       break;
@@ -180,6 +186,66 @@ function summarize(
     lines.push(`Model's account: ${modelSummary}`);
   }
   return lines.join(" ");
+}
+
+/** Compare only the safe accessibility shape; values and captured pixels never enter this diff. */
+function observationSignature(observation: Observation): string {
+  return JSON.stringify({
+    targetId: observation.grant.targetId,
+    bounds: observation.inspection.bounds,
+    fidelity: observation.inspection.fidelity,
+    truncated: observation.inspection.truncated,
+    secureInput: observation.inspection.secureInput,
+    nodes: observation.inspection.nodes.map((node) => ({
+      uid: node.uid,
+      role: node.role,
+      label: node.label,
+      hasValue: node.hasValue,
+      enabled: node.enabled,
+      focused: node.focused,
+      bounds: node.bounds,
+      parent: node.parent,
+      actions: node.actions,
+    })),
+  });
+}
+
+function nodeSignature(node: ComputerInspection["nodes"][number]): string {
+  return JSON.stringify({
+    role: node.role,
+    label: node.label,
+    hasValue: node.hasValue,
+    enabled: node.enabled,
+    focused: node.focused,
+    bounds: node.bounds,
+    parent: node.parent,
+    actions: node.actions,
+  });
+}
+
+function validateCompletionEvidence(
+  evidence: readonly string[],
+  decisionObservation: Observation,
+  currentObservation: Observation,
+): boolean {
+  if (evidence.length === 0) return false;
+  // The UI may have changed while the model was responding. Re-check the
+  // Host-bound target and cited value-free nodes, without failing completion
+  // because an unrelated control elsewhere in the window changed.
+  if (
+    decisionObservation.grant.targetId !== currentObservation.grant.targetId ||
+    decisionObservation.inspection.fidelity !== currentObservation.inspection.fidelity ||
+    decisionObservation.inspection.truncated !== currentObservation.inspection.truncated ||
+    decisionObservation.inspection.secureInput !== currentObservation.inspection.secureInput ||
+    JSON.stringify(decisionObservation.inspection.bounds) !== JSON.stringify(currentObservation.inspection.bounds)
+  ) return false;
+  const decisionNodes = new Map(decisionObservation.inspection.nodes.map((node) => [node.uid, node]));
+  const currentNodes = new Map(currentObservation.inspection.nodes.map((node) => [node.uid, node]));
+  return evidence.every((uid) => {
+    const before = decisionNodes.get(uid);
+    const current = currentNodes.get(uid);
+    return before !== undefined && current !== undefined && nodeSignature(before) === nodeSignature(current);
+  });
 }
 
 export async function runComputerLoop(
@@ -202,6 +268,15 @@ export async function runComputerLoop(
     steps.push(step);
     deps.onStep?.(step);
   };
+  const updateStepVerification = (stepIndex: number, action: ComputerStepRecord["action"], verification: ComputerUseVerification) => {
+    for (let i = steps.length - 1; i >= 0; i -= 1) {
+      if (steps[i].index === stepIndex && steps[i].action === action) {
+        steps[i] = { ...steps[i], verification };
+        deps.onStep?.(steps[i]);
+        return;
+      }
+    }
+  };
 
   let observation: Observation;
   try {
@@ -219,10 +294,11 @@ export async function runComputerLoop(
   }
 
   if (input.observeOnly) {
-    record({ index: 0, action: "observe", ok: true });
+    record({ index: 0, action: "observe", ok: true, verification: "observed" });
     const elements = observation.inspection.nodes.length;
     return {
       outcome: "done",
+      verification: "observation-only",
       summary: `Observed ${observation.grant.targetLabel}: ${elements} accessible element${
         elements === 1 ? "" : "s"
       }${observation.inspection.truncated ? " (list truncated)" : ""}${
@@ -249,6 +325,7 @@ export async function runComputerLoop(
           ok: false,
           errorCode: "COMPUTER_ACTION_REJECTED",
           target: parsed.reason,
+          verification: "refused",
         });
         if (invalidAnswers >= MAX_INVALID_ANSWERS) {
           return {
@@ -263,13 +340,46 @@ export async function runComputerLoop(
         // budget; MAX_INVALID_ANSWERS still bounds malformed-output retries.
         continue;
       }
-      invalidAnswers = 0;
       answer = parsed.answer;
 
       if (answer.kind === "done") {
-        return { outcome: "done", summary: summarize("done", steps, answer.summary), steps };
+        const decisionObservation = observation;
+        deps.onActivity?.({ phase: "observing", stepIndex: index + 1 });
+        observation = await observeWithTargetRetry(deps, decisionObservation.grant.targetId);
+        deps.onActivity?.({ phase: "verifying", stepIndex: index + 1 });
+        if (validateCompletionEvidence(answer.evidence, decisionObservation, observation)) {
+          record({
+            index,
+            action: "done",
+            ok: true,
+            verification: "model-confirmed",
+            evidenceCount: answer.evidence.length,
+          });
+          return {
+            outcome: "done",
+            verification: "model-confirmed",
+            summary: `${summarize("done", steps, answer.summary)} Completion cites ${answer.evidence.length} element(s) from the latest accessibility observation; this is model-confirmed UIA evidence, not independent semantic proof.`,
+            steps,
+          };
+        }
+
+        invalidAnswers += 1;
+        record({ index, action: "done", ok: false, verification: "unverified", target: "missing or stale UIA evidence" });
+        deps.onActivity?.({ phase: "observing", stepIndex: index + 1, verification: "unverified" });
+        if (invalidAnswers >= MAX_INVALID_ANSWERS) {
+          return {
+            outcome: "unverified",
+            verification: "unverified",
+            summary: summarize("unverified", steps, answer.summary),
+            steps,
+          };
+        }
+        // The fresh Host observation above is read-only; never replay a click,
+        // keystroke, or other possibly non-idempotent action.
+        continue;
       }
       if (answer.kind === "ask") {
+        invalidAnswers = 0;
         deps.onActivity?.({ phase: "asking", stepIndex: index + 1 });
         record({ index, action: "ask", ok: true, target: answer.question });
         return {
@@ -281,6 +391,7 @@ export async function runComputerLoop(
       }
 
       if (answer.kind === "switch") {
+        invalidAnswers = 0;
         const targetId = resolveSwitchTarget(observation, answer.window);
         const label = targetId
           ? windowLabel(observation, targetId) ?? `window ${targetId}`
@@ -293,7 +404,7 @@ export async function runComputerLoop(
           }
           deps.onActivity?.({ phase: "acting", stepIndex: index + 1, action: "switch", target: label });
           observation = await observeWithTargetRetry(deps, targetId);
-          record({ index, action: "switch", ok: true, target: label });
+          record({ index, action: "switch", ok: true, target: label, verification: "observed" });
           // The overlay frames the window being worked on, so it moves too.
           deps.onCursor?.({
             kind: "show",
@@ -304,7 +415,7 @@ export async function runComputerLoop(
           lastRefusal = undefined;
         } catch (error) {
           const code = errorCode(error);
-          record({ index, action: "switch", ok: false, errorCode: code, target: label });
+          record({ index, action: "switch", ok: false, errorCode: code, target: label, verification: "refused" });
           const terminal = TERMINAL_CODES[code];
           if (terminal && GRANT_LEVEL_OUTCOMES.has(terminal)) {
             return {
@@ -331,6 +442,7 @@ export async function runComputerLoop(
         continue;
       }
 
+      invalidAnswers = 0;
       const validated = validateAnswerAction(answer.action, observation.inspection);
       if (!validated.ok) {
         record({
@@ -339,6 +451,7 @@ export async function runComputerLoop(
           ok: false,
           errorCode: "COMPUTER_ACTION_REJECTED",
           target: validated.reason,
+          verification: "refused",
         });
         repeatedRefusals = validated.reason === lastRefusal ? repeatedRefusals + 1 : 1;
         lastRefusal = validated.reason;
@@ -351,7 +464,7 @@ export async function runComputerLoop(
           };
         }
         index += 1;
-        observation = await deps.observe();
+        observation = await observeWithTargetRetry(deps, observation.grant.targetId);
         continue;
       }
 
@@ -410,7 +523,7 @@ export async function runComputerLoop(
                 },
           );
         }
-        record({ index, action: validated.action.kind, ok: true, ...(target ? { target } : {}) });
+        record({ index, action: validated.action.kind, ok: true, ...(target ? { target } : {}), verification: "dispatched" });
         repeatedRefusals = 0;
         lastRefusal = undefined;
       } catch (error) {
@@ -421,6 +534,7 @@ export async function runComputerLoop(
           ok: false,
           errorCode: code,
           ...(target ? { target } : {}),
+          verification: "refused",
         });
         const terminal = TERMINAL_CODES[code];
         if (terminal) {
@@ -444,7 +558,19 @@ export async function runComputerLoop(
       }
 
       index += 1;
-      observation = await deps.observe();
+      const beforeObservation = observation;
+      deps.onActivity?.({ phase: "observing", stepIndex: index, verification: "dispatched" });
+      try {
+        observation = await deps.observe();
+        const verification = observationSignature(beforeObservation) === observationSignature(observation)
+          ? "observed-no-change"
+          : "observed-change";
+        updateStepVerification(index - 1, validated.action.kind, verification);
+        deps.onActivity?.({ phase: "observing", stepIndex: index, verification });
+      } catch (error) {
+        updateStepVerification(index - 1, validated.action.kind, "unverified");
+        throw error;
+      }
       // Always capture the state after a dispatched action, including the
       // final action at the per-call limit. Otherwise a caller can receive a
       // step-limit result without the action's outcome ever being observed.

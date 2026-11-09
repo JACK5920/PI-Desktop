@@ -3179,6 +3179,8 @@ sklm: {
       "observing": "Checking the screen",
       "thinking": "Planning next action",
       "acting": "Performing action",
+      "verifying": "Abschlussnachweis wird geprüft",
+      "unverified": "Abschluss nicht verifiziert",
       "asking": "Needs your input",
       "completed": "Computer task finished",
       "failed": "Computer task stopped"
@@ -3196,9 +3198,25 @@ sklm: {
       "select": "Select",
       "switch": "Switch window"
     },
+    "completionCheck": "Abschlussnachweis",
+    "verificationStatus": {
+      "observed": "Beobachtet",
+
+      "observation-only": "Nur Beobachtung",
+      "dispatched": "Ausgeführt",
+      "observed-change": "UIA-Status geändert",
+      "observed-no-change": "Keine UIA-Statusänderung erkannt",
+      "model-confirmed": "Vom Modell mit aktuellem UIA-Nachweis bestätigt",
+      "unverified": "Nicht verifiziert",
+      "refused": "Abgelehnt"
+    },
     "recentSteps": "Recent",
     "widgetBudget": "{{count}} actions left",
     "captureA11yOnly": "Accessibility only",
+    "captureStatus": {
+      "captured": "Screenshot für diesen Schritt erfasst",
+      "unavailable": "Screenshot nicht verfügbar; nur Barrierefreiheit wird verwendet"
+    },
     "stop": "Stop",
     "stopping": "Stopping…",
     "stopFailed": "Could not stop the active desktop run. Try again.",

@@ -59,6 +59,8 @@ export function publishComputerUseActivity(next: ComputerRunActivity): void {
       ok: step.ok,
       ...(step.ok && safeActivityText(step.target) ? { target: safeActivityText(step.target) } : {}),
       ...(step.errorCode?.startsWith("COMPUTER_") ? { errorCode: step.errorCode.slice(0, 64) } : {}),
+      ...(step.verification ? { verification: step.verification } : {}),
+      ...(typeof step.evidenceCount === "number" ? { evidenceCount: step.evidenceCount } : {}),
     }));
   activeActivity = {
     grantId: next.grantId,
@@ -68,6 +70,8 @@ export function publishComputerUseActivity(next: ComputerRunActivity): void {
     ...(next.action ? { action: next.action } : {}),
     ...(safeActivityText(next.target) ? { target: safeActivityText(next.target) } : {}),
     ...(next.errorCode?.startsWith("COMPUTER_") ? { errorCode: next.errorCode.slice(0, 64) } : {}),
+    ...(next.verification ? { verification: next.verification } : {}),
+    ...(next.captureStatus ? { captureStatus: next.captureStatus } : {}),
   };
   notifyActivity();
 }

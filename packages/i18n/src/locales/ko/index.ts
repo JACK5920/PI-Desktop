@@ -3218,6 +3218,8 @@ importConfirm: "가져온 확장은 에이전트 프로세스 안에서 에이�
       "observing": "Checking the screen",
       "thinking": "Planning next action",
       "acting": "Performing action",
+      "verifying": "완료 근거 확인 중",
+      "unverified": "완료 상태 확인되지 않음",
       "asking": "Needs your input",
       "completed": "Computer task finished",
       "failed": "Computer task stopped"
@@ -3235,9 +3237,25 @@ importConfirm: "가져온 확장은 에이전트 프로세스 안에서 에이�
       "select": "Select",
       "switch": "Switch window"
     },
+    "completionCheck": "완료 근거",
+    "verificationStatus": {
+      "observed": "관찰됨",
+
+      "observation-only": "관찰 전용",
+      "dispatched": "전달됨",
+      "observed-change": "UIA 상태 변경 감지",
+      "observed-no-change": "UIA 상태 변경이 감지되지 않음",
+      "model-confirmed": "현재 UIA 근거로 모델 확인됨",
+      "unverified": "확인되지 않음",
+      "refused": "거부됨"
+    },
     "recentSteps": "Recent",
     "widgetBudget": "{{count}} actions left",
     "captureA11yOnly": "Accessibility only",
+    "captureStatus": {
+      "captured": "이 단계의 화면을 캡처함",
+      "unavailable": "화면 캡처를 사용할 수 없어 접근성 정보만 사용 중"
+    },
     "stop": "Stop",
     "stopping": "Stopping…",
     "stopFailed": "Could not stop the active desktop run. Try again.",

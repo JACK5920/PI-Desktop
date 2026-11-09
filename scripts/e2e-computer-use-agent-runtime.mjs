@@ -55,6 +55,7 @@ const { createComputerUseTool } = await import(
 const requests = [];
 const routedModels = { conversation: [], computer: [] };
 let computerImageRequests = 0;
+let computerImageBase64Chars = 0;
 let mainCalls = 0;
 let computerCalls = 0;
 let noOpActionSentForCycle = false;
@@ -65,10 +66,38 @@ let computerToolDeclarations = 0;
 let fixtureStatePath;
 let fixtureChild;
 let fixtureTitle;
+let fixtureTargetId;
 let fixtureOutput = "";
+const fixtureCapture = process.env.PI_COMPUTER_E2E_CAPTURE_MODE === "pixels"
+  ? "a11y-and-pixels"
+  : "a11y-only";
 const testRoot = await mkdtemp(join(tmpdir(), "pi-computer-agent-runtime-"));
 const computerRpcMethods = [];
 let activeCycle = 1;
+let windowScopedObservationChecks = 0;
+function latestComputerObservationText(messages) {
+  const text = messages.map((message) => {
+    const content = message?.content;
+    if (typeof content === "string") return content;
+    if (Array.isArray(content)) {
+      return content.map((part) => part?.type === "text" && typeof part.text === "string" ? part.text : "").join("\n");
+    }
+    return "";
+  }).join("\n");
+  const start = text.lastIndexOf("Current window:");
+  return start >= 0 ? text.slice(start) : text;
+}
+function describeComputerContext(messages) {
+  return messages.slice(-6).map((message) => {
+    const content = message?.content;
+    const text = typeof content === "string"
+      ? content
+      : Array.isArray(content)
+        ? content.map((part) => part?.type === "text" && typeof part.text === "string" ? part.text : "[non-text]").join("\n")
+        : String(content ?? "");
+    return `${message?.role ?? "?"}: ${text.slice(-1400)}`;
+  }).join("\n---\n");
+}
 const server = createServer(async (request, response) => {
   const chunks = [];
   for await (const chunk of request) chunks.push(chunk);
@@ -81,13 +110,35 @@ const server = createServer(async (request, response) => {
   const messages = body.messages ?? [];
   const isComputerDecision = JSON.stringify(messages.at(-1) ?? {}).includes("Observation:");
   routedModels[isComputerDecision ? "computer" : "conversation"].push(body.model);
-  if (isComputerDecision && messages.some((message) =>
-    Array.isArray(message.content) && message.content.some((part) => part.type === "image_url"),
-  )) computerImageRequests++;
+  if (isComputerDecision) {
+    computerCalls++;
+    const currentObservation = latestComputerObservationText([messages.at(-1) ?? {}]);
+    const visibleWindowLines = currentObservation.match(/^window_id=/gm) ?? [];
+    if (visibleWindowLines.length !== 1 || !currentObservation.includes(fixtureTitle)) {
+      const detail = `pinned-window observation mismatch: listedWindowCount=${visibleWindowLines.length}; fixtureTitlePresent=${currentObservation.includes(fixtureTitle)}`;
+      response.writeHead(500, { "content-type": "text/plain; charset=utf-8" }).end(detail);
+      console.error(detail);
+      return;
+    }
+    windowScopedObservationChecks++;
+    // Count only the newest decision's observation, not images retained in
+    // older conversation messages; otherwise one early image could make later
+    // failed captures look successful.
+    const latestContent = messages.at(-1)?.content;
+    const imageParts = Array.isArray(latestContent)
+      ? latestContent.filter((part) => part?.type === "image_url")
+      : [];
+    if (imageParts.length > 0) computerImageRequests++;
+    for (const part of imageParts) {
+      const url = part.image_url?.url;
+      if (typeof url === "string" && url.startsWith("data:image/png;base64,")) {
+        computerImageBase64Chars += url.slice("data:image/png;base64,".length).length;
+      }
+    }
+  }
   let delta;
   let finish;
   if (isComputerDecision) {
-    computerCalls++;
     const transcript = JSON.stringify(messages);
     const clickedMarkerPresent = transcript.includes(`CU-RUNTIME-FIXTURE-CLICKED-${activeCycle}`);
     computerDecisions.push({
@@ -97,22 +148,27 @@ const server = createServer(async (request, response) => {
       clickedMarkerPresent,
     });
     if (clickSentForCycle && clickedMarkerPresent) {
-      delta = { role: "assistant", content: JSON.stringify({ kind: "done", summary: "Verified fixture label changed." }) };
+      const latestObservation = latestComputerObservationText(messages);
+      const nodeLine = latestObservation.split(/\r?\n/).findLast((line) =>
+        line.includes(`"CU-RUNTIME-FIXTURE-CLICKED-${activeCycle}"`) && line.includes("uid="),
+      );
+      const evidenceUid = nodeLine?.match(/\buid=([^\s·]+)/)?.[1];
+      if (!evidenceUid) throw new Error("Final Computer observation did not include the changed fixture label UID");
+      computerDecisions.at(-1).evidenceUid = evidenceUid;
+      delta = { role: "assistant", content: JSON.stringify({ kind: "done", summary: "Verified fixture label changed.", evidence: [evidenceUid] }) };
       finish = "stop";
     } else {
-      const latestPrompt = messages.at(-1)?.content;
-      const latestObservation = typeof latestPrompt === "string"
-        ? latestPrompt
-        : Array.isArray(latestPrompt)
-          ? latestPrompt
-              .map((part) => (part?.type === "text" && typeof part.text === "string" ? part.text : ""))
-              .join("\n")
-          : JSON.stringify(latestPrompt ?? "");
-      const nodeLine = latestObservation.split(/\r?\n/).find((line) =>
+      const latestObservation = latestComputerObservationText(messages);
+      const nodeLine = latestObservation.split(/\r?\n/).findLast((line) =>
         line.includes('"CU-RUNTIME-FIXTURE-ACTION"') && line.includes("uid="),
       );
       const uid = nodeLine?.match(/\buid=([^\s·]+)/)?.[1];
-      if (!uid) throw new Error("Computer observation did not include the fixture button UID");
+      if (!uid) {
+        const details = `Computer observation did not include the fixture button UID. Latest parsed observation:\n${latestObservation.slice(-3000)}\nRecent messages:\n${describeComputerContext(messages)}`;
+        response.writeHead(500, { "content-type": "text/plain; charset=utf-8" }).end(details);
+        console.error(details);
+        return;
+      }
       // Inject one valid but intentionally non-mutating action per fresh
       // grant. The next model decision must be based on a new Host
       // observation, then choose the state-changing click.
@@ -218,12 +274,25 @@ $form.add_Shown({ $form.Activate() | Out-Null })
     const binding = { providerId: computerProviderRow.provider.id, modelId: computerModel.id };
     await host.call("settings.set", {
       defaultPermissionMode: "auto",
-      computerUse: { enabled: true, model: binding, defaultInputPolicy: "autonomous-in-scope", defaultCapture: "a11y-and-pixels" },
+      // Keep UIA evidence acceptance independent from WGC by default. The opt-in
+      // pixel mode runs the same fixture/model path to validate real capture.
+      computerUse: { enabled: true, model: binding, defaultInputPolicy: "autonomous-in-scope", defaultCapture: fixtureCapture },
     });
     const callHost = async (method, params) => {
       if (method.startsWith("computer.")) computerRpcMethods.push(method);
       if (method === "computer.act") computerActions.push(params.action?.kind);
-      return host.call(method, params);
+      // Pin this acceptance run to its own disposable window. This models a
+      // user-selected Host target and prevents reading/capturing the daily
+      // desktop if foreground focus changes between grant cycles.
+      const targetParams = method === "computer.grantCreate" && params?.origin === "agent"
+        ? { ...params, targetId: fixtureTargetId }
+        : params;
+      const result = await host.call(method, targetParams);
+      if (method === "computer.grantCreate" && params?.origin === "agent") {
+        assert.equal(result.targetId, fixtureTargetId, "Host grant must remain pinned to the exact isolated fixture window");
+        assert.equal(result.scope, "window", "Host must make an exact-target request a window-scoped grant");
+      }
+      return result;
     };
     const deadline = Date.now() + 15_000;
     let visibleTargets = [];
@@ -235,6 +304,8 @@ $form.add_Shown({ $form.Activate() | Out-Null })
     }
     assert(visibleTargets.some((target) => target.title === fixtureTitle),
       `isolated fixture window must be visible to Host before the model turn; fixtureExit=${fixtureChild.exitCode}; output=${fixtureOutput}; targets=${JSON.stringify(visibleTargets)}`);
+    fixtureTargetId = visibleTargets.find((target) => target.title === fixtureTitle)?.targetId;
+    assert(fixtureTargetId, "fixture target must have a Host-issued target id before the model turn");
     const session = await createSession(host, workspace, "Computer runtime fixture");
     let stderr = "";
     const sidecar = new AgentSidecar({
@@ -321,14 +392,27 @@ $form.add_Shown({ $form.Activate() | Out-Null })
       assert.equal(computerToolDeclarations, 3, "each fresh turn's first model request must declare Computer");
       assert.equal(mainCalls, 6, "each conversation turn should call Computer then provide a final response");
       assert.equal(computerCalls, 9, "each Computer run must re-observe after a non-mutating action, recover with a click, then verify");
+      assert.equal(computerDecisions.filter((decision) => decision.clickedMarkerPresent).length, 3);
+      assert.ok(computerDecisions.filter((decision) => decision.clickedMarkerPresent).every((decision) => typeof decision.evidenceUid === "string"),
+        "each completion answer must cite a UID from its latest Host observation");
       assert.deepEqual(computerActions, ["hover", "click", "hover", "click", "hover", "click"],
         "each fresh grant must recover from a valid no-op action using a fresh observation before clicking");
       assert.deepEqual(routedModels.conversation, Array(6).fill(model.id), "conversation requests must use the selected chat model");
       assert.deepEqual(routedModels.computer, Array(9).fill(computerModel.id), "Computer decisions must use the separately selected Computer model");
-      assert.equal(computerImageRequests, 9, "each Computer decision must receive the exact granted-window image alongside the UIA observation");
+      const expectedImageRequests = fixtureCapture === "a11y-and-pixels" ? 9 : 0;
+      assert.equal(computerImageRequests, expectedImageRequests,
+        fixtureCapture === "a11y-and-pixels"
+          ? "each Computer decision must receive a non-empty exact granted-window image"
+          : "the UIA verification suite must not depend on Windows Graphics Capture");
+      if (fixtureCapture === "a11y-and-pixels") {
+        assert.ok(computerImageBase64Chars > 0, "pixel mode must deliver actual PNG bytes to the loopback vision model");
+      }
+      assert.equal(windowScopedObservationChecks, 9,
+        "every Computer-model turn must receive exactly the pinned target window, not peer desktop windows");
       assert.equal(await readFile(fixtureStatePath, "utf8"), "CU-RUNTIME-FIXTURE-CLICKED-3");
       assert.equal(computerRpcMethods.filter((method) => method === "computer.grantCreate").length, 3);
-      assert.equal(computerRpcMethods.filter((method) => method === "computer.inspect").length, 9);
+      assert.equal(computerRpcMethods.filter((method) => method === "computer.inspect").length, 12,
+        "each action is re-observed and each completion citation is checked against a fresh Host observation");
       assert.equal(computerRpcMethods.filter((method) => method === "computer.act").length, 6);
       assert.equal(computerRpcMethods.filter((method) => method === "computer.grantRevoke").length, 3);
       assert.deepEqual(
@@ -339,8 +423,12 @@ $form.add_Shown({ $form.Activate() | Out-Null })
       console.log(JSON.stringify({ ok: true, toolCalls, mainModelRequests: mainCalls, computerModelRequests: computerCalls,
         routedModels,
         computerImageRequests,
+        computerImageBase64Chars,
+        captureMode: fixtureCapture,
+        windowScopedObservationChecks,
         computerActions,
         computerDecisions,
+        hostComputerInspectionCount: computerRpcMethods.filter((method) => method === "computer.inspect").length,
         hostComputerRpcMethods: [...new Set(computerRpcMethods)],
         fixtureState: "CU-RUNTIME-FIXTURE-CLICKED-3", freshGrantCycles: 3 }));
     } finally {

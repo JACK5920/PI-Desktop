@@ -3202,6 +3202,8 @@ sklm: {
       "observing": "Checking the screen",
       "thinking": "Planning next action",
       "acting": "Performing action",
+      "verifying": "正在核驗完成依據",
+      "unverified": "完成狀態未驗證",
       "asking": "Needs your input",
       "completed": "Computer task finished",
       "failed": "Computer task stopped"
@@ -3219,9 +3221,25 @@ sklm: {
       "select": "Select",
       "switch": "Switch window"
     },
+    "completionCheck": "完成依據",
+    "verificationStatus": {
+      "observed": "已觀察",
+
+      "observation-only": "僅觀察",
+      "dispatched": "已派送",
+      "observed-change": "偵測到 UIA 狀態變更",
+      "observed-no-change": "未偵測到 UIA 狀態變更",
+      "model-confirmed": "模型已引用目前 UIA 證據確認",
+      "unverified": "未驗證",
+      "refused": "已拒絕"
+    },
     "recentSteps": "Recent",
     "widgetBudget": "{{count}} actions left",
     "captureA11yOnly": "Accessibility only",
+    "captureStatus": {
+      "captured": "本步已擷取螢幕截圖",
+      "unavailable": "截圖無法使用，目前僅使用無障礙資訊"
+    },
     "stop": "Stop",
     "stopping": "Stopping…",
     "stopFailed": "Could not stop the active desktop run. Try again.",

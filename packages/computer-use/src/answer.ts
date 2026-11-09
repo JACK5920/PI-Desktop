@@ -33,7 +33,7 @@ export type LoopAnswer =
   | { kind: "action"; action: ComputerAction; note?: string }
   /** Read another window of a desktop-scope grant (ADR 0344). */
   | { kind: "switch"; window: string; note?: string }
-  | { kind: "done"; summary: string }
+  | { kind: "done"; summary: string; evidence: string[] }
   | { kind: "ask"; question: string };
 
 export type AnswerParse =
@@ -93,14 +93,22 @@ export function parseLoopAnswer(text: string): AnswerParse {
   if (kind === "done") {
     const summary = boundedString(value.summary, MAX_SUMMARY_CHARS);
     if (!summary) return reject("done without a summary");
+    const evidenceRaw = value.evidence === undefined ? [] : value.evidence;
+    if (!Array.isArray(evidenceRaw) || evidenceRaw.length > 8) return reject("malformed completion evidence");
+    const evidence: string[] = [];
+    for (const entry of evidenceRaw) {
+      const uid = boundedString(entry, 256);
+      if (!uid || evidence.includes(uid)) return reject("malformed completion evidence");
+      evidence.push(uid);
+    }
     // Some providers attach a harmless reason/note to terminal answers. Accept
     // that explicitly, but keep action and routing fields disallowed here.
     const note = value.note === undefined ? undefined : boundedString(value.note, MAX_NOTE_CHARS);
     if (value.note !== undefined && !note) return reject("malformed note");
-    if (Object.keys(value).some((key) => !["kind", "summary", "note"].includes(key))) {
+    if (Object.keys(value).some((key) => !["kind", "summary", "note", "evidence"].includes(key))) {
       return reject("done with unexpected fields");
     }
-    return { ok: true, answer: { kind: "done", summary } };
+    return { ok: true, answer: { kind: "done", summary, evidence } };
   }
   if (kind === "ask") {
     const question = boundedString(value.question, MAX_QUESTION_CHARS);

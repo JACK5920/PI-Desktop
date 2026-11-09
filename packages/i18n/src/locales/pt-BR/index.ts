@@ -3146,6 +3146,8 @@ export const ptBR = {
       "observing": "Checking the screen",
       "thinking": "Planning next action",
       "acting": "Performing action",
+      "verifying": "Verificando evidências de conclusão",
+      "unverified": "Conclusão não verificada",
       "asking": "Needs your input",
       "completed": "Computer task finished",
       "failed": "Computer task stopped"
@@ -3163,9 +3165,25 @@ export const ptBR = {
       "select": "Select",
       "switch": "Switch window"
     },
+    "completionCheck": "Evidência de conclusão",
+    "verificationStatus": {
+      "observed": "Observado",
+
+      "observation-only": "Somente observação",
+      "dispatched": "Enviado",
+      "observed-change": "Estado UIA alterado",
+      "observed-no-change": "Nenhuma alteração de estado UIA detectada",
+      "model-confirmed": "Modelo confirmou com evidência UIA atual",
+      "unverified": "Não verificado",
+      "refused": "Recusado"
+    },
     "recentSteps": "Recent",
     "widgetBudget": "{{count}} actions left",
     "captureA11yOnly": "Accessibility only",
+    "captureStatus": {
+      "captured": "Captura feita para esta etapa",
+      "unavailable": "Captura indisponível; usando somente acessibilidade"
+    },
     "stop": "Stop",
     "stopping": "Stopping…",
     "stopFailed": "Could not stop the active desktop run. Try again.",

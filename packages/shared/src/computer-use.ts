@@ -330,6 +330,17 @@ export type ComputerActResult = {
   dispatched: "accessibility-action" | "window-event" | "system-input";
 };
 
+/** A truthful, value-free marker for what the loop has established so far. */
+export type ComputerUseVerification =
+  | "observation-only"
+  | "observed"
+  | "dispatched"
+  | "observed-change"
+  | "observed-no-change"
+  | "model-confirmed"
+  | "unverified"
+  | "refused";
+
 /** One step the loop completed, as reported back to the user-facing summary. */
 export type ComputerStepRecord = {
   index: number;
@@ -339,6 +350,9 @@ export type ComputerStepRecord = {
   target?: string;
   ok: boolean;
   errorCode?: string;
+  verification?: ComputerUseVerification;
+  /** Number of exact current-observation UIDs cited by a `done` answer. */
+  evidenceCount?: number;
 };
 
 export type ComputerRunOutcome =
@@ -348,6 +362,7 @@ export type ComputerRunOutcome =
   | "revoked"
   | "expired"
   | "needs-user"
+  | "unverified"
   | "failed";
 
 export type ComputerRunResult = {
@@ -358,18 +373,21 @@ export type ComputerRunResult = {
   /** Present when `outcome` is `needs-user`: what the model wants to ask. */
   question?: string;
   errorCode?: string;
+  verification?: "model-confirmed" | "unverified" | "observation-only";
 };
 
 /** Sanitized, ephemeral UI status. It is not written to the transcript or audit log. */
-export type ComputerRunPhase = "starting" | "observing" | "thinking" | "acting" | "asking" | "completed" | "failed";
+export type ComputerRunPhase = "starting" | "observing" | "thinking" | "acting" | "verifying" | "asking" | "completed" | "unverified" | "failed";
 
 /** Recent input steps omit entered text and model-generated prose by construction. */
 export type ComputerActivityStep = {
   index: number;
-  action: ComputerActionKind | "switch";
+  action: ComputerActionKind | "switch" | "done";
   target?: string;
   ok: boolean;
   errorCode?: string;
+  verification?: ComputerUseVerification;
+  evidenceCount?: number;
 };
 
 export type ComputerRunActivity = {
@@ -379,6 +397,9 @@ export type ComputerRunActivity = {
   action?: ComputerActionKind | "switch";
   target?: string;
   errorCode?: string;
+  verification?: ComputerUseVerification;
+  /** A requested screenshot may be unavailable even when accessibility works. */
+  captureStatus?: "captured" | "unavailable";
   recentSteps: ComputerActivityStep[];
 };
 

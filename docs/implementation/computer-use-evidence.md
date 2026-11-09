@@ -45,7 +45,9 @@ after every turn, so an earlier turn's state cannot satisfy a later turn.
 This verifies repeated grant lifecycle and post-action state observation on one
 stable target. It does not yet cover cold application restart, the target itself
 becoming unavailable/reappearing, real provider/model routes, or action-specific
-verified/dispatched/failed semantics in the product UI.
+verified/dispatched/failed semantics in the product UI at the time of this
+acceptance. The completion evidence follow-up below adds explicit dispatch,
+observation, and completion states.
 
 ## Final-step observation — 2026-11-09
 
@@ -64,8 +66,8 @@ actions are deterministically verified.
 | Documentation checks | Passed: 89 English/Chinese pairs and 640 documentation pages. |
 | Windows UIA target resolution and recovery | Passed: an unrelated isolated process/window was added then removed without invalidating the original exact ID; after closing that target and reopening a same-title fixture, the old ID stayed invalid and the replacement required a new ID. The fixture passed in 5.46 seconds. |
 
-Generic action-specific result statuses and recovery under changing window/process
-availability remain unfinished.
+At the time of this checkpoint, generic action-specific result statuses and
+recovery under changing window/process availability remained unfinished.
 
 ## Distinct model-route acceptance — 2026-11-09
 
@@ -196,6 +198,48 @@ history.
 This remains local interactive Windows fixture acceptance. It does not claim
 acceptance across arbitrary providers or from the packaged end-user application.
 
+## Completion citation and live status — 2026-11-09
+
+The loop now treats model completion as a claim that needs a current, checkable
+UIA citation. A `done` answer includes one to eight exact element UIDs from the
+latest observation. After the model responds, the loop re-observes the same
+Host-bound target, then accepts the answer only if each cited UID is still
+present and its value-free UIA shape (role, label, value-presence flag, enabled
+and focus state, bounds, parent, and supported actions) still matches the
+decision observation. The whole-tree observation diff separately marks each
+action as `dispatched`, `observed-change`, or `observed-no-change`.
+
+If citations are absent or stale, the loop refreshes the pinned target and asks
+again once without replaying any action. A second unverifiable `done` returns an
+explicit `unverified` result, not success. The Agent tool returns it as an
+error-result so the conversation cannot silently treat it as a successful tool
+call. Accessibility values and screenshot bytes are excluded from the UIA diff;
+pixel-only claims without current structured UIA references remain unverified.
+The accepted state is explicitly **model-confirmed against current UIA evidence**,
+not an independent semantic proof that the requested task is correct.
+
+The live widget now shows dispatch/observation/completion-verification state and
+distinguishes `unverified` from `completed`. The recent activity trail updates
+the same step in place as the Host dispatch and post-action observation arrive.
+When pixel capture is enabled, the widget also distinguishes a screenshot
+attached for the current step from an unavailable screenshot; in the latter
+case the model receives an explicit instruction to rely only on UIA and not
+claim visual inspection. Window-scoped grants expose only their pinned window
+in model context; desktop-scoped grants retain the desktop window list.
+
+| Check | Result |
+|---|---|
+| `@pi-desktop/computer-use` tests | Passed: 51 tests, including stale UID rejection, UI change during model response, screenshot-only unverified completion, missing-evidence `unverified`, no action replay, observed-change/no-change states, and explicit unavailable-pixel guidance. |
+| Electron Main Computer Use tests | Passed: 12 tests, including unverified tool result, no input dispatch, grant revocation, and surfaced capture success/unavailability. |
+| `@pi-desktop/desktop` and `@pi-desktop/i18n` typecheck | Passed. |
+| `node scripts/e2e-computer-use-agent-runtime.mjs` | UIA mode passed in 3 consecutive runs; opt-in pixel mode (`PI_COMPUTER_E2E_CAPTURE_MODE=pixels`) passed in 3 consecutive runs after the target-only context and exact-current-image assertions. Each run used 3 fresh grants, 6 native UIA actions, 9 loopback Computer-model decisions, 12 Host inspections including fresh completion checks, and three exact fixture-state readbacks. Pixel runs delivered 9 non-empty PNG data URLs to the dedicated loopback Computer model (129,560–136,132 base64 characters per run); no screenshots were saved. The fixture wrapper pins each grant to the exact Host-issued disposable-window target ID, asserts the Host returns `scope=window`, and checks that each model observation contains only that pinned window. Ordinary conversation and Computer model used distinct fixture routes. |
+| `node scripts/e2e-computer-use-settings.mjs` | Passed in isolated Electron: settings writes, live dispatch, model-confirmed UIA status, visible "Screenshot unavailable; using accessibility only" fallback, and Stop request ownership. |
+| `git diff --check` | Passed. |
+
+These tests use a deterministic local model endpoint and an isolated WinForms
+fixture. They do not establish semantic verification across arbitrary models,
+arbitrary toolkits, or the packaged user application.
+
 ## Implemented surfaces
 
 | Surface | Current state |
@@ -210,7 +254,7 @@ acceptance across arbitrary providers or from the packaged end-user application.
 | macOS backend | An `AXUIElement` backend exists in source; this evidence set does not contain macOS device acceptance. |
 | Linux/X11 backend | X11 identity/geometry plus AT-SPI inspection and supported actions. Passed the GTK/Xvfb/dbus-run-session CI fixture on 2026-11-09 (workflow run `42525594538`): target discovery, AT-SPI control inspection, button invocation, and changed accessible status label. Wayland input remains explicitly unsupported. |
 | Pixel capture and cursor overlay | Windows path implemented; no packaged-app or multi-display/DPI acceptance yet. |
-| Packaged desktop acceptance | Not complete. |
+| Packaged desktop acceptance | Startup smoke passed; packaged Computer Use interaction flow is not yet accepted. |
 
 ## Automated evidence
 
@@ -237,8 +281,8 @@ build.
 
 The Windows fixture probe is not evidence that arbitrary applications have
 been accepted. It exercises only a temporary fixture window. The source-level
-and automated checks do not establish packaged-app behavior, pixel capture,
-macOS behavior, or a live model/provider run.
+and automated checks do not establish packaged Computer Use interaction,
+macOS device behavior, or a live provider run.
 
 The initial native action fixture incorrectly used a WinForms `Label`'s
 `MouseDoubleClick` callback as the double-click postcondition. Isolated Windows
@@ -254,10 +298,90 @@ fixture event. This proves the action path against this WinForms ListView
 fixture only; it does not establish behavior for every UI framework/control or
 action-specific product status guarantees.
 
+Current Windows rerun of `cargo test -p host-core --locked
+computer::tests::windows_backend_drives_only_the_isolated_fixture_window --
+--ignored --exact --nocapture` passed (1 test, 23.01 seconds). The isolated
+WinForms fixture exercises click, double-click, right-click, hover, drag,
+scroll, Unicode `type_text`, literal `press_keys`, repeated ComboBox and
+ListBox selection with native state readback, then stale-target rejection
+after the fixture window is closed and replaced. This is a local device pass
+for these specific controls and does not generalize to all Windows apps.
+
+The Agent→Host→UIA completion-evidence fixture defaults to accessibility-only
+capture so UIA assertions stay independent. An initial opt-in pixel run
+revealed a harness flaw: its desktop grant was not pinned to the test window,
+so the model received the current frontmost desktop observation rather than
+the fixture control. This was target-selection drift in the test setup, not
+proof of a Windows Graphics Capture failure. The fixture now passes the exact
+Host-issued fixture target ID to each grant; opt-in pixel mode then passed
+three independent runs and delivered non-empty images to the local
+vision-capable model endpoint. The standalone capture matcher test still
+verifies that a missing exact HWND source does not fall back to another window.
+
+## Packaged Windows startup smoke — 2026-11-09
+
+The unpacked Electron application was rebuilt after generating the Agent
+Runtime bundle (`packages/agent-runtime/dist-bundle`). An initial package
+attempt without that bundle logged a missing-source warning; the bundle was
+generated with `node packages/agent-runtime/scripts/bundle.mjs` and packaging
+was repeated. The resulting executable is
+`apps/desktop/release/win-unpacked/PI-Desktop.exe`.
+
+The packaged executable was launched with both `--user-data-dir` and
+`PI_DESKTOP_DATA_DIR` set to the temporary profile
+`E:\\PI-Desktop-dev\\.artifacts\\packaged-smoke`; no installed user's profile
+or database was used. The top-level window reported `PI-Desktop`, responded to
+window queries, and isolated logs recorded successful host-core handshake,
+Agent Sidecar configuration, and scheduled-runner startup. A second launch
+used a separate throwaway profile and inspected the actual packaged renderer
+through its temporary local DevTools endpoint: the `window.piDesktop` bridge
+was present, Windows UIA and capture capability probes both returned
+`granted`, and `computerGrantDescribe` correctly reported no active grant. A
+Computer Use enablement/pixel-mode settings write was then read back through
+the packaged app's own settings IPC. No model was configured and no action or
+capture was started in this settings-only check. Both app processes were
+closed, and both temporary profiles removed. The unpacked build output remains
+in the development directory.
+
+At the time of this settings-only smoke check, packaged Computer Use interaction
+acceptance had not yet been run. The later “Packaged Windows Computer Use
+interaction E2E” section below records the subsequent packaged interaction run
+and its remaining scope.
+
 ## Remaining acceptance
 
 - Rerun `corepack pnpm docs:build` after the broken links are fixed.
-- Complete isolated packaged Electron acceptance for settings, grant lifecycle,
-  pixel capture, cursor overlay, Stop, and cancellation.
+- Run screenshot-based visual QA for the full-screen edge glow on a representative
+  multi-display/DPI setup; do not persist any desktop screenshots.
 - Keep the native Windows fixture opt-in because it opens a visible window.
 - Add macOS device acceptance before claiming macOS runtime support; Linux/X11 CI evidence does not establish Wayland or arbitrary-toolkit coverage.
+
+## Packaged Windows Computer Use interaction E2E — 2026-11-09
+
+The unpacked Release build was refreshed after `cargo build --release -p host-core --locked`; the packaged `resources/bin/pi-desktop-host-core.exe` has the same 2026-11-09 build timestamp as `target/release/pi-desktop-host-core.exe`. A local-only fake OpenAI-compatible endpoint and a disposable WinForms fixture were used with a fresh profile/data directory under `.artifacts`. No external provider was contacted, no screenshot file was saved, and the test fixture was the only target window acted on.
+
+The test exercised the packaged renderer and Electron IPC end to end: create separate chat and Computer model providers, enable Computer Use with pixel capture, read settings back, create a new agent session, send a real prompt, and verify that the chat-model request declared `Computer`. The Computer model first received a non-target current-window observation, returned a switch using the exact quoted Host window ID, then received target-bound observations including image payloads. It performed hover and click using observed UIDs; the fixture wrote `CU-PACKAGED-CLICKED-1` only from its button click handler. The model then returned `done` with a current observation UID as completion evidence, and the chat model produced the final response.
+
+Result: packaged interaction E2E **passed** (`switchN=1`, `computerN=4`, `imageN=3`, `finalN=1`; fixture postcondition exactly `CU-PACKAGED-CLICKED-1`). The first attempt did not test switching because the fixture was topmost and already foreground; the harness was corrected to start from the app window and to parse only the value inside `window_id="..."`, then the target-switch run passed. That first attempt is not counted as acceptance.
+
+This establishes the tested packaged path for provider/settings/session wiring, model tool declaration, exact-ID target switch, pixel payload delivery to the configured Computer model, one UIA hover/click sequence, and evidence-backed completion on this Windows fixture. It does **not** establish arbitrary application compatibility, live external-provider behavior, screenshot persistence/privacy beyond this harness, cursor-overlay visuals, or Stop/cancellation acceptance; those remain separate checks. Both app and fixture processes were closed by the harness. Temporary `.artifacts/packaged-cu-debug*` files are test-only and are removed after evidence capture.
+
+## Windows Host target-selection recheck — 2026-11-09
+
+After the packaged image-path acceptance, reran the ignored native Windows fixture tests on the current checkout. `windows_backend_drives_only_the_isolated_fixture_window` passed (1/1, 21.92 s), exercising the isolated WinForms fixture controls and stale-target rejection. `windows_backend_repeats_target_binding_under_three_start_conditions` passed (1/1, 12.63 s): 50 fresh-host attempts, 50 two-window churn attempts, and 60 attempts after ten grant lifecycle cycles; first-attempt failures, 100 ms recoveries, late recoveries, unrecovered attempts, and target mismatches were all zero. These are focused local Windows fixture results, not claims about arbitrary apps or other platforms.
+
+The existing isolated Electron settings/Stop E2E was also rerun on this checkout on 2026-11-09 (`node scripts/e2e-computer-use-settings.mjs`, exit 0). It verified Computer Use enablement/model/budget/expiry writes, restriction-setting round trips, and the Stop path forwarding the exact owning `{ sessionId, grantId }`. This remains renderer/Electron test-harness evidence; the packaged Stop/overlay result is documented below, while screenshot-based visual QA remains open.
+
+## Agent Runtime Computer tool registration recheck — 2026-11-09
+
+Reran the focused Agent Runtime registration and fixed-declaration tests on this checkout: 13 passed, 0 failed (407 unrelated tests skipped by the name filter). This confirms Computer remains registered as a core Agent-mode tool when enabled and is absent when disabled or in Plan/Goal modes; fixed declarations remain restricted to the explicitly verified model/API route rather than silently assumed for arbitrary providers.
+
+A full current-checkout Windows Host Core run completed on 2026-11-09: `cargo test --locked -p host-core` — 1,242 passed, 0 failed, 3 ignored, 0 filtered (100.46 seconds). This includes the Computer grant/policy/RPC tests plus the rest of Host Core; it is Windows-only and does not substitute for Linux/macOS device acceptance.
+
+## Packaged Computer Use Stop and overlay E2E — 2026-11-09
+
+Added a repeatable Windows-only test at `scripts/e2e-computer-use-packaged-stop.mjs`, exposed as `pnpm test:e2e:computer-use-packaged`. It requires the unpacked Release app to exist, uses a local fake provider endpoint plus a throwaway profile and WinForms fixture under `.artifacts`, and removes the profile/data/fixture directory when finished. It does not persist or emit screenshots.
+
+The packaged run passed: the chat model selected the `Computer` tool; Computer switched using the observed exact fixture window ID and received one pixel payload; the live status widget displayed the fixture target and an enabled Stop button; the cursor renderer surface loaded with the blue full-screen edge border/glow CSS; clicking Stop aborted the pending Computer-model request, Host grant state became empty, and the widget cleared. No action was executed against the fixture in this Stop-specific test. The normal action E2E above already verifies click-through compatibility by successfully changing the isolated fixture while the cursor overlay is active. The aborted run correctly produced no final chat-model response (`finalReplies=0`); cancellation stops the owning tool turn rather than inventing a completion message.
+
+This proves DOM/CSS/runtime wiring and Stop cancellation in the packaged Windows app. It is not screenshot-based visual QA of glow appearance across different displays, scaling settings, or graphics drivers; that remains open.
