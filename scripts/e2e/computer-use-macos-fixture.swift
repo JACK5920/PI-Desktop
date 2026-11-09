@@ -72,14 +72,14 @@ final class ComputerUseFixture: NSObject, NSApplicationDelegate, NSTextFieldDele
     func applicationDidFinishLaunching(_ notification: Notification) {
         targetWindow = makeWindow(title: targetTitle, size: NSSize(width: 560, height: 300))
         normalField = NSTextField(string: "")
-        normalField.accessibilityLabel = "CU normal text field"
+        normalField.setAccessibilityLabel("CU normal text field")
         normalField.accessibilityIdentifier = "computerUseNormalTextField"
         normalField.delegate = self
         secureField = NSSecureTextField(string: "")
-        secureField.accessibilityLabel = "CU secure text field"
+        secureField.setAccessibilityLabel("CU secure text field")
         secureField.accessibilityIdentifier = "computerUseSecureTextField"
         pointerButton = PointerProbeButton(title: "CU pointer probe", target: nil, action: nil)
-        pointerButton.accessibilityLabel = "CU pointer probe"
+        pointerButton.setAccessibilityLabel("CU pointer probe")
         pointerButton.onPointerEvent = { [weak self] event in self?.recordPointerEvent(event) }
         targetWindow.contentView = makeStack([
             label("Computer Use isolated native fixture"),
@@ -95,7 +95,7 @@ final class ComputerUseFixture: NSObject, NSApplicationDelegate, NSTextFieldDele
         otherWindow = makeWindow(title: otherTitle, size: NSSize(width: 420, height: 180))
         otherField = NSTextField(string: "Different window; do not type here")
         otherField.isEditable = false
-        otherField.accessibilityLabel = "CU other window field"
+        otherField.setAccessibilityLabel("CU other window field")
         otherWindow.contentView = makeStack([label("Focus-mismatch test window"), otherField])
         otherWindow.center()
         NSApplication.shared.activate(ignoringOtherApps: true)
@@ -150,7 +150,7 @@ final class ComputerUseFixture: NSObject, NSApplicationDelegate, NSTextFieldDele
 
     private func label(_ value: String) -> NSTextField {
         let field = NSTextField(labelWithString: value)
-        field.accessibilityLabel = value
+        field.setAccessibilityLabel(value)
         return field
     }
 
