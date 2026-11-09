@@ -68,6 +68,44 @@ struct KeyChord {
 
 pub struct WindowsDesktop;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SecureInputStatus {
+    Clear,
+    SecureDesktop,
+    PasswordFocused,
+    DpiContextUnavailable,
+    DesktopStateUnknown,
+    AutomationUnavailable,
+    FocusUnavailable,
+    PasswordStateUnknown,
+}
+
+impl SecureInputStatus {
+    fn refusal_reason(self) -> Option<&'static str> {
+        match self {
+            Self::Clear => None,
+            Self::SecureDesktop => Some("secure-desktop"),
+            Self::PasswordFocused => Some("focused-password-element"),
+            Self::DpiContextUnavailable => Some("dpi-context-unavailable"),
+            Self::DesktopStateUnknown => Some("input-desktop-unknown"),
+            Self::AutomationUnavailable => Some("uia-unavailable"),
+            Self::FocusUnavailable => Some("focused-element-unavailable"),
+            Self::PasswordStateUnknown => Some("password-state-unknown"),
+        }
+    }
+
+    fn is_indeterminate(self) -> bool {
+        matches!(
+            self,
+            Self::DpiContextUnavailable
+                | Self::DesktopStateUnknown
+                | Self::AutomationUnavailable
+                | Self::FocusUnavailable
+                | Self::PasswordStateUnknown
+        )
+    }
+}
+
 impl WindowsDesktop {
     pub fn new() -> Self {
         Self
@@ -106,6 +144,31 @@ impl WindowsDesktop {
                 .map_err(map_uia_error)?;
         }
         Ok((apartment, automation))
+    }
+
+    fn secure_input_status(&self) -> SecureInputStatus {
+        let Ok(_dpi_context) = PerMonitorDpiContext::enter() else {
+            return SecureInputStatus::DpiContextUnavailable;
+        };
+        let Some(desktop_name) = input_desktop_name() else {
+            return SecureInputStatus::DesktopStateUnknown;
+        };
+        if secure_desktop_is_active(Some(&desktop_name)) {
+            return SecureInputStatus::SecureDesktop;
+        }
+        let Ok((_apartment, automation)) = self.automation() else {
+            return SecureInputStatus::AutomationUnavailable;
+        };
+        // A focused password element is a hard refusal. If Windows or UIA
+        // cannot answer, fail closed rather than type into an unknown field.
+        let Ok(focused) = (unsafe { automation.GetFocusedElement() }) else {
+            return SecureInputStatus::FocusUnavailable;
+        };
+        match unsafe { focused.CurrentIsPassword() } {
+            Ok(value) if value.as_bool() => SecureInputStatus::PasswordFocused,
+            Ok(_) => SecureInputStatus::Clear,
+            Err(_) => SecureInputStatus::PasswordStateUnknown,
+        }
     }
 
     fn bound_window(&self, target: &TargetRef) -> Result<HWND, DesktopError> {
@@ -530,23 +593,16 @@ impl Desktop for WindowsDesktop {
     }
 
     fn secure_input_active(&self) -> bool {
-        let Ok(_dpi_context) = PerMonitorDpiContext::enter() else {
-            return true;
+        let status = self.secure_input_status();
+        let Some(reason) = status.refusal_reason() else {
+            return false;
         };
-        if secure_desktop_is_active(input_desktop_name().as_deref()) {
-            return true;
+        if status.is_indeterminate() {
+            tracing::warn!(reason, "Computer Use secure-input guard failed closed");
+        } else {
+            tracing::debug!(reason, "Computer Use secure-input guard is active");
         }
-        let Ok((_apartment, automation)) = self.automation() else {
-            return true;
-        };
-        // A focused password element is a hard refusal. If Windows or UIA
-        // cannot answer, fail closed rather than type into an unknown field.
-        let Ok(focused) = (unsafe { automation.GetFocusedElement() }) else {
-            return true;
-        };
-        unsafe { focused.CurrentIsPassword() }
-            .map(|value| value.as_bool())
-            .unwrap_or(true)
+        true
     }
 
     fn perform(
@@ -1787,6 +1843,22 @@ mod tests {
         assert!(secure_desktop_is_active(None));
         assert!(secure_desktop_is_active(Some("Winlogon")));
         assert!(!secure_desktop_is_active(Some("Default")));
+    }
+
+    #[test]
+    fn secure_input_refusals_identify_the_guard_that_fired_without_user_data() {
+        assert_eq!(
+            SecureInputStatus::SecureDesktop.refusal_reason(),
+            Some("secure-desktop")
+        );
+        assert_eq!(
+            SecureInputStatus::PasswordFocused.refusal_reason(),
+            Some("focused-password-element")
+        );
+        assert_eq!(SecureInputStatus::Clear.refusal_reason(), None);
+        assert!(SecureInputStatus::PasswordStateUnknown.is_indeterminate());
+        assert!(SecureInputStatus::SecureDesktop.refusal_reason().is_some());
+        assert!(!SecureInputStatus::SecureDesktop.is_indeterminate());
     }
 
     #[test]

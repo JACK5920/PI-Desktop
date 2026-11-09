@@ -511,3 +511,12 @@ The immediate fixture retry passed in 22.96 seconds. This is evidence of a
 recovered run, not a root-cause diagnosis; the transient refusal remains an
 open reliability issue and must not be described as a confirmed product defect
 or as resolved.
+
+The Windows Host now distinguishes secure-input refusal reasons in
+non-sensitive diagnostic events: secure desktop, focused password element, or
+an indeterminate DPI/desktop/UIA/focus/password-state check. Indeterminate
+states still fail closed; this adds diagnostic specificity without weakening
+the guard. The interactive fixture test initializes a test-only tracing
+subscriber so any recurrence reports the reason without emitting the focused
+element's name, value, or window title. The original one-off refusal has not
+recurred in the diagnostic rerun, so its exact cause remains unknown.

@@ -237,6 +237,11 @@ fn windows_backend_drives_only_the_isolated_fixture_window() {
     use std::thread;
     use std::time::SystemTime;
 
+    let _ = tracing_subscriber::fmt()
+        .with_test_writer()
+        .with_max_level(tracing::Level::DEBUG)
+        .try_init();
+
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     let nonce = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
