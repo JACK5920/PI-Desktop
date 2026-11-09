@@ -122,6 +122,11 @@ extern "C" {
         attribute: CFStringRef,
         value: *mut CFTypeRef,
     ) -> AXError;
+    pub(super) fn AXUIElementIsAttributeSettable(
+        element: AXUIElementRef,
+        attribute: CFStringRef,
+        settable: *mut Boolean,
+    ) -> AXError;
     pub(super) fn AXUIElementSetAttributeValue(
         element: AXUIElementRef,
         attribute: CFStringRef,
@@ -379,6 +384,20 @@ pub(super) fn attribute_string(element: AXUIElementRef, name: &str) -> Option<St
 pub(super) fn attribute_bool(element: AXUIElementRef, name: &str) -> Option<bool> {
     let value = attribute(element, name)?;
     cf_bool(value.as_ref())
+}
+
+pub(super) fn attribute_is_settable(element: AXUIElementRef, name: &str) -> bool {
+    let Some(attribute) = CfString::new(name) else {
+        return false;
+    };
+    let mut settable = 0;
+    // SAFETY: the attribute string is live for the call and `settable` is a
+    // writable Boolean out parameter as required by AXUIElement.
+    unsafe {
+        AXUIElementIsAttributeSettable(element, attribute.as_ref(), &mut settable)
+            == kAXErrorSuccess
+            && settable != 0
+    }
 }
 
 pub(super) fn attribute_point(element: AXUIElementRef, name: &str) -> Option<CGPoint> {

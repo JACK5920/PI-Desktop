@@ -29,6 +29,10 @@ use super::{
 
 pub struct MacDesktop;
 
+fn should_offer_set_value(has_value: bool, settable: bool, enabled: bool) -> bool {
+    has_value && settable && enabled
+}
+
 impl MacDesktop {
     pub fn new() -> Self {
         Self
@@ -260,6 +264,7 @@ impl MacDesktop {
             .map(|value| value.chars().take(MAX_LABEL_CHARS).collect::<String>())
             .filter(|value| !value.trim().is_empty());
         let has_value = attribute(element, "AXValue").is_some();
+        let can_set_value = has_value && attribute_is_settable(element, "AXValue");
         let enabled = attribute_bool(element, "AXEnabled").unwrap_or(true);
         let focused = attribute_bool(element, "AXFocused").unwrap_or(false);
         let bounds = match (
@@ -278,7 +283,7 @@ impl MacDesktop {
         let mut actions = supported_actions(&names);
         // A settable value is how text gets entered without typing into
         // whatever happens to have focus.
-        if has_value && enabled {
+        if should_offer_set_value(has_value, can_set_value, enabled) {
             actions.push(ActionKind::SetValue);
         }
         if enabled {
@@ -853,5 +858,13 @@ mod tests {
             !actions.contains(&ActionKind::SetValue),
             "value comes from AXValue, not an action"
         );
+    }
+
+    #[test]
+    fn set_value_is_advertised_only_for_enabled_settable_ax_values() {
+        assert!(should_offer_set_value(true, true, true));
+        assert!(!should_offer_set_value(true, false, true));
+        assert!(!should_offer_set_value(false, true, true));
+        assert!(!should_offer_set_value(true, true, false));
     }
 }
