@@ -283,7 +283,7 @@ arbitrary toolkits, or the packaged user application.
 | Granted-window pixel capture | Chromium captures only the native window id in the Host grant; unmatched sources fail closed, and captured bytes are sent only to the separately bound Computer Use model. |
 | Cursor overlay | A click-through, non-authoritative overlay follows Host-validated action coordinates and is destroyed when the grant ends. |
 | macOS backend | An `AXUIElement` backend exists in source; this evidence set does not contain macOS device acceptance. |
-| Linux/X11 backend | X11 identity/geometry plus AT-SPI inspection/actions; XTEST-backed Hover/Drag are advertised only for bounded accessible nodes when XTEST is available. Passed the GTK/Xvfb/dbus-run-session CI fixture on 2026-11-09 (workflow run `42573461147`): target discovery, AT-SPI button invocation, and GTK-observed hover/drag state changes. Wayland input remains explicitly unsupported. |
+| Linux/X11 backend | X11 identity/geometry plus AT-SPI inspection/actions; XTEST-backed Hover/Drag/PressKeys are exposed only for bounded accessible nodes when XTEST is available. Passed GTK/Xvfb/dbus-run-session acceptance on 2026-11-09 (workflow run `42578140460`): target discovery, AT-SPI click, hover/drag state changes, literal and `ctrl+a` keyboard input with entry readback, and refusal after focus moved outside the bound window. Wayland input remains explicitly unsupported. |
 | Pixel capture and cursor overlay | Windows path packaged-app smoke acceptance passed on the primary display (two-point composite sampling; no image saved); multi-display/DPI acceptance remains open. |
 | Packaged desktop acceptance | Startup smoke passed. This earlier matrix snapshot predates the packaged interaction and Stop/overlay E2E results recorded below. |
 
@@ -300,7 +300,7 @@ The following checks were run in the current worktree during this task:
 | Electron Computer Use tool tests | Passed (pixel-mode forwarding, exact window-source matching, cursor event forwarding, and grant revoke). |
 | `cargo test -p host-core --locked` | Previously passed in this worktree: 1,220 passed, 0 failed, 2 ignored. |
 | Current Windows host-core targeted tests | Passed: 39 passed, 0 failed, 1 ignored. Linux-only backend tests are compiled/run by the Linux CI job, not this Windows result. |
-| Linux GTK/AT-SPI/XTEST fixture acceptance | Passed in CI workflow run `42573461147`. It verifies X11 target discovery, AT-SPI button invocation, plus actual GTK pointer-enter and drag callbacks reflected in an accessible status label. |
+| Linux GTK/AT-SPI/XTEST fixture acceptance | Passed in CI workflow run `42578140460`. It verifies X11 target discovery, AT-SPI button invocation, GTK pointer-enter and drag callbacks, actual key input and modifier-chord text readback, plus focus-loss refusal. |
 | `cargo clippy -p host-core --all-targets` | Previously passed; one pre-existing `filter_next` warning in `transcripts.rs`. |
 | Windows UIA fixture probe | Previously passed on this interactive Windows host, targeting only its own temporary harmless fixture window. |
 | Repeated Windows target-selection baseline | Passed in 3 independent test-process runs on 2026-11-09 using `cargo test -p host-core --locked computer::tests::windows_backend_repeats_target_binding_under_three_start_conditions -- --ignored --exact --nocapture`: each run covered 50 exact-ID pinned grants in a fresh test process, 50 alternating binds while two isolated target windows and a third process repeatedly opened/closed transient windows, then 10 create/revoke setup grants followed by 50 more binds. Across 480 target-resolution policy calls (450 scenario trials + 30 churn setup grants), first-attempt failures = 0, retries = 0, unrecovered failures = 0, late recoveries = 0, target mismatches = 0. The test cleans all fixture processes, scripts, and readiness markers. |
@@ -472,7 +472,7 @@ architecture limit; the resulting full CI run `42573461147` passed all jobs,
 including architecture budgets and the GTK/Xvfb integration. Wayland and other
 platforms remain out of scope for this batch.
 
-## Linux X11 keyboard chords — in validation
+## Linux X11 keyboard chords — 2026-11-09
 
 The Linux X11 backend now has an XTEST `press_keys` implementation for the
 documented ASCII key names and `ctrl` / `shift` / `alt` chords. It resolves
@@ -486,6 +486,6 @@ Non-ASCII literal text should continue to use `type_text` through AT-SPI.
 The GTK/Xvfb fixture now includes a text entry. Its integration test verifies
 that an ordinary key and a `ctrl+a` + replacement sequence change the actual
 entry value, and that sending a key after focus moves outside the bound window
-is rejected. Cross-target `cargo check --tests` passes locally; the Ubuntu
-GTK/Xvfb runtime test is pending on the current commit. Do not treat this new
-keyboard path as runtime-accepted until that CI step passes.
+is rejected. Cross-target `cargo check --tests` and `cargo clippy --tests`
+passed locally. Ubuntu CI run `42578140460` passed formatting, clippy, the Host
+Core tests, and the GTK/Xvfb runtime integration.
