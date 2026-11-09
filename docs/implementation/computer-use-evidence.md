@@ -478,7 +478,9 @@ The Linux X11 backend now has an XTEST `press_keys` implementation for the
 documented ASCII key names and `ctrl` / `shift` / `alt` chords. It resolves
 keysyms through the active X server keyboard map, sends key-down/up events, and
 refuses to type unless the current X11 input focus is the bound target or one
-of its descendants. This is a focus guard, not a focus-stealing fallback.
+of its descendants. For X11's `PointerRoot` focus mode, it also requires the
+pointer to be over the bound target. This is a focus guard, not a
+focus-stealing fallback.
 Non-ASCII literal text should continue to use `type_text` through AT-SPI.
 
 The GTK/Xvfb fixture now includes a text entry. Its integration test verifies

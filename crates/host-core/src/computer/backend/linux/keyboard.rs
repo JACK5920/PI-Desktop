@@ -25,6 +25,7 @@ const XK_DELETE: u32 = 0xffff;
 const XK_SHIFT_L: u32 = 0xffe1;
 pub(super) const XK_CONTROL_L: u32 = 0xffe3;
 const XK_ALT_L: u32 = 0xffe9;
+const POINTER_ROOT_WINDOW: Window = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct KeyChord {
@@ -45,22 +46,16 @@ pub(super) fn press_keys(
     target: Window,
     chords: &[String],
 ) -> Result<(), DesktopError> {
+    let root = root_window_for_target(connection, target)?;
     let focused = connection
         .get_input_focus()
         .map_err(x11_error)?
         .reply()
         .map_err(x11_error)?
         .focus;
-    if focused == 0 || !is_descendant_window(connection, focused, target) {
+    if !focus_is_within_target(connection, focused, target, root) {
         return Err(DesktopError::NotActionable);
     }
-    let root = connection
-        .setup()
-        .roots
-        .iter()
-        .find(|screen| is_descendant_window(connection, target, screen.root))
-        .map(|screen| screen.root)
-        .ok_or(DesktopError::NotActionable)?;
     let keymap = keyboard_mapping(connection)?;
 
     let mut strokes = Vec::with_capacity(chords.len());
@@ -105,6 +100,38 @@ pub(super) fn press_keys(
         }
     }
     Ok(())
+}
+
+fn root_window_for_target(
+    connection: &RustConnection,
+    target: Window,
+) -> Result<Window, DesktopError> {
+    connection
+        .setup()
+        .roots
+        .iter()
+        .find(|screen| is_descendant_window(connection, target, screen.root))
+        .map(|screen| screen.root)
+        .ok_or(DesktopError::NotActionable)
+}
+
+pub(super) fn focus_is_within_target(
+    connection: &RustConnection,
+    focused: Window,
+    target: Window,
+    root: Window,
+) -> bool {
+    if focused == POINTER_ROOT_WINDOW {
+        let Ok(pointer) = connection.query_pointer(root) else {
+            return false;
+        };
+        let Ok(pointer) = pointer.reply() else {
+            return false;
+        };
+        pointer.child != 0 && is_descendant_window(connection, pointer.child, target)
+    } else {
+        focused != 0 && is_descendant_window(connection, focused, target)
+    }
 }
 
 fn parse_key_chord(input: &str) -> Option<KeyChord> {

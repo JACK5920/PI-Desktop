@@ -245,7 +245,7 @@ fn linux_backend_drives_gtk_fixture_through_atspi() {
         .focus;
     let target_window = u32::try_from(target.target.window).expect("fixture window fits X11 ID");
     assert!(
-        is_descendant_window(&x11, focused, target_window),
+        keyboard::focus_is_within_target(&x11, focused, target_window, root),
         "the GTK key target should own X11 focus before sending keys (focus={focused:#x}, target={target_window:#x})"
     );
     assert!(
