@@ -24,7 +24,7 @@ use super::backend::{
     Desktop, DesktopError, Dispatched, Measured, RawInspection, RawTarget, TargetRef,
 };
 use super::{
-    Action, ActionKind, Capabilities, Fidelity, Node, PermissionState, Rect, MAX_LABEL_CHARS,
+    Action, ActionKind, Capabilities, Fidelity, Node, PermissionState, Point, Rect, MAX_LABEL_CHARS,
 };
 
 pub struct MacDesktop;
