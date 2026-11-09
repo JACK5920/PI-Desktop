@@ -73,11 +73,11 @@ final class ComputerUseFixture: NSObject, NSApplicationDelegate, NSTextFieldDele
         targetWindow = makeWindow(title: targetTitle, size: NSSize(width: 560, height: 300))
         normalField = NSTextField(string: "")
         normalField.setAccessibilityLabel("CU normal text field")
-        normalField.accessibilityIdentifier = "computerUseNormalTextField"
+        normalField.setAccessibilityIdentifier("computerUseNormalTextField")
         normalField.delegate = self
         secureField = NSSecureTextField(string: "")
         secureField.setAccessibilityLabel("CU secure text field")
-        secureField.accessibilityIdentifier = "computerUseSecureTextField"
+        secureField.setAccessibilityIdentifier("computerUseSecureTextField")
         pointerButton = PointerProbeButton(title: "CU pointer probe", target: nil, action: nil)
         pointerButton.setAccessibilityLabel("CU pointer probe")
         pointerButton.onPointerEvent = { [weak self] event in self?.recordPointerEvent(event) }
