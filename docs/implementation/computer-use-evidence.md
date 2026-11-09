@@ -351,8 +351,9 @@ and its remaining scope.
 ## Remaining acceptance
 
 - Rerun `corepack pnpm docs:build` after the broken links are fixed.
-- Run screenshot-based visual QA for the full-screen edge glow on a representative
-  multi-display/DPI setup; do not persist any desktop screenshots.
+- The automated primary-display composite smoke check below passed twice; still
+  perform human visual QA and test multi-display/DPI placement. Do not persist
+  desktop screenshots.
 - Keep the native Windows fixture opt-in because it opens a visible window.
 - Add macOS device acceptance before claiming macOS runtime support; Linux/X11 CI evidence does not establish Wayland or arbitrary-toolkit coverage.
 
@@ -380,8 +381,8 @@ A full current-checkout Windows Host Core run completed on 2026-11-09: `cargo te
 
 ## Packaged Computer Use Stop and overlay E2E — 2026-11-09
 
-Added a repeatable Windows-only test at `scripts/e2e-computer-use-packaged-stop.mjs`, exposed as `pnpm test:e2e:computer-use-packaged`. It requires the unpacked Release app to exist, uses a local fake provider endpoint plus a throwaway profile and WinForms fixture under `.artifacts`, and removes the profile/data/fixture directory when finished. It does not persist or emit screenshots.
+Added a repeatable Windows-only test at `scripts/e2e-computer-use-packaged-stop.mjs`, exposed as `pnpm test:e2e:computer-use-packaged`. It requires the unpacked Release app to exist, uses a local fake provider endpoint plus a throwaway profile and WinForms fixture under `.artifacts`, and removes the profile/data/fixture directory when finished. By default it does not capture a preview. Setting `PI_CU_E2E_CAPTURE_PREVIEW=1` streams a downscaled preview of the cursor renderer surface in memory through stdout; it does not write an image file and does not include the underlying desktop. Setting `PI_CU_E2E_VERIFY_DESKTOP_COMPOSITE=1` samples only two in-memory pixels (near the primary display edge and fixture center) and checks the foreground process ID; it outputs boolean pass/fail diagnostics and no pixel colors or screenshot data.
 
-The packaged run passed: the chat model selected the `Computer` tool; Computer switched using the observed exact fixture window ID and received one pixel payload; the live status widget displayed the fixture target and an enabled Stop button; the cursor renderer surface loaded with the blue full-screen edge border/glow CSS; clicking Stop aborted the pending Computer-model request, Host grant state became empty, and the widget cleared. No action was executed against the fixture in this Stop-specific test. The normal action E2E above already verifies click-through compatibility by successfully changing the isolated fixture while the cursor overlay is active. The aborted run correctly produced no final chat-model response (`finalReplies=0`); cancellation stops the owning tool turn rather than inventing a completion message.
+The packaged Stop/overlay run passed twice with `PI_CU_E2E_VERIFY_DESKTOP_COMPOSITE=1`: the chat model selected the `Computer` tool; Computer switched using the observed exact fixture window ID and received pixel payloads; an observed fixture button was clicked to ensure the green fixture was foreground; the live status widget displayed the fixture target and an enabled Stop button; the cursor renderer surface loaded with the blue full-screen edge border/glow CSS; then the two-pixel composite check confirmed the fixture remained visible at the sampled center and the blue edge effect changed the sampled edge pixel. Clicking Stop aborted the pending Computer-model request, Host grant state became empty, and the widget cleared. The aborted run correctly produced no final chat-model response (`finalReplies=0`); cancellation stops the owning tool turn rather than inventing a completion message. No image was captured or saved; the output reported only booleans and `screenshotsSaved=0`.
 
-This proves DOM/CSS/runtime wiring and Stop cancellation in the packaged Windows app. It is not screenshot-based visual QA of glow appearance across different displays, scaling settings, or graphics drivers; that remains open.
+This proves DOM/CSS/runtime wiring and Stop cancellation in the packaged Windows app, plus an automated pixel-level smoke check of the actual primary-display composite over a known isolated fixture. It does not establish how the effect looks to a human across the entire display, nor multi-display/scaling or graphics-driver behavior; those remain open. No screenshot image was written.
