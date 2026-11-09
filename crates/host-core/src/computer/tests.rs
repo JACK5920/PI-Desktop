@@ -258,6 +258,8 @@ fn windows_backend_drives_only_the_isolated_fixture_window() {
     let state_path_display = state_path.display().to_string();
     let pointer_state_path = fixture_dir.join(format!("{title}-pointer.txt"));
     let pointer_state_path_display = pointer_state_path.display().to_string();
+    let double_click_state_path = fixture_dir.join(format!("{title}-double-click.txt"));
+    let double_click_state_path_display = double_click_state_path.display().to_string();
     let scroll_state_path = fixture_dir.join(format!("{title}-scroll.txt"));
     let scroll_state_path_display = scroll_state_path.display().to_string();
     let combo_state_path = fixture_dir.join(format!("{title}-combo.txt"));
@@ -283,7 +285,6 @@ $hoverTarget.Text = 'Hover target'
 $hoverTarget.Location = New-Object System.Drawing.Point(220, 18)
 $hoverTarget.AutoSize = $true
 $hoverTarget.add_MouseEnter({{ [System.IO.File]::WriteAllText('{pointer_state_path_display}', 'hover') }})
-$hoverTarget.add_MouseDoubleClick({{ [System.IO.File]::WriteAllText('{pointer_state_path_display}', 'double-click') }})
 $hoverTarget.add_MouseUp({{ param($sender, $event); if ($event.Button -eq [System.Windows.Forms.MouseButtons]::Right) {{ [System.IO.File]::WriteAllText('{pointer_state_path_display}', 'right-click') }} }})
 $button = New-Object System.Windows.Forms.Button
 $button.Name = 'FixtureAction'
@@ -321,6 +322,20 @@ $list.Size = New-Object System.Drawing.Size(140, 120)
 [void]$list.Items.Add('Epsilon')
 $list.SelectedIndex = 0
 $list.add_SelectedIndexChanged({{ [System.IO.File]::WriteAllText('{list_state_display}', $list.SelectedItem) }})
+$doubleClickList = New-Object System.Windows.Forms.ListView
+$doubleClickList.Name = 'FixtureDoubleClickList'
+$doubleClickList.AccessibleName = 'CU-FIXTURE-DOUBLECLICK-LIST'
+$doubleClickList.View = [System.Windows.Forms.View]::List
+$doubleClickList.Location = New-Object System.Drawing.Point(220, 56)
+$doubleClickList.Size = New-Object System.Drawing.Size(100, 24)
+$doubleClickItem = New-Object System.Windows.Forms.ListViewItem('CU-FIXTURE-DOUBLE-ACTIVATE')
+[void]$doubleClickList.Items.Add($doubleClickItem)
+$script:doubleClickActivations = 0
+[System.IO.File]::WriteAllText('{double_click_state_path_display}', '0')
+$doubleClickList.add_ItemActivate({{
+    $script:doubleClickActivations++
+    [System.IO.File]::WriteAllText('{double_click_state_path_display}', [string]$script:doubleClickActivations)
+}})
 $scrollPanel = New-Object System.Windows.Forms.Panel
 $scrollPanel.Name = 'FixtureScroll'
 $scrollPanel.AccessibleName = 'CU-FIXTURE-SCROLL'
@@ -353,6 +368,7 @@ $form.Controls.Add($button)
 $form.Controls.Add($textBox)
 $form.Controls.Add($combo)
 $form.Controls.Add($list)
+$form.Controls.Add($doubleClickList)
 $form.Controls.Add($scrollPanel)
 $form.Controls.Add($dragTarget)
 [System.Windows.Forms.Application]::Run($form)
@@ -540,7 +556,7 @@ $form.Size = New-Object System.Drawing.Size(320, 180)
             .into_iter()
             .find(|item| item.label.as_deref() == Some("CU-FIXTURE-HOVER"))
             .expect("fixture label is available for pointer actions");
-        for kind in [ActionKind::DoubleClick, ActionKind::RightClick] {
+        for kind in [ActionKind::RightClick] {
             desktop
                 .perform(
                     &target.target,
@@ -551,11 +567,7 @@ $form.Size = New-Object System.Drawing.Size(320, 180)
                     },
                 )
                 .unwrap_or_else(|error| panic!("dispatch {kind:?}: {error:?}"));
-            let expected = if kind == ActionKind::DoubleClick {
-                "double-click"
-            } else {
-                "right-click"
-            };
+            let expected = "right-click";
             let deadline = Instant::now() + Duration::from_secs(3);
             while fs::read_to_string(&pointer_state_path).ok().as_deref() != Some(expected) {
                 assert!(
@@ -563,6 +575,56 @@ $form.Size = New-Object System.Drawing.Size(320, 180)
                     "{kind:?} did not update fixture state"
                 );
                 thread::sleep(Duration::from_millis(25));
+            }
+        }
+
+        let initial_double_click_deadline = Instant::now() + Duration::from_secs(3);
+        while fs::read_to_string(&double_click_state_path).ok().as_deref() != Some("0") {
+            assert!(
+                Instant::now() < initial_double_click_deadline,
+                "fixture did not initialize the ListView activation counter"
+            );
+            thread::sleep(Duration::from_millis(25));
+        }
+        for activation in 1..=50 {
+            let double_click_list = desktop
+                .inspect(&target.target, 400)
+                .expect("inspect ListView double-click fixture")
+                .nodes
+                .into_iter()
+                .find(|node| node.label.as_deref() == Some("CU-FIXTURE-DOUBLECLICK-LIST"))
+                .expect("UIA should expose the dedicated double-click ListView by its name");
+            assert!(
+                double_click_list.actions.contains(&ActionKind::DoubleClick),
+                "ListView must advertise DoubleClick"
+            );
+            desktop
+                .perform(
+                    &target.target,
+                    Some(&double_click_list.uid),
+                    &Action {
+                        kind: Some(ActionKind::DoubleClick),
+                        ..Action::default()
+                    },
+                )
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "ListView double-click activation {activation} dispatch failed: {error:?}"
+                    )
+                });
+            let deadline = Instant::now() + Duration::from_secs(3);
+            loop {
+                let observed = fs::read_to_string(&double_click_state_path)
+                    .ok()
+                    .and_then(|value| value.trim().parse::<usize>().ok());
+                if observed == Some(activation) {
+                    break;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "ListView activation {activation}/50 was not observed; counter={observed:?}"
+                );
+                thread::sleep(Duration::from_millis(10));
             }
         }
 
@@ -861,6 +923,7 @@ $form.Size = New-Object System.Drawing.Size(320, 180)
     let _ = fs::remove_file(secondary_script_path);
     let _ = fs::remove_file(state_path);
     let _ = fs::remove_file(pointer_state_path);
+    let _ = fs::remove_file(double_click_state_path);
     let _ = fs::remove_file(scroll_state_path);
     let _ = fs::remove_file(combo_state_path);
     let _ = fs::remove_file(list_state_path);

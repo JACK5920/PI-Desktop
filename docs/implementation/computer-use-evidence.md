@@ -240,12 +240,19 @@ been accepted. It exercises only a temporary fixture window. The source-level
 and automated checks do not establish packaged-app behavior, pixel capture,
 macOS behavior, or a live model/provider run.
 
-The separate native action fixture exposed an intermittent double-click
-postcondition failure during this task. The target-selection baseline above
-passed independently, but mouse-action acceptance remains incomplete; one
-successful and four failed exploratory runs were observed before the baseline
-was isolated. At least one failed run left the fixture state unchanged, so a
-successful dispatch result must not be treated as proof of a completed click.
+The initial native action fixture incorrectly used a WinForms `Label`'s
+`MouseDoubleClick` callback as the double-click postcondition. Isolated Windows
+message diagnostics showed the control received the double-click message, but
+that Label did not raise the callback; those failures did not establish a
+backend dispatch defect. The fixture now uses a dedicated, compact ListView and
+observes its `ItemActivate` counter after every Host backend action. The
+`windows_backend_drives_only_the_isolated_fixture_window` acceptance passed in
+three independent Windows test-process runs: 50 double-click activations per
+run, 150 total, with each counter increment observed exactly once and no
+missed activations. Right-click remains independently checked against its
+fixture event. This proves the action path against this WinForms ListView
+fixture only; it does not establish behavior for every UI framework/control or
+action-specific product status guarantees.
 
 ## Remaining acceptance
 
