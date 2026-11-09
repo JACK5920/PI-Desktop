@@ -253,8 +253,8 @@ arbitrary toolkits, or the packaged user application.
 | Cursor overlay | A click-through, non-authoritative overlay follows Host-validated action coordinates and is destroyed when the grant ends. |
 | macOS backend | An `AXUIElement` backend exists in source; this evidence set does not contain macOS device acceptance. |
 | Linux/X11 backend | X11 identity/geometry plus AT-SPI inspection and supported actions. Passed the GTK/Xvfb/dbus-run-session CI fixture on 2026-11-09 (workflow run `42525594538`): target discovery, AT-SPI control inspection, button invocation, and changed accessible status label. Wayland input remains explicitly unsupported. |
-| Pixel capture and cursor overlay | Windows path implemented; no packaged-app or multi-display/DPI acceptance yet. |
-| Packaged desktop acceptance | Startup smoke passed; packaged Computer Use interaction flow is not yet accepted. |
+| Pixel capture and cursor overlay | Windows path packaged-app smoke acceptance passed on the primary display (two-point composite sampling; no image saved); multi-display/DPI acceptance remains open. |
+| Packaged desktop acceptance | Startup smoke passed. This earlier matrix snapshot predates the packaged interaction and Stop/overlay E2E results recorded below. |
 
 ## Automated evidence
 
@@ -350,12 +350,15 @@ and its remaining scope.
 
 ## Remaining acceptance
 
-- Rerun `corepack pnpm docs:build` after the broken links are fixed.
 - The automated primary-display composite smoke check below passed twice; still
   perform human visual QA and test multi-display/DPI placement. Do not persist
   desktop screenshots.
 - Keep the native Windows fixture opt-in because it opens a visible window.
 - Add macOS device acceptance before claiming macOS runtime support; Linux/X11 CI evidence does not establish Wayland or arbitrary-toolkit coverage.
+
+## Documentation build — 2026-11-09
+
+VitePress build passed on this checkout with `node ..\node_modules\vitepress\bin\vitepress.js build .` from `E:\PI-Desktop-dev\docs` (`vitepress v1.6.4`, build complete). The root `corepack pnpm docs:build` wrapper could not launch because the current PATH `pnpm` shim resolves to v11.7.0 while this repository pins 12.8.1; invoking the repository-installed VitePress binary directly completed the same docs build without changing package-manager configuration.
 
 ## Packaged Windows Computer Use interaction E2E — 2026-11-09
 
@@ -365,13 +368,13 @@ The test exercised the packaged renderer and Electron IPC end to end: create sep
 
 Result: packaged interaction E2E **passed** (`switchN=1`, `computerN=4`, `imageN=3`, `finalN=1`; fixture postcondition exactly `CU-PACKAGED-CLICKED-1`). The first attempt did not test switching because the fixture was topmost and already foreground; the harness was corrected to start from the app window and to parse only the value inside `window_id="..."`, then the target-switch run passed. That first attempt is not counted as acceptance.
 
-This establishes the tested packaged path for provider/settings/session wiring, model tool declaration, exact-ID target switch, pixel payload delivery to the configured Computer model, one UIA hover/click sequence, and evidence-backed completion on this Windows fixture. It does **not** establish arbitrary application compatibility, live external-provider behavior, screenshot persistence/privacy beyond this harness, cursor-overlay visuals, or Stop/cancellation acceptance; those remain separate checks. Both app and fixture processes were closed by the harness. Temporary `.artifacts/packaged-cu-debug*` files are test-only and are removed after evidence capture.
+This establishes the tested packaged path for provider/settings/session wiring, model tool declaration, exact-ID target switch, pixel payload delivery to the configured Computer model, one UIA hover/click sequence, and evidence-backed completion on this Windows fixture. It does **not** establish arbitrary application compatibility, live external-provider behavior, or screenshot persistence/privacy beyond this harness. At that time, cursor-overlay visuals and Stop/cancellation were still separate checks; later evidence below covers packaged Stop behavior and a two-point primary-display composite smoke test. Both app and fixture processes were closed by the harness. Temporary `.artifacts/packaged-cu-debug*` files are test-only and are removed after evidence capture.
 
 ## Windows Host target-selection recheck — 2026-11-09
 
 After the packaged image-path acceptance, reran the ignored native Windows fixture tests on the current checkout. `windows_backend_drives_only_the_isolated_fixture_window` passed (1/1, 21.92 s), exercising the isolated WinForms fixture controls and stale-target rejection. `windows_backend_repeats_target_binding_under_three_start_conditions` passed (1/1, 12.63 s): 50 fresh-host attempts, 50 two-window churn attempts, and 60 attempts after ten grant lifecycle cycles; first-attempt failures, 100 ms recoveries, late recoveries, unrecovered attempts, and target mismatches were all zero. These are focused local Windows fixture results, not claims about arbitrary apps or other platforms.
 
-The existing isolated Electron settings/Stop E2E was also rerun on this checkout on 2026-11-09 (`node scripts/e2e-computer-use-settings.mjs`, exit 0). It verified Computer Use enablement/model/budget/expiry writes, restriction-setting round trips, and the Stop path forwarding the exact owning `{ sessionId, grantId }`. This remains renderer/Electron test-harness evidence; the packaged Stop/overlay result is documented below, while screenshot-based visual QA remains open.
+The existing isolated Electron settings/Stop E2E was also rerun on this checkout on 2026-11-09 (`node scripts/e2e-computer-use-settings.mjs`, exit 0). It verified Computer Use enablement/model/budget/expiry writes, restriction-setting round trips, and the Stop path forwarding the exact owning `{ sessionId, grantId }`. This remains renderer/Electron test-harness evidence; later packaged Stop/overlay acceptance and the automated composite smoke test are documented below. Human visual QA and multi-display/DPI checks remain open.
 
 ## Agent Runtime Computer tool registration recheck — 2026-11-09
 
