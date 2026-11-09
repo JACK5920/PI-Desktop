@@ -95,6 +95,7 @@ cycle.
 |---|---|
 | `node scripts/e2e-computer-use-protocol-matrix.mjs` | Passed 8/8 combinations: 4 protocols × 2 capture modes. Every combination completed 3 fresh grant cycles, 6 UIA actions, 9 Computer decisions, 12 Host inspections, 6 conversation requests with Computer declared, and 3 revocations; all cycles verified native fixture state. |
 | Pixel transport across protocols | Passed: 9/9 Computer decisions per protocol received non-empty PNG payloads (36/36 total) in OpenAI Chat `image_url`, Responses `input_image`, Anthropic base64 image source, and Gemini `inlineData` forms. Only image MIME/byte counts were reported; no image files were saved. |
+| Latest local matrix rerun (2026-11-09) | Passed 8/8 on `E:\PI-Desktop-dev`; all four wire protocols passed both accessibility-only and pixel modes, with the three-cycle native fixture reaching the expected final state in each run. Pixel-mode runs delivered non-empty PNG data to the local fake model endpoint; no screenshot files were saved. |
 
 This is protocol-adapter and local-runtime acceptance, not proof that real
 Anthropic/Gemini/OpenAI accounts or arbitrary compatible gateways behave the
