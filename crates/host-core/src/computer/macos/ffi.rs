@@ -28,6 +28,11 @@ pub(super) const kCFStringEncodingUTF8: u32 = 0x0800_0100;
 /// `kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements`
 pub(super) const WINDOW_LIST_OPTIONS: u32 = 1 | 16;
 pub(super) const kCGNullWindowID: u32 = 0;
+pub(super) const kCGEventLeftMouseDown: u32 = 1;
+pub(super) const kCGEventLeftMouseUp: u32 = 2;
+pub(super) const kCGEventMouseMoved: u32 = 5;
+pub(super) const kCGEventLeftMouseDragged: u32 = 6;
+pub(super) const kCGMouseButtonLeft: u32 = 0;
 pub(super) const kAXValueTypeCGPoint: u32 = 1;
 pub(super) const kAXValueTypeCGSize: u32 = 2;
 /// `kCFNumberSInt64Type` and `kCFNumberDoubleType`
@@ -134,6 +139,12 @@ extern "C" {
         source: CGEventSourceRef,
         virtual_key: u16,
         key_down: Boolean,
+    ) -> CGEventRef;
+    pub(super) fn CGEventCreateMouseEvent(
+        source: CGEventSourceRef,
+        mouse_type: u32,
+        mouse_cursor_position: CGPoint,
+        mouse_button: u32,
     ) -> CGEventRef;
     pub(super) fn CGEventSetFlags(event: CGEventRef, flags: u64);
     pub(super) fn CGEventPostToPid(pid: i32, event: CGEventRef);

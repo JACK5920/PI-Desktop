@@ -15,8 +15,10 @@
 #![allow(non_snake_case)]
 
 mod ffi;
+mod pointer;
 
 use ffi::*;
+use pointer::*;
 
 use super::backend::{
     Desktop, DesktopError, Dispatched, Measured, RawInspection, RawTarget, TargetRef,
@@ -279,6 +281,12 @@ impl MacDesktop {
         if has_value && enabled {
             actions.push(ActionKind::SetValue);
         }
+        if enabled {
+            actions.push(ActionKind::PressKeys);
+            if bounds.is_some() {
+                actions.extend([ActionKind::Hover, ActionKind::Drag]);
+            }
+        }
         let index = nodes.len();
         nodes.push(Node {
             uid: make_uid(path, &role, label.as_deref()),
@@ -413,6 +421,64 @@ impl MacDesktop {
         // Older systems may not expose the private AX window-id join key.
         // Reuse the same strict geometry/title fallback as target resolution.
         Ok(self.window_matches(focused.as_ref(), target))
+    }
+
+    fn perform_pointer_action(
+        &self,
+        target: &TargetRef,
+        element_bounds: Option<Rect>,
+        action: &Action,
+    ) -> Result<(), DesktopError> {
+        let window = self.measure(target)?.bounds;
+        match action.kind.ok_or(DesktopError::NotActionable)? {
+            ActionKind::Hover => {
+                let point = match action.point {
+                    Some(point) => window_relative_point(window, point)?,
+                    None => {
+                        let element = element_bounds.ok_or(DesktopError::NotActionable)?;
+                        Point {
+                            x: element.x + element.width / 2.0,
+                            y: element.y + element.height / 2.0,
+                        }
+                    }
+                };
+                let hit_stack = read_window_hit_stack()?;
+                if !contains_screen_point(window, point)
+                    || !frontmost_window_is_target_at(&hit_stack, target, point)
+                {
+                    return Err(DesktopError::NotActionable);
+                }
+                post_mouse_event(target.pid, kCGEventMouseMoved, point)?;
+            }
+            ActionKind::Drag => {
+                let from = window_relative_point(
+                    window,
+                    action.point.ok_or(DesktopError::NotActionable)?,
+                )?;
+                let to =
+                    window_relative_point(window, action.to.ok_or(DesktopError::NotActionable)?)?;
+                let path = sampled_drag_path(from, to).ok_or(DesktopError::NotActionable)?;
+                let hit_stack = read_window_hit_stack()?;
+                for point in &path {
+                    if !contains_screen_point(window, *point)
+                        || !frontmost_window_is_target_at(&hit_stack, target, *point)
+                    {
+                        return Err(DesktopError::NotActionable);
+                    }
+                }
+                post_mouse_event(target.pid, kCGEventLeftMouseDown, from)?;
+                let move_result = path.iter().try_for_each(|point| {
+                    post_mouse_event(target.pid, kCGEventLeftMouseDragged, *point)
+                });
+                // Always try to release after mouse-down, even if an injected
+                // move event fails part-way through the drag.
+                let release_result = post_mouse_event(target.pid, kCGEventLeftMouseUp, to);
+                move_result?;
+                release_result?;
+            }
+            _ => return Err(DesktopError::NotActionable),
+        }
+        Ok(())
     }
 }
 
@@ -620,9 +686,11 @@ impl Desktop for MacDesktop {
                 };
                 self.perform_ax_action(element, name)?;
             }
-            ActionKind::Hover | ActionKind::Drag | ActionKind::TypeText => {
-                return Err(DesktopError::Unsupported);
+            ActionKind::Hover | ActionKind::Drag => {
+                self.perform_pointer_action(target, _bounds, action)?;
+                return Ok(Dispatched::WindowEvent);
             }
+            ActionKind::TypeText => return Err(DesktopError::Unsupported),
             ActionKind::PressKeys => unreachable!("handled above"),
         }
         Ok(Dispatched::AccessibilityAction)
@@ -681,6 +749,98 @@ mod tests {
         assert_eq!(window_id_matches(Some(42), 42), Some(true));
         assert_eq!(window_id_matches(Some(43), 42), Some(false));
         assert_eq!(window_id_matches(None, 42), None);
+    }
+
+    #[test]
+    fn pointer_actions_require_the_target_to_be_the_frontmost_window() {
+        let target = TargetRef {
+            target_id: "10:42".into(),
+            pid: 10,
+            window: 42,
+            app_key: "fixture".into(),
+        };
+        let point = Point { x: 140.0, y: 85.0 };
+        let target_window = WindowHitRegion {
+            pid: 10,
+            window: 42,
+            bounds: Rect {
+                x: 100.0,
+                y: 50.0,
+                width: 300.0,
+                height: 200.0,
+            },
+            alpha: 1.0,
+        };
+        assert!(frontmost_window_is_target_at(
+            &[target_window],
+            &target,
+            point
+        ));
+
+        let covering_window = WindowHitRegion {
+            pid: 11,
+            window: 77,
+            bounds: Rect {
+                x: 120.0,
+                y: 60.0,
+                width: 80.0,
+                height: 80.0,
+            },
+            alpha: 1.0,
+        };
+        assert!(!frontmost_window_is_target_at(
+            &[covering_window, target_window],
+            &target,
+            point
+        ));
+        assert!(frontmost_window_is_target_at(
+            &[covering_window, target_window],
+            &target,
+            Point { x: 250.0, y: 120.0 }
+        ));
+    }
+
+    #[test]
+    fn pointer_coordinates_are_window_relative_and_reject_out_of_bounds() {
+        let window = Rect {
+            x: -400.0,
+            y: 50.0,
+            width: 300.0,
+            height: 200.0,
+        };
+        assert_eq!(
+            window_relative_point(window, Point { x: 12.0, y: 34.0 }).unwrap(),
+            Point { x: -388.0, y: 84.0 }
+        );
+        assert!(window_relative_point(window, Point { x: 301.0, y: 10.0 }).is_err());
+        assert!(window_relative_point(
+            window,
+            Point {
+                x: f64::NAN,
+                y: 10.0
+            }
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn drag_path_is_bounded_and_reaches_the_requested_destination() {
+        let from = Point { x: -10.0, y: 0.0 };
+        let to = Point { x: 110.0, y: 80.0 };
+        let path = sampled_drag_path(from, to).expect("bounded path");
+        assert!(path.len() > 1);
+        assert!(path.last().is_some_and(|point| *point == to));
+        assert!(path
+            .windows(2)
+            .all(|pair| { (pair[1].x - pair[0].x).hypot(pair[1].y - pair[0].y) <= 24.01 }));
+        assert!(sampled_drag_path(
+            Point { x: 0.0, y: 0.0 },
+            Point {
+                x: 100_000.0,
+                y: 0.0
+            }
+        )
+        .is_none());
     }
 
     #[test]
