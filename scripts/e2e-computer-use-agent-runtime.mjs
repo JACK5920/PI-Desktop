@@ -71,51 +71,166 @@ let fixtureOutput = "";
 const fixtureCapture = process.env.PI_COMPUTER_E2E_CAPTURE_MODE === "pixels"
   ? "a11y-and-pixels"
   : "a11y-only";
+const apiStyle = process.env.PI_COMPUTER_E2E_API_STYLE ?? "chat_completions";
+const supportedApiStyles = new Set(["chat_completions", "responses", "anthropic_messages", "google_generative_ai"]);
+assert(supportedApiStyles.has(apiStyle), `unsupported Computer Use E2E apiStyle: ${apiStyle}`);
 const testRoot = await mkdtemp(join(tmpdir(), "pi-computer-agent-runtime-"));
 const computerRpcMethods = [];
 let activeCycle = 1;
 let windowScopedObservationChecks = 0;
 function latestComputerObservationText(messages) {
-  const text = messages.map((message) => {
-    const content = message?.content;
-    if (typeof content === "string") return content;
-    if (Array.isArray(content)) {
-      return content.map((part) => part?.type === "text" && typeof part.text === "string" ? part.text : "").join("\n");
-    }
-    return "";
-  }).join("\n");
+  const text = textIn(messages);
   const start = text.lastIndexOf("Current window:");
   return start >= 0 ? text.slice(start) : text;
 }
 function describeComputerContext(messages) {
   return messages.slice(-6).map((message) => {
-    const content = message?.content;
-    const text = typeof content === "string"
-      ? content
-      : Array.isArray(content)
-        ? content.map((part) => part?.type === "text" && typeof part.text === "string" ? part.text : "[non-text]").join("\n")
-        : String(content ?? "");
+    const text = textIn(message) || String(message?.content ?? "");
     return `${message?.role ?? "?"}: ${text.slice(-1400)}`;
   }).join("\n---\n");
 }
+
+function requestItems(body) {
+  if (apiStyle === "responses") return Array.isArray(body.input) ? body.input : [];
+  if (apiStyle === "google_generative_ai") return Array.isArray(body.contents) ? body.contents : [];
+  return Array.isArray(body.messages) ? body.messages : [];
+}
+
+function textIn(value) {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) return value.map(textIn).filter(Boolean).join("\n");
+  if (!value || typeof value !== "object") return "";
+  const record = value;
+  const ownText = typeof record.text === "string" ? record.text : "";
+  const textKeys = new Set(["content", "parts", "input", "output", "arguments", "partial_json", "functionResponse", "functionCall", "delta"]);
+  return [ownText, ...Object.entries(record)
+    .filter(([key]) => textKeys.has(key))
+    .map(([, child]) => textIn(child))].filter(Boolean).join("\n");
+}
+
+function requestModelId(body, requestUrl) {
+  if (typeof body.model === "string") return body.model;
+  if (apiStyle === "google_generative_ai") {
+    const match = new URL(requestUrl, "http://127.0.0.1").pathname.match(/\/models\/([^:]+):/);
+    return match?.[1] ? decodeURIComponent(match[1]) : "";
+  }
+  return "";
+}
+
+function declaresComputerTool(body) {
+  if (apiStyle === "google_generative_ai") {
+    return (body.tools ?? []).some((tool) => (tool.functionDeclarations ?? []).some((entry) => entry.name === "Computer"));
+  }
+  return (body.tools ?? []).some((tool) => tool.name === "Computer" || tool.function?.name === "Computer");
+}
+
+function isToolResult(item) {
+  if (apiStyle === "responses") return item.type === "function_call_output" && Boolean(item.call_id);
+  if (apiStyle === "anthropic_messages") return Array.isArray(item.content) && item.content.some((part) => part.type === "tool_result");
+  if (apiStyle === "google_generative_ai") return Array.isArray(item.parts) && item.parts.some((part) => part.functionResponse?.name === "Computer");
+  return item.role === "tool" || Boolean(item.tool_call_id);
+}
+
+function respondToProvider(response, modelId, payload) {
+  if (apiStyle === "chat_completions") {
+    response.writeHead(200, { "content-type": "text/event-stream" });
+    const delta = payload.kind === "tool"
+      ? { role: "assistant", tool_calls: [{ index: 0, id: "computer-fixture-call", type: "function",
+          function: { name: "Computer", arguments: JSON.stringify(payload.arguments) } }] }
+      : { role: "assistant", content: payload.text };
+    const finish = payload.kind === "tool" ? "tool_calls" : "stop";
+    response.end(
+      `data: ${JSON.stringify({ id: "computer-fixture", model: modelId, choices: [{ index: 0, delta, finish_reason: null }] })}\n\n` +
+      `data: ${JSON.stringify({ id: "computer-fixture", model: modelId, choices: [{ index: 0, delta: {}, finish_reason: finish }] })}\n\n` +
+      "data: [DONE]\n\n",
+    );
+    return;
+  }
+
+  if (apiStyle === "responses") {
+    response.writeHead(200, { "content-type": "text/event-stream" });
+    const send = (event) => response.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+    send({ type: "response.created", response: { id: "resp_computer_fixture" } });
+    if (payload.kind === "tool") {
+      const args = JSON.stringify(payload.arguments);
+      const item = { id: "fc_computer_fixture", type: "function_call", call_id: "call_computer_fixture",
+        name: "Computer", arguments: args, status: "completed" };
+      send({ type: "response.output_item.added", output_index: 0, item: { ...item, arguments: "", status: "in_progress" } });
+      send({ type: "response.function_call_arguments.delta", output_index: 0, delta: args });
+      send({ type: "response.output_item.done", output_index: 0, item });
+      send({ type: "response.completed", response: { id: "resp_computer_fixture", status: "completed", output: [item],
+        usage: { input_tokens: 10, output_tokens: 10, total_tokens: 20 } } });
+    } else {
+      const item = { id: "msg_computer_fixture", type: "message", role: "assistant", status: "completed",
+        content: [{ type: "output_text", text: payload.text, annotations: [] }] };
+      send({ type: "response.output_item.added", output_index: 0, item: { ...item, status: "in_progress", content: [] } });
+      send({ type: "response.output_text.delta", output_index: 0, content_index: 0, delta: payload.text });
+      send({ type: "response.output_item.done", output_index: 0, item });
+      send({ type: "response.completed", response: { id: "resp_computer_fixture", status: "completed", output: [item],
+        usage: { input_tokens: 10, output_tokens: 10, total_tokens: 20 } } });
+    }
+    response.end();
+    return;
+  }
+
+  if (apiStyle === "anthropic_messages") {
+    response.writeHead(200, { "content-type": "text/event-stream" });
+    const send = (event) => response.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+    const tool = payload.kind === "tool";
+    send({ type: "message_start", message: { id: "msg_computer_fixture", type: "message", role: "assistant",
+      model: modelId, content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 10, output_tokens: 1 } } });
+    send({ type: "content_block_start", index: 0, content_block: tool
+      ? { type: "tool_use", id: "toolu_computer_fixture", name: "Computer", input: {} }
+      : { type: "text", text: "" } });
+    send({ type: "content_block_delta", index: 0, delta: tool
+      ? { type: "input_json_delta", partial_json: JSON.stringify(payload.arguments) }
+      : { type: "text_delta", text: payload.text } });
+    send({ type: "content_block_stop", index: 0 });
+    send({ type: "message_delta", delta: { stop_reason: tool ? "tool_use" : "end_turn", stop_sequence: null }, usage: { output_tokens: 10 } });
+    send({ type: "message_stop" });
+    response.end();
+    return;
+  }
+
+  response.writeHead(200, { "content-type": "text/event-stream" });
+  const part = payload.kind === "tool"
+    ? { functionCall: { id: "call_computer_fixture", name: "Computer", args: payload.arguments } }
+    : { text: payload.text };
+  response.end(`data: ${JSON.stringify({ candidates: [{ content: { role: "model", parts: [part] }, finishReason: "STOP" }],
+    usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 10, totalTokenCount: 20 } })}\n\n`);
+}
+
 const server = createServer(async (request, response) => {
   const chunks = [];
   for await (const chunk of request) chunks.push(chunk);
   const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-  requests.push(body);
+  const modelId = requestModelId(body, request.url ?? "/");
+  const messages = requestItems(body);
+  const requestPath = new URL(request.url ?? "/", "http://127.0.0.1").pathname;
+  const validPath = apiStyle === "chat_completions" ? requestPath === "/v1/chat/completions"
+    : apiStyle === "responses" ? requestPath === "/v1/responses"
+      : apiStyle === "anthropic_messages" ? requestPath === "/v1/messages"
+        : requestPath.startsWith("/v1beta/models/") && requestPath.endsWith(":streamGenerateContent");
+  if (!validPath) {
+    response.writeHead(404, { "content-type": "text/plain; charset=utf-8" })
+      .end(`unexpected ${apiStyle} endpoint path: ${requestPath}`);
+    return;
+  }
+  requests.push({ apiStyle, url: request.url, model: modelId, hasComputerDeclaration: declaresComputerTool(body) });
   if (requests.length > 18) {
     response.writeHead(500).end("fixture request ceiling exceeded");
     return;
   }
-  const messages = body.messages ?? [];
-  const isComputerDecision = JSON.stringify(messages.at(-1) ?? {}).includes("Observation:");
-  routedModels[isComputerDecision ? "computer" : "conversation"].push(body.model);
+  const isComputerDecision = modelId === "deepseek-flash";
+  routedModels[isComputerDecision ? "computer" : "conversation"].push(modelId);
   if (isComputerDecision) {
     computerCalls++;
-    const currentObservation = latestComputerObservationText([messages.at(-1) ?? {}]);
+    const allText = textIn(messages);
+    const observationStart = allText.lastIndexOf("Current window:");
+    const currentObservation = observationStart >= 0 ? allText.slice(observationStart) : allText;
     const visibleWindowLines = currentObservation.match(/^window_id=/gm) ?? [];
     if (visibleWindowLines.length !== 1 || !currentObservation.includes(fixtureTitle)) {
-      const detail = `pinned-window observation mismatch: listedWindowCount=${visibleWindowLines.length}; fixtureTitlePresent=${currentObservation.includes(fixtureTitle)}`;
+      const detail = `pinned-window observation mismatch: apiStyle=${apiStyle}; model=${modelId}; listedWindowCount=${visibleWindowLines.length}; fixtureTitlePresent=${currentObservation.includes(fixtureTitle)}; observationTail=${currentObservation.slice(-900)}`;
       response.writeHead(500, { "content-type": "text/plain; charset=utf-8" }).end(detail);
       console.error(detail);
       return;
@@ -124,7 +239,7 @@ const server = createServer(async (request, response) => {
     // Count only the newest decision's observation, not images retained in
     // older conversation messages; otherwise one early image could make later
     // failed captures look successful.
-    const latestContent = messages.at(-1)?.content;
+    const latestContent = messages.at(-1)?.content ?? messages.at(-1)?.parts;
     const imageParts = Array.isArray(latestContent)
       ? latestContent.filter((part) => part?.type === "image_url")
       : [];
@@ -136,10 +251,9 @@ const server = createServer(async (request, response) => {
       }
     }
   }
-  let delta;
-  let finish;
+  let payload;
   if (isComputerDecision) {
-    const transcript = JSON.stringify(messages);
+    const transcript = textIn(messages);
     const clickedMarkerPresent = transcript.includes(`CU-RUNTIME-FIXTURE-CLICKED-${activeCycle}`);
     computerDecisions.push({
       cycle: activeCycle,
@@ -155,8 +269,7 @@ const server = createServer(async (request, response) => {
       const evidenceUid = nodeLine?.match(/\buid=([^\s·]+)/)?.[1];
       if (!evidenceUid) throw new Error("Final Computer observation did not include the changed fixture label UID");
       computerDecisions.at(-1).evidenceUid = evidenceUid;
-      delta = { role: "assistant", content: JSON.stringify({ kind: "done", summary: "Verified fixture label changed.", evidence: [evidenceUid] }) };
-      finish = "stop";
+      payload = { kind: "text", text: JSON.stringify({ kind: "done", summary: "Verified fixture label changed.", evidence: [evidenceUid] }) };
     } else {
       const latestObservation = latestComputerObservationText(messages);
       const nodeLine = latestObservation.split(/\r?\n/).findLast((line) =>
@@ -177,34 +290,26 @@ const server = createServer(async (request, response) => {
       computerDecisions.at(-1).action = kind;
       if (kind === "hover") noOpActionSentForCycle = true;
       else clickSentForCycle = true;
-      delta = { role: "assistant", content: JSON.stringify({ kind: "action", action: { kind, uid } }) };
-      finish = "stop";
+      payload = { kind: "text", text: JSON.stringify({ kind: "action", action: { kind, uid } }) };
     }
   } else {
     mainCalls++;
-    const tool = (body.tools ?? []).find((candidate) => candidate.function?.name === "Computer");
-    const latestUserIndex = messages.findLastIndex((message) => message.role === "user");
-    const currentTurnMessages = messages.slice(latestUserIndex + 1);
-    const priorToolResult = currentTurnMessages.some((message) => message.role === "tool" || message.tool_call_id);
-    if (tool && !priorToolResult) computerToolDeclarations++;
-    if (tool && !priorToolResult) {
-      delta = { role: "assistant", tool_calls: [{ index: 0, id: "computer-fixture-call", type: "function",
-        function: { name: "Computer", arguments: JSON.stringify({ instruction: `Click the button in ${fixtureTitle}, then verify its status changed.` }) } }] };
-      finish = "tool_calls";
+    const hasTool = declaresComputerTool(body);
+    const promptIndex = messages.findLastIndex((message) => textIn(message).includes(`cycle ${activeCycle}`));
+    const currentTurnMessages = messages.slice(promptIndex + 1);
+    const priorToolResult = currentTurnMessages.some(isToolResult);
+    if (hasTool && !priorToolResult) computerToolDeclarations++;
+    if (hasTool && !priorToolResult) {
+      payload = { kind: "tool", arguments: { instruction: `Click the test button in ${fixtureTitle} once, then verify its status changed for cycle ${activeCycle}.` } };
     } else {
-      delta = { role: "assistant", content: "Computer action was executed and verified." };
-      finish = "stop";
+      payload = { kind: "text", text: "Computer action was executed and verified." };
     }
   }
-  response.writeHead(200, { "content-type": "text/event-stream" });
-  response.end(
-    `data: ${JSON.stringify({ id: "computer-fixture", model: body.model, choices: [{ index: 0, delta, finish_reason: null }] })}\n\n` +
-    `data: ${JSON.stringify({ id: "computer-fixture", model: body.model, choices: [{ index: 0, delta: {}, finish_reason: finish }] })}\n\n` +
-    "data: [DONE]\n\n",
-  );
+  respondToProvider(response, modelId, payload);
 });
 await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 const endpoint = `http://127.0.0.1:${server.address().port}/v1`;
+const providerEndpoint = apiStyle === "google_generative_ai" ? endpoint.replace(/\/v1$/, "/v1beta") : endpoint;
 const model = Object.values(DEEPSEEK_MODELS).find((candidate) => candidate.id === "deepseek-v4-pro");
 assert(model, "DeepSeek fixture model metadata missing");
 const computerModel = Object.values(DEEPSEEK_MODELS).find((candidate) => candidate.id === "deepseek-flash");
@@ -212,8 +317,10 @@ assert(computerModel, "Distinct Computer fixture model metadata missing");
 const runtimeProvider = {
   id: "computer-e2e-computer-model",
   name: "Computer E2E computer model",
+  vendorKey: "custom",
   modelId: computerModel.id,
-  baseUrl: endpoint,
+  baseUrl: providerEndpoint,
+  apiStyle,
   modelConfig: modelConfigFromPi(computerModel),
   apiKey: "fixture-only",
   authKind: "api_key",
@@ -258,18 +365,18 @@ $form.add_Shown({ $form.Activate() | Out-Null })
       type: "openai_compatible",
       protocol: "openai_compatible",
       authKind: "none",
-      baseUrl: endpoint,
+      baseUrl: providerEndpoint,
       defaultModelId: model.id,
-      apiStyle: "chat_completions",
+      apiStyle,
     });
     const computerProviderRow = await host.call("providers.create", {
       name: "Computer E2E computer model",
       type: "openai_compatible",
       protocol: "openai_compatible",
       authKind: "none",
-      baseUrl: endpoint,
+      baseUrl: providerEndpoint,
       defaultModelId: computerModel.id,
-      apiStyle: "chat_completions",
+      apiStyle,
     });
     const binding = { providerId: computerProviderRow.provider.id, modelId: computerModel.id };
     await host.call("settings.set", {
@@ -390,6 +497,11 @@ $form.add_Shown({ $form.Activate() | Out-Null })
       assert.deepEqual(turnErrors, [], JSON.stringify(turnErrors));
       assert.deepEqual(toolCalls, ["Computer", "Computer", "Computer"], "the real Agent Runtime must dispatch Computer on each fresh turn");
       assert.equal(computerToolDeclarations, 3, "each fresh turn's first model request must declare Computer");
+      const conversationRequests = requests.filter((request) => request.model === model.id);
+      assert.equal(conversationRequests.length, 6, "each API protocol must service the conversation model's tool and follow-up requests");
+      assert(conversationRequests.every((request) => request.hasComputerDeclaration),
+        `Computer must remain declared on every conversation request using ${apiStyle}`);
+      assert(requests.every((request) => request.apiStyle === apiStyle), "all provider requests must use the selected API protocol");
       assert.equal(mainCalls, 6, "each conversation turn should call Computer then provide a final response");
       assert.equal(computerCalls, 9, "each Computer run must re-observe after a non-mutating action, recover with a click, then verify");
       assert.equal(computerDecisions.filter((decision) => decision.clickedMarkerPresent).length, 3);
@@ -420,8 +532,9 @@ $form.add_Shown({ $form.Activate() | Out-Null })
         ["computer.grantCreate", "computer.act", "computer.act", "computer.grantRevoke", "computer.grantCreate", "computer.act", "computer.act", "computer.grantRevoke", "computer.grantCreate", "computer.act", "computer.act", "computer.grantRevoke"],
         "each grant must be revoked before the next cycle creates one",
       );
-      console.log(JSON.stringify({ ok: true, toolCalls, mainModelRequests: mainCalls, computerModelRequests: computerCalls,
+      console.log(JSON.stringify({ ok: true, apiStyle, toolCalls, mainModelRequests: mainCalls, computerModelRequests: computerCalls,
         routedModels,
+        requests: requests.map(({ apiStyle: style, url, model: requestModel, hasComputerDeclaration }) => ({ style, url, model: requestModel, hasComputerDeclaration })),
         computerImageRequests,
         computerImageBase64Chars,
         captureMode: fixtureCapture,

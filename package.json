@@ -31,6 +31,7 @@
     "test:e2e:keep-awake": "node scripts/e2e-keep-awake.mjs",
     "test:e2e:computer-use-settings": "node scripts/e2e-computer-use-settings.mjs",
     "test:e2e:computer-use-runtime": "node scripts/e2e-computer-use-agent-runtime.mjs",
+    "test:e2e:computer-use-protocol-matrix": "node scripts/e2e-computer-use-protocol-matrix.mjs",
     "test:e2e:live-voice": "node scripts/e2e-live-voice.mjs",
     "test:e2e:rpc-unicode": "node scripts/e2e-rpc-unicode.mjs",
     "test:e2e:tool-result-persistence": "node --max-old-space-size=4096 scripts/e2e-tool-result-persistence.mjs",

@@ -69,6 +69,37 @@ actions are deterministically verified.
 At the time of this checkpoint, generic action-specific result statuses and
 recovery under changing window/process availability remained unfinished.
 
+## Agent Runtime Computer Use protocol matrix — 2026-11-09
+
+The repeatable Windows Agent → Computer → Host → UIA fixture now runs the same
+three-turn, distinct-chat/control-model scenario across four provider wire
+formats: OpenAI Chat Completions, OpenAI Responses, Anthropic Messages, and
+Google Generative AI. Run all four with
+`node scripts/e2e-computer-use-protocol-matrix.mjs`, or invoke one format by
+setting `PI_COMPUTER_E2E_API_STYLE=<style>` and running
+`node scripts/e2e-computer-use-agent-runtime.mjs`. The matrix uses a local fake
+endpoint and an isolated WinForms window; it creates no provider credentials,
+does not call a real model provider, and uses accessibility-only capture.
+
+For each protocol the server asserts the adapter's actual request path and
+wire-format tool declaration, then returns a Computer tool call. The separately
+configured `deepseek-flash` Computer model receives the current pinned-window
+observation and returns `hover → click → done`; the Host re-inspects after each
+action, checks fresh completion evidence, and revokes the grant before the next
+cycle. The native fixture's final state is read from its own file after every
+cycle.
+
+| Check | Result |
+|---|---|
+| `node scripts/e2e-computer-use-protocol-matrix.mjs` | Passed 4/4 styles. Each style completed 3 fresh grant cycles, 6 actions, 9 Computer decisions, 12 Host inspections, 6 conversation requests with Computer declared, and 3 revocations; all cycles verified native fixture state. |
+| Chat Completions pixel-mode rerun | Passed: 9/9 Computer decisions received non-empty PNG payloads (126,192 base64 characters total); no screenshot was written. |
+
+This is protocol-adapter and local-runtime acceptance, not proof that real
+Anthropic/Gemini/OpenAI accounts or arbitrary compatible gateways behave the
+same. It also does not yet verify pixel serialization across all four wire
+formats; the pixel-mode capture path is separately accepted over Chat
+Completions only.
+
 ## Distinct model-route acceptance — 2026-11-09
 
 The Agent Runtime E2E now binds the ordinary conversation to `deepseek-flash`
