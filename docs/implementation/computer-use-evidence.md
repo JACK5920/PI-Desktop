@@ -492,3 +492,22 @@ entry value, and that sending a key after focus moves outside the bound window
 is rejected. Cross-target `cargo check --tests` and `cargo clippy --tests`
 passed locally. Ubuntu CI run `42578140460` passed formatting, clippy, the Host
 Core tests, and the GTK/Xvfb runtime integration.
+
+## Windows interactive target recheck — 2026-11-09
+
+Re-ran the opt-in Windows UIA acceptance tests from `E:\PI-Desktop-dev` against
+their isolated WinForms fixtures. `windows_backend_repeats_target_binding_under_three_start_conditions`
+passed 160 trials: 50 fresh-host, 50 two-window churn, and 60 after ten grant
+cycles; all reported zero first-attempt failures, delayed recoveries, unrecovered
+targets, or target mismatches. `windows_backend_drives_only_the_isolated_fixture_window`
+also passed on an immediate retry, including UIA click state readback and the
+existing text, ComboBox/ListBox, mouse, scroll, and drag checks.
+
+The first invocation of the interactive fixture test returned
+`SecureInputRefused` at dispatch. After cleanup, a read-only snapshot showed the
+input desktop was `Default` and the focused UIA element was a non-password Chrome
+Pane; that later snapshot cannot establish the state at the original refusal.
+The immediate fixture retry passed in 22.96 seconds. This is evidence of a
+recovered run, not a root-cause diagnosis; the transient refusal remains an
+open reliability issue and must not be described as a confirmed product defect
+or as resolved.
