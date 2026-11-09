@@ -108,6 +108,31 @@ function textIn(value) {
     .map(([, child]) => textIn(child))].filter(Boolean).join("\n");
 }
 
+function imagePayloadsIn(value, payloads = []) {
+  if (Array.isArray(value)) {
+    for (const item of value) imagePayloadsIn(item, payloads);
+    return payloads;
+  }
+  if (!value || typeof value !== "object") return payloads;
+  const record = value;
+  const imageUrl = typeof record.image_url === "string" ? record.image_url : record.image_url?.url;
+  if ((record.type === "image_url" || record.type === "input_image") && typeof imageUrl === "string") {
+    const match = imageUrl.match(/^data:([^;]+);base64,(.+)$/s);
+    if (match) payloads.push({ mimeType: match[1], data: match[2] });
+  }
+  if (record.type === "image" && typeof record.source?.data === "string") {
+    payloads.push({ mimeType: record.source.media_type, data: record.source.data });
+  }
+  const inlineData = record.inlineData ?? record.inline_data;
+  if (inlineData && typeof inlineData.data === "string") {
+    payloads.push({ mimeType: inlineData.mimeType ?? inlineData.mime_type, data: inlineData.data });
+  }
+  for (const key of ["content", "parts", "image_url", "source", "inlineData", "inline_data"]) {
+    if (record[key] && typeof record[key] === "object") imagePayloadsIn(record[key], payloads);
+  }
+  return payloads;
+}
+
 function requestModelId(body, requestUrl) {
   if (typeof body.model === "string") return body.model;
   if (apiStyle === "google_generative_ai") {
@@ -239,16 +264,15 @@ const server = createServer(async (request, response) => {
     // Count only the newest decision's observation, not images retained in
     // older conversation messages; otherwise one early image could make later
     // failed captures look successful.
-    const latestContent = messages.at(-1)?.content ?? messages.at(-1)?.parts;
-    const imageParts = Array.isArray(latestContent)
-      ? latestContent.filter((part) => part?.type === "image_url")
-      : [];
-    if (imageParts.length > 0) computerImageRequests++;
-    for (const part of imageParts) {
-      const url = part.image_url?.url;
-      if (typeof url === "string" && url.startsWith("data:image/png;base64,")) {
-        computerImageBase64Chars += url.slice("data:image/png;base64,".length).length;
-      }
+    const latestMessage = messages.at(-1);
+    const latestContent = latestMessage?.content ?? latestMessage?.parts ?? latestMessage;
+    const imagePayloads = imagePayloadsIn(latestContent);
+    if (imagePayloads.length > 0) computerImageRequests++;
+    for (const image of imagePayloads) {
+      assert.equal(image.mimeType, "image/png", `${apiStyle} pixel input must preserve PNG MIME type`);
+      assert(image.data.length > 0, `${apiStyle} pixel input must not be empty`);
+      assert(image.data.startsWith("iVBORw0KGgo"), `${apiStyle} pixel input must preserve the PNG signature`);
+      computerImageBase64Chars += image.data.length;
     }
   }
   let payload;

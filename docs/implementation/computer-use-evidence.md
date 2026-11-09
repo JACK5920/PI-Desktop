@@ -74,12 +74,14 @@ recovery under changing window/process availability remained unfinished.
 The repeatable Windows Agent → Computer → Host → UIA fixture now runs the same
 three-turn, distinct-chat/control-model scenario across four provider wire
 formats: OpenAI Chat Completions, OpenAI Responses, Anthropic Messages, and
-Google Generative AI. Run all four with
+Google Generative AI, in both accessibility-only and pixel-capture modes. Run
+the full matrix with
 `node scripts/e2e-computer-use-protocol-matrix.mjs`, or invoke one format by
 setting `PI_COMPUTER_E2E_API_STYLE=<style>` and running
-`node scripts/e2e-computer-use-agent-runtime.mjs`. The matrix uses a local fake
-endpoint and an isolated WinForms window; it creates no provider credentials,
-does not call a real model provider, and uses accessibility-only capture.
+`node scripts/e2e-computer-use-agent-runtime.mjs`; add
+`PI_COMPUTER_E2E_CAPTURE_MODE=pixels` to select pixel capture. The matrix uses
+a local fake endpoint and an isolated WinForms window; it creates no provider
+credentials and does not call a real model provider. It does not save screenshots.
 
 For each protocol the server asserts the adapter's actual request path and
 wire-format tool declaration, then returns a Computer tool call. The separately
@@ -91,14 +93,12 @@ cycle.
 
 | Check | Result |
 |---|---|
-| `node scripts/e2e-computer-use-protocol-matrix.mjs` | Passed 4/4 styles. Each style completed 3 fresh grant cycles, 6 actions, 9 Computer decisions, 12 Host inspections, 6 conversation requests with Computer declared, and 3 revocations; all cycles verified native fixture state. |
-| Chat Completions pixel-mode rerun | Passed: 9/9 Computer decisions received non-empty PNG payloads (126,192 base64 characters total); no screenshot was written. |
+| `node scripts/e2e-computer-use-protocol-matrix.mjs` | Passed 8/8 combinations: 4 protocols × 2 capture modes. Every combination completed 3 fresh grant cycles, 6 UIA actions, 9 Computer decisions, 12 Host inspections, 6 conversation requests with Computer declared, and 3 revocations; all cycles verified native fixture state. |
+| Pixel transport across protocols | Passed: 9/9 Computer decisions per protocol received non-empty PNG payloads (36/36 total) in OpenAI Chat `image_url`, Responses `input_image`, Anthropic base64 image source, and Gemini `inlineData` forms. Only image MIME/byte counts were reported; no image files were saved. |
 
 This is protocol-adapter and local-runtime acceptance, not proof that real
 Anthropic/Gemini/OpenAI accounts or arbitrary compatible gateways behave the
-same. It also does not yet verify pixel serialization across all four wire
-formats; the pixel-mode capture path is separately accepted over Chat
-Completions only.
+same, nor that those models interpret the transmitted pixels correctly.
 
 ## Distinct model-route acceptance — 2026-11-09
 
