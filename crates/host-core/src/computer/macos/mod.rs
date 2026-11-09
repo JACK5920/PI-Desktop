@@ -371,10 +371,15 @@ impl MacDesktop {
     }
 
     /// Post one key chord to the granted process. The event never enters the
-    /// HID tap, so it cannot land in another application if focus moves.
-    fn press_keys(&self, pid: i32, chords: &[String]) -> Result<(), DesktopError> {
+    /// HID tap, so it cannot land in another application if focus moves. Since
+    /// process-directed events can still reach a second window in that process,
+    /// verify the exact granted window is focused before every chord.
+    fn press_keys(&self, target: &TargetRef, chords: &[String]) -> Result<(), DesktopError> {
         for chord in chords {
             let (flags, key) = parse_chord(chord).ok_or(DesktopError::NotActionable)?;
+            if !self.focused_window_is_target(target)? {
+                return Err(DesktopError::NotActionable);
+            }
             for down in [1u8, 0u8] {
                 // SAFETY: a null source is documented as "use a private
                 // source"; the event is released before the next iteration.
@@ -385,13 +390,34 @@ impl MacDesktop {
                 // SAFETY: the event is ours until it is released.
                 unsafe {
                     CGEventSetFlags(event, flags);
-                    CGEventPostToPid(pid, event);
+                    CGEventPostToPid(target.pid, event);
                     CFRelease(event);
                 }
             }
         }
         Ok(())
     }
+
+    fn focused_window_is_target(&self, target: &TargetRef) -> Result<bool, DesktopError> {
+        // SAFETY: the PID comes from the already validated Host target grant.
+        let app = unsafe { AXUIElementCreateApplication(target.pid) };
+        if app.is_null() {
+            return Err(DesktopError::TargetGone);
+        }
+        let app = CfOwned(app);
+        let focused =
+            attribute(app.as_ref(), "AXFocusedWindow").ok_or(DesktopError::NotActionable)?;
+        if let Some(matches) = window_id_matches(ax_window_id(focused.as_ref()), target.window) {
+            return Ok(matches);
+        }
+        // Older systems may not expose the private AX window-id join key.
+        // Reuse the same strict geometry/title fallback as target resolution.
+        Ok(self.window_matches(focused.as_ref(), target))
+    }
+}
+
+fn window_id_matches(actual: Option<u32>, expected: u64) -> Option<bool> {
+    actual.map(|actual| u64::from(actual) == expected)
 }
 
 /// Modifier bits as `CGEventFlags`.
@@ -563,7 +589,9 @@ impl Desktop for MacDesktop {
         let kind = action.kind.ok_or(DesktopError::NotActionable)?;
         if kind == ActionKind::PressKeys {
             let keys = action.keys.as_ref().ok_or(DesktopError::NotActionable)?;
-            self.press_keys(target.pid, keys)?;
+            // Confirm the selected window still exists before sending any keys.
+            self.window_element(target)?;
+            self.press_keys(target, keys)?;
             return Ok(Dispatched::WindowEvent);
         }
         let window = self.window_element(target)?;
@@ -646,6 +674,13 @@ mod tests {
         for chord in ["", "cmd", "cmd+", "cmd+a+b", "f13", "eject", "power"] {
             assert!(parse_chord(chord).is_none(), "accepted {chord}");
         }
+    }
+
+    #[test]
+    fn process_directed_keys_require_the_exact_granted_window_identity() {
+        assert_eq!(window_id_matches(Some(42), 42), Some(true));
+        assert_eq!(window_id_matches(Some(43), 42), Some(false));
+        assert_eq!(window_id_matches(None, 42), None);
     }
 
     #[test]
