@@ -151,13 +151,22 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
       - uses: Swatinem/rust-cache@v2
 
       - name: Check formatting
         run: cargo fmt --all -- --check
 
       - name: Test macOS Computer Use backend contracts
-        run: cargo test -p host-core --locked computer::macos::tests
+        run: "cargo test -p host-core --locked computer::macos::"
+
+      - name: Type-check the native Computer Use fixture and device runner
+        run: |
+          swiftc -typecheck scripts/e2e/computer-use-macos-fixture.swift
+          node --check scripts/e2e-computer-use-device.mjs
 
       - name: Clippy macOS Host Core
         run: cargo clippy -p host-core --all-targets --locked

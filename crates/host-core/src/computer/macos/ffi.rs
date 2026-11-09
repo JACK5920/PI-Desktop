@@ -7,7 +7,7 @@
 //! reads the call surface in one place.
 #![allow(non_upper_case_globals, non_snake_case)]
 
-use std::ffi::c_void;
+use std::ffi::{c_ulong, c_void};
 
 use super::super::ActionKind;
 
@@ -145,6 +145,11 @@ extern "C" {
         virtual_key: u16,
         key_down: Boolean,
     ) -> CGEventRef;
+    pub(super) fn CGEventKeyboardSetUnicodeString(
+        event: CGEventRef,
+        string_length: c_ulong,
+        unicode_string: *const u16,
+    );
     pub(super) fn CGEventCreateMouseEvent(
         source: CGEventSourceRef,
         mouse_type: u32,

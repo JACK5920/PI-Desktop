@@ -3,6 +3,29 @@
 This note records the current fork implementation and the evidence available
 for it. It contains no captured screen contents, window titles, or credentials.
 
+## Computer Use baseline exit gate
+
+This table bounds the current reliability milestone. Do not expand this
+milestone with unrelated features; add work only when an acceptance row fails
+or a reproducible defect blocks one. Passing this table closes the baseline
+milestone, not the claim that every desktop/compositor/provider works.
+
+| Gate | Current evidence | State |
+|---|---|---|
+| Exact target selection and recovery | Windows target binding passed 160 attempts across cold Host, two-window churn, and repeated grant cycles with zero mismatches/recoveries; fresh Windows fixture passed 3 consecutive runs. | **Pass** |
+| Multi-model tool dispatch and pixels | Four wire protocols × accessibility/pixel mode passed 8/8 with 24 fresh grants/revocations, native state readback, and 36/36 non-empty pixel payloads. | **Pass** |
+| Post-action verification and Stop | Agent loop re-inspects and checks a native postcondition; packaged Stop/overlay acceptance passed twice, revoking the grant and clearing the status widget. | **Pass** |
+| Windows UIA and status path | Isolated fixture covers text, selection, pointer, scrolling, ComboBox/ListBox readback; secure-input uncertainty remains fail-closed with a bounded retry and non-sensitive reason/attempt logs. | **Pass with known transient-cause limitation** |
+| Linux desktop support | GTK/Xvfb/AT-SPI/XTEST target-bound acceptance and covered-window refusal passed Linux CI. | **Pass for X11; Wayland input unsupported** |
+| macOS native backend | Opt-in AppKit fixture covers exact target, Unicode text, `cmd+a`/`backspace`, focus refusal/recovery, secure field refusal, and native Hover/Drag callbacks. It has not been Swift-compiled or run on macOS in this Windows session. | **Pending macOS runner/device** |
+| Mixed-DPI / multi-monitor behavior | Simulated 100/125/150% and negative-origin geometry tests exist; physical mixed-DPI/multi-monitor acceptance has not been run. | **Pending suitable hardware** |
+
+Close the current milestone only after the macOS gate is run on macOS and the
+physical display gate is either exercised on suitable hardware or explicitly
+accepted as a release limitation. Keep Wayland visibly unsupported rather than
+claiming Linux-wide input coverage. New feature work belongs to a separately
+scoped milestone after this gate is resolved.
+
 ## Reliability follow-up — 2026-11-08
 
 The Windows UIA mapper now recovers a small allowlist of semantic roles when a
@@ -95,7 +118,7 @@ cycle.
 |---|---|
 | `node scripts/e2e-computer-use-protocol-matrix.mjs` | Passed 8/8 combinations: 4 protocols × 2 capture modes. Every combination completed 3 fresh grant cycles, 6 UIA actions, 9 Computer decisions, 12 Host inspections, 6 conversation requests with Computer declared, and 3 revocations; all cycles verified native fixture state. |
 | Pixel transport across protocols | Passed: 9/9 Computer decisions per protocol received non-empty PNG payloads (36/36 total) in OpenAI Chat `image_url`, Responses `input_image`, Anthropic base64 image source, and Gemini `inlineData` forms. Only image MIME/byte counts were reported; no image files were saved. |
-| Latest local matrix rerun (2026-11-09) | Passed 8/8 on `E:\PI-Desktop-dev`; all four wire protocols passed both accessibility-only and pixel modes, with the three-cycle native fixture reaching the expected final state in each run. Pixel-mode runs delivered non-empty PNG data to the local fake model endpoint; no screenshot files were saved. |
+| Latest local matrix rerun (2026-11-09) | Passed 8/8 on `E:\PI-Desktop-dev`: 24 fresh grants, 24 revocations, 48 UIA actions, 96 Host inspections, and 24 native fixture state readbacks; no target-window mismatch. Accessibility-only runs sent no images. Pixel runs sent 36/36 non-empty PNG payloads to the local fake endpoint across the four wire formats. No screenshot files were saved. |
 
 This is protocol-adapter and local-runtime acceptance, not proof that real
 Anthropic/Gemini/OpenAI accounts or arbitrary compatible gateways behave the
@@ -199,8 +222,12 @@ through the native UIA backend and checks an effect reported by the fixture,
 not merely a successful dispatch: double-click and right-click event handlers,
 hover entry, drag movement plus release, and a nonzero UIA ScrollPattern value.
 The existing click, Unicode text, key chord, ComboBox, and ListBox checks remain
-in the same fixture. The test is still ignored by ordinary CI because it opens
-a visible window and requires an interactive Windows desktop.
+in the same fixture. The native Edit control is also set and restored through
+UIA ValuePattern with exact fixture-state readback. It focuses a disposable
+WinForms password field and checks that the production secure-input guard
+refuses while it is focused, then clears after focus returns to a normal field;
+no password text is entered or read. The test is still ignored by ordinary CI
+because it opens a visible window and requires an interactive Windows desktop.
 
 | Check | Result |
 |---|---|
@@ -277,13 +304,13 @@ arbitrary toolkits, or the packaged user application.
 | Surface | Current state |
 |---|---|
 | Shared contracts and settings | Implemented in `packages/shared/src/computer-use.ts`; disabled by default and gated by the user's Computer Use setting. |
-| Windows backend | UI Automation backend in `crates/host-core/src/computer/`; bounded reads/actions are limited to the host's validated current target. |
+| Windows backend | UI Automation backend in `crates/host-core/src/computer/`; bounded reads/actions are limited to the host's validated current target. Secure-input detection immediately refuses confirmed secure desktop/password focus; indeterminate DPI/desktop/UIA/focus states are re-probed up to three times (15 ms apart) and remain fail-closed if unresolved, with the final refusal reason/attempt count logged without user content. |
 | Host grants and refusal policy | Host-owned grant lifecycle, target validation, cooldown after Stop, audit metadata, and refusal paths are covered by Host Core tests. |
 | Agent tool and bounded loop | `packages/computer-use/` and `packages/agent-runtime/src/computer-use/`; runs through Host RPC and the configured Computer Use model. |
 | Settings and live status | Settings allow explicit enablement/model selection, accessibility-only or granted-window pixels, and bounded parameters; the live widget exposes current grant state, capture mode, and Stop. |
 | Granted-window pixel capture | Chromium captures only the native window id in the Host grant; unmatched sources fail closed, and captured bytes are sent only to the separately bound Computer Use model. |
 | Cursor overlay | A click-through, non-authoritative overlay follows Host-validated action coordinates and is destroyed when the grant ends. |
-| macOS backend | The `AXUIElement` backend supports accessibility inspection and listed AX actions. Process-directed `PressKeys` now checks that `AXFocusedWindow` matches the granted target before every chord (using the existing strict geometry/title fallback only when the AX window-ID join is unavailable). macOS-15 CI compiled the backend and passed its contract tests and Clippy in workflow run `42583429219`; this is not interactive TCC/UI acceptance. `Hover`, `Drag`, and `TypeText` remain unsupported on macOS and need native-device work/acceptance. |
+| macOS backend | The `AXUIElement` backend supports accessibility inspection and listed AX actions. Process-directed `PressKeys` checks that `AXFocusedWindow` matches the granted target before every chord. Unicode `TypeText` is offered for enabled, editable, settable non-secure roles; it refuses before focusing a control if another window is active, and rechecks the target before every UTF-16 event chunk. `Hover` and `Drag` are implemented and advertised for bounded nodes with screen geometry; they check the WindowServer hit stack against the granted window, and drag validates its mouse-down origin as well as every sampled movement point. The opt-in native acceptance harness is `PI_DESKTOP_COMPUTER_USE_DEVICE=1 node scripts/e2e-computer-use-device.mjs`; it now checks native pointer-enter/drag callbacks alongside exact target binding, ASCII/CJK/emoji text readback, focus mismatch refusal/recovery, and secure-input refusal, without saving screenshots or text. macOS CI type-checks the fixture and runner and runs all macOS Computer Use unit tests; the interactive harness still needs a real macOS desktop with Accessibility permission and has not yet been run for these changes. |
 | Linux/X11 backend | X11 identity/geometry plus AT-SPI inspection/actions; XTEST-backed Hover/Drag/PressKeys are exposed only for bounded accessible nodes when XTEST is available. Passed GTK/Xvfb/dbus-run-session acceptance on 2026-11-09 (workflow run `42578140460`): target discovery, AT-SPI click, hover/drag state changes, literal and `ctrl+a` keyboard input with entry readback, and refusal after focus moved outside the bound window. The follow-up stacking hit-test and covering-window regression passed Linux Host CI (workflow run `42580202802`); hover/drag are refused if another top-level child is the hit target. Wayland input remains explicitly unsupported. |
 | Pixel capture and cursor overlay | Windows path packaged-app smoke acceptance passed on the primary display (two-point composite sampling; no image saved); multi-display/DPI acceptance remains open. |
 | Packaged desktop acceptance | Startup smoke and packaged Windows Computer Use interaction passed. The isolated Stop/overlay E2E also passed twice: the fixture stayed visible beneath the click-through overlay, the status widget showed the target and enabled Stop control, Stop canceled the active tool turn, the Host grant was revoked, and the widget cleared. See the detailed run evidence below. Physical multi-monitor/DPI and human visual QA remain open. |
@@ -387,7 +414,7 @@ and its remaining scope.
   hardware. Simulated DPI-coordinate coverage is recorded below. Do not persist
   desktop screenshots.
 - Keep the native Windows fixture opt-in because it opens a visible window.
-- Add macOS device acceptance before claiming macOS runtime support; Linux/X11 CI evidence does not establish Wayland or arbitrary-toolkit coverage.
+- Run `PI_DESKTOP_COMPUTER_USE_DEVICE=1 node scripts/e2e-computer-use-device.mjs` on a macOS desktop before claiming native macOS runtime support; the script exists and its interactive run is still outstanding. Linux/X11 CI evidence does not establish Wayland or arbitrary-toolkit coverage.
 
 ## Documentation build — 2026-11-09
 
@@ -540,3 +567,55 @@ the guard. The interactive fixture test initializes a test-only tracing
 subscriber so any recurrence reports the reason without emitting the focused
 element's name, value, or window title. The original one-off refusal has not
 recurred in the diagnostic rerun, so its exact cause remains unknown.
+
+Fresh local recheck on the current `E:\PI-Desktop-dev` checkout:
+`windows_backend_drives_only_the_isolated_fixture_window` passed again (1/1,
+22.60 seconds), and `windows_backend_repeats_target_binding_under_three_start_conditions`
+passed 160 trials (50 fresh-host, 50 two-window churn, 60 after ten grant
+cycles) in 9.63 seconds. All target-binding counters were zero: no first-attempt
+failures, retries, late recoveries, unrecovered targets, or target mismatches.
+The transient secure-input refusal did not recur in this run; its original
+cause remains unknown rather than being declared fixed.
+
+Additional reliability recheck: the same isolated WinForms UIA fixture passed
+three consecutive runs on the current checkout (3/3; each completed the native
+text, selection, pointer, scroll, and target-readback assertions). The transient
+`SecureInputRefused` was not observed in these runs; this increases confidence
+but does not establish its original cause or prove the failure impossible.
+
+## Windows secure-input transient retry — 2026-11-09
+
+To reduce false refusal from momentary UIA/focus unavailability without
+weakening the guard, confirmed secure-desktop/password states still refuse on
+the first probe, while indeterminate states are re-checked up to three times
+with a 15 ms interval. Persistent uncertainty still refuses; the warning
+records only the reason and attempt count. The retry contract test passed
+(transient unknown → clear, persistent unknown → refusal, confirmed password →
+immediate refusal). The isolated WinForms UIA acceptance then passed three
+consecutive runs (3/3) after this change. The original transient's exact cause
+remains unknown; this is bounded recovery behavior, not proof the underlying
+OS/UIA anomaly cannot recur.
+
+## Pointer drag origin target validation — 2026-11-09
+
+Review found that macOS drag validated every sampled movement point against the
+WindowServer front-to-back stack but omitted the initial mouse-down coordinate.
+The path validator is now platform-neutral and checks the origin first, then
+each sampled point for both target-window bounds and frontmost-target identity.
+The regression test passed on Windows (`cargo test -p host-core --locked
+computer::tests::pointer_drag_target_check_includes_mouse_down_origin_and_every_move
+-- --exact --nocapture`, 1/1), including refusal at an occluded origin before
+movement validation. The complete Computer Use Host test subset also passed
+(53 passed, 0 failed, 2 ignored). The native macOS hit-stack integration still
+requires the macOS CI lane; that platform-specific check has not run in this
+local Windows session.
+
+## Exit-gate recheck — 2026-11-09
+
+On the current working tree, the full Windows Host Core suite passed again:
+1,246 passed, 0 failed, and 3 ignored. Documentation checks verified 89
+English/Chinese pairs and 640 pages; the VitePress production build completed.
+Rust formatting, `git diff --check`, and Node syntax checking of the opt-in
+macOS device runner passed. These Windows checks do not substitute for the
+remaining native macOS execution or physical mixed-DPI/multi-monitor gates in
+the exit table above.

@@ -16,7 +16,9 @@
 
 mod ffi;
 mod pointer;
+mod text;
 
+use super::macos_text::{is_editable_text_role, is_secure_text_role};
 use ffi::*;
 use pointer::*;
 
@@ -262,13 +264,16 @@ impl MacDesktop {
             return true;
         }
         let role = attribute_string(element, "AXRole").unwrap_or_else(|| "AXUnknown".into());
+        let subrole = attribute_string(element, "AXSubrole");
+        let is_secure_text = is_secure_text_role(&role, subrole.as_deref());
         let label = attribute_string(element, "AXTitle")
             .or_else(|| attribute_string(element, "AXDescription"))
             .or_else(|| attribute_string(element, "AXLabel"))
             .map(|value| value.chars().take(MAX_LABEL_CHARS).collect::<String>())
             .filter(|value| !value.trim().is_empty());
         let has_value = attribute(element, "AXValue").is_some();
-        let can_set_value = has_value && attribute_is_settable(element, "AXValue");
+        let can_set_value =
+            has_value && !is_secure_text && attribute_is_settable(element, "AXValue");
         let enabled = attribute_bool(element, "AXEnabled").unwrap_or(true);
         let focused = attribute_bool(element, "AXFocused").unwrap_or(false);
         let bounds = match (
@@ -289,6 +294,12 @@ impl MacDesktop {
         // whatever happens to have focus.
         if should_offer_set_value(has_value, can_set_value, enabled) {
             actions.push(ActionKind::SetValue);
+        }
+        if enabled
+            && is_editable_text_role(&role)
+            && should_offer_set_value(has_value, can_set_value, enabled)
+        {
+            actions.push(ActionKind::TypeText);
         }
         if enabled {
             actions.push(ActionKind::PressKeys);
@@ -473,12 +484,10 @@ impl MacDesktop {
                     window_relative_point(window, action.to.ok_or(DesktopError::NotActionable)?)?;
                 let path = sampled_drag_path(from, to).ok_or(DesktopError::NotActionable)?;
                 let hit_stack = read_window_hit_stack()?;
-                for point in &path {
-                    if !contains_screen_point(window, *point)
-                        || !frontmost_window_is_target_at(&hit_stack, target, *point)
-                    {
-                        return Err(DesktopError::NotActionable);
-                    }
+                if !super::pointer_drag_points_stay_in_target(window, from, &path, |point| {
+                    frontmost_window_is_target_at(&hit_stack, target, point)
+                }) {
+                    return Err(DesktopError::NotActionable);
                 }
                 post_mouse_event(target.pid, kCGEventLeftMouseDown, from)?;
                 let move_result = path.iter().try_for_each(|point| {
@@ -688,8 +697,21 @@ impl Desktop for MacDesktop {
             ActionKind::RightClick => self.perform_ax_action(element, "AXShowMenu")?,
             ActionKind::Select => self.perform_ax_action(element, "AXPick")?,
             ActionKind::SetValue => {
+                let role =
+                    attribute_string(element as AXUIElementRef, "AXRole").unwrap_or_default();
+                let subrole = attribute_string(element as AXUIElementRef, "AXSubrole");
+                if is_secure_text_role(&role, subrole.as_deref()) {
+                    return Err(DesktopError::SecureInputRefused);
+                }
                 let text = action.text.as_deref().ok_or(DesktopError::NotActionable)?;
                 self.set_value(element, text)?;
+            }
+            ActionKind::TypeText => {
+                let text = action.text.as_deref().ok_or(DesktopError::NotActionable)?;
+                text::type_text(target, element, text, || {
+                    self.focused_window_is_target(target)
+                })?;
+                return Ok(Dispatched::WindowEvent);
             }
             ActionKind::Scroll => {
                 let scroll = action.scroll.ok_or(DesktopError::NotActionable)?;
@@ -704,7 +726,6 @@ impl Desktop for MacDesktop {
                 self.perform_pointer_action(target, _bounds, action)?;
                 return Ok(Dispatched::WindowEvent);
             }
-            ActionKind::TypeText => return Err(DesktopError::Unsupported),
             ActionKind::PressKeys => unreachable!("handled above"),
         }
         Ok(Dispatched::AccessibilityAction)
@@ -811,6 +832,26 @@ mod tests {
             &[covering_window, target_window],
             &target,
             Point { x: 250.0, y: 120.0 }
+        ));
+
+        let window = target_window.bounds;
+        let from = Point { x: 140.0, y: 85.0 };
+        let clear_path = [Point { x: 250.0, y: 120.0 }];
+        assert!(
+            !super::pointer_drag_points_stay_in_target(window, from, &clear_path, |point| {
+                frontmost_window_is_target_at(&[covering_window, target_window], &target, point)
+            }),
+            "the drag origin must also be target-bound before mouse-down"
+        );
+        assert!(super::pointer_drag_points_stay_in_target(
+            window,
+            Point { x: 250.0, y: 120.0 },
+            &[Point { x: 280.0, y: 180.0 }],
+            |point| frontmost_window_is_target_at(
+                &[covering_window, target_window],
+                &target,
+                point
+            ),
         ));
     }
 
