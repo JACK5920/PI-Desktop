@@ -17,6 +17,45 @@ use super::{
 
 const OWN_PID: i32 = 4_242;
 
+#[test]
+fn pointer_drag_target_check_includes_mouse_down_origin_and_every_move() {
+    let target_bounds = Rect {
+        x: 100.0,
+        y: 50.0,
+        width: 300.0,
+        height: 200.0,
+    };
+    let origin = Point { x: 140.0, y: 85.0 };
+    let movement = [Point { x: 250.0, y: 120.0 }];
+    let mut visited = Vec::new();
+    assert!(!super::pointer_drag_points_stay_in_target(
+        target_bounds,
+        origin,
+        &movement,
+        |point| {
+            visited.push(point);
+            point != origin
+        },
+    ));
+    assert_eq!(
+        visited,
+        vec![origin],
+        "refuse before checking or dispatching movement when the mouse-down target is covered"
+    );
+
+    visited.clear();
+    assert!(super::pointer_drag_points_stay_in_target(
+        target_bounds,
+        origin,
+        &movement,
+        |point| {
+            visited.push(point);
+            true
+        },
+    ));
+    assert_eq!(visited, vec![origin, movement[0]]);
+}
+
 #[cfg(target_os = "windows")]
 #[derive(Default, Debug)]
 struct WindowsTargetTrialStats {
@@ -261,6 +300,10 @@ fn windows_backend_drives_only_the_isolated_fixture_window() {
     let secondary_script_path = fixture_dir.join(format!("{secondary_title}.ps1"));
     let state_path = fixture_dir.join(format!("{title}.txt"));
     let state_path_display = state_path.display().to_string();
+    let focus_command_path = fixture_dir.join(format!("{title}-focus-command.txt"));
+    let focus_command_path_display = focus_command_path.display().to_string();
+    let focus_state_path = fixture_dir.join(format!("{title}-focus-state.txt"));
+    let focus_state_path_display = focus_state_path.display().to_string();
     let pointer_state_path = fixture_dir.join(format!("{title}-pointer.txt"));
     let pointer_state_path_display = pointer_state_path.display().to_string();
     let double_click_state_path = fixture_dir.join(format!("{title}-double-click.txt"));
@@ -303,6 +346,24 @@ $textBox.AccessibleName = 'CU-FIXTURE-EDIT'
 $textBox.Location = New-Object System.Drawing.Point(16, 100)
 $textBox.Width = 300
 $textBox.add_TextChanged({{ [System.IO.File]::WriteAllText('{state_path_display}', $textBox.Text) }})
+$secureTextBox = New-Object System.Windows.Forms.TextBox
+$secureTextBox.Name = 'FixtureSecureText'
+$secureTextBox.AccessibleName = 'CU-FIXTURE-SECURE'
+$secureTextBox.UseSystemPasswordChar = $true
+$secureTextBox.Location = New-Object System.Drawing.Point(340, 146)
+$secureTextBox.Width = 140
+$focusTimer = New-Object System.Windows.Forms.Timer
+$focusTimer.Interval = 50
+$focusTimer.add_Tick({{
+    if ([System.IO.File]::Exists('{focus_command_path_display}')) {{
+        $command = [System.IO.File]::ReadAllText('{focus_command_path_display}')
+        [System.IO.File]::Delete('{focus_command_path_display}')
+        $form.Activate()
+        if ($command -eq 'secure') {{ $focused = $secureTextBox.Focus() }} else {{ $focused = $textBox.Focus() }}
+        [System.IO.File]::WriteAllText('{focus_state_path_display}', "$($command):$focused")
+    }}
+}})
+$focusTimer.Start()
 $combo = New-Object System.Windows.Forms.ComboBox
 $combo.Name = 'FixtureCombo'
 $combo.AccessibleName = 'CU-FIXTURE-COMBO'
@@ -371,6 +432,7 @@ $form.Controls.Add($label)
 $form.Controls.Add($hoverTarget)
 $form.Controls.Add($button)
 $form.Controls.Add($textBox)
+$form.Controls.Add($secureTextBox)
 $form.Controls.Add($combo)
 $form.Controls.Add($list)
 $form.Controls.Add($doubleClickList)
@@ -521,6 +583,44 @@ $form.Size = New-Object System.Drawing.Size(320, 180)
             .find(|item| item.label.as_deref() == Some("CU-FIXTURE-ACTION"))
             .expect("UIA should expose only the fixture action by its accessible name");
         assert!(button.actions.contains(&ActionKind::Click));
+
+        // Exercise the real Windows secure-input guard against an isolated
+        // Password TextBox, then verify that it clears after focus returns to
+        // an ordinary field. No password content is entered or read.
+        fs::write(&focus_command_path, "secure").expect("request secure-field focus");
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while fs::read_to_string(&focus_state_path).ok().as_deref() != Some("secure:True") {
+            assert!(
+                Instant::now() < deadline,
+                "isolated secure fixture field did not receive focus"
+            );
+            thread::sleep(Duration::from_millis(25));
+        }
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while !desktop.secure_input_active() {
+            assert!(
+                Instant::now() < deadline,
+                "focused password field was not detected by the secure-input guard"
+            );
+            thread::sleep(Duration::from_millis(25));
+        }
+        fs::write(&focus_command_path, "normal").expect("request ordinary-field focus");
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while fs::read_to_string(&focus_state_path).ok().as_deref() != Some("normal:True") {
+            assert!(
+                Instant::now() < deadline,
+                "ordinary fixture field did not regain focus"
+            );
+            thread::sleep(Duration::from_millis(25));
+        }
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while desktop.secure_input_active() {
+            assert!(
+                Instant::now() < deadline,
+                "secure-input guard remained active after focus left the password field"
+            );
+            thread::sleep(Duration::from_millis(25));
+        }
 
         desktop
             .perform(
@@ -780,6 +880,49 @@ $form.Size = New-Object System.Drawing.Size(320, 180)
             thread::sleep(Duration::from_millis(50));
         }
 
+        // Verify ValuePattern writes are distinct from typed input and that
+        // the native control exposes the exact postcondition to the fixture.
+        let value_pattern_text = "SetValue ✓";
+        desktop
+            .perform(
+                &target.target,
+                Some(&edit.uid),
+                &Action {
+                    kind: Some(ActionKind::SetValue),
+                    text: Some(value_pattern_text.into()),
+                    ..Action::default()
+                },
+            )
+            .expect("set the fixture value through UIA ValuePattern");
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while fs::read_to_string(&state_path).ok().as_deref() != Some(value_pattern_text) {
+            assert!(
+                Instant::now() < deadline,
+                "ValuePattern did not update the fixture's observable text state"
+            );
+            thread::sleep(Duration::from_millis(25));
+        }
+        let expected = "Ab中文!@#A!";
+        desktop
+            .perform(
+                &target.target,
+                Some(&edit.uid),
+                &Action {
+                    kind: Some(ActionKind::SetValue),
+                    text: Some(expected.into()),
+                    ..Action::default()
+                },
+            )
+            .expect("restore the fixture value before selection tests");
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while fs::read_to_string(&state_path).ok().as_deref() != Some(expected) {
+            assert!(
+                Instant::now() < deadline,
+                "ValuePattern did not restore the fixture's expected state"
+            );
+            thread::sleep(Duration::from_millis(25));
+        }
+
         let combo = desktop
             .inspect(&target.target, 400)
             .expect("inspect fixture combo box")
@@ -927,6 +1070,8 @@ $form.Size = New-Object System.Drawing.Size(320, 180)
     let _ = fs::remove_file(script_path);
     let _ = fs::remove_file(secondary_script_path);
     let _ = fs::remove_file(state_path);
+    let _ = fs::remove_file(focus_command_path);
+    let _ = fs::remove_file(focus_state_path);
     let _ = fs::remove_file(pointer_state_path);
     let _ = fs::remove_file(double_click_state_path);
     let _ = fs::remove_file(scroll_state_path);

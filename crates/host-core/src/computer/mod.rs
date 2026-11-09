@@ -20,6 +20,8 @@
 pub mod backend;
 #[cfg(target_os = "macos")]
 mod macos;
+#[cfg(any(target_os = "macos", test))]
+mod macos_text;
 pub mod policy;
 #[cfg(test)]
 mod tests;
@@ -306,6 +308,38 @@ impl ActionKind {
 pub struct Point {
     pub x: f64,
     pub y: f64,
+}
+
+/// Validate every pointer coordinate that will receive an injected drag,
+/// including the mouse-down origin. Kept platform-neutral so every build can
+/// exercise the ordering/coverage invariant even when it cannot run the native
+/// macOS hit-test backend.
+#[cfg(any(target_os = "macos", test))]
+pub(crate) fn pointer_drag_points_stay_in_target(
+    window: Rect,
+    from: Point,
+    path: &[Point],
+    mut target_is_frontmost: impl FnMut(Point) -> bool,
+) -> bool {
+    std::iter::once(&from)
+        .chain(path.iter())
+        .all(|point| contains_screen_point(window, *point) && target_is_frontmost(*point))
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn contains_screen_point(bounds: Rect, point: Point) -> bool {
+    point.x.is_finite()
+        && point.y.is_finite()
+        && bounds.x.is_finite()
+        && bounds.y.is_finite()
+        && bounds.width.is_finite()
+        && bounds.height.is_finite()
+        && bounds.width > 0.0
+        && bounds.height > 0.0
+        && point.x >= bounds.x
+        && point.y >= bounds.y
+        && point.x < bounds.x + bounds.width
+        && point.y < bounds.y + bounds.height
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]

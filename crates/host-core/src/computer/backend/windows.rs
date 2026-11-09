@@ -55,6 +55,8 @@ use crate::computer::{
 
 const MAX_TREE_NODES: usize = 400;
 const UIA_TIMEOUT_MS: u32 = 2_000;
+const SECURE_INPUT_PROBE_ATTEMPTS: usize = 3;
+const SECURE_INPUT_RETRY_DELAY: Duration = Duration::from_millis(15);
 const MOD_CONTROL: u8 = 0x02;
 const MOD_SHIFT: u8 = 0x01;
 const MOD_ALT: u8 = 0x04;
@@ -106,6 +108,20 @@ impl SecureInputStatus {
     }
 }
 
+fn retry_indeterminate_secure_input_status(
+    mut probe: impl FnMut() -> SecureInputStatus,
+    mut wait_before_retry: impl FnMut(),
+) -> (SecureInputStatus, usize) {
+    for attempt in 1..=SECURE_INPUT_PROBE_ATTEMPTS {
+        let status = probe();
+        if !status.is_indeterminate() || attempt == SECURE_INPUT_PROBE_ATTEMPTS {
+            return (status, attempt);
+        }
+        wait_before_retry();
+    }
+    unreachable!("secure-input probe attempt limit is non-zero")
+}
+
 impl WindowsDesktop {
     pub fn new() -> Self {
         Self
@@ -146,7 +162,14 @@ impl WindowsDesktop {
         Ok((apartment, automation))
     }
 
-    fn secure_input_status(&self) -> SecureInputStatus {
+    fn secure_input_status(&self) -> (SecureInputStatus, usize) {
+        retry_indeterminate_secure_input_status(
+            || self.secure_input_status_once(),
+            || thread::sleep(SECURE_INPUT_RETRY_DELAY),
+        )
+    }
+
+    fn secure_input_status_once(&self) -> SecureInputStatus {
         let Ok(_dpi_context) = PerMonitorDpiContext::enter() else {
             return SecureInputStatus::DpiContextUnavailable;
         };
@@ -593,12 +616,16 @@ impl Desktop for WindowsDesktop {
     }
 
     fn secure_input_active(&self) -> bool {
-        let status = self.secure_input_status();
+        let (status, attempts) = self.secure_input_status();
         let Some(reason) = status.refusal_reason() else {
             return false;
         };
         if status.is_indeterminate() {
-            tracing::warn!(reason, "Computer Use secure-input guard failed closed");
+            tracing::warn!(
+                reason,
+                attempts,
+                "Computer Use secure-input guard failed closed"
+            );
         } else {
             tracing::debug!(reason, "Computer Use secure-input guard is active");
         }
@@ -1859,6 +1886,48 @@ mod tests {
         assert!(SecureInputStatus::PasswordStateUnknown.is_indeterminate());
         assert!(SecureInputStatus::SecureDesktop.refusal_reason().is_some());
         assert!(!SecureInputStatus::SecureDesktop.is_indeterminate());
+    }
+
+    #[test]
+    fn secure_input_guard_retries_indeterminate_uia_state_but_stays_fail_closed() {
+        let mut statuses = [
+            SecureInputStatus::FocusUnavailable,
+            SecureInputStatus::PasswordStateUnknown,
+            SecureInputStatus::Clear,
+        ]
+        .into_iter();
+        let mut waits = 0;
+        let (status, attempts) = retry_indeterminate_secure_input_status(
+            || statuses.next().expect("three probes"),
+            || waits += 1,
+        );
+        assert_eq!(status, SecureInputStatus::Clear);
+        assert_eq!(attempts, 3);
+        assert_eq!(waits, 2);
+
+        let mut attempts_seen = 0;
+        let (status, attempts) = retry_indeterminate_secure_input_status(
+            || {
+                attempts_seen += 1;
+                SecureInputStatus::FocusUnavailable
+            },
+            || {},
+        );
+        assert_eq!(status, SecureInputStatus::FocusUnavailable);
+        assert_eq!(attempts, SECURE_INPUT_PROBE_ATTEMPTS);
+        assert_eq!(attempts_seen, SECURE_INPUT_PROBE_ATTEMPTS);
+
+        let mut secure_attempts = 0;
+        let (status, attempts) = retry_indeterminate_secure_input_status(
+            || {
+                secure_attempts += 1;
+                SecureInputStatus::PasswordFocused
+            },
+            || panic!("confirmed secure input must not be retried"),
+        );
+        assert_eq!(status, SecureInputStatus::PasswordFocused);
+        assert_eq!(attempts, 1);
+        assert_eq!(secure_attempts, 1);
     }
 
     #[test]

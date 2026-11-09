@@ -20258,11 +20258,15 @@ their separate platform acceptance.
   cancellation, and grant cleanup. Host policy/backend state transitions are
   covered by the Rust tests. Pixel-source matching and model forwarding are
   covered by `agent-tool.test.ts`, while stale cursor-event ownership is covered
-  by `computer-cursor-state.test.ts`; this does not replace packaged-app
-  acceptance.
+  by `computer-cursor-state.test.ts`. The packaged
+  `pnpm test:e2e:computer-use-packaged` path additionally verifies the exact
+  target switch, a fixture-owned click-handler marker readback before Stop,
+  window-scoped image delivery, the visible status/overlay, cancellation,
+  grant revocation, and widget cleanup.
 - **Status:** Renderer and Main/Agent/Host-RPC lifecycle paths are automated;
-  Windows UIA fixture acceptance passed locally. Full packaged-app acceptance
-  remains pending.
+  the unpacked Windows app passed packaged action-readback and Stop/overlay
+  acceptance with a local fake provider. Live external-provider behavior,
+  multi-display/DPI hardware, and human visual acceptance remain open.
 
 ### E2E-COMPUTER-use-configurable-application-restrictions-v1
 
@@ -20392,3 +20396,38 @@ their windows). The Electron half — the automatic mint through the tool, the
 indicator, Stop aborting the turn, the drawn cursor, and the loop against a real
 model — is still `NOT RUN`, and so is anything needing Screen Recording. The
 permission-request UI below has isolated fixture automation.
+
+### E2E-COMPUTER-use-macos-Unicode-type-text-v1
+
+- **Preconditions:** An opt-in macOS desktop run with the Host binary built,
+  Accessibility permission granted to `pi-desktop-host-core`, and the disposable
+  AppKit fixture in `scripts/e2e/computer-use-macos-fixture.swift`. The fixture
+  opens one target and one second window in the same process. Do not use a real
+  credential or the operator's ordinary application content.
+- **Run:** `PI_DESKTOP_COMPUTER_USE_DEVICE=1 node scripts/e2e-computer-use-device.mjs`
+- **Path:** Bind Computer Use to the fixture window. Inspect the text controls;
+  first hover another control to move the pointer away, reset the fixture's
+  pointer flags, then verify `hover` reaches the probe; clear the drag flags and
+  verify `drag` produces native mouse-down/movement/up callbacks. Send ASCII,
+  CJK, supplementary-plane Unicode, and mixed input with `type_text`; verify
+  the fixture's resulting state after each action. Finally inject `cmd+a` plus
+  `backspace` with `press_keys` and verify the native text field is empty.
+  Attempt secure-field input and move focus outside the bound target between
+  actions, then verify both refuse without modifying either target.
+- **Expected:** `TypeText` is advertised only for enabled, editable, settable
+  non-secure roles. UTF-16 chunks preserve scalar order and surrogate pairs;
+  every chunk rechecks that the focused window is the granted target. Secure
+  input and focus mismatch fail closed, and a successful dispatch is not
+  reported as completion without a fresh observation. `press_keys` must also
+  produce the expected native text-field state after a fresh observation.
+- **Coverage:** `crates/host-core/src/computer/macos/text.rs` role/chunk unit
+  tests; `scripts/e2e-computer-use-device.mjs` launches the native fixture,
+  binds its exact target ID, checks fresh Host observations, verifies actual
+  field state by an in-memory expected-value hash, refuses focus mismatch and
+  secure input, and confirms recovery. The macOS CI lane type-checks the Swift
+  fixture and runner and executes all macOS Computer Use unit tests. CI does
+  not run the visible fixture because it requires interactive TCC permission.
+- **Status:** Implementation and repeatable opt-in acceptance harness are in
+  place. Native fixture execution still requires a macOS desktop with the Host
+  Accessibility permission; Windows-side Apple-target type-checking is not a
+  substitute for this runtime acceptance.
