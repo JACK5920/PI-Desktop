@@ -33,6 +33,10 @@ fn should_offer_set_value(has_value: bool, settable: bool, enabled: bool) -> boo
     has_value && settable && enabled
 }
 
+fn value_matches(expected: &str, actual: Option<&str>) -> bool {
+    actual == Some(expected)
+}
+
 impl MacDesktop {
     pub fn new() -> Self {
         Self
@@ -376,11 +380,16 @@ impl MacDesktop {
         // SAFETY: both strings outlive the call; AX copies the value.
         let status =
             unsafe { AXUIElementSetAttributeValue(element, attr.as_ref(), value.as_ref()) };
-        if status == kAXErrorSuccess {
-            Ok(())
-        } else {
-            Err(DesktopError::NotActionable)
+        if status != kAXErrorSuccess {
+            return Err(DesktopError::NotActionable);
         }
+        let actual = attribute_string(element as AXUIElementRef, "AXValue");
+        if !value_matches(text, actual.as_deref()) {
+            return Err(DesktopError::Failed(
+                "the target did not retain the requested value".into(),
+            ));
+        }
+        Ok(())
     }
 
     /// Post one key chord to the granted process. The event never enters the
@@ -866,5 +875,12 @@ mod tests {
         assert!(!should_offer_set_value(true, false, true));
         assert!(!should_offer_set_value(false, true, true));
         assert!(!should_offer_set_value(true, true, false));
+    }
+
+    #[test]
+    fn set_value_reports_success_only_after_matching_ax_readback() {
+        assert!(value_matches("hello", Some("hello")));
+        assert!(!value_matches("hello", Some("other")));
+        assert!(!value_matches("hello", None));
     }
 }
