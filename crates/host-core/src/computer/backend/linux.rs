@@ -30,6 +30,7 @@ use crate::computer::{
 };
 
 mod keyboard;
+mod pointer;
 
 const MAX_X11_WINDOWS: usize = 512;
 
@@ -384,6 +385,7 @@ async fn perform_atspi(
                     })
                     .ok_or(DesktopError::NotActionable)?;
                 let (x, y) = absolute_pointer_point(measured.bounds, point)?;
+                pointer::ensure_target_hit(&x11, root, target.window, x, y)?;
                 fake_pointer_input(&x11, root, MOTION_NOTIFY_EVENT, 0, x, y)?;
             }
             ActionKind::Drag => {
@@ -391,6 +393,8 @@ async fn perform_atspi(
                 let to = action.to.ok_or(DesktopError::NotActionable)?;
                 let (from_x, from_y) = absolute_pointer_point(measured.bounds, from)?;
                 let (to_x, to_y) = absolute_pointer_point(measured.bounds, to)?;
+                pointer::ensure_target_hit(&x11, root, target.window, from_x, from_y)?;
+                pointer::ensure_target_hit(&x11, root, target.window, to_x, to_y)?;
                 fake_pointer_input(&x11, root, MOTION_NOTIFY_EVENT, 0, from_x, from_y)?;
                 fake_pointer_input(&x11, root, BUTTON_PRESS_EVENT, 1, from_x, from_y)?;
                 fake_pointer_input(&x11, root, MOTION_NOTIFY_EVENT, 0, to_x, to_y)?;

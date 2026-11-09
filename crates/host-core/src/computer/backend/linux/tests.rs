@@ -137,6 +137,76 @@ fn linux_backend_drives_gtk_fixture_through_atspi() {
     let pointer_uid = pointer.uid.clone();
     let pointer_bounds = pointer.bounds.expect("pointer fixture has bounds");
 
+    let (x11, screen_index) = desktop.x11().expect("connect to X11 fixture");
+    let root = x11.setup().roots[screen_index].root;
+    let hit_point = Point {
+        x: pointer_bounds.x + pointer_bounds.width / 2.0,
+        y: pointer_bounds.y + pointer_bounds.height / 2.0,
+    };
+    let (hit_x, hit_y) = absolute_pointer_point(target.bounds, hit_point)
+        .expect("pointer target center is inside the fixture");
+    pointer::ensure_target_hit(&x11, root, target.target.window, hit_x, hit_y)
+        .expect("uncovered GTK target should be the topmost recipient");
+
+    let blocker = x11.generate_id().expect("allocate blocking overlay ID");
+    x11.create_window(
+        0,
+        blocker,
+        root,
+        hit_x,
+        hit_y,
+        32,
+        32,
+        0,
+        x11rb::protocol::xproto::WindowClass::INPUT_ONLY,
+        0,
+        &x11rb::protocol::xproto::CreateWindowAux::new().override_redirect(1),
+    )
+    .expect("create a harmless InputOnly overlay over the fixture")
+    .check()
+    .expect("create the blocker overlay");
+    x11.map_window(blocker)
+        .expect("map the blocker overlay")
+        .check()
+        .expect("show the blocker overlay");
+    assert!(matches!(
+        pointer::ensure_target_hit(&x11, root, target.target.window, hit_x, hit_y),
+        Err(DesktopError::NotActionable)
+    ));
+    assert!(matches!(
+        desktop.perform(
+            &target.target,
+            Some(&pointer_uid),
+            &Action {
+                kind: Some(ActionKind::Hover),
+                uid: Some(pointer_uid.clone()),
+                ..Action::default()
+            }
+        ),
+        Err(DesktopError::NotActionable)
+    ));
+    assert!(matches!(
+        desktop.perform(
+            &target.target,
+            Some(&pointer_uid),
+            &Action {
+                kind: Some(ActionKind::Drag),
+                uid: Some(pointer_uid.clone()),
+                point: Some(hit_point),
+                to: Some(Point {
+                    x: pointer_bounds.x + pointer_bounds.width - 24.0,
+                    y: hit_point.y,
+                }),
+                ..Action::default()
+            }
+        ),
+        Err(DesktopError::NotActionable)
+    ));
+    x11.destroy_window(blocker)
+        .expect("remove the blocker overlay")
+        .check()
+        .expect("destroy the blocker");
+
     desktop
         .perform(
             &target.target,
@@ -221,8 +291,6 @@ fn linux_backend_drives_gtk_fixture_through_atspi() {
     assert!(key_target.actions.contains(&ActionKind::PressKeys));
     let key_target_uid = key_target.uid.clone();
     let key_bounds = key_target.bounds.expect("key target has accessible bounds");
-    let (x11, screen_index) = desktop.x11().expect("connect to X11 fixture");
-    let root = x11.setup().roots[screen_index].root;
     let (key_x, key_y) = absolute_pointer_point(
         target.bounds,
         Point {
