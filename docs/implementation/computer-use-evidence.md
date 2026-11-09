@@ -285,7 +285,7 @@ arbitrary toolkits, or the packaged user application.
 | macOS backend | An `AXUIElement` backend exists in source; this evidence set does not contain macOS device acceptance. |
 | Linux/X11 backend | X11 identity/geometry plus AT-SPI inspection/actions; XTEST-backed Hover/Drag/PressKeys are exposed only for bounded accessible nodes when XTEST is available. Passed GTK/Xvfb/dbus-run-session acceptance on 2026-11-09 (workflow run `42578140460`): target discovery, AT-SPI click, hover/drag state changes, literal and `ctrl+a` keyboard input with entry readback, and refusal after focus moved outside the bound window. The follow-up stacking hit-test and covering-window regression passed Linux Host CI (workflow run `42580202802`); hover/drag are refused if another top-level child is the hit target. Wayland input remains explicitly unsupported. |
 | Pixel capture and cursor overlay | Windows path packaged-app smoke acceptance passed on the primary display (two-point composite sampling; no image saved); multi-display/DPI acceptance remains open. |
-| Packaged desktop acceptance | Startup smoke passed. This earlier matrix snapshot predates the packaged interaction and Stop/overlay E2E results recorded below. |
+| Packaged desktop acceptance | Startup smoke and packaged Windows Computer Use interaction passed. The isolated Stop/overlay E2E also passed twice: the fixture stayed visible beneath the click-through overlay, the status widget showed the target and enabled Stop control, Stop canceled the active tool turn, the Host grant was revoked, and the widget cleared. See the detailed run evidence below. Physical multi-monitor/DPI and human visual QA remain open. |
 
 ## Automated evidence
 
