@@ -462,11 +462,14 @@ root-screen coordinates, and rejected if coordinates are non-finite or outside
 the X11 signed-coordinate range. The GTK fixture now changes its accessible
 status only after receiving real pointer-enter and button-drag events.
 
-The existing Ubuntu CI Xvfb/GTK/AT-SPI step exercises the extended integration
-test for XTEST availability, advertised actions, hover state, drag state, and
-the existing AT-SPI click. Local Linux-target `cargo check` and
-`cargo check --tests` both passed on 2026-11-09. This Windows host has no Linux
-desktop session, WSL distribution, or running Docker Linux engine, so the GTK /
-Xvfb runtime acceptance has not yet run locally; require the Ubuntu CI result
-before treating Linux X11 Hover/Drag as runtime-accepted. Wayland and other
-platforms remain out of scope for this batch.
+The extended Ubuntu CI Xvfb/GTK/AT-SPI integration test passed on 2026-11-09
+(CI run `42572633985`, job “Rust host-core format / lint / test”). It exercised
+XTEST availability, advertised actions, GTK-observed hover state, GTK-observed
+drag state, and the existing AT-SPI click. Local Linux-target `cargo check` and
+`cargo check --tests` also passed. The rest of that CI run was still in progress
+when this evidence was recorded; its JS architecture-budget check had failed
+because the added Linux backend code pushed `linux.rs` over the 1,000-LOC
+architecture limit. The test module has since been split into
+`backend/linux/tests.rs` so the product module remains below the limit; the
+follow-up CI run must confirm the complete gate. Wayland and other platforms
+remain out of scope for this batch.
