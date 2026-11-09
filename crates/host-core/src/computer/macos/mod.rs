@@ -838,12 +838,12 @@ mod tests {
         let from = Point { x: 140.0, y: 85.0 };
         let clear_path = [Point { x: 250.0, y: 120.0 }];
         assert!(
-            !super::pointer_drag_points_stay_in_target(window, from, &clear_path, |point| {
+            !super::super::pointer_drag_points_stay_in_target(window, from, &clear_path, |point| {
                 frontmost_window_is_target_at(&[covering_window, target_window], &target, point)
             }),
             "the drag origin must also be target-bound before mouse-down"
         );
-        assert!(super::pointer_drag_points_stay_in_target(
+        assert!(super::super::pointer_drag_points_stay_in_target(
             window,
             Point { x: 250.0, y: 120.0 },
             &[Point { x: 280.0, y: 180.0 }],

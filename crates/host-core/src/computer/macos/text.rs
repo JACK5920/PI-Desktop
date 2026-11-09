@@ -1,7 +1,7 @@
 //! Target-bound Unicode text input for the macOS Computer Use backend.
 
 use super::super::backend::{DesktopError, TargetRef};
-use super::super::macos_text::unicode_text_chunks;
+use super::super::macos_text::{is_editable_text_role, is_secure_text_role, unicode_text_chunks};
 use super::ffi::*;
 
 pub(super) fn type_text(
