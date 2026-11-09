@@ -450,3 +450,23 @@ contract; Host input/target coordinates remain physical screen pixels.
 
 The physical multi-monitor/DPI and human visual checks remain open; this change
 does not claim those hardware cases are accepted.
+
+## Linux X11 Hover/Drag implementation — 2026-11-09
+
+The Linux X11 backend now detects the XTEST extension and advertises `Hover`
+and `Drag` only for accessible nodes with screen bounds when XTEST is available.
+Hover defaults to the center of the selected node; drag requires explicit
+start/end points. Both are interpreted relative to the already-bound target
+window, checked against that window's measured bounds, converted to XTEST
+root-screen coordinates, and rejected if coordinates are non-finite or outside
+the X11 signed-coordinate range. The GTK fixture now changes its accessible
+status only after receiving real pointer-enter and button-drag events.
+
+The existing Ubuntu CI Xvfb/GTK/AT-SPI step exercises the extended integration
+test for XTEST availability, advertised actions, hover state, drag state, and
+the existing AT-SPI click. Local Linux-target `cargo check` and
+`cargo check --tests` both passed on 2026-11-09. This Windows host has no Linux
+desktop session, WSL distribution, or running Docker Linux engine, so the GTK /
+Xvfb runtime acceptance has not yet run locally; require the Ubuntu CI result
+before treating Linux X11 Hover/Drag as runtime-accepted. Wayland and other
+platforms remain out of scope for this batch.

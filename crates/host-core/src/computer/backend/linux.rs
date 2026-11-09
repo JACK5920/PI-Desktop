@@ -16,12 +16,18 @@ use atspi::proxy::component::ComponentProxy;
 use atspi::proxy::editable_text::EditableTextProxy;
 use atspi::proxy::value::ValueProxy;
 use atspi::zbus::{Connection as BusConnection, Proxy};
-use x11rb::connection::Connection;
-use x11rb::protocol::xproto::{AtomEnum, ConnectionExt, MapState, Window};
+use x11rb::connection::{Connection, RequestConnection};
+use x11rb::protocol::xproto::{
+    AtomEnum, ConnectionExt, MapState, Window, BUTTON_PRESS_EVENT, BUTTON_RELEASE_EVENT,
+    MOTION_NOTIFY_EVENT,
+};
+use x11rb::protocol::xtest::{self, ConnectionExt as XTestConnectionExt};
 use x11rb::rust_connection::RustConnection;
 
 use super::{Desktop, DesktopError, Dispatched, Measured, RawInspection, RawTarget, TargetRef};
-use crate::computer::{Action, ActionKind, Capabilities, Fidelity, Node, PermissionState, Rect};
+use crate::computer::{
+    Action, ActionKind, Capabilities, Fidelity, Node, PermissionState, Point, Rect,
+};
 
 const MAX_X11_WINDOWS: usize = 512;
 
@@ -223,6 +229,10 @@ async fn inspect_atspi(
     allow_sensitive_input: bool,
 ) -> AtspiResult<RawInspection> {
     let x11 = LinuxDesktop::new().measure(&target)?;
+    let pointer_input_supported = LinuxDesktop::new()
+        .x11()
+        .ok()
+        .is_some_and(|(connection, _)| xtest_available(&connection));
     let root = window_root(&connection, &target, &x11.bounds, &x11.title).await?;
     let root_bus = root
         .name_as_str()
@@ -258,7 +268,10 @@ async fn inspect_atspi(
             .filter(|label| !label.is_empty());
         let bounds = component_bounds(&connection, &bus, &path).await;
         let is_password = role == Role::PasswordText;
-        let actions = advertised_actions(&connection, &bus, &path, interfaces).await;
+        let mut actions = advertised_actions(&connection, &bus, &path, interfaces).await;
+        if pointer_input_supported && bounds.is_some() {
+            actions.extend([ActionKind::Hover, ActionKind::Drag]);
+        }
         let index = nodes.len();
         nodes.push(Node {
             uid: format!("{bus}|{path}"),
@@ -315,10 +328,7 @@ async fn perform_atspi(
     action: Action,
 ) -> AtspiResult<Dispatched> {
     let kind = action.kind.ok_or(DesktopError::NotActionable)?;
-    if matches!(
-        kind,
-        ActionKind::PressKeys | ActionKind::Hover | ActionKind::Drag
-    ) {
+    if kind == ActionKind::PressKeys {
         return Err(DesktopError::Unsupported);
     }
     let uid = uid.ok_or(DesktopError::ElementNotFound)?;
@@ -339,6 +349,46 @@ async fn perform_atspi(
         .ok_or(DesktopError::ElementNotFound)?;
     if !node.enabled || !node.actions.contains(&kind) {
         return Err(DesktopError::NotActionable);
+    }
+
+    if matches!(kind, ActionKind::Hover | ActionKind::Drag) {
+        let (x11, screen_index) = LinuxDesktop::new().x11()?;
+        if !xtest_available(&x11) {
+            return Err(DesktopError::Unsupported);
+        }
+        let root = x11
+            .setup()
+            .roots
+            .get(screen_index)
+            .ok_or(DesktopError::Unsupported)?
+            .root;
+        match kind {
+            ActionKind::Hover => {
+                let point = action
+                    .point
+                    .or_else(|| {
+                        node.bounds.map(|bounds| Point {
+                            x: bounds.x + bounds.width / 2.0,
+                            y: bounds.y + bounds.height / 2.0,
+                        })
+                    })
+                    .ok_or(DesktopError::NotActionable)?;
+                let (x, y) = absolute_pointer_point(measured.bounds, point)?;
+                fake_pointer_input(&x11, root, MOTION_NOTIFY_EVENT, 0, x, y)?;
+            }
+            ActionKind::Drag => {
+                let from = action.point.ok_or(DesktopError::NotActionable)?;
+                let to = action.to.ok_or(DesktopError::NotActionable)?;
+                let (from_x, from_y) = absolute_pointer_point(measured.bounds, from)?;
+                let (to_x, to_y) = absolute_pointer_point(measured.bounds, to)?;
+                fake_pointer_input(&x11, root, MOTION_NOTIFY_EVENT, 0, from_x, from_y)?;
+                fake_pointer_input(&x11, root, BUTTON_PRESS_EVENT, 1, from_x, from_y)?;
+                fake_pointer_input(&x11, root, MOTION_NOTIFY_EVENT, 0, to_x, to_y)?;
+                fake_pointer_input(&x11, root, BUTTON_RELEASE_EVENT, 1, to_x, to_y)?;
+            }
+            _ => unreachable!("pointer branch checks hover and drag"),
+        }
+        return Ok(Dispatched::WindowEvent);
     }
 
     if kind == ActionKind::Scroll {
@@ -844,6 +894,48 @@ fn x11_error(error: impl std::fmt::Display) -> DesktopError {
     DesktopError::Failed(format!("X11 request failed: {error}"))
 }
 
+fn xtest_available(connection: &RustConnection) -> bool {
+    connection
+        .extension_information(xtest::X11_EXTENSION_NAME)
+        .is_ok_and(|information| information.is_some())
+}
+
+fn absolute_pointer_point(bounds: Rect, point: Point) -> Result<(i16, i16), DesktopError> {
+    if !point.x.is_finite()
+        || !point.y.is_finite()
+        || point.x < 0.0
+        || point.y < 0.0
+        || point.x >= bounds.width
+        || point.y >= bounds.height
+    {
+        return Err(DesktopError::NotActionable);
+    }
+    let x = bounds.x + point.x;
+    let y = bounds.y + point.y;
+    if !x.is_finite() || !y.is_finite() {
+        return Err(DesktopError::NotActionable);
+    }
+    let x = i16::try_from(x.round() as i64).map_err(|_| DesktopError::NotActionable)?;
+    let y = i16::try_from(y.round() as i64).map_err(|_| DesktopError::NotActionable)?;
+    Ok((x, y))
+}
+
+fn fake_pointer_input(
+    connection: &RustConnection,
+    root: Window,
+    event_type: u8,
+    detail: u8,
+    x: i16,
+    y: i16,
+) -> Result<(), DesktopError> {
+    connection
+        .xtest_fake_input(event_type, detail, 0, root, x, y, 0)
+        .map_err(x11_error)?
+        .check()
+        .map_err(x11_error)?;
+    connection.flush().map_err(x11_error)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -862,6 +954,34 @@ mod tests {
     #[test]
     fn target_identity_binds_pid_window_and_executable() {
         assert_eq!(target_id(12, 0x34, "editor"), "12:52:editor");
+    }
+
+    #[test]
+    fn pointer_points_are_absolute_screen_coordinates_inside_the_bound_target() {
+        let bounds = Rect {
+            x: 120.0,
+            y: 60.0,
+            width: 400.0,
+            height: 300.0,
+        };
+        assert_eq!(
+            absolute_pointer_point(bounds, Point { x: 20.0, y: 30.0 }),
+            Ok((140, 90))
+        );
+        assert_eq!(
+            absolute_pointer_point(bounds, Point { x: 400.0, y: 30.0 }),
+            Err(DesktopError::NotActionable)
+        );
+        assert_eq!(
+            absolute_pointer_point(
+                bounds,
+                Point {
+                    x: f64::NAN,
+                    y: 30.0
+                }
+            ),
+            Err(DesktopError::NotActionable)
+        );
     }
 
     #[test]
@@ -945,6 +1065,17 @@ mod tests {
         assert!(button.enabled);
         assert!(button.actions.contains(&ActionKind::Click));
         let uid = button.uid.clone();
+        let pointer = initial
+            .nodes
+            .iter()
+            .find(|node| node.label.as_deref() == Some("Fixture pointer target"))
+            .expect("find GTK pointer fixture in AT-SPI tree");
+        assert!(pointer.enabled);
+        assert!(pointer.bounds.is_some());
+        assert!(pointer.actions.contains(&ActionKind::Hover));
+        assert!(pointer.actions.contains(&ActionKind::Drag));
+        let pointer_uid = pointer.uid.clone();
+        let pointer_bounds = pointer.bounds.expect("pointer fixture has bounds");
 
         desktop
             .perform(
@@ -973,6 +1104,71 @@ mod tests {
             assert!(
                 std::time::Instant::now() < deadline,
                 "GTK state did not change after the accepted AT-SPI click"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+
+        desktop
+            .perform(
+                &target.target,
+                Some(&pointer_uid),
+                &Action {
+                    kind: Some(ActionKind::Hover),
+                    uid: Some(pointer_uid.clone()),
+                    ..Action::default()
+                },
+            )
+            .expect("move the X11 pointer over the GTK fixture");
+        wait_for_fixture_status(
+            &desktop,
+            &target.target,
+            "Fixture status: Hover confirmed by GTK",
+        );
+
+        let drag_from = Point {
+            x: pointer_bounds.x + 24.0,
+            y: pointer_bounds.y + pointer_bounds.height / 2.0,
+        };
+        let drag_to = Point {
+            x: pointer_bounds.x + pointer_bounds.width - 24.0,
+            y: pointer_bounds.y + pointer_bounds.height / 2.0,
+        };
+        desktop
+            .perform(
+                &target.target,
+                Some(&pointer_uid),
+                &Action {
+                    kind: Some(ActionKind::Drag),
+                    uid: Some(pointer_uid.clone()),
+                    point: Some(drag_from),
+                    to: Some(drag_to),
+                    ..Action::default()
+                },
+            )
+            .expect("drag across the GTK fixture using XTEST");
+        wait_for_fixture_status(
+            &desktop,
+            &target.target,
+            "Fixture status: Drag confirmed by GTK",
+        );
+    }
+
+    fn wait_for_fixture_status(desktop: &LinuxDesktop, target: &TargetRef, expected: &str) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        loop {
+            let updated = desktop
+                .inspect(target, 400)
+                .expect("reinspect GTK fixture after pointer action");
+            if updated
+                .nodes
+                .iter()
+                .any(|node| node.label.as_deref() == Some(expected))
+            {
+                return;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "GTK state did not change to {expected} after the pointer action"
             );
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
