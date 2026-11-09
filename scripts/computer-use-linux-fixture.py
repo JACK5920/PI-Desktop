@@ -25,6 +25,16 @@ button.connect(
         status.get_accessible().set_name("Fixture status: Click confirmed by GTK"),
     ),
 )
+key_target = Gtk.Entry()
+key_target.get_accessible().set_name("Fixture key target")
+key_target.connect("changed", lambda entry: update_key_status(entry.get_text()))
+
+
+def update_key_status(text):
+    status.set_text(f"Key input received: {text}")
+    status.get_accessible().set_name(f"Fixture status: Key input received: {text}")
+
+
 pointer_target = Gtk.EventBox()
 pointer_target.set_size_request(240, 72)
 pointer_target.get_accessible().set_name("Fixture pointer target")
@@ -81,6 +91,7 @@ pointer_target.connect("motion-notify-event", on_pointer_motion)
 pointer_target.connect("button-release-event", on_pointer_release)
 layout.pack_start(status, False, False, 0)
 layout.pack_start(button, False, False, 0)
+layout.pack_start(key_target, False, False, 0)
 layout.pack_start(pointer_target, False, False, 0)
 window.add(layout)
 window.connect("destroy", Gtk.main_quit)

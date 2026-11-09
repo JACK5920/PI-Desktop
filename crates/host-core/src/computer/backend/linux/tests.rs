@@ -211,6 +211,90 @@ fn linux_backend_drives_gtk_fixture_through_atspi() {
         &target.target,
         "Fixture status: Drag confirmed by GTK",
     );
+
+    let key_target = initial
+        .nodes
+        .iter()
+        .find(|node| node.label.as_deref() == Some("Fixture key target"))
+        .expect("find GTK key target in AT-SPI tree");
+    assert!(key_target.enabled);
+    assert!(key_target.actions.contains(&ActionKind::PressKeys));
+    let key_target_uid = key_target.uid.clone();
+    let key_bounds = key_target.bounds.expect("key target has accessible bounds");
+    let (x11, screen_index) = desktop.x11().expect("connect to X11 fixture");
+    let root = x11.setup().roots[screen_index].root;
+    let (key_x, key_y) = absolute_pointer_point(
+        target.bounds,
+        Point {
+            x: key_bounds.x + key_bounds.width / 2.0,
+            y: key_bounds.y + key_bounds.height / 2.0,
+        },
+    )
+    .expect("key target is inside the bound fixture");
+    fake_pointer_input(&x11, root, MOTION_NOTIFY_EVENT, 0, key_x, key_y)
+        .expect("move over the GTK key target");
+    fake_pointer_input(&x11, root, BUTTON_PRESS_EVENT, 1, key_x, key_y)
+        .expect("focus the GTK key target");
+    fake_pointer_input(&x11, root, BUTTON_RELEASE_EVENT, 1, key_x, key_y)
+        .expect("release the GTK key target click");
+
+    desktop
+        .perform(
+            &target.target,
+            Some(&key_target_uid),
+            &Action {
+                kind: Some(ActionKind::PressKeys),
+                uid: Some(key_target_uid.clone()),
+                keys: Some(vec!["x".into()]),
+                ..Action::default()
+            },
+        )
+        .expect("send a key to the focused GTK entry");
+    wait_for_fixture_status(
+        &desktop,
+        &target.target,
+        "Fixture status: Key input received: x",
+    );
+
+    desktop
+        .perform(
+            &target.target,
+            Some(&key_target_uid),
+            &Action {
+                kind: Some(ActionKind::PressKeys),
+                uid: Some(key_target_uid.clone()),
+                keys: Some(vec!["ctrl+a".into(), "z".into()]),
+                ..Action::default()
+            },
+        )
+        .expect("send a modifier chord and replacement key to the focused GTK entry");
+    wait_for_fixture_status(
+        &desktop,
+        &target.target,
+        "Fixture status: Key input received: z",
+    );
+
+    x11.set_input_focus(
+        x11rb::protocol::xproto::InputFocus::PARENT,
+        root,
+        x11rb::CURRENT_TIME,
+    )
+    .expect("request focus on the X11 root to simulate lost target focus")
+    .check()
+    .expect("set non-target focus");
+    assert!(matches!(
+        desktop.perform(
+            &target.target,
+            Some(&key_target_uid),
+            &Action {
+                kind: Some(ActionKind::PressKeys),
+                uid: Some(key_target_uid.clone()),
+                keys: Some(vec!["y".into()]),
+                ..Action::default()
+            }
+        ),
+        Err(DesktopError::NotActionable)
+    ));
 }
 
 fn wait_for_fixture_status(desktop: &LinuxDesktop, target: &TargetRef, expected: &str) {

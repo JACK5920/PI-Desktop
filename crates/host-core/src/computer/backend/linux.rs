@@ -29,6 +29,8 @@ use crate::computer::{
     Action, ActionKind, Capabilities, Fidelity, Node, PermissionState, Point, Rect,
 };
 
+mod keyboard;
+
 const MAX_X11_WINDOWS: usize = 512;
 
 pub struct LinuxDesktop;
@@ -270,7 +272,7 @@ async fn inspect_atspi(
         let is_password = role == Role::PasswordText;
         let mut actions = advertised_actions(&connection, &bus, &path, interfaces).await;
         if pointer_input_supported && bounds.is_some() {
-            actions.extend([ActionKind::Hover, ActionKind::Drag]);
+            actions.extend([ActionKind::Hover, ActionKind::Drag, ActionKind::PressKeys]);
         }
         let index = nodes.len();
         nodes.push(Node {
@@ -328,9 +330,6 @@ async fn perform_atspi(
     action: Action,
 ) -> AtspiResult<Dispatched> {
     let kind = action.kind.ok_or(DesktopError::NotActionable)?;
-    if kind == ActionKind::PressKeys {
-        return Err(DesktopError::Unsupported);
-    }
     let uid = uid.ok_or(DesktopError::ElementNotFound)?;
     let (bus, path) = uid.split_once('|').ok_or(DesktopError::ElementNotFound)?;
     let measured = LinuxDesktop::new().measure(&target)?;
@@ -349,6 +348,17 @@ async fn perform_atspi(
         .ok_or(DesktopError::ElementNotFound)?;
     if !node.enabled || !node.actions.contains(&kind) {
         return Err(DesktopError::NotActionable);
+    }
+
+    if kind == ActionKind::PressKeys {
+        let keys = action.keys.as_deref().ok_or(DesktopError::NotActionable)?;
+        let (x11, _) = LinuxDesktop::new().x11()?;
+        if !xtest_available(&x11) {
+            return Err(DesktopError::Unsupported);
+        }
+        let window = u32::try_from(target.window).map_err(|_| DesktopError::TargetGone)?;
+        keyboard::press_keys(&x11, window, keys)?;
+        return Ok(Dispatched::WindowEvent);
     }
 
     if matches!(kind, ActionKind::Hover | ActionKind::Drag) {

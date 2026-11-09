@@ -466,10 +466,24 @@ The extended Ubuntu CI Xvfb/GTK/AT-SPI integration test passed on 2026-11-09
 (CI run `42572633985`, job “Rust host-core format / lint / test”). It exercised
 XTEST availability, advertised actions, GTK-observed hover state, GTK-observed
 drag state, and the existing AT-SPI click. Local Linux-target `cargo check` and
-`cargo check --tests` also passed. The rest of that CI run was still in progress
-when this evidence was recorded; its JS architecture-budget check had failed
-because the added Linux backend code pushed `linux.rs` over the 1,000-LOC
-architecture limit. The test module has since been split into
-`backend/linux/tests.rs` so the product module remains below the limit; the
-follow-up CI run must confirm the complete gate. Wayland and other platforms
-remain out of scope for this batch.
+`cargo check --tests` also passed. A follow-up change split the test module into
+`backend/linux/tests.rs` to keep the Linux backend below the 1,000-LOC
+architecture limit; the resulting full CI run `42573461147` passed all jobs,
+including architecture budgets and the GTK/Xvfb integration. Wayland and other
+platforms remain out of scope for this batch.
+
+## Linux X11 keyboard chords — in validation
+
+The Linux X11 backend now has an XTEST `press_keys` implementation for the
+documented ASCII key names and `ctrl` / `shift` / `alt` chords. It resolves
+keysyms through the active X server keyboard map, sends key-down/up events, and
+refuses to type unless the current X11 input focus is the bound target or one
+of its descendants. This is a focus guard, not a focus-stealing fallback.
+Non-ASCII literal text should continue to use `type_text` through AT-SPI.
+
+The GTK/Xvfb fixture now includes a text entry. Its integration test verifies
+that an ordinary key and a `ctrl+a` + replacement sequence change the actual
+entry value, and that sending a key after focus moves outside the bound window
+is rejected. Cross-target `cargo check --tests` passes locally; the Ubuntu
+GTK/Xvfb runtime test is pending on the current commit. Do not treat this new
+keyboard path as runtime-accepted until that CI step passes.
