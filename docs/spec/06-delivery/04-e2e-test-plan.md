@@ -20258,11 +20258,15 @@ their separate platform acceptance.
   cancellation, and grant cleanup. Host policy/backend state transitions are
   covered by the Rust tests. Pixel-source matching and model forwarding are
   covered by `agent-tool.test.ts`, while stale cursor-event ownership is covered
-  by `computer-cursor-state.test.ts`; this does not replace packaged-app
-  acceptance.
+  by `computer-cursor-state.test.ts`. The packaged
+  `pnpm test:e2e:computer-use-packaged` path additionally verifies the exact
+  target switch, a fixture-owned click-handler marker readback before Stop,
+  window-scoped image delivery, the visible status/overlay, cancellation,
+  grant revocation, and widget cleanup.
 - **Status:** Renderer and Main/Agent/Host-RPC lifecycle paths are automated;
-  Windows UIA fixture acceptance passed locally. Full packaged-app acceptance
-  remains pending.
+  the unpacked Windows app passed packaged action-readback and Stop/overlay
+  acceptance with a local fake provider. Live external-provider behavior,
+  multi-display/DPI hardware, and human visual acceptance remain open.
 
 ### E2E-COMPUTER-use-configurable-application-restrictions-v1
 

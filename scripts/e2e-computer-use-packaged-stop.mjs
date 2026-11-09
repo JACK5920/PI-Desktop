@@ -13,6 +13,7 @@ const dataDir = join(runDir, 'data');
 const title = `PI-CU-STOP-${randomUUID()}`;
 const fixturePath = join(runDir, 'fixture.ps1');
 const statePath = join(runDir, 'state.txt');
+const clickedStatePath = join(runDir, 'clicked.txt');
 const exe = join(root, 'apps/desktop/release/win-unpacked/PI-Desktop.exe');
 const debugPort = await reservePort();
 if (!existsSync(exe)) throw new Error(`Packaged app missing: ${exe}; build it first.`);
@@ -21,7 +22,7 @@ let app, fixtureProc, server, sockets = [];
 let mainRequests = 0, computerRequests = 0, computerImages = 0, switchReplies = 0, finalReplies = 0;
 let stalled = false;
 let aborted = false;
-let fixtureClicked = false;
+let clickReplyIssued = false;
 const endpointReady = new Promise((resolve, reject) => {
   server = createServer(async (req, res) => {
     let body;
@@ -41,11 +42,11 @@ const endpointReady = new Promise((resolve, reject) => {
         if (!window) { res.writeHead(500).end('fixture window id missing'); return; }
         switchReplies++;
         delta={role:'assistant',content:JSON.stringify({kind:'switch',window,note:'Select isolated fixture window'})}; finish='stop';
-      } else if (!fixtureClicked) {
+      } else if (!clickReplyIssued) {
         const actionLine=text.split(/\r?\n/).find((line)=>line.includes('CU-STOP-ACTION')&&line.includes('uid='));
         const uid=actionLine?.match(/\buid=([^\s·]+)/)?.[1];
         if(!uid){res.writeHead(500).end('isolated fixture action UID missing');return;}
-        fixtureClicked=true;
+        clickReplyIssued=true;
         delta={role:'assistant',content:JSON.stringify({kind:'action',action:{kind:'click',uid}})};finish='stop';
       } else {
         res.on('close', () => { aborted=true; });
@@ -87,7 +88,8 @@ async function invoke(c,name,input) { const channel=await c.eval(`window.piDeskt
 try {
   await mkdir(runDir,{recursive:true});
   const safeStatePath=statePath.replaceAll("'","''");
-  await writeFile(fixturePath,`Add-Type -AssemblyName System.Windows.Forms\n$screen=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds;$w=[Math]::Min(1000,$screen.Width);$h=[Math]::Min(700,$screen.Height)\n$form=New-Object System.Windows.Forms.Form;$form.Text='${title}';$form.FormBorderStyle='None';$form.StartPosition='Manual';$form.Location=New-Object System.Drawing.Point -ArgumentList $screen.X,$screen.Y;$form.Size=New-Object System.Drawing.Size -ArgumentList $w,$h;$form.BackColor=[System.Drawing.Color]::FromArgb(0,175,95);$form.TopMost=$false\n[IO.File]::WriteAllText('${safeStatePath}',($screen.X.ToString()+','+$screen.Y.ToString()+','+$w.ToString()+','+$h.ToString()))\n$label=New-Object System.Windows.Forms.Label;$label.Text='Isolated stop test';$label.Location=New-Object System.Drawing.Point(30,30);$label.AutoSize=$true\n$button=New-Object System.Windows.Forms.Button;$button.AccessibleName='CU-STOP-ACTION';$button.Text='Test target';$button.Location=New-Object System.Drawing.Point(30,70);$button.add_Click({$label.Text='CU-STOP-CLICKED'})\n$form.Controls.Add($label);$form.Controls.Add($button);[System.Windows.Forms.Application]::Run($form)`);
+  const safeClickedStatePath=clickedStatePath.replaceAll("'","''");
+  await writeFile(fixturePath,`Add-Type -AssemblyName System.Windows.Forms\n$screen=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds;$w=[Math]::Min(1000,$screen.Width);$h=[Math]::Min(700,$screen.Height)\n$form=New-Object System.Windows.Forms.Form;$form.Text='${title}';$form.FormBorderStyle='None';$form.StartPosition='Manual';$form.Location=New-Object System.Drawing.Point -ArgumentList $screen.X,$screen.Y;$form.Size=New-Object System.Drawing.Size -ArgumentList $w,$h;$form.BackColor=[System.Drawing.Color]::FromArgb(0,175,95);$form.TopMost=$false\n[IO.File]::WriteAllText('${safeStatePath}',($screen.X.ToString()+','+$screen.Y.ToString()+','+$w.ToString()+','+$h.ToString()))\n$label=New-Object System.Windows.Forms.Label;$label.Text='Isolated stop test';$label.Location=New-Object System.Drawing.Point(30,30);$label.AutoSize=$true\n$button=New-Object System.Windows.Forms.Button;$button.AccessibleName='CU-STOP-ACTION';$button.Text='Test target';$button.Location=New-Object System.Drawing.Point(30,70);$button.add_Click({$label.Text='CU-STOP-CLICKED';[IO.File]::WriteAllText('${safeClickedStatePath}','clicked')})\n$form.Controls.Add($label);$form.Controls.Add($button);[System.Windows.Forms.Application]::Run($form)`);
   fixtureProc=spawn('powershell.exe',['-NoProfile','-STA','-ExecutionPolicy','Bypass','-File',fixturePath],{stdio:'ignore'}); await sleep(900);
   app=spawn(exe,[`--user-data-dir=${profile}`,`--remote-debugging-port=${debugPort}`],{env:{...process.env,PI_DESKTOP_DATA_DIR:dataDir,NO_PROXY:'127.0.0.1,localhost',no_proxy:'127.0.0.1,localhost'},stdio:'ignore'});
   const mainTarget=await waitFor(async()=> (await getTargets()).find((target)=>target.type==='page' && target.url.includes('/renderer/index.html') && !target.url.includes('surface=')), 'main renderer');
@@ -102,6 +104,8 @@ try {
   assert.equal(activate.status,0,'could not make the PI app the initial foreground window');
   await invoke(main,'agentPrompt',{sessionId:session.session.id,content:`Select the isolated test window ${title}; keep waiting for the next instruction.`,messageId:randomUUID(),viewingSessionId:session.session.id,permissionMode:'auto'});
   await waitFor(()=>Promise.resolve(stalled ? true : null), 'Computer model stall');
+  const fixtureState=await waitFor(async()=>{try{return (await readFile(clickedStatePath,'utf8')).trim()==='clicked'?'clicked':null;}catch{return null;}},'native fixture click postcondition',5000);
+  assert.equal(fixtureState,'clicked','Host dispatch must cause the fixture button handler to run before Stop is tested');
   const targets=await waitFor(async()=>{const current=await getTargets();return current.some((target)=>target.type==='page'&&target.url.includes('surface=computer-use-widget'))&&current.some((target)=>target.type==='page'&&target.url.includes('surface=computer-use-cursor'))?current:null;},'widget and cursor surfaces');
   const widgetTarget=targets.find((target)=>target.type==='page'&&target.url.includes('surface=computer-use-widget'));
   const cursorTarget=targets.find((target)=>target.type==='page'&&target.url.includes('surface=computer-use-cursor'));
@@ -134,8 +138,8 @@ try {
   await waitFor(()=>Promise.resolve(aborted ? true : null), 'aborted Computer model request',10000);
   await waitFor(async()=>{try{const result=await invoke(main,'computerGrantDescribe');return result.grant===null;}catch{return false;}},'revoked Host grant',10000);
   const widgetAfterStop=await waitFor(async()=>{const v=await widget.eval(`(()=>({stop:!!document.querySelector('.computer-use-widget-stop'),text:document.body.innerText}))()`);return v&&!v.stop&&!v.text.includes(title)?v:null;},'status widget cleared after Stop',10000);
-  assert.equal(switchReplies,1); assert(computerImages>=2); assert(fixtureClicked); assert.equal(finalReplies,0); assert(aborted);
-  console.log('PACKAGED STOP/CURSOR E2E PASS',JSON.stringify({switchReplies,computerRequests,computerImages,widgetVisible:widgetState.text.includes(title),stopEnabled:!widgetState.disabled,widgetCleared:!widgetAfterStop.stop&&!widgetAfterStop.text.includes(title),cursorBorder:cursorState.border,cursorEdgeGlow:cursorState.boxShadow.includes('96px')||cursorState.boxShadow.includes('160px'),desktopComposite,aborted,finalReplies,screenshotsSaved:0}));
+  assert.equal(switchReplies,1); assert(computerImages>=2); assert(clickReplyIssued); assert.equal(finalReplies,0); assert(aborted);
+  console.log('PACKAGED STOP/CURSOR E2E PASS',JSON.stringify({switchReplies,computerRequests,computerImages,fixtureStateConfirmed:fixtureState==='clicked',widgetVisible:widgetState.text.includes(title),stopEnabled:!widgetState.disabled,widgetCleared:!widgetAfterStop.stop&&!widgetAfterStop.text.includes(title),cursorBorder:cursorState.border,cursorEdgeGlow:cursorState.boxShadow.includes('96px')||cursorState.boxShadow.includes('160px'),desktopComposite,aborted,finalReplies,screenshotsSaved:0}));
 } catch(error) { console.error('PACKAGED STOP/CURSOR E2E FAIL',JSON.stringify({mainRequests,computerRequests,computerImages,switchReplies,finalReplies,aborted,error:String(error)})); throw error; }
 finally {
   for(const ws of sockets)try{ws.close()}catch{}

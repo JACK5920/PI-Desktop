@@ -421,9 +421,29 @@ A full current-checkout Windows Host Core run completed on 2026-11-09: `cargo te
 
 Added a repeatable Windows-only test at `scripts/e2e-computer-use-packaged-stop.mjs`, exposed as `pnpm test:e2e:computer-use-packaged`. It requires the unpacked Release app to exist, uses a local fake provider endpoint plus a throwaway profile and WinForms fixture under `.artifacts`, and removes the profile/data/fixture directory when finished. By default it does not capture a preview. Setting `PI_CU_E2E_CAPTURE_PREVIEW=1` streams a downscaled preview of the cursor renderer surface in memory through stdout; it does not write an image file and does not include the underlying desktop. Setting `PI_CU_E2E_VERIFY_DESKTOP_COMPOSITE=1` samples only two in-memory pixels (near the primary display edge and fixture center) and checks the foreground process ID; it outputs boolean pass/fail diagnostics and no pixel colors or screenshot data.
 
-The packaged Stop/overlay run passed twice with `PI_CU_E2E_VERIFY_DESKTOP_COMPOSITE=1`: the chat model selected the `Computer` tool; Computer switched using the observed exact fixture window ID and received pixel payloads; an observed fixture button was clicked to ensure the green fixture was foreground; the live status widget displayed the fixture target and an enabled Stop button; the cursor renderer surface loaded with the blue full-screen edge border/glow CSS; then the two-pixel composite check confirmed the fixture remained visible at the sampled center and the blue edge effect changed the sampled edge pixel. Clicking Stop aborted the pending Computer-model request, Host grant state became empty, and the widget cleared. The aborted run correctly produced no final chat-model response (`finalReplies=0`); cancellation stops the owning tool turn rather than inventing a completion message. No image was captured or saved; the output reported only booleans and `screenshotsSaved=0`.
+The packaged Stop/overlay run passed twice with `PI_CU_E2E_VERIFY_DESKTOP_COMPOSITE=1`: the chat model selected the `Computer` tool; Computer switched using the observed exact fixture window ID and received pixel payloads; an observed fixture button was clicked to ensure the green fixture was foreground; the fixture's own click handler wrote a marker which the harness read back before testing Stop; the live status widget displayed the fixture target and an enabled Stop button; the cursor renderer surface loaded with the blue full-screen edge border/glow CSS; then the two-pixel composite check confirmed the fixture remained visible at the sampled center and the blue edge effect changed the sampled edge pixel. Clicking Stop aborted the pending Computer-model request, Host grant state became empty, and the widget cleared. The aborted run correctly produced no final chat-model response (`finalReplies=0`); cancellation stops the owning tool turn rather than inventing a completion message. No image was captured or saved; the output reported only booleans and `screenshotsSaved=0`.
 
 This proves DOM/CSS/runtime wiring and Stop cancellation in the packaged Windows app, plus an automated pixel-level smoke check of the actual primary-display composite over a known isolated fixture. It does not establish how the effect looks to a human across the entire display, nor multi-display/scaling or graphics-driver behavior; those remain open. No screenshot image was written.
+
+## Packaged action postcondition readback — 2026-11-09
+
+The packaged Stop/overlay E2E no longer treats the deterministic model's
+planned click response as evidence that the click happened. The isolated
+WinForms fixture writes a separate marker only from its real button click
+handler, and the harness waits for and reads that marker before it presses
+Stop. This makes the test distinguish model intent, Host dispatch, and actual
+fixture state change while preserving the Stop/cancellation assertion.
+
+| Check | Result |
+|---|---|
+| Rebuilt unpacked Windows app | Passed: Electron package and release Host rebuilt from `main` head `db169474`; packaged Host binary matched `target/release/pi-desktop-host-core.exe`. |
+| `node scripts/e2e-computer-use-packaged-stop.mjs` | Passed: exact target switch, two window-scoped image payloads, fixture-owned click marker readback, live target widget and Stop, cursor overlay presence, request cancellation, Host grant revocation, widget cleanup, and `screenshotsSaved=0`. |
+| `node scripts/e2e-computer-use-agent-runtime.mjs` | Passed: three fresh grant cycles, six UIA actions, twelve Host inspections, separate conversation/Computer model routes, and fixture-owned final state `CU-RUNTIME-FIXTURE-CLICKED-3`. |
+| `node scripts/e2e-computer-use-protocol-matrix.mjs` | Passed 8/8: Chat Completions, Responses, Anthropic Messages, and Gemini; each in accessibility-only and pixel-capture mode. Each run completed three fixture state-change cycles; pixel mode delivered image payloads to the local fake endpoint and saved no screenshots. |
+| `cargo test -p host-core --locked` on Windows | Passed: 1,244 passed, 0 failed, 3 ignored. |
+
+These are deterministic local-model and isolated fixture checks, not proof that
+live external providers or arbitrary native applications behave identically.
 
 ## Windows overlay DPI coordinate normalization — 2026-11-09
 
