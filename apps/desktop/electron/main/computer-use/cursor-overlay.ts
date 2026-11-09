@@ -9,7 +9,7 @@ export type ComputerCursorOverlay = {
 };
 
 /** A click-through visual only; Host remains the sole authority for input. */
-export function createComputerCursorOverlay(): ComputerCursorOverlay {
+export function createComputerCursorOverlay(options: { windowsCoordinates?: boolean } = {}): ComputerCursorOverlay {
   let window: BrowserWindow | null = null;
   let displayBounds: ComputerRect | null = null;
   let activeGrant: string | null = null;
@@ -26,6 +26,20 @@ export function createComputerCursorOverlay(): ComputerCursorOverlay {
       return;
     }
     window.webContents.send(IPC.event.computerCursor, event);
+  };
+
+  // The Windows Host reports UIA/GetWindowRect coordinates in screen physical
+  // pixels, while Electron's screen API and BrowserWindow bounds are DIPs.
+  // Convert at this boundary so target matching, overlay placement, and the
+  // renderer cursor all use one coordinate space. Other backends keep their
+  // existing native coordinate contract.
+  const windowsCoordinates = options.windowsCoordinates ?? process.platform === "win32";
+  const toDipRect = (rect: ComputerRect): ComputerRect =>
+    windowsCoordinates ? screen.screenToDipRect(null, rect) : rect;
+  const toDipEvent = (event: ComputerCursorEvent): ComputerCursorEvent => {
+    if (!windowsCoordinates || event.kind === "show" || event.kind === "hide") return event;
+    const point = screen.screenToDipPoint({ x: event.x, y: event.y });
+    return { ...event, x: point.x, y: point.y };
   };
 
   ipcMain.handle(IPC.invoke.computerCursorReady, (event) => {
@@ -134,10 +148,10 @@ export function createComputerCursorOverlay(): ComputerCursorOverlay {
       }
       if (event.kind === "show") {
         activeGrant = event.grantId;
-        targetBounds = event.bounds;
-        const matchedDisplay = screen.getDisplayMatching(event.bounds);
+        targetBounds = toDipRect(event.bounds);
+        const matchedDisplay = screen.getDisplayMatching(targetBounds);
         displayBounds = matchedDisplay.bounds;
-        const displayEvent = { ...event, displayBounds };
+        const displayEvent = { ...event, bounds: targetBounds, displayBounds };
         latestEvent = displayEvent;
         void ensureWindow(displayBounds).then((created) => {
           if (!created || created.isDestroyed() || activeGrant !== event.grantId) return;
@@ -147,8 +161,9 @@ export function createComputerCursorOverlay(): ComputerCursorOverlay {
         return;
       }
       if (activeGrant !== event.grantId || !displayBounds) return;
-      latestEvent = event;
-      send(event);
+      const displayEvent = toDipEvent(event);
+      latestEvent = displayEvent;
+      send(displayEvent);
     },
     close() {
       activeGrant = null;

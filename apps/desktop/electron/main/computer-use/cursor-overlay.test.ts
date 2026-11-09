@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const electronFixture = vi.hoisted(() => ({
   displayBounds: { x: -1920, y: 0, width: 1920, height: 1080 },
+  physicalToDipPoint: (point: { x: number; y: number }) => point,
+  physicalToDipRect: (rect: { x: number; y: number; width: number; height: number }) => rect,
   targetBounds: null as unknown,
   options: null as unknown,
   readyHandler: null as ((event: { sender: unknown }) => unknown) | null,
@@ -61,6 +63,8 @@ vi.mock("electron", () => {
         electronFixture.targetBounds = bounds;
         return { bounds: electronFixture.displayBounds };
       }),
+      screenToDipPoint: vi.fn((point: { x: number; y: number }) => electronFixture.physicalToDipPoint(point)),
+      screenToDipRect: vi.fn((_window: null, rect: { x: number; y: number; width: number; height: number }) => electronFixture.physicalToDipRect(rect)),
     },
   };
 });
@@ -73,6 +77,8 @@ import { IPC } from "@pi-desktop/shared";
 describe("Computer cursor overlay display bounds", () => {
   beforeEach(() => {
     electronFixture.displayBounds = { x: -1920, y: 0, width: 1920, height: 1080 };
+    electronFixture.physicalToDipPoint = (point) => point;
+    electronFixture.physicalToDipRect = (rect) => rect;
     electronFixture.targetBounds = null;
     electronFixture.options = null;
     electronFixture.readyHandler = null;
@@ -114,6 +120,86 @@ describe("Computer cursor overlay display bounds", () => {
       expect.objectContaining({ kind: "show", grantId: "grant-1", bounds: targetBounds, displayBounds: electronFixture.displayBounds }),
     );
     expect(sender?.send).toHaveBeenCalledWith(IPC.event.computerCursor, latestMove);
+    overlay.close();
+  });
+
+  it.each([
+    {
+      name: "100% baseline display",
+      physicalBounds: { x: 0, y: 0, width: 1920, height: 1080 },
+      dipBounds: { x: 0, y: 0, width: 1920, height: 1080 },
+      scale: 1,
+      originX: 0,
+      originY: 0,
+      dipOriginX: 0,
+      dipOriginY: 0,
+      physicalPoint: { x: 960, y: 540 },
+      dipPoint: { x: 960, y: 540 },
+      display: { x: 0, y: 0, width: 1920, height: 1080 },
+    },
+    {
+      name: "125% primary display",
+      physicalBounds: { x: 0, y: 0, width: 2400, height: 1350 },
+      dipBounds: { x: 0, y: 0, width: 1920, height: 1080 },
+      scale: 1.25,
+      originX: 0,
+      originY: 0,
+      dipOriginX: 0,
+      dipOriginY: 0,
+      physicalPoint: { x: 1200, y: 675 },
+      dipPoint: { x: 960, y: 540 },
+      display: { x: 0, y: 0, width: 1920, height: 1080 },
+    },
+    {
+      name: "150% negative-origin secondary display",
+      physicalBounds: { x: -2880, y: 0, width: 2880, height: 1620 },
+      dipBounds: { x: -1920, y: 0, width: 1920, height: 1080 },
+      scale: 1.5,
+      originX: -2880,
+      originY: 0,
+      dipOriginX: -1920,
+      dipOriginY: 0,
+      physicalPoint: { x: -1440, y: 900 },
+      dipPoint: { x: -960, y: 600 },
+      display: { x: -1920, y: 0, width: 1920, height: 1080 },
+    },
+  ])("converts Host physical pixels to Electron DIPs on $name", async ({
+    physicalBounds,
+    dipBounds,
+    scale,
+    originX,
+    originY,
+    dipOriginX,
+    dipOriginY,
+    physicalPoint,
+    dipPoint,
+    display,
+  }) => {
+    electronFixture.displayBounds = display;
+    const pointToDip = (point: { x: number; y: number }) => ({
+      x: dipOriginX + (point.x - originX) / scale,
+      y: dipOriginY + (point.y - originY) / scale,
+    });
+    electronFixture.physicalToDipPoint = pointToDip;
+    electronFixture.physicalToDipRect = (rect) => {
+      const topLeft = pointToDip({ x: rect.x, y: rect.y });
+      const bottomRight = pointToDip({ x: rect.x + rect.width, y: rect.y + rect.height });
+      return { x: topLeft.x, y: topLeft.y, width: bottomRight.x - topLeft.x, height: bottomRight.y - topLeft.y };
+    };
+
+    const overlay = createComputerCursorOverlay({ windowsCoordinates: true });
+    overlay.apply({ kind: "show", grantId: "dpi-grant", bounds: physicalBounds });
+    overlay.apply({ kind: "move", grantId: "dpi-grant", ...physicalPoint });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(electronFixture.targetBounds).toEqual(dipBounds);
+    expect(electronFixture.window?.bounds).toEqual(display);
+    electronFixture.didFinishLoad?.();
+    expect(electronFixture.window?.webContents.send).toHaveBeenCalledWith(
+      IPC.event.computerCursor,
+      expect.objectContaining({ kind: "move", grantId: "dpi-grant", ...dipPoint }),
+    );
     overlay.close();
   });
 });

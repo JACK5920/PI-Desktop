@@ -31,6 +31,10 @@ use windows::Win32::UI::Accessibility::{
     UIA_ScrollPatternId, UIA_SelectionItemPatternId, UIA_SelectionPatternId, UIA_TogglePatternId,
     UIA_ValuePatternId,
 };
+use windows::Win32::UI::HiDpi::{
+    SetThreadDpiAwarenessContext, DPI_AWARENESS_CONTEXT, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE,
+    DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
     KEYEVENTF_UNICODE, VIRTUAL_KEY,
@@ -70,6 +74,7 @@ impl WindowsDesktop {
     }
 
     fn enumerate(&self) -> Result<Vec<RawTarget>, DesktopError> {
+        let _dpi_context = PerMonitorDpiContext::enter()?;
         let mut targets = Vec::new();
         let context = &mut targets as *mut Vec<RawTarget>;
         // SAFETY: the callback is synchronous; `context` points to the live
@@ -444,6 +449,7 @@ impl Desktop for WindowsDesktop {
     }
 
     fn resolve_target(&self, target_id: &str) -> Result<Option<RawTarget>, DesktopError> {
+        let _dpi_context = PerMonitorDpiContext::enter()?;
         let mut parts = target_id.splitn(3, ':');
         let (Some(pid_text), Some(hwnd_text), Some(expected_app_key)) =
             (parts.next(), parts.next(), parts.next())
@@ -473,6 +479,7 @@ impl Desktop for WindowsDesktop {
     }
 
     fn measure(&self, target: &TargetRef) -> Result<Measured, DesktopError> {
+        let _dpi_context = PerMonitorDpiContext::enter()?;
         let hwnd = self.bound_window(target)?;
         let mut rect = RECT::default();
         // SAFETY: `hwnd` has just been revalidated against the enumerated PID
@@ -505,6 +512,7 @@ impl Desktop for WindowsDesktop {
         if !allow_sensitive_input && self.secure_input_active() {
             return Err(DesktopError::SecureInputRefused);
         }
+        let _dpi_context = PerMonitorDpiContext::enter()?;
         let (_apartment, automation) = self.automation()?;
         let (bounds, array) = self.elements(&automation, target)?;
         let count = unsafe { array.Length() }.map_err(map_uia_error)?.max(0) as usize;
@@ -522,6 +530,9 @@ impl Desktop for WindowsDesktop {
     }
 
     fn secure_input_active(&self) -> bool {
+        let Ok(_dpi_context) = PerMonitorDpiContext::enter() else {
+            return true;
+        };
         if secure_desktop_is_active(input_desktop_name().as_deref()) {
             return true;
         }
@@ -557,6 +568,7 @@ impl Desktop for WindowsDesktop {
         if !allow_sensitive_input && self.secure_input_active() {
             return Err(DesktopError::SecureInputRefused);
         }
+        let _dpi_context = PerMonitorDpiContext::enter()?;
         let (_apartment, automation) = self.automation()?;
         let element = self.target_element_for_action(
             &automation,
@@ -835,6 +847,39 @@ impl Desktop for WindowsDesktop {
             }
         }
         Ok(Dispatched::AccessibilityAction)
+    }
+}
+
+/// Keep native Window/UIA coordinates in physical screen pixels even when the
+/// Host executable itself has no DPI manifest. The previous worker-thread
+/// context is restored before returning to unrelated Host work.
+struct PerMonitorDpiContext(DPI_AWARENESS_CONTEXT);
+
+impl PerMonitorDpiContext {
+    fn enter() -> Result<Self, DesktopError> {
+        let previous =
+            unsafe { SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) };
+        if !previous.is_invalid() {
+            return Ok(Self(previous));
+        }
+
+        // Windows 10 1607 supports per-monitor v1 even where v2 is absent.
+        let previous =
+            unsafe { SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE) };
+        if !previous.is_invalid() {
+            return Ok(Self(previous));
+        }
+        Err(DesktopError::Failed(
+            "could not establish per-monitor DPI awareness for Computer Use".into(),
+        ))
+    }
+}
+
+impl Drop for PerMonitorDpiContext {
+    fn drop(&mut self) {
+        // SAFETY: the saved context was returned by SetThreadDpiAwarenessContext
+        // on this same thread and remains valid for restoring its prior state.
+        unsafe { SetThreadDpiAwarenessContext(self.0) };
     }
 }
 
@@ -1671,6 +1716,26 @@ fn map_uia_error(_error: impl std::fmt::Debug) -> DesktopError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use windows::Win32::UI::HiDpi::{
+        AreDpiAwarenessContextsEqual, GetAwarenessFromDpiAwarenessContext,
+        GetThreadDpiAwarenessContext, DPI_AWARENESS_PER_MONITOR_AWARE,
+    };
+
+    #[test]
+    fn computer_operations_use_per_monitor_dpi_and_restore_the_worker_context() {
+        let original = unsafe { GetThreadDpiAwarenessContext() };
+        {
+            let _context = PerMonitorDpiContext::enter()
+                .expect("Windows should support per-monitor DPI awareness");
+            let current = unsafe { GetThreadDpiAwarenessContext() };
+            assert_eq!(
+                unsafe { GetAwarenessFromDpiAwarenessContext(current) },
+                DPI_AWARENESS_PER_MONITOR_AWARE
+            );
+        }
+        let restored = unsafe { GetThreadDpiAwarenessContext() };
+        assert!(unsafe { AreDpiAwarenessContextsEqual(original, restored) }.as_bool());
+    }
 
     #[test]
     fn parses_only_window_scoped_key_chords() {

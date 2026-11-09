@@ -382,7 +382,8 @@ and its remaining scope.
 ## Remaining acceptance
 
 - The automated primary-display composite smoke check below passed twice; still
-  perform human visual QA and test multi-display/DPI placement. Do not persist
+  perform human visual QA and test multi-display/DPI placement on suitable
+  hardware. Simulated DPI-coordinate coverage is recorded below. Do not persist
   desktop screenshots.
 - Keep the native Windows fixture opt-in because it opens a visible window.
 - Add macOS device acceptance before claiming macOS runtime support; Linux/X11 CI evidence does not establish Wayland or arbitrary-toolkit coverage.
@@ -420,3 +421,32 @@ Added a repeatable Windows-only test at `scripts/e2e-computer-use-packaged-stop.
 The packaged Stop/overlay run passed twice with `PI_CU_E2E_VERIFY_DESKTOP_COMPOSITE=1`: the chat model selected the `Computer` tool; Computer switched using the observed exact fixture window ID and received pixel payloads; an observed fixture button was clicked to ensure the green fixture was foreground; the live status widget displayed the fixture target and an enabled Stop button; the cursor renderer surface loaded with the blue full-screen edge border/glow CSS; then the two-pixel composite check confirmed the fixture remained visible at the sampled center and the blue edge effect changed the sampled edge pixel. Clicking Stop aborted the pending Computer-model request, Host grant state became empty, and the widget cleared. The aborted run correctly produced no final chat-model response (`finalReplies=0`); cancellation stops the owning tool turn rather than inventing a completion message. No image was captured or saved; the output reported only booleans and `screenshotsSaved=0`.
 
 This proves DOM/CSS/runtime wiring and Stop cancellation in the packaged Windows app, plus an automated pixel-level smoke check of the actual primary-display composite over a known isolated fixture. It does not establish how the effect looks to a human across the entire display, nor multi-display/scaling or graphics-driver behavior; those remain open. No screenshot image was written.
+
+## Windows overlay DPI coordinate normalization — 2026-11-09
+
+The Windows Host supplies screen coordinates from native window/UIA geometry,
+while Electron positions the click-through overlay and renderer cursor in DIPs.
+Computer Host operations now temporarily use Per-Monitor V2 DPI awareness
+(falling back to Per-Monitor V1) and restore the worker thread's original DPI
+context when the operation ends. This makes `GetWindowRect` measurements
+consistent with UIA physical-screen geometry even though the Host executable
+does not provide a DPI manifest. At the Electron boundary, the Host target
+rectangle is converted with `screen.screenToDipRect` before display matching,
+and Host cursor points are converted with `screen.screenToDipPoint` before
+renderer delivery. Non-Windows backends retain their existing coordinate
+contract; Host input/target coordinates remain physical screen pixels.
+
+| Check | Result |
+|---|---|
+| `cursor-overlay.test.ts` | Passed 5/5: baseline 100%, simulated 125% primary display, simulated 150% negative-origin secondary display, full-monitor overlay bounds, and renderer state replay. |
+| Host DPI awareness unit test | Passed: native thread context became Per-Monitor aware and was restored exactly after scope exit. |
+| Full Windows Host Core suite | Passed: `cargo test --locked -p host-core` — 1,243 passed, 0 failed, 3 ignored. |
+| Native Windows Host fixture | Passed: isolated UIA action/readback fixture and 160 target-binding trials (50 fresh, 50 two-window churn, 60 after grant cycles); zero mismatches or recovery failures. |
+| Agent Runtime + Host pixel E2E | Passed on the current checkout: 3 isolated grant cycles, 6 UIA actions, 9 post-action decisions/observations, 9 PNG payloads sent only to the local fake image-capable model endpoint; the fixture confirmed all three state changes. No screenshot was saved. |
+| Development Host binary | Passed: `cargo build --locked -p host-core`. |
+| Desktop TypeScript check | Passed: `tsc -p apps/desktop/tsconfig.json --noEmit`. |
+| Electron Vite desktop build | Passed: main, preload, and renderer bundles built. |
+| Physical display environment | This machine has one 1920×1080 monitor at 96 DPI. No physical mixed-DPI or multi-monitor acceptance was possible in this run; the 125%/150% tests exercise simulated Electron conversions, not real display hardware. |
+
+The physical multi-monitor/DPI and human visual checks remain open; this change
+does not claim those hardware cases are accepted.
