@@ -23,7 +23,7 @@ const XK_PAGE_DOWN: u32 = 0xff56;
 const XK_END: u32 = 0xff57;
 const XK_DELETE: u32 = 0xffff;
 const XK_SHIFT_L: u32 = 0xffe1;
-const XK_CONTROL_L: u32 = 0xffe3;
+pub(super) const XK_CONTROL_L: u32 = 0xffe3;
 const XK_ALT_L: u32 = 0xffe9;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -194,6 +194,13 @@ fn keyboard_mapping(connection: &RustConnection) -> Result<HashMap<u32, KeyStrok
         }
     }
     Ok(keymap)
+}
+
+pub(super) fn supports_keysym(
+    connection: &RustConnection,
+    wanted: u32,
+) -> Result<bool, DesktopError> {
+    Ok(keyboard_mapping(connection)?.contains_key(&wanted))
 }
 
 fn lookup_key(keymap: &HashMap<u32, KeyStroke>, wanted: u32) -> Result<KeyStroke, DesktopError> {

@@ -237,6 +237,26 @@ fn linux_backend_drives_gtk_fixture_through_atspi() {
         .expect("focus the GTK key target");
     fake_pointer_input(&x11, root, BUTTON_RELEASE_EVENT, 1, key_x, key_y)
         .expect("release the GTK key target click");
+    let focused = x11
+        .get_input_focus()
+        .expect("query X11 input focus after focusing the entry")
+        .reply()
+        .expect("read X11 input focus")
+        .focus;
+    let target_window = u32::try_from(target.target.window).expect("fixture window fits X11 ID");
+    assert!(
+        is_descendant_window(&x11, focused, target_window),
+        "the GTK key target should own X11 focus before sending keys (focus={focused:#x}, target={target_window:#x})"
+    );
+    assert!(
+        keyboard::supports_keysym(&x11, u32::from(b'x')).expect("read X11 keymap for x"),
+        "X11 keymap maps x"
+    );
+    assert!(
+        keyboard::supports_keysym(&x11, keyboard::XK_CONTROL_L)
+            .expect("read X11 keymap for Control_L"),
+        "X11 keymap maps the left control modifier"
+    );
 
     desktop
         .perform(
