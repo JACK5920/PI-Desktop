@@ -3205,6 +3205,7 @@ sklm: {
       "observed-change": "Cambió el estado de UIA",
       "observed-no-change": "No se detectó ningún cambio en UIA",
       "model-confirmed": "El modelo confirmó con evidencia UIA actual",
+      "unverified-by-design": "Autodeclarado: el árbol de accesibilidad no puede expresar este resultado",
       "unverified": "Sin verificar",
       "refused": "Rechazado"
     },

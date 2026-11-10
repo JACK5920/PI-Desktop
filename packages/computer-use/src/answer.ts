@@ -38,14 +38,43 @@ export type LoopAnswer =
 
 export type AnswerParse =
   | { ok: true; answer: LoopAnswer }
-  | { ok: false; reason: string };
+  /**
+   * `shape` is a value-free description of what the model actually sent, so a
+   * refusal is diagnosable later without storing model prose or screen content.
+   * It names keys and primitive types only — never a string's contents.
+   */
+  | { ok: false; reason: string; shape?: string };
 
 const MAX_NOTE_CHARS = 300;
 const MAX_SUMMARY_CHARS = 1_000;
 const MAX_QUESTION_CHARS = 300;
 
-function reject(reason: string): AnswerParse {
-  return { ok: false, reason };
+/**
+ * Describe a model reply without quoting it.
+ *
+ * A refusal that says only "unknown answer kind" cannot be acted on: it does not
+ * distinguish a typo in `kind` from a completely different schema. But the reply
+ * is model prose about the user's screen, so the contents must never reach a log.
+ * Keys and primitive types are the part that is safe and useful.
+ */
+function describeShape(value: unknown): string {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return `array(${value.length})`;
+  if (typeof value !== "object") return typeof value;
+  const entries = Object.entries(value as Record<string, unknown>)
+    .slice(0, 12)
+    .map(([key, item]) => {
+      const boundedKey = key.slice(0, 32);
+      if (Array.isArray(item)) return `${boundedKey}:array(${item.length})`;
+      if (item && typeof item === "object") return `${boundedKey}:object`;
+      return `${boundedKey}:${typeof item}`;
+    });
+  return `{${entries.join(",")}}`;
+}
+
+function reject(reason: string, value?: unknown): AnswerParse {
+  const shape = value === undefined ? undefined : describeShape(value);
+  return shape === undefined ? { ok: false, reason } : { ok: false, reason, shape };
 }
 
 /**
@@ -92,7 +121,7 @@ export function parseLoopAnswer(text: string): AnswerParse {
   const kind = value.kind;
   if (kind === "done") {
     const summary = boundedString(value.summary, MAX_SUMMARY_CHARS);
-    if (!summary) return reject("done without a summary");
+    if (!summary) return reject("done without a summary", value);
     const evidenceRaw = value.evidence === undefined ? [] : value.evidence;
     if (!Array.isArray(evidenceRaw) || evidenceRaw.length > 8) return reject("malformed completion evidence");
     const evidence: string[] = [];
@@ -106,24 +135,24 @@ export function parseLoopAnswer(text: string): AnswerParse {
     const note = value.note === undefined ? undefined : boundedString(value.note, MAX_NOTE_CHARS);
     if (value.note !== undefined && !note) return reject("malformed note");
     if (Object.keys(value).some((key) => !["kind", "summary", "note", "evidence"].includes(key))) {
-      return reject("done with unexpected fields");
+      return reject("done with unexpected fields", value);
     }
     return { ok: true, answer: { kind: "done", summary, evidence } };
   }
   if (kind === "ask") {
     const question = boundedString(value.question, MAX_QUESTION_CHARS);
-    if (!question) return reject("ask without a question");
+    if (!question) return reject("ask without a question", value);
     if (Object.keys(value).some((key) => !["kind", "question"].includes(key))) {
-      return reject("ask with unexpected fields");
+      return reject("ask with unexpected fields", value);
     }
     return { ok: true, answer: { kind: "ask", question } };
   }
   if (kind === "switch") {
     if (Object.keys(value).some((key) => !["kind", "window", "note"].includes(key))) {
-      return reject("switch with unexpected fields");
+      return reject("switch with unexpected fields", value);
     }
     const window = boundedString(value.window, 256);
-    if (!window) return reject("switch without a window");
+    if (!window) return reject("switch without a window", value);
     const switchNote = value.note === undefined ? undefined : boundedString(value.note, MAX_NOTE_CHARS);
     if (value.note !== undefined && !switchNote) return reject("malformed note");
     return {
@@ -131,21 +160,21 @@ export function parseLoopAnswer(text: string): AnswerParse {
       answer: switchNote ? { kind: "switch", window, note: switchNote } : { kind: "switch", window },
     };
   }
-  if (kind !== "action") return reject("unknown answer kind");
+  if (kind !== "action") return reject("unknown answer kind", value);
 
   if (Object.keys(value).some((key) => !["kind", "action", "note"].includes(key))) {
-    return reject("action with unexpected fields");
+    return reject("action with unexpected fields", value);
   }
   const raw = value.action;
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return reject("action without a body");
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return reject("action without a body", value);
   const body = raw as Record<string, unknown>;
   const allowed = ["kind", "uid", "point", "to", "text", "keys", "scroll", "option"];
   if (Object.keys(body).some((key) => !allowed.includes(key))) {
-    return reject("action body with unexpected fields");
+    return reject("action body with unexpected fields", raw);
   }
   const actionKind = body.kind;
   if (typeof actionKind !== "string" || !COMPUTER_ACTION_KINDS.includes(actionKind as ComputerActionKind)) {
-    return reject("unknown action kind");
+    return reject("unknown action kind", raw);
   }
   const action: ComputerAction = { kind: actionKind as ComputerActionKind };
 

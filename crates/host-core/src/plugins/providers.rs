@@ -246,6 +246,32 @@ pub(crate) fn sync_plugin_providers(
 ) -> Result<usize> {
     let now = now_ms();
     let mut written = 0usize;
+
+    // Deletions run FIRST, before anything is written.
+    //
+    // The order matters more than it looks. A previous version deleted the rows
+    // this declaration no longer names *after* the write loop. The write loop
+    // can bail early — an id owned by another plugin, a row it does not own —
+    // and `reconcile_all` treats that failure as a warning so the plugin's
+    // enablement is never undone. The result was a half-applied sync: declared
+    // rows already removed, replacements never written.
+    //
+    // That is exactly how a bound provider vanished: `wtqpool-cn` sat first in
+    // the manifest, its row was deleted, and the crash on 2026-11-10 07:09:56
+    // (twelve plugin hosts exited with code 1) meant nothing was re-created.
+    //
+    // Deleting first means a bail leaves the table as it was plus nothing —
+    // never minus a row the caller still depends on.
+    let declared_rows: Vec<String> = declared
+        .iter()
+        .map(|provider| plugin_provider_row_id(plugin_id, &provider.id))
+        .collect();
+    for row_id in owned_provider_ids(db, plugin_id)? {
+        if !declared_rows.contains(&row_id) {
+            delete_provider_row(db, secrets, &row_id)?;
+        }
+    }
+
     for provider in declared {
         let row_id = plugin_provider_row_id(plugin_id, &provider.id);
         // A row already sitting on this id that another plugin — or the user —
@@ -378,15 +404,6 @@ pub(crate) fn sync_plugin_providers(
         }
         written += 1;
     }
-    let declared_rows: Vec<String> = declared
-        .iter()
-        .map(|provider| plugin_provider_row_id(plugin_id, &provider.id))
-        .collect();
-    for row_id in owned_provider_ids(db, plugin_id)? {
-        if !declared_rows.contains(&row_id) {
-            delete_provider_row(db, secrets, &row_id)?;
-        }
-    }
     Ok(written)
 }
 
@@ -483,11 +500,27 @@ pub(crate) fn reconcile_all(
                 continue;
             }
         };
+
+        // plugin host mid-restart still settling its rows, a transient SQLITE_BUSY
+        // — and the cost of not retrying is the failure mode this file was just
+        // fixed for: a declared row silently missing until the next launch.
+        // A second failure is reported, not swallowed.
         match sync_plugin_providers(db, secrets, &plugin.id, &declared, plugin.enabled) {
             Ok(count) => written += count,
-            Err(error) => {
-                tracing::warn!(plugin = %plugin.id, %error, "plugin provider sync failed");
-            }
+            Err(first) => match sync_plugin_providers(db, secrets, &plugin.id, &declared, plugin.enabled) {
+                Ok(count) => {
+                    tracing::info!(plugin = %plugin.id, %first, "plugin provider sync recovered on retry");
+                    written += count;
+                }
+                Err(second) => {
+                    tracing::warn!(
+                        plugin = %plugin.id,
+                        %first,
+                        %second,
+                        "plugin provider sync failed twice; its rows are unchanged"
+                    );
+                }
+            },
         }
     }
     // A plugin removed while the host was down — or an uninstall whose row

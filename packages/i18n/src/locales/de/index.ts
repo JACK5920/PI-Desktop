@@ -3207,6 +3207,7 @@ sklm: {
       "observed-change": "UIA-Status geändert",
       "observed-no-change": "Keine UIA-Statusänderung erkannt",
       "model-confirmed": "Vom Modell mit aktuellem UIA-Nachweis bestätigt",
+      "unverified-by-design": "Selbstberichtet: Der Bedienungshilfen-Baum kann dieses Ergebnis nicht ausdrücken",
       "unverified": "Nicht verifiziert",
       "refused": "Abgelehnt"
     },

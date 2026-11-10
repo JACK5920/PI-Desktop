@@ -389,6 +389,40 @@ describe("Computer local tool", () => {
     unsubscribe();
   });
 
+  it("returns self-reported no-change as unverified, not successful completion", async () => {
+    computerRuntime.runComputerLoop.mockImplementation(runBoundedComputerLoop);
+    computerRuntime.completeOneShot
+      .mockResolvedValueOnce({ text: '{"kind":"action","action":{"kind":"click","uid":"button-1"}}' })
+      .mockResolvedValueOnce({ text: '{"kind":"done","summary":"clicked","evidence":[]}' });
+    const { host, calls } = hostFixture();
+    const handler = createComputerUseTool({
+      getHost: () => host,
+      resolveProvider: async () => ({
+        id: "p", name: "Pinned", modelId: "m", apiKey: "fixture-only",
+        supportsReasoning: false, supportedThinkingLevels: ["off"],
+      }),
+    });
+    const activities: Array<{ phase?: string; verification?: string }> = [];
+    const unsubscribe = subscribeComputerUseActivity((activity) => {
+      if (activity) activities.push({ phase: activity.phase, verification: activity.verification });
+    });
+
+    const result = await handler({
+      sessionId: "session-1",
+      toolCallId: "tool-self-reported-no-change",
+      args: { instruction: "Click the fixture" },
+      signal: new AbortController().signal,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.content).toMatchObject({ outcome: "unverified", verification: "unverified-by-design" });
+    expect(calls.filter(({ method }) => method === "computer.act")).toHaveLength(1);
+    expect(calls.filter(({ method }) => method === "computer.inspect")).toHaveLength(3);
+    expect(calls.at(-1)?.method).toBe("computer.grantRevoke");
+    expect(activities).toContainEqual({ phase: "unverified", verification: "unverified-by-design" });
+    unsubscribe();
+  });
+
   it("fails closed when Computer Use is disabled without minting a grant", async () => {
     const { host, calls } = hostFixture(false);
     const handler = createComputerUseTool({ getHost: () => host, resolveProvider: vi.fn() });

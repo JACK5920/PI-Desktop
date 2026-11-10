@@ -20431,3 +20431,23 @@ permission-request UI below has isolated fixture automation.
   place. Native fixture execution still requires a macOS desktop with the Host
   Accessibility permission; Windows-side Apple-target type-checking is not a
   substitute for this runtime acceptance.
+
+### E2E-COMPUTER-use-unverified-completion-and-identity-v1
+
+- **Preconditions:** Isolated Computer Use loop with a disposable accessibility
+  fixture and a deterministic local model stub. Do not operate the user's live
+  desktop.
+- **Path:** Return fresh UIDs for the same uniquely identifiable control across
+  observations and verify valid completion evidence is accepted. Then present
+  two sibling controls with the same role and accessibility shape, cite one,
+  and verify the loop refuses to call it model-confirmed. Finally dispatch an
+  action whose post-observation is unchanged and return `done` without evidence.
+- **Expected:** Ambiguous sibling identity is not accepted as completion
+  evidence. The no-change/self-reported path stops further retries but returns
+  outcome `unverified`, verification `unverified-by-design`, a non-success
+  activity phase, and a non-success tool result; it is never presented as
+  ordinary `done` or verified completion. No action is replayed.
+- **Coverage:** `packages/computer-use/src/loop.test.ts`,
+  `apps/desktop/electron/main/computer-use/agent-tool.test.ts`, and the
+  Computer Use widget's verification-state rendering.
+- **Status:** Unit and isolated runtime regression coverage.

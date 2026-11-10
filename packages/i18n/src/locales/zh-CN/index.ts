@@ -3238,6 +3238,7 @@ sklm: {
       "observed-change": "检测到 UIA 状态变化",
       "observed-no-change": "未检测到 UIA 状态变化",
       "model-confirmed": "模型已引用当前 UIA 证据确认",
+      "unverified-by-design": "自述完成：辅助功能树无法表达该结果",
       unverified: "未验证",
       refused: "已拒绝",
     },

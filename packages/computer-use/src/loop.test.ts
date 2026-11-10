@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { renderHistory } from "./prompt.js";
 import type { ComputerAction, ComputerCursorEvent, ComputerGrantView, ComputerLoopActivity, ComputerNode } from "@pi-desktop/shared";
 
 import { runComputerLoop, type ComputerLoopDeps } from "./loop.js";
@@ -548,5 +549,297 @@ describe("runComputerLoop", () => {
     const result = await runComputerLoop({ instruction: "save" }, deps);
     expect(result.outcome).toBe("failed");
     expect(cursor[cursor.length - 1]?.kind).toBe("hide");
+  });
+
+  // -------------------------------------------------------------------------
+  // Regressions for the "churning uid" defect.
+  //
+  // These are the two tests whose absence let the bug ship. Every other test in
+  // this file stubs `observe` to return the same fixed uid (`0.1#ab`) forever,
+  // which is the OPPOSITE of what the cua backend does: it re-mints
+  // `{snapshot}:{row}` on every read. Under a fixed-uid stub both the change
+  // signal and the completion check look healthy, because uid equality happens
+  // to hold.
+  //
+  // So the stub below re-mints uids per tick and keeps `identity` stable, which
+  // is exactly the live wire shape.
+  // -------------------------------------------------------------------------
+  describe("with a uid that is re-minted on every observation", () => {
+    /** Same element, new uid each time — the cua backend's real behaviour. */
+    function churn(tick: number, nodes: Array<Omit<ComputerNode, "uid">>): Observation {
+      return observation(
+        nodes.map((node, i) => ({ ...node, uid: `s${String(tick).padStart(8, "0")}:${i}` })),
+      );
+    }
+
+    const saveByPath: Omit<ComputerNode, "uid"> = {
+      identity: "pane#0/button#0",
+      role: "button",
+      label: "Save",
+      hasValue: false,
+      enabled: true,
+      focused: false,
+      actions: ["click"],
+    };
+
+    it("reports observed-no-change when the tree is identical under new uids", async () => {
+      // A keystroke that changes nothing must read back as "no change". Before
+      // the fix the signature included `uid`, so two reads of an untouched
+      // window always differed and this outcome was unreachable.
+      let tick = 1;
+      const seen: string[] = [];
+      const h = harness(
+        [
+          '{"kind":"action","action":{"kind":"press_keys","keys":["cmd+a"],"uid":"PLACEHOLDER"}}',
+          '{"kind":"done","summary":"selected","evidence":[]}',
+        ],
+        { observe: () => churn(tick++, [saveByPath]) },
+      );
+      const deps: ComputerLoopDeps = {
+        ...h.deps,
+        observe: async () => {
+          const next = await h.deps.observe();
+          seen.push(next.inspection.nodes[0].uid);
+          return next;
+        },
+        decide: async () => {
+          const raw = (await h.deps.decide()) as string;
+          return raw.replaceAll("PLACEHOLDER", seen[seen.length - 1] ?? "");
+        },
+      };
+
+      const result = await runComputerLoop({ instruction: "select all", maxSteps: 3 }, deps);
+
+      expect(result.steps).toContainEqual(
+        expect.objectContaining({ action: "press_keys", verification: "observed-no-change" }),
+      );
+    });
+
+    it("accepts completion evidence whose uid was re-minted between the decision and the check", async () => {
+      // The model cites the uid it saw while deciding; the host re-reads before
+      // validating. Those are different uids for the same element, and before
+      // the fix the two uid sets never intersected — so `done` could not
+      // succeed at all on the cua backend.
+      let tick = 1;
+      const seen: string[] = [];
+      const h = harness(
+        [
+          '{"kind":"action","action":{"kind":"click","uid":"PLACEHOLDER"}}',
+          '{"kind":"done","summary":"saved","evidence":["PLACEHOLDER"]}',
+        ],
+        { observe: () => churn(tick++, [saveByPath]) },
+      );
+      const deps: ComputerLoopDeps = {
+        ...h.deps,
+        observe: async () => {
+          const next = await h.deps.observe();
+          seen.push(next.inspection.nodes[0].uid);
+          return next;
+        },
+        decide: async () => {
+          const raw = (await h.deps.decide()) as string;
+          return raw.replaceAll("PLACEHOLDER", seen[seen.length - 1] ?? "");
+        },
+      };
+
+      const result = await runComputerLoop({ instruction: "save", maxSteps: 4 }, deps);
+
+      expect(result.outcome).toBe("done");
+      expect(result.verification).toBe("model-confirmed");
+      expect(result.steps).toContainEqual(
+        expect.objectContaining({ action: "done", ok: true, verification: "model-confirmed" }),
+      );
+    });
+
+    it("refuses completion evidence when identical siblings make the ordinal identity ambiguous", async () => {
+      let tick = 1;
+      let latestUid = "";
+      const identicalSibling = { ...saveByPath, identity: "pane#0/button#1" };
+      const h = harness([], {
+        observe: () => churn(tick++, [saveByPath, identicalSibling]),
+      });
+      const deps: ComputerLoopDeps = {
+        ...h.deps,
+        observe: async () => {
+          const next = await h.deps.observe();
+          latestUid = next.inspection.nodes[0].uid;
+          return next;
+        },
+        decide: async () => JSON.stringify({
+          kind: "done",
+          summary: "saved",
+          evidence: [latestUid],
+        }),
+      };
+
+      const result = await runComputerLoop({ instruction: "save", maxSteps: 4 }, deps);
+
+      expect(result.outcome).toBe("unverified");
+      expect(result.verification).toBe("unverified");
+      expect(result.steps).not.toContainEqual(
+        expect.objectContaining({ action: "done", ok: true, verification: "model-confirmed" }),
+      );
+    });
+
+    it("rejects evidence whose element changed after the model last saw it", async () => {
+      // The fix must not turn the check into a rubber stamp. The model cites the
+      // uid it saw; by the time the host validates, that same element (same
+      // identity) has a different accessibility state. That is a refusal.
+      //
+      // The citation is pinned to the FIRST observation on purpose: the loop
+      // lets the model retry a rejected done against a fresh read, which would
+      // otherwise make this pass for the wrong reason.
+      let tick = 1;
+      let firstUid = "";
+      const h = harness(
+        [
+          '{"kind":"action","action":{"kind":"click","uid":"PLACEHOLDER"}}',
+          '{"kind":"done","summary":"saved","evidence":["PLACEHOLDER"]}',
+        ],
+        {
+          observe: () => {
+            // Enabled for the read the model acts from, disabled from then on.
+            const node = tick >= 2 ? { ...saveByPath, enabled: false } : saveByPath;
+            return churn(tick++, [node]);
+          },
+        },
+      );
+      const deps: ComputerLoopDeps = {
+        ...h.deps,
+        observe: async () => {
+          const next = await h.deps.observe();
+          if (firstUid === "") firstUid = next.inspection.nodes[0].uid;
+          return next;
+        },
+        decide: async () => {
+          const raw = (await h.deps.decide()) as string;
+          return raw.replaceAll("PLACEHOLDER", firstUid);
+        },
+      };
+
+      const result = await runComputerLoop({ instruction: "save", maxSteps: 2 }, deps);
+
+      expect(result.outcome).toBe("unverified");
+      expect(result.steps).toContainEqual(
+        expect.objectContaining({ action: "done", ok: false, verification: "unverified" }),
+      );
+    });
+
+    it("closes as self-reported when a dispatched action provably changed nothing", async () => {
+      // A selection, a scroll position, a key that changes nothing on screen:
+      // the tree genuinely did not move, so no citation can ever validate. The
+      // agent may close with an empty evidence list, and the loop labels the
+      // outcome as self-reported rather than pretending it was verified.
+      let tick = 1;
+      let firstUid = "";
+      const h = harness(
+        [
+          '{"kind":"action","action":{"kind":"press_keys","keys":["cmd+a"],"uid":"PLACEHOLDER"}}',
+          '{"kind":"done","summary":"selected all","evidence":[]}',
+        ],
+        { observe: () => churn(tick++, [saveByPath]) },
+      );
+      const deps: ComputerLoopDeps = {
+        ...h.deps,
+        observe: async () => {
+          const next = await h.deps.observe();
+          if (firstUid === "") firstUid = next.inspection.nodes[0].uid;
+          return next;
+        },
+        decide: async () => {
+          const raw = (await h.deps.decide()) as string;
+          return raw.replaceAll("PLACEHOLDER", firstUid);
+        },
+      };
+
+      const result = await runComputerLoop({ instruction: "select all", maxSteps: 4 }, deps);
+
+      expect(result.outcome).toBe("unverified");
+      expect(result.verification).toBe("unverified-by-design");
+      expect(result.steps).toContainEqual(
+        expect.objectContaining({ action: "press_keys", verification: "observed-no-change" }),
+      );
+      expect(result.steps).toContainEqual(
+        expect.objectContaining({ action: "done", ok: false, verification: "unverified-by-design" }),
+      );
+      expect(h.activity).toContainEqual(
+        expect.objectContaining({ phase: "unverified", verification: "unverified-by-design" }),
+      );
+    });
+
+    it("does not accept an empty evidence list when the tree did change", async () => {
+      // The escape hatch must stay narrow: if the read-back said the tree moved,
+      // there is something to cite, so an empty list is still a refusal.
+      let tick = 1;
+      let firstUid = "";
+      const h = harness(
+        [
+          '{"kind":"action","action":{"kind":"click","uid":"PLACEHOLDER"}}',
+          '{"kind":"done","summary":"saved","evidence":[]}',
+        ],
+        {
+          observe: () => {
+            // The label changes on every read, so the tree never looks still.
+            const node = { ...saveByPath, label: `Save ${tick}` };
+            return churn(tick++, [node]);
+          },
+        },
+      );
+      const deps: ComputerLoopDeps = {
+        ...h.deps,
+        observe: async () => {
+          const next = await h.deps.observe();
+          if (firstUid === "") firstUid = next.inspection.nodes[0].uid;
+          return next;
+        },
+        decide: async () => {
+          const raw = (await h.deps.decide()) as string;
+          return raw.replaceAll("PLACEHOLDER", firstUid);
+        },
+      };
+
+      const result = await runComputerLoop({ instruction: "save", maxSteps: 2 }, deps);
+
+      expect(result.steps).toContainEqual(
+        expect.objectContaining({ action: "done", ok: false, verification: "unverified" }),
+      );
+    });
+
+    it("tells the model it is repeating itself once the tree keeps not changing", () => {
+      // A real run sent `ctrl+a` five times and clicked a non-clickable field
+      // twice before hitting the step limit. The verification was honest; the
+      // model simply had no signal that repeating would not help.
+      const still = (index: number) => ({
+        index,
+        action: "press_keys" as const,
+        ok: true,
+        verification: "observed-no-change" as const,
+      });
+      const hint = "Do not keep repeating the same action";
+
+      // One no-change step is not enough to call it stuck.
+      expect(renderHistory([still(0)])).not.toContain(hint);
+      // Two consecutive ones are.
+      expect(renderHistory([still(0), still(1)])).toContain(hint);
+    });
+
+    it("does not call it stuck when the tree did change", () => {
+      // The hint must stay specific: a real change means progress, and saying
+      // "you are stuck" there would steer the model away from a working action.
+      const hint = "Do not keep repeating the same action";
+      const changed = {
+        index: 0,
+        action: "click" as const,
+        ok: true,
+        verification: "observed-change" as const,
+      };
+      const still = {
+        index: 1,
+        action: "press_keys" as const,
+        ok: true,
+        verification: "observed-no-change" as const,
+      };
+      expect(renderHistory([changed, still])).not.toContain(hint);
+    });
   });
 });

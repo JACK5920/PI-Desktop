@@ -22,6 +22,13 @@ import {
   type ComputerTarget,
 } from "@pi-desktop/shared";
 
+/**
+ * How many consecutive dispatched-with-no-change actions before the model is
+ * told it is repeating itself. Two is enough evidence that the interface is not
+ * responding, and early enough that the hint still has steps left to act on.
+ */
+const STUCK_AFTER_NO_CHANGE = 2;
+
 export type Observation = {
   grant: ComputerGrantView;
   inspection: ComputerInspection;
@@ -61,6 +68,8 @@ export const COMPUTER_LOOP_SYSTEM_PROMPT = [
   '{"kind":"done","summary":"what is now true","evidence":["<uid from the latest observation>"]}',
   '{"kind":"ask","question":"what you need from the user"}',
   "For `done`, return `kind`, `summary`, and `evidence`: one or more exact element UIDs copied from the latest observation that support the result. The loop checks every UID against that latest Host observation. Never cite an older observation, invent a UID, or claim completion without UIA evidence. If the interface has no relevant accessible evidence, use `ask` to explain that completion cannot be verified; a screenshot alone is not a structured verification.",
+  "",
+  "One exception: some results are real but invisible to UIA — a text selection, a scroll position, keyboard focus, a key that changes nothing on screen. When the previous step was dispatched and its read-back said the accessibility tree did not change, you may close with `done`, an empty `evidence` array, and a `summary` that states plainly which part the accessibility tree cannot show. The loop reports that outcome as self-reported, never as verified. Do not use this to skip a result the tree can show, and do not invent a UID to dress it up as evidence.",
   "",
   "Rules:",
   "- Address elements by `uid` from the element list. Use a point only when no element fits.",
@@ -141,7 +150,7 @@ export function renderObservation(observation: Observation): string {
 
 export function renderHistory(steps: readonly ComputerStepRecord[]): string {
   if (steps.length === 0) return "No steps have run yet.";
-  return steps
+  const lines = steps
     .map((step) => {
       const target = step.target ? ` on ${step.target}` : "";
       const verification = step.verification ? `; verification=${step.verification}` : "";
@@ -151,6 +160,35 @@ export function renderHistory(steps: readonly ComputerStepRecord[]): string {
         : `${step.index}. ${step.action}${target}: refused (${step.errorCode ?? "unknown"})${verification}`;
     })
     .join("\n");
+  const stuck = stuckHint(steps);
+  return stuck ? `${lines}\n\n${stuck}` : lines;
+}
+
+/**
+ * Tell the model when it is repeating itself against an interface that will
+ * never answer.
+ *
+ * A keystroke that changes nothing — a selection, a scroll at the end of a list,
+ * a key the target ignores — reads back as `observed-no-change` forever. Without
+ * a word at that point the model keeps trying variants until the step limit: a
+ * real run sent `ctrl+a` five times and also clicked a non-clickable field twice.
+ * Naming the situation is enough; the decision stays the model's.
+ */
+function stuckHint(steps: readonly ComputerStepRecord[]): string | undefined {
+  const dispatched = steps.filter(
+    (step) => step.ok && step.action !== "observe" && step.action !== "switch" && step.action !== "done" && step.action !== "ask",
+  );
+  if (dispatched.length < STUCK_AFTER_NO_CHANGE) return undefined;
+  const trailing = dispatched.slice(-STUCK_AFTER_NO_CHANGE);
+  if (!trailing.every((step) => step.verification === "observed-no-change")) return undefined;
+  return (
+    `The last ${STUCK_AFTER_NO_CHANGE} actions were dispatched and the accessibility tree ` +
+    "did not change after any of them. If the result you need is something UIA cannot " +
+    "express — a text selection, a scroll position, keyboard focus, a key the target " +
+    "ignores — close with `done`, an empty `evidence` array, and a summary that says " +
+    "plainly what cannot be shown. If instead you are unsure whether the target " +
+    "understood, use `ask`. Do not keep repeating the same action."
+  );
 }
 
 export function buildDecisionRequest(

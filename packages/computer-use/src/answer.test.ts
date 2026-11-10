@@ -124,6 +124,33 @@ describe("parseLoopAnswer", () => {
     });
   });
 
+  it("names the reply's shape without quoting its contents", () => {
+    // A refusal that says only "unknown answer kind" cannot be acted on: it does
+    // not separate a typo in `kind` from a wholly different schema. The shape is
+    // the diagnosable part, and it must carry keys and types only — the reply is
+    // model prose about the user's screen, so its contents never reach a record.
+    const rejected = parseLoopAnswer(
+      '{"kind":"shell","command":"rm -rf /","secret":"hunter2"}',
+    );
+    expect(rejected).toMatchObject({ ok: false, reason: "unknown answer kind" });
+    if (rejected.ok) throw new Error("unreachable");
+    expect(rejected.shape).toContain("kind:string");
+    expect(rejected.shape).toContain("command:string");
+    // The values themselves are absent.
+    expect(rejected.shape).not.toContain("rm -rf");
+    expect(rejected.shape).not.toContain("hunter2");
+    expect(rejected.shape).not.toContain("shell");
+  });
+
+  it("says nothing about shape when there was no object to describe", () => {
+    // "the model returned no JSON object" already explains itself; inventing a
+    // shape there would only add noise.
+    const rejected = parseLoopAnswer("I could not decide what to do.");
+    expect(rejected).toMatchObject({ ok: false });
+    if (rejected.ok) throw new Error("unreachable");
+    expect(rejected.shape).toBeUndefined();
+  });
+
   it("refuses fields the schema does not define, including a target or a basis", () => {
     for (const text of [
       '{"kind":"done","summary":"ok","extra":1}',

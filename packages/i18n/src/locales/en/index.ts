@@ -3305,6 +3305,7 @@ importConfirm: "Imported extensions run inside the agent process with the same a
       "observed-change": "UIA state changed",
       "observed-no-change": "No UIA state change detected",
       "model-confirmed": "Model confirmed with current UIA evidence",
+      "unverified-by-design": "Self-reported: the accessibility tree cannot express this result",
       unverified: "Unverified",
       refused: "Refused",
     },

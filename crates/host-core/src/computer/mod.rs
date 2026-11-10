@@ -382,6 +382,22 @@ pub struct Action {
 #[serde(rename_all = "camelCase")]
 pub struct Node {
     pub uid: String,
+    /// Identity that survives a new observation.
+    ///
+    /// `uid` is a dispatch handle: the cua backend mints `{snapshot}:{row}`, so
+    /// it changes every time the window is read. That is what makes the driver
+    /// refuse a stale handle, which is exactly what dispatch needs — but it also
+    /// means `uid` cannot answer "is this the same element as before". Anything
+    /// that compares two observations has to use this instead.
+    ///
+    /// Shape is a path of `role#ordinal` segments from the root, e.g.
+    /// `pane#0/edit#0`. It deliberately excludes the label: a label that changed
+    /// is usually the *evidence* that an action worked, not a different element.
+    ///
+    /// `Some` on every backend that can compute it. `None` means the caller must
+    /// fall back to `uid`, which is the pre-existing (unstable) behaviour.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub identity: Option<String>,
     pub role: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,

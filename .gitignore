@@ -54,6 +54,14 @@ coverage/
 .pi/
 .cc-connect/
 
+
+# Test scratch trees. Each is removed by its own teardown; these lines only
+# keep an interrupted run from polluting `git status`. They are also listed in
+# `electron.vite.config.ts` so the dev watcher never opens a live Chromium
+# profile — an EBUSY there takes the whole dev process down.
+.artifacts/
+apps/desktop/.isolated-launch-test-*/
+apps/desktop/.jev-service-ui-*/
 .playwright-mcp/
 .claude/
 .workbuddy

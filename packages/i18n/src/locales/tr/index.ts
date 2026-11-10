@@ -3239,6 +3239,7 @@ importConfirm: "İçe aktarılan uzantılar ajan sürecinde, ajanın kendi araç
       "observed-change": "UIA durumu değişti",
       "observed-no-change": "UIA durum değişikliği algılanmadı",
       "model-confirmed": "Model güncel UIA kanıtıyla doğruladı",
+      "unverified-by-design": "Kendi bildirimi: erişilebilirlik ağacı bu sonucu ifade edemiyor",
       "unverified": "Doğrulanmadı",
       "refused": "Reddedildi"
     },

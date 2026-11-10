@@ -237,12 +237,17 @@ The loop is a pure module in `packages/computer-use`, independent of Electron:
    budget, and a refusal from the host is recorded as that step rather than
    ending the run.
 
-The loop stops on `done`, on the step limit (the call's `maxSteps` clamped by
-the grant's action budget), on revocation, on expiry, or on repeated failure of
-the same step. Model prose never reaches a tool result unparsed: the summary is
-assembled from what the loop actually did, and a switch is never counted as
-work done on the machine. Nothing in the model's answer can widen the scope,
-reach a refused window, raise the budget, or disable a refusal.
+The loop stops on evidence-backed `done`, on the step limit (the call's
+`maxSteps` clamped by the grant's action budget), on revocation, on expiry, or
+on repeated failure of the same step. A model may report a result that the
+accessibility tree cannot express only after a dispatched action reads back no
+tree change; this stops the loop as `unverified` with verification
+`unverified-by-design`, never as successful completion. Ambiguous cross-observation
+element identities are not accepted as completion evidence. Model prose never
+reaches a tool result unparsed: the summary is assembled from what the loop
+actually did, and a switch is never counted as work done on the machine.
+Nothing in the model's answer can widen the scope, reach a refused window,
+raise the budget, or disable a refusal.
 
 ## The agent's cursor is drawn, not stolen
 

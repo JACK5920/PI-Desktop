@@ -3246,6 +3246,7 @@ importConfirm: "가져온 확장은 에이전트 프로세스 안에서 에이�
       "observed-change": "UIA 상태 변경 감지",
       "observed-no-change": "UIA 상태 변경이 감지되지 않음",
       "model-confirmed": "현재 UIA 근거로 모델 확인됨",
+      "unverified-by-design": "자체 보고: 접근성 트리로는 이 결과를 표현할 수 없음",
       "unverified": "확인되지 않음",
       "refused": "거부됨"
     },

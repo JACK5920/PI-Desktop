@@ -261,6 +261,18 @@ export type ComputerGrantView = {
 
 export type ComputerNode = {
   uid: string;
+  /**
+   * Identity that survives a new observation.
+   *
+   * `uid` is a dispatch handle: the cua backend mints `{snapshot}:{row}`, so it
+   * changes every time the window is read. That is what lets the driver refuse
+   * a stale handle — but it also means `uid` cannot answer "is this the same
+   * element as before". Anything comparing two observations must use this.
+   *
+   * Absent only for a backend that cannot compute it; callers fall back to
+   * `uid`, which is the pre-identity behaviour.
+   */
+  identity?: string;
   role: string;
   /** Accessible name, truncated. Absent when the platform exposes none. */
   label?: string;
@@ -321,7 +333,6 @@ export type ComputerAction = {
   scroll?: { dx: number; dy: number };
   option?: string;
 };
-
 export type ComputerActResult = {
   grantId: string;
   revision: number;
@@ -330,7 +341,7 @@ export type ComputerActResult = {
   dispatched: "accessibility-action" | "window-event" | "system-input";
 };
 
-/** A truthful, value-free marker for what the loop has established so far. */
+
 export type ComputerUseVerification =
   | "observation-only"
   | "observed"
@@ -338,6 +349,13 @@ export type ComputerUseVerification =
   | "observed-change"
   | "observed-no-change"
   | "model-confirmed"
+  /**
+   * The action ran, the accessibility tree really did not change, and the
+   * result is one UIA cannot express (a selection, a scroll position, focus).
+   * Reported as self-reported rather than as verified: the alternative is an
+   * agent that either retries forever or lies about having evidence.
+   */
+  | "unverified-by-design"
   | "unverified"
   | "refused";
 
@@ -373,7 +391,7 @@ export type ComputerRunResult = {
   /** Present when `outcome` is `needs-user`: what the model wants to ask. */
   question?: string;
   errorCode?: string;
-  verification?: "model-confirmed" | "unverified" | "observation-only";
+  verification?: "model-confirmed" | "unverified-by-design" | "unverified" | "observation-only";
 };
 
 /** Sanitized, ephemeral UI status. It is not written to the transcript or audit log. */

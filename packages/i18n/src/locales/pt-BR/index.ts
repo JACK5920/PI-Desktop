@@ -3174,6 +3174,7 @@ export const ptBR = {
       "observed-change": "Estado UIA alterado",
       "observed-no-change": "Nenhuma alteração de estado UIA detectada",
       "model-confirmed": "Modelo confirmou com evidência UIA atual",
+      "unverified-by-design": "Autorrelatado: a árvore de acessibilidade não pode expressar este resultado",
       "unverified": "Não verificado",
       "refused": "Recusado"
     },

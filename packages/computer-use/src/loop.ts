@@ -197,19 +197,33 @@ function observationSignature(observation: Observation): string {
     truncated: observation.inspection.truncated,
     secureInput: observation.inspection.secureInput,
     nodes: observation.inspection.nodes.map((node) => ({
-      uid: node.uid,
+      // `identity`, never `uid`. The cua backend re-mints uid from a fresh
+      // snapshot on every read, so including it made both observations differ
+      // every time — `observed-no-change` could never be reached and the loop
+      // lost its only signal that an action did nothing.
+      identity: node.identity ?? node.uid,
       role: node.role,
       label: node.label,
       hasValue: node.hasValue,
       enabled: node.enabled,
       focused: node.focused,
-      bounds: node.bounds,
-      parent: node.parent,
+      // `bounds` and `parent` are omitted on purpose: the cua backend reports
+      // bounds as absent, and `parent` is an array index that shifts whenever a
+      // node is inserted, which would report "changed" for an unrelated edit.
       actions: node.actions,
     })),
   });
 }
 
+/**
+ * What must still match for a cited element to count as "the same element,
+ * unchanged".
+ *
+ * Deliberately value-free and index-free: `bounds` is absent on the cua backend
+ * and `parent` is an array index that shifts when any node is inserted, so
+ * including either would fail the check for reasons unrelated to the cited
+ * element.
+ */
 function nodeSignature(node: ComputerInspection["nodes"][number]): string {
   return JSON.stringify({
     role: node.role,
@@ -217,10 +231,53 @@ function nodeSignature(node: ComputerInspection["nodes"][number]): string {
     hasValue: node.hasValue,
     enabled: node.enabled,
     focused: node.focused,
-    bounds: node.bounds,
-    parent: node.parent,
     actions: node.actions,
   });
+}
+
+/**
+ * The current CUA identity fallback is a role/ordinal path. When two siblings
+ * expose the same accessibility shape, that path cannot prove which physical
+ * control survived an insertion or reorder. Refuse completion evidence for
+ * that ambiguous case rather than treating an indistinguishable sibling as the
+ * cited element.
+ */
+function hasAmbiguousIdentity(
+  node: ComputerInspection["nodes"][number],
+  nodes: readonly ComputerInspection["nodes"][number][],
+): boolean {
+  if (!node.identity) return false;
+  const separator = node.identity.lastIndexOf("/");
+  const parentPath = separator < 0 ? "" : node.identity.slice(0, separator);
+  return nodes.some((candidate) => {
+    if (candidate.identity === node.identity || candidate.role !== node.role || !candidate.identity) return false;
+    const candidateSeparator = candidate.identity.lastIndexOf("/");
+    const candidateParent = candidateSeparator < 0 ? "" : candidate.identity.slice(0, candidateSeparator);
+    return (
+      candidateParent === parentPath &&
+      nodeSignature(candidate) === nodeSignature(node)
+    );
+  });
+}
+
+/**
+ * The verification recorded on the most recent action the agent actually
+ * dispatched, ignoring reads.
+ *
+ * `unverified-by-design` keys off this: only an `observed-no-change` read-back
+ * proves the tree really did stay still, which is the one situation where
+ * "UIA cannot express this" is a fact rather than an excuse.
+ */
+function lastDispatchedVerification(
+  steps: readonly ComputerStepRecord[],
+): ComputerUseVerification | undefined {
+  for (let i = steps.length - 1; i >= 0; i -= 1) {
+    const step = steps[i];
+    if (step.action === "observe" || step.action === "switch") continue;
+    if (step.action === "done" || step.action === "ask") continue;
+    return step.verification;
+  }
+  return undefined;
 }
 
 function validateCompletionEvidence(
@@ -239,12 +296,28 @@ function validateCompletionEvidence(
     decisionObservation.inspection.secureInput !== currentObservation.inspection.secureInput ||
     JSON.stringify(decisionObservation.inspection.bounds) !== JSON.stringify(currentObservation.inspection.bounds)
   ) return false;
-  const decisionNodes = new Map(decisionObservation.inspection.nodes.map((node) => [node.uid, node]));
-  const currentNodes = new Map(currentObservation.inspection.nodes.map((node) => [node.uid, node]));
+  // The model cites `uid` because that is what it was shown, but a uid only
+  // means anything within one observation: the cua backend re-mints every uid
+  // from a fresh snapshot on each read. So the lookup is two-step — resolve the
+  // cited uid in the observation the model decided from, then follow that
+  // node's identity into the current one.
+  //
+  // Before this, both maps were keyed by uid and their key sets never
+  // intersected, so this function returned false unconditionally: `done` could
+  // not succeed on the cua backend at all.
+  const decisionByUid = new Map(decisionObservation.inspection.nodes.map((node) => [node.uid, node]));
+  const currentByIdentity = new Map(
+    currentObservation.inspection.nodes.map((node) => [node.identity ?? node.uid, node]),
+  );
   return evidence.every((uid) => {
-    const before = decisionNodes.get(uid);
-    const current = currentNodes.get(uid);
-    return before !== undefined && current !== undefined && nodeSignature(before) === nodeSignature(current);
+    const before = decisionByUid.get(uid);
+    if (before === undefined) return false;
+    if (
+      hasAmbiguousIdentity(before, decisionObservation.inspection.nodes) ||
+      hasAmbiguousIdentity(before, currentObservation.inspection.nodes)
+    ) return false;
+    const current = currentByIdentity.get(before.identity ?? before.uid);
+    return current !== undefined && nodeSignature(before) === nodeSignature(current);
   });
 }
 
@@ -324,7 +397,10 @@ export async function runComputerLoop(
           action: "done",
           ok: false,
           errorCode: "COMPUTER_ACTION_REJECTED",
-          target: parsed.reason,
+          // The shape travels with the refusal so a later diagnosis can tell a
+          // typo in `kind` from a wholly different schema. It is keys and types
+          // only — the model's prose never reaches this record.
+          target: parsed.shape ? `${parsed.reason} (${parsed.shape})` : parsed.reason,
           verification: "refused",
         });
         if (invalidAnswers >= MAX_INVALID_ANSWERS) {
@@ -362,6 +438,40 @@ export async function runComputerLoop(
             steps,
           };
         }
+
+        // A result UIA cannot express — a selection, a scroll position, focus —
+        // leaves the tree genuinely unchanged, so no citation can ever validate.
+        // Without this the model has two options, both bad: retry until the step
+        // limit, or cite an unrelated node and claim evidence it does not have.
+        //
+        // The bar is deliberately specific: the agent must cite nothing, must
+        // have actually dispatched something, and that action's read-back must be
+        // an honest `observed-no-change`. That is a self-report, and it is
+        // labelled as one — never as verified.
+        if (
+          answer.evidence.length === 0 &&
+          steps.some((step) => step.ok && step.action !== "observe" && step.action !== "switch") &&
+          lastDispatchedVerification(steps) === "observed-no-change"
+        ) {
+          record({
+            index,
+            action: "done",
+            ok: false,
+            verification: "unverified-by-design",
+          });
+          deps.onActivity?.({
+            phase: "unverified",
+            stepIndex: index + 1,
+            verification: "unverified-by-design",
+          });
+          return {
+            outcome: "unverified",
+            verification: "unverified-by-design",
+            summary: `${summarize("unverified", steps, answer.summary)} The action was dispatched and the accessibility tree did not change; this outcome is self-reported because UIA cannot express the result.`,
+            steps,
+          };
+        }
+
 
         invalidAnswers += 1;
         record({ index, action: "done", ok: false, verification: "unverified", target: "missing or stale UIA evidence" });

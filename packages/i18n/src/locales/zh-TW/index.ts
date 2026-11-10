@@ -3230,6 +3230,7 @@ sklm: {
       "observed-change": "偵測到 UIA 狀態變更",
       "observed-no-change": "未偵測到 UIA 狀態變更",
       "model-confirmed": "模型已引用目前 UIA 證據確認",
+      "unverified-by-design": "自述完成：輔助功能樹無法表達該結果",
       "unverified": "未驗證",
       "refused": "已拒絕"
     },

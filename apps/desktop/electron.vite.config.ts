@@ -4,6 +4,28 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import type { Plugin } from "vite";
 
+/**
+ * Directories the dev server must never watch.
+ *
+ * The test suites create their scratch trees under `apps/desktop/` because they
+ * need a real path on a real volume. Some of those trees hold a live Chromium
+ * profile, and Chromium keeps temporary files open inside it. Vite's watcher
+ * then hits `EBUSY` on such a file and emits an unhandled `error` on the
+ * FSWatcher, which takes the whole dev process down with it. That is not
+ * hypothetical: it killed three PI-Desktop sessions on 2026-11-10 while the
+ * desktop test suites were running.
+ *
+ * Ignoring them is the right fix here. Moving the tests elsewhere would weaken
+ * what they check (real paths, real junctions, real backup roots), and merely
+ * catching the watcher error would leave the dev server watching a tree that
+ * other processes rewrite underneath it.
+ */
+const TEST_SCRATCH_IGNORE = [
+  "**/.jev-service-ui-*/**",
+  "**/.isolated-launch-test-*/**",
+  "**/.artifacts/**",
+];
+
 // Dev needs 'unsafe-eval' for vite HMR tooling; production must not ship it.
 function tightenCsp(): Plugin {
   return {
@@ -44,6 +66,9 @@ function dropLegacyFontFallbacks(): Plugin {
 
 export default defineConfig({
   main: {
+    // The dev server watches the whole project root, and the desktop test
+    // suites write live Chromium profiles there. See TEST_SCRATCH_IGNORE.
+    server: { watch: { ignored: TEST_SCRATCH_IGNORE } },
     // `ws` loads its optional native accelerators (bufferutil, utf-8-validate)
     // inside `require` + try/catch and falls back to its own JavaScript
     // implementation when they are absent. A bundle cannot fail a require, and
@@ -101,6 +126,9 @@ export default defineConfig({
     },
   },
   renderer: {
+    // Tailwind and the React refresh runtime watch this same root, so the
+    // scratch trees have to be ignored here too, not only on `main`.
+    server: { watch: { ignored: TEST_SCRATCH_IGNORE } },
     root: ".",
     build: {
       // electron-vite's renderer preset hard-defaults minify to false, unlike

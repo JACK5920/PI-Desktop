@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, readFile, realpath, stat, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, rmdir, stat, symlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { basename, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import test from "node:test";
+import test, { after } from "node:test";
 
 const root = fileURLToPath(new URL("../../../", import.meta.url));
 const artifacts = join(root, ".artifacts");
@@ -15,6 +15,20 @@ const { build } = createRequire(new URL("../../../packages/agent-runtime/package
 const bundle = join(scratch, "storage.mjs");
 await build({ entryPoints: [join(root, "apps/desktop/electron/main/storage/files.ts")], outfile: bundle, bundle: true, platform: "node", format: "esm", alias: { "original-fs": "node:fs" } });
 const storage = await import(pathToFileURL(bundle).href);
+
+// The scratch tree is real user-shaped storage — junctions, a junction into a
+// junction, a "new drive" path with a space in it — so it has to live under a
+// real directory. Left behind, every run leaves a fresh subdirectory in the
+// repository root and shows up in `git status`. Remove it, and then the
+// `.artifacts/` parent too: this is the only test that creates that parent, so
+// leaving it behind would leave an empty directory the repository never
+// otherwise has. `rmdir` (not `rm -r`) is deliberate — if another suite has
+// since put something there, a non-empty directory stays put instead of being
+// wiped out from under it.
+after(async () => {
+  await rm(scratch, { recursive: true, force: true });
+  await rmdir(artifacts).catch(() => {});
+});
 
 import { register } from "node:module";
 register(new URL("./helpers/ts-import-hooks.mjs", import.meta.url).href);

@@ -749,6 +749,49 @@ fn a_row_another_owner_holds_makes_the_sync_fail_rather_than_no_op() {
 }
 
 #[test]
+fn a_failed_sync_never_deletes_a_row_it_still_declares() {
+    // The order inside `sync_plugin_providers` is load-bearing. It used to
+    // delete the rows a declaration no longer names *after* writing the ones it
+    // does — so a bail in the write loop left the table with rows removed and
+    // replacements never written. On 2026-11-10 that is exactly how a bound
+    // provider disappeared: `wtqpool-cn` sat first in the manifest, its row was
+    // deleted, twelve plugin hosts crashed, and nothing was re-created.
+    let (_dir, db, secrets) = test_context();
+    let declared = declared_providers(&manifest());
+    sync_plugin_providers(&db, &secrets, "demo.provider", &declared, true).unwrap();
+
+    let kept = "plugin:demo.provider:demo";
+    // A second row this plugin owns but no longer declares, so the sweep has
+    // something it legitimately wants to remove.
+    let stale = "plugin:demo.provider:gone";
+    db.conn()
+        .execute(
+            "INSERT INTO providers (id, name, owner_plugin_id, created_at, updated_at)
+             VALUES (?1, 'Gone', 'demo.provider', 1, 1)",
+            params![stale],
+        )
+        .unwrap();
+
+    // Make the write loop bail: the declared row is now held by someone else.
+    db.conn()
+        .execute(
+            "UPDATE providers SET owner_plugin_id = 'other.plugin' WHERE id = ?1",
+            params![kept],
+        )
+        .unwrap();
+
+    sync_plugin_providers(&db, &secrets, "demo.provider", &declared, true)
+        .expect_err("a foreign owner must fail the sync");
+
+    // The declared row still exists — a refused sync must not take it away.
+    let row = providers::get_provider(&db, &secrets, kept).unwrap();
+    assert!(
+        row.is_some(),
+        "a sync that bails must leave every declared row in place"
+    );
+}
+
+#[test]
 fn startup_reconciliation_removes_a_row_whose_plugin_is_gone() {
     let (dir, db, secrets) = test_context();
     let declared = declared_providers(&manifest());
