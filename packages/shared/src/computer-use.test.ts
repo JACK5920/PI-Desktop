@@ -2,6 +2,7 @@ import { expect, it } from "vitest";
 import {
   COMPUTER_MAX_STEPS_LIMIT,
   COMPUTER_USE_DEFAULTS,
+  computerUseModelBindingForSource,
   needsAccessibilityRequest,
   type ComputerCapabilities,
   validateComputerToolArgs,
@@ -72,6 +73,23 @@ it("computerUse settings keep an explicit model binding", () => {
   expect(value.defaultInputPolicy).toBe("autonomous-in-scope");
   expect(value.defaultCapture).toBe("a11y-and-pixels");
   expect(value.denylist).toEqual(["com.apple.keychainaccess"]);
+});
+
+it("computerUse model source defaults compatibly and accepts conversation mode", () => {
+  expect(validateComputerUseSettings({ enabled: true }).modelSource).toBeUndefined();
+  expect(validateComputerUseSettings({ enabled: true, modelSource: "dedicated" }).modelSource).toBe("dedicated");
+  expect(validateComputerUseSettings({ enabled: true, modelSource: "conversation" }).modelSource).toBe("conversation");
+  expect(() => validateComputerUseSettings({ enabled: true, modelSource: "fallback" })).toThrow(/invalid/);
+});
+
+it("model-source resolution follows the chosen model and never silently falls back", () => {
+  const dedicated = { providerId: "dedicated-provider", modelId: "dedicated-model" };
+  const conversation = { providerId: "chat-provider", modelId: "chat-model" };
+  expect(computerUseModelBindingForSource({ model: dedicated })).toEqual(dedicated);
+  expect(computerUseModelBindingForSource({ model: dedicated, modelSource: "dedicated" }, conversation)).toEqual(dedicated);
+  expect(computerUseModelBindingForSource({ model: dedicated, modelSource: "conversation" }, conversation)).toEqual(conversation);
+  expect(computerUseModelBindingForSource({ model: dedicated, modelSource: "conversation" }, null)).toBeNull();
+  expect(computerUseModelBindingForSource({ model: null, modelSource: "conversation" })).toBeNull();
 });
 
 it("computerUse grant budgets have no product upper limit", () => {

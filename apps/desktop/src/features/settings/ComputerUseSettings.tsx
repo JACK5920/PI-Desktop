@@ -1,13 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
-import { useTranslation } from "react-i18next";
 import type { AppSettings, ComputerCapabilities, ComputerModelBinding, ProviderPublic } from "@pi-desktop/shared";
 import { COMPUTER_USE_DEFAULTS } from "@pi-desktop/shared";
-import { Badge, Input, SettingsToggle } from "../../components/ui";
+import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { SettingsMenuSelect } from "../../components/settings/SettingsMenuSelect";
-import { ComputerUseModelPicker } from "./ComputerUseModelPicker";
-import { computerModelSupportsVision } from "./computer-use-model-vision";
+import { Badge, Input, SegmentedControl, SettingsToggle } from "../../components/ui";
 import { api } from "../../lib/api";
 import { useAppStore } from "../../stores/app-store";
+import { ComputerUseModelPicker } from "./ComputerUseModelPicker";
+import { computerModelSupportsVision } from "./computer-use-model-vision";
 import { SettingsCard, SettingsRow } from "./primitives";
 
 function bindingId(binding: ComputerModelBinding): string {
@@ -50,6 +50,7 @@ export function ComputerUseSettingsSection({
   const { t } = useTranslation();
   const showToast = useAppStore((state) => state.showToast);
   const computerUse = settings.computerUse ?? { enabled: false };
+  const modelSource = computerUse.modelSource ?? "dedicated";
   const restrictions = computerUse.restrictions ?? {};
   const [providers, setProviders] = useState<ProviderPublic[]>([]);
   const [capabilities, setCapabilities] = useState<ComputerCapabilities | null>(null);
@@ -67,7 +68,7 @@ export function ComputerUseSettingsSection({
 
   useEffect(() => {
     let cancelled = false;
-    if (computerUse.defaultCapture !== "a11y-and-pixels" || !selectedProvider || !currentBinding) {
+    if (modelSource === "conversation" || computerUse.defaultCapture !== "a11y-and-pixels" || !selectedProvider || !currentBinding) {
       setVisionSupport(null);
       return () => { cancelled = true; };
     }
@@ -91,7 +92,7 @@ export function ComputerUseSettingsSection({
       if (!cancelled) setVisionSupport(null);
     });
     return () => { cancelled = true; };
-  }, [computerUse.defaultCapture, currentBinding?.modelId, currentBinding?.providerId, selectedProvider]);
+  }, [computerUse.defaultCapture, currentBinding?.modelId, currentBinding?.providerId, modelSource, selectedProvider]);
 
   useEffect(() => {
     let cancelled = false;
@@ -148,19 +149,41 @@ export function ComputerUseSettingsSection({
           onChange={() => void saveComputerUse({ enabled: !computerUse.enabled })}
         />
       </SettingsRow>
-      <SettingsRow title={t("settings.computerUseModel")}>
-        <ComputerUseModelPicker
-          providers={providers}
-          value={selectedBinding}
+      <SettingsRow
+        title={t("settings.computerUseModelSource")}
+        description={t("settings.computerUseModelSourceDescription")}
+      >
+        <SegmentedControl
+          label={t("settings.computerUseModelSource")}
+          value={modelSource}
           disabled={busy || loading}
-          onChange={(value) => {
-            const next = availableBindings.find((item) => bindingId(item) === value);
-            void saveComputerUse({ model: next ?? null });
-          }}
+          options={[
+            { value: "dedicated", label: t("settings.computerUseModelSourceDedicated") },
+            { value: "conversation", label: t("settings.computerUseModelSourceConversation") },
+          ]}
+          onChange={(value) => void saveComputerUse({ modelSource: value })}
         />
-        <p className="computer-use-settings-notice">{t("settings.computerUseCaptureDescription")}</p>
       </SettingsRow>
-      {!selectedBinding && computerUse.enabled ? (
+      {modelSource === "dedicated" ? (
+        <SettingsRow title={t("settings.computerUseModel")}>
+          <ComputerUseModelPicker
+            providers={providers}
+            value={selectedBinding}
+            disabled={busy || loading}
+            onChange={(value) => {
+              const next = availableBindings.find((item) => bindingId(item) === value);
+              void saveComputerUse({ model: next ?? null });
+            }}
+          />
+          <p className="computer-use-settings-notice">{t("settings.computerUseCaptureDescription")}</p>
+        </SettingsRow>
+      ) : (
+        <SettingsRow title={t("settings.computerUseModel")}>
+          <p className="computer-use-settings-notice">{t("settings.computerUseFollowConversationModel")}</p>
+          <p className="computer-use-settings-notice">{t("settings.computerUseCaptureConversationDescription")}</p>
+        </SettingsRow>
+      )}
+      {modelSource === "dedicated" && !selectedBinding && computerUse.enabled ? (
         <p className="computer-use-settings-notice" role="status">{t("settings.computerUseModelRequired")}</p>
       ) : null}
       <SettingsRow title={t("settings.computerUseCapture")}>

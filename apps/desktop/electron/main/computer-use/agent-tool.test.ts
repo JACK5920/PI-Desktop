@@ -59,6 +59,57 @@ afterEach(() => {
 });
 
 describe("Computer local tool", () => {
+  it("resolves Computer Use with the current conversation model when that source is selected", async () => {
+    const { host } = hostFixture(true, false, { modelSource: "conversation" });
+    const resolveProvider = vi.fn(async () => ({
+      id: "chat-provider", name: "Chat provider", modelId: "chat-model", apiKey: "fixture-only",
+      supportsReasoning: false, supportedThinkingLevels: ["off" as const],
+    }));
+    computerRuntime.runComputerLoop.mockResolvedValue({ outcome: "done", summary: "verified", steps: [] });
+    const handler = createComputerUseTool({
+      getHost: () => host,
+      resolveProvider,
+    });
+
+    const result = await handler({
+      sessionId: "session-1",
+      toolCallId: "tool-conversation-model",
+      args: { instruction: "Inspect the fixture" },
+      signal: new AbortController().signal,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(resolveProvider).toHaveBeenCalledWith(
+      expect.objectContaining({ computerUse: expect.objectContaining({ modelSource: "conversation" }) }),
+      "session-1",
+      "conversation",
+    );
+  });
+
+  it("does not fall back to the saved dedicated model when the conversation model is unavailable", async () => {
+    const { host, calls } = hostFixture(true, true, { modelSource: "conversation" });
+    const resolveProvider = vi.fn(async () => null);
+    const handler = createComputerUseTool({
+      getHost: () => host,
+      resolveProvider,
+    });
+
+    const result = await handler({
+      sessionId: "session-without-model",
+      toolCallId: "tool-no-model-fallback",
+      args: { instruction: "Inspect the fixture" },
+      signal: new AbortController().signal,
+    });
+
+    expect(result).toMatchObject({ ok: false, errorCode: "COMPUTER_MODEL_NOT_CONFIGURED" });
+    expect(resolveProvider).toHaveBeenCalledWith(
+      expect.objectContaining({ computerUse: expect.objectContaining({ modelSource: "conversation" }) }),
+      "session-without-model",
+      "conversation",
+    );
+    expect(calls.some((call) => call.method === "computer.grantCreate")).toBe(false);
+  });
+
   it("matches pixel capture to the exact native window and never substitutes another source", () => {
     const sources = [{ id: "window:4242:0" }, { id: "window:9001:0" }, { id: "screen:0:0" }];
     expect(captureSourceIdFor(sources, "101:4242")).toBe("window:4242:0");

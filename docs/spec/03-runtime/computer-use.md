@@ -215,19 +215,22 @@ synthesis and refuses a stale one. Therefore:
 
 ## The bound model and the loop
 
-Computer Use carries its own model binding — one `{ providerId, modelId }` the
-user picks in settings from the existing provider rows, following the
-`imageGeneration` precedent. The conversation model is not used to drive the
-machine, and there is no silent fallback to it: with no binding configured the
-tool reports a configuration error. The user decides which model may operate
-their computer, and what that costs.
+Computer Use model selection is explicit in Settings and offers two sources:
+`dedicated` uses the saved `computerUse.model` binding; `conversation` resolves
+the active Host session's `providerId`/`modelId` for each new Computer run. An
+absent source retains the legacy `dedicated` behavior. Switching sources never
+changes the conversation model, erases the dedicated binding, interrupts an
+active run, or silently falls back. If the selected source cannot be resolved,
+the tool fails before creating a grant. Screenshot mode still requires the
+resolved model to accept images; an unsupported model is reported rather than
+replaced.
 
 The loop is a pure module in `packages/computer-use`, independent of Electron:
 
 1. Observe: the accessibility tree for the bound window, the host's window list
    with its refusals, a scope-cropped capture when the grant allows pixels, and
    the grant view.
-2. Decide: one request to the bound model, which must answer with exactly one
+2. Decide: one request to the resolved model, which must answer with exactly one
    action against a strict schema, or `switch`, or `done`, or `ask`.
 3. Validate: the schema, then the `uid` against the current tree, the
    coordinates against the measured geometry, the grant revision, and the
@@ -320,9 +323,13 @@ never a no-op reported as success.
   PI-Desktop's own windows and credential surfaces are never reachable, and
   Stop ends the run. There is no input-approval row while `confirm-each` has
   no card behind it.
-- The model binding is explicit. Settings offers the provider rows the user
-  already configured; an enabled feature with no binding is a visible
-  unconfigured state, not a silent fallback to the conversation model.
+- Model source is explicit. Settings offers a segmented choice between the
+  saved dedicated model and the current conversation model. The dedicated
+  model picker is shown only in dedicated mode; its binding is preserved while
+  conversation mode is selected. Conversation mode resolves the exact model
+  from the active Host session for each new run, does not alter chat selection,
+  and never falls back when the session/model is unavailable. Image support is
+  validated against the model actually resolved for the run.
 - A doctor view reports per-platform OS permission state (accessibility,
   capture, accessibility bus, session type) and distinguishes "not requested",
   "denied", and "unsupported on this platform". A denied TCC grant must not be
@@ -384,8 +391,10 @@ lands with the implementing change.
 The dedicated Computer Use model control uses the Composer's searchable model
 catalog, provider grouping, configured aliases, and model identity labels. Its
 selection is scoped to `computerUse.model`; it must not change the active chat
-session model. The separate Computer Use binding remains visible as a distinct
-setting because it controls which model receives desktop observations. The
+session model. A segmented model-source control chooses the dedicated binding
+or the current conversation model without erasing either selection. The
+separate Computer Use binding remains visible as a distinct setting because it
+controls which model receives desktop observations. The
 popup is wider than the compact Composer dropdown (up to 520 CSS pixels), with
 a capped 184 CSS-pixel provider rail, so ordinary provider and model names
 remain readable without allowing long names to expand the UI indefinitely. It

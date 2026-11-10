@@ -20237,11 +20237,16 @@ their separate platform acceptance.
   revoke or abort anything. Activity events are grant-scoped and clear on
   revoke, failure, cancellation, and renderer teardown; stale events cannot
   move or keep visible the full-display overlay. Pixel mode sends only the exact
-  Host-bound window image to the dedicated model; a missing/mismatched source
+  Host-bound window image to the model selected by the explicit Computer Use
+  model source; a missing/mismatched source
   sends no image. The cursor overlay is visual-only, click-through, and
   disappears when its grant ends.
-- The dedicated-model control uses the Composer model catalog's search and
-  configured alias display, while saving only the exact Computer Use
+- The model-source control persists dedicated-versus-current-conversation mode
+  without changing the active chat model. Conversation mode resolves the
+  current Host session model and never falls back to the saved dedicated model
+  when it cannot resolve one. Switching back to dedicated mode preserves the
+  saved binding. The dedicated-model control uses the Composer model catalog's
+  search and configured alias display, while saving only the exact Computer Use
   provider/model binding. Its popup and provider rail have bounded widths wide
   enough to read ordinary provider names and remain viewport-clamped; unusually
   long names do not expand the UI without limit. The overlay glow spans a broad

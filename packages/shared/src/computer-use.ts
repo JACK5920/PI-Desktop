@@ -31,6 +31,9 @@ export type ComputerGrantScope = "desktop" | "window";
 /** One `{ providerId, modelId }` the user picked, as in `imageGeneration`. */
 export type ComputerModelBinding = { providerId: string; modelId: string };
 
+/** Which model drives the native Computer loop. Missing keeps legacy dedicated-model behavior. */
+export type ComputerUseModelSource = "dedicated" | "conversation";
+
 /** User-overridable application-level policy guards. Missing values keep the existing defaults. */
 export type ComputerUseRestrictions = {
   /** One switch that disables the guards below without erasing their individual values. */
@@ -43,6 +46,8 @@ export type ComputerUseRestrictions = {
 
 export type ComputerUseSettings = {
   enabled: boolean;
+  /** `conversation` follows the host session's selected chat model; absent means `dedicated`. */
+  modelSource?: ComputerUseModelSource;
   /** Absent means unconfigured; the tool refuses rather than falling back. */
   model?: ComputerModelBinding | null;
   defaultInputPolicy?: ComputerInputPolicy;
@@ -59,6 +64,18 @@ export type ComputerUseSettings = {
   idleExpiryMs?: number;
   restrictions?: ComputerUseRestrictions;
 };
+
+/** Resolve the model binding without ever falling back across the selected source. */
+export function computerUseModelBindingForSource(
+  settings: Pick<ComputerUseSettings, "model" | "modelSource"> | null | undefined,
+  conversationModel?: { providerId?: string | null; modelId?: string | null } | null,
+): ComputerModelBinding | null {
+  if (!settings || (settings.modelSource ?? "dedicated") === "dedicated") {
+    return settings?.model ?? null;
+  }
+  if (!conversationModel?.providerId || !conversationModel.modelId) return null;
+  return { providerId: conversationModel.providerId, modelId: conversationModel.modelId };
+}
 
 export const COMPUTER_USE_DEFAULTS = {
   inputPolicy: "autonomous-in-scope",
@@ -105,6 +122,7 @@ export function validateComputerUseSettings(value: unknown): ComputerUseSettings
   const input = value as Record<string, unknown>;
   const allowed = [
     "enabled",
+    "modelSource",
     "model",
     "defaultInputPolicy",
     "defaultCapture",
@@ -124,6 +142,11 @@ export function validateComputerUseSettings(value: unknown): ComputerUseSettings
   };
 
   const result: ComputerUseSettings = { enabled: input.enabled };
+
+  if (input.modelSource !== undefined) {
+    if (input.modelSource !== "dedicated" && input.modelSource !== "conversation") return invalid();
+    result.modelSource = input.modelSource;
+  }
 
   if (input.model !== undefined && input.model !== null) {
     if (!input.model || typeof input.model !== "object" || Array.isArray(input.model)) return invalid();

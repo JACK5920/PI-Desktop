@@ -87,7 +87,7 @@ function toActivityStep(step: ComputerStepRecord): ComputerActivityStep | null {
 /** Main-process executor for the Agent Runtime's host-authorized Computer tool. */
 export function createComputerUseTool(options: {
   getHost: () => Pick<HostProcess, "call"> | null;
-  resolveProvider: (settings: AppSettings) => Promise<RuntimeProviderConfig | null>;
+  resolveProvider: (settings: AppSettings, sessionId: string, source: "dedicated" | "conversation") => Promise<RuntimeProviderConfig | null>;
   capture?: typeof captureGrantedWindow;
   cursorOverlay?: { apply: (event: ComputerCursorEvent) => void };
 }): LocalToolHandler {
@@ -99,8 +99,16 @@ export function createComputerUseTool(options: {
     const settings = await host.call<AppSettings>("settings.get");
     const config = settings.computerUse;
     if (!config?.enabled) return failure("COMPUTER_DISABLED", "Enable Computer Use in Settings first.");
-    const provider = await options.resolveProvider(settings);
-    if (!provider) return failure("COMPUTER_MODEL_NOT_CONFIGURED", "Choose a dedicated Computer Use model in Settings. The conversation model is not used as a fallback.");
+    const modelSource = config.modelSource ?? "dedicated";
+    const provider = await options.resolveProvider(settings, sessionId, modelSource);
+    if (!provider) {
+      return failure(
+        "COMPUTER_MODEL_NOT_CONFIGURED",
+        modelSource === "conversation"
+          ? "The current conversation model could not be resolved. Select an available conversation model or switch Computer Use to a dedicated model in Settings."
+          : "Choose a dedicated Computer Use model in Settings.",
+      );
+    }
     const captureMode = config.defaultCapture ?? COMPUTER_USE_DEFAULTS.capture;
     if (captureMode === "a11y-and-pixels" && !visionFromModelConfig(provider.modelConfig)) {
       return failure(
