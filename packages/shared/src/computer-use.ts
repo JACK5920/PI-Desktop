@@ -410,6 +410,19 @@ export type ComputerStepRecord = {
   target?: string;
   ok: boolean;
   errorCode?: string;
+  /**
+   * Why the host refused, in the host's own words.
+   *
+   * The refusal code alone says that something was denied, never what: a
+   * rejected chord and an unsupported target both answer
+   * `COMPUTER_ACTION_REJECTED`, and a model that cannot tell them apart
+   * retries variants of the same action until the step limit. The host's
+   * message is diagnostic text by contract -- it names keys, control types
+   * and counts, and carries no window text, typed value or pixels -- so it
+   * is what lets the model choose a different action instead of a different
+   * spelling of the same one.
+   */
+  reason?: string;
   verification?: ComputerUseVerification;
   /** Number of exact current-observation UIDs cited by a `done` answer. */
   evidenceCount?: number;

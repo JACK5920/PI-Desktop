@@ -59,6 +59,25 @@ export type ComputerLoopInput = {
 const MAX_INVALID_ANSWERS = 2;
 /** Consecutive identical refusals before the loop stops trying. */
 const MAX_REPEATED_REFUSALS = 2;
+/**
+ * Consecutive skipped duplicate writes before the loop gives up.
+ *
+ * A skipped write is a write the model already dispatched, so repeating it
+ * cannot change the window. The model is told the write already happened,
+ * and a model that asks again anyway is not going to be answered by a third
+ * identical request. Two is enough: the first skip tells the model, the
+ * second confirms it did not take the hint.
+ */
+const MAX_REPEATED_SKIPS = 2;
+/**
+ * Longest refusal explanation kept for the model.
+ *
+ * The host's message is diagnostic text and is already free of screen
+ * content, but it can be long: a driver failure names the window, the
+ * accelerator it looked for and how many elements it scanned. A model does
+ * not need all of that, and the history it reads is rebuilt on every step.
+ */
+const MAX_REFUSAL_REASON_CHARS = 400;
 
 /**
  * Outcomes that end the run whatever step produced them: the grant itself is
@@ -92,6 +111,31 @@ function errorCode(error: unknown): string {
     if (typeof code === "string" && code.startsWith("COMPUTER_")) return code;
   }
   return "COMPUTER_ACTION_REJECTED";
+}
+
+/**
+ * The host's own explanation of a refusal.
+ *
+ * The refusal code says that something was denied; only the message says
+ * what. A rejected chord and a target that cannot receive one both answer
+ * `COMPUTER_ACTION_REJECTED`, and a model that cannot tell them apart
+ * retries spellings of the same action until the step limit.
+ *
+ * The host's message is diagnostic text by contract: it names keys, control
+ * types and counts, and carries no window text, typed value or pixels. It is
+ * bounded here anyway, because a driver that fails in an unexpected way can
+ * put anything into an error string, and this text is about to be handed to
+ * a model as a step record.
+ */
+function refusalReason(error: unknown): string | undefined {
+  if (!error || typeof error !== "object") return undefined;
+  const message = (error as { message?: unknown }).message;
+  if (typeof message !== "string") return undefined;
+  const text = message.trim();
+  if (!text) return undefined;
+  return text.length > MAX_REFUSAL_REASON_CHARS
+    ? `${text.slice(0, MAX_REFUSAL_REASON_CHARS - 1)}…`
+    : text;
 }
 
 /** Retry only a named target that the host says is temporarily unavailable. */
@@ -477,6 +521,12 @@ export async function runComputerLoop(
   // Writes already dispatched, keyed by target identity + action + payload.
   // A write the model cannot see succeed is the one it will happily repeat.
   const dispatchedWrites = new Set<string>();
+  // Consecutive duplicate writes that were skipped, and the payload of the
+  // last one. A skipped write did not change the window, so repeating it is
+  // no progress; the payload is remembered so that a model which moves on to
+  // a different write starts the count afresh.
+  let repeatedSkips = 0;
+  let lastSkippedKey: string | undefined;
   // Whether the host confirmed the most recent content write by reading the
   // field back, and which step that confirmation belongs to. `undefined` means
   // the backend could not tell.
@@ -873,6 +923,27 @@ export async function runComputerLoop(
           // works and keeps going until the step limit.
           verification: "skipped-duplicate",
         });
+        // A skipped write is no progress, and repeating it is not going to
+        // become progress. The history does tell the model that the write
+        // already happened, and a model that keeps asking for the same text
+        // on the same element is not reading that: it asks again with the
+        // same payload, the write is skipped again, and every step of the
+        // budget is spent without the window changing at all.
+        //
+        // The count is per payload, so a model that moves on to a different
+        // write is not punished for the one it skipped.
+        // The count is per payload, so a model that moves on to a different
+        // write is not punished for the one it skipped.
+        repeatedSkips = lastSkippedKey === writeKey ? repeatedSkips + 1 : 1;
+        lastSkippedKey = writeKey;
+        if (repeatedSkips >= MAX_REPEATED_SKIPS) {
+          return {
+            outcome: "failed",
+            summary: summarize("failed", steps, undefined, "COMPUTER_ACTION_REJECTED"),
+            steps,
+            errorCode: "COMPUTER_ACTION_REJECTED",
+          };
+        }
         index += 1;
         // Re-read the window anyway. The model has to see the state the
         // skipped write left behind, otherwise it has nothing to decide on
@@ -880,6 +951,11 @@ export async function runComputerLoop(
         observation = await observeWithTargetRetry(deps, observation.grant.targetId);
         continue;
       }
+      // A write that went out clears the skip counter for the payload it
+      // replaced, so the model is not punished later for a write it has
+      // already moved past.
+      repeatedSkips = 0;
+      lastSkippedKey = undefined;
 
       deps.onActivity?.({
         phase: "acting",
@@ -946,12 +1022,18 @@ export async function runComputerLoop(
         lastRefusal = undefined;
       } catch (error) {
         const code = errorCode(error);
+        // The host's own explanation travels with the refusal. Without it the
+        // model sees the same bare code for a mistyped chord and for a target
+        // that cannot receive one, and answers both with another spelling of
+        // the same action.
+        const reason = refusalReason(error);
         record({
           index,
           action: validated.action.kind,
           ok: false,
           errorCode: code,
           ...(target ? { target } : {}),
+          ...(reason ? { reason } : {}),
           verification: "refused",
         });
         const terminal = TERMINAL_CODES[code];

@@ -165,9 +165,14 @@ export function renderHistory(steps: readonly ComputerStepRecord[]): string {
         return `${step.index}. ${step.action}${target}: skipped (this exact write was already sent to this element)${evidence}`;
       }
       const verification = step.verification ? `; verification=${step.verification}` : "";
+      // The host's explanation of a refusal is the only thing that tells the
+      // model whether to change the action or to change its spelling. The
+      // code alone is the same for a chord the driver will not accept and for
+      // a target that cannot receive one at all.
+      const reason = step.reason ? `; reason: ${step.reason}` : "";
       return step.ok
         ? `${step.index}. ${step.action}${target}: dispatched${verification}${evidence}`
-        : `${step.index}. ${step.action}${target}: refused (${step.errorCode ?? "unknown"})${verification}`;
+        : `${step.index}. ${step.action}${target}: refused (${step.errorCode ?? "unknown"})${reason}${verification}`;
     })
     .join("\n");
   const stuck = stuckHint(steps);

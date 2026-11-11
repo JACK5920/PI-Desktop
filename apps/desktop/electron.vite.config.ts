@@ -46,17 +46,41 @@ const TEST_SCRATCH_IGNORE = [
 ];
 
 /**
- * The workspace packages the desktop imports.
+ * The workspace packages the desktop imports, resolved to their sources.
  *
- * They are reached through junctions under `node_modules/@pi-desktop`, and a
- * watcher does not follow a junction out of its own tree. Without this, a
- * change in one of them left the main bundle stale until the desktop was
- * restarted by hand.
+ * The desktop reaches them through junctions under `node_modules/@pi-desktop`,
+ * and those junctions point at the package roots. A package root is not
+ * readable as source by a bundler: its manifest points `main`/`exports` at
+ * `dist` (`packages/computer-use` exports `./dist/index.js`), so the bundler
+ * imports the compiled output, and the watcher only sees the tree it reads.
+ * A source edit therefore reached the bundle late -- only after `tsc` had
+ * emitted into `dist` -- and a package the build had never emitted was
+ * invisible to the desktop altogether.
+ *
+ * Aliasing the package entry points to their sources fixes both halves of
+ * that: the bundler reads the file that was just edited, and the watcher
+ * tracks it through the module graph even though it sits outside the
+ * application's root directory.
+ *
+ * The patterns are anchored so that a package's own subpath exports keep
+ * working. `@pi-desktop/agent-runtime` exports `./sidecar`,
+ * `./proxy-tunnel` and `./system-proxy-relay` beside its main entry, and each
+ * of those resolves to its own file; a loose prefix match would rewrite them
+ * all into the main entry point.
  */
-const WORKSPACE_PACKAGES = [
-  resolve(__dirname, "../../packages/computer-use/src"),
-  resolve(__dirname, "../../packages/agent-runtime/src"),
-  resolve(__dirname, "../../packages/shared/src"),
+const WORKSPACE_PACKAGE_ALIASES = [
+  {
+    find: /^@pi-desktop\/computer-use$/,
+    replacement: resolve(__dirname, "../../packages/computer-use/src/index.ts"),
+  },
+  {
+    find: /^@pi-desktop\/agent-runtime$/,
+    replacement: resolve(__dirname, "../../packages/agent-runtime/src/index.ts"),
+  },
+  {
+    find: /^@pi-desktop\/shared$/,
+    replacement: resolve(__dirname, "../../packages/shared/src/index.ts"),
+  },
 ];
 
 // Dev needs 'unsafe-eval' for vite HMR tooling; production must not ship it.
@@ -99,9 +123,6 @@ function dropLegacyFontFallbacks(): Plugin {
 
 export default defineConfig({
   main: {
-    // The dev server watches the whole project root, and the desktop test
-    // suites write live Chromium profiles there. See TEST_SCRATCH_IGNORE.
-    server: { watch: { ignored: TEST_SCRATCH_IGNORE, additional: WORKSPACE_PACKAGES } },
     // `ws` loads its optional native accelerators (bufferutil, utf-8-validate)
     // inside `require` + try/catch and falls back to its own JavaScript
     // implementation when they are absent. A bundle cannot fail a require, and
@@ -116,6 +137,10 @@ export default defineConfig({
       "__dirname": "import.meta.dirname",
     },
     build: {
+      // The main bundle is built with `build.watch`, not served by a dev
+      // server, so `server.watch` does not apply to it. Rollup's watcher
+      // follows the module graph, so a workspace package is picked up through
+      // the source aliases below rather than through a directory list.
       rollupOptions: {
         // Bundle JS workspace packages into Main. Native voice modules must
         // resolve from packaged node_modules because their loaders locate
@@ -139,7 +164,11 @@ export default defineConfig({
         },
       },
     },
+    resolve: {
+      alias: WORKSPACE_PACKAGE_ALIASES,
+    },
   },
+
   preload: {
     // The preload must be a fully bundled CJS file so it can run in a
     // sandboxed renderer without Node module resolution.
@@ -161,7 +190,15 @@ export default defineConfig({
   renderer: {
     // Tailwind and the React refresh runtime watch this same root, so the
     // scratch trees have to be ignored here too, not only on `main`.
-    server: { watch: { ignored: TEST_SCRATCH_IGNORE, additional: WORKSPACE_PACKAGES } },
+    //
+    // The watcher only follows the application's own root, so a workspace
+    // package outside it is reached through the source aliases below and
+    // tracked by the module graph rather than by a directory list.
+    server: {
+      watch: {
+        ignored: TEST_SCRATCH_IGNORE,
+      },
+    },
     root: ".",
     build: {
       // electron-vite's renderer preset hard-defaults minify to false, unlike
@@ -177,6 +214,8 @@ export default defineConfig({
     plugins: [react(), tailwindcss(), tightenCsp(), dropLegacyFontFallbacks()],
     resolve: {
       alias: [
+        ...WORKSPACE_PACKAGE_ALIASES,
+        { find: "@renderer", replacement: resolve("src") },
         { find: "@renderer", replacement: resolve("src") },
         {
           find: /^@pi-desktop\/i18n\/locales\/([^/]+)$/,

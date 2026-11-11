@@ -1191,5 +1191,132 @@ describe("completion evidence for a consumed element", () => {
     // The citation names a uid the model was never shown, so this is not the
     // consumed-element case: it must not be reported as one.
     expect(result.verification).not.toBe("unverified-by-design");
+    expect(result.verification).not.toBe("unverified-by-design");
+  });
+
+  it("carries the host's refusal explanation into the step and the model history", async () => {
+    // The refusal code alone cannot tell a mistyped chord from a target that
+    // cannot receive one: both answer COMPUTER_ACTION_REJECTED. The host's
+    // message is the only thing that lets the model pick a different action
+    // instead of another spelling of the same one.
+    const explanation =
+      "action rejected: hotkey on a modern XAML / UWP target (pid 37564, hwnd 69799062) " +
+      "could not find a UIA AcceleratorKey matching ctrl+s (scanned 42 element(s)).";
+    let decisions = 0;
+    const deps: ComputerLoopDeps = {
+      observe: async () => observation(),
+      act: async () => {
+        throw Object.assign(new Error(explanation), { code: "COMPUTER_ACTION_REJECTED" });
+      },
+      decide: async () => {
+        decisions += 1;
+        return decisions === 1
+          ? '{"kind":"action","action":{"kind":"click","uid":"0.1#ab"}}'
+          : '{"kind":"done","summary":"gave up","evidence":[]}';
+      },
+    };
+
+    const result = await runComputerLoop({ instruction: "press the chord", maxSteps: 3 }, deps);
+
+    const refused = result.steps.find((step) => step.action === "click");
+    expect(refused?.ok).toBe(false);
+    expect(refused?.errorCode).toBe("COMPUTER_ACTION_REJECTED");
+    expect(refused?.reason).toBe(explanation);
+    expect(renderHistory(result.steps)).toContain("could not find a UIA AcceleratorKey");
+  });
+
+  it("keeps a refusal explanation bounded", async () => {
+    // A driver that fails in an unexpected way can put anything into an error
+    // string, and this text is about to be handed to a model as a step record.
+    const noise = "x".repeat(5_000);
+    let decisions = 0;
+    const deps: ComputerLoopDeps = {
+      observe: async () => observation(),
+      act: async () => {
+        throw Object.assign(new Error(noise), { code: "COMPUTER_ACTION_REJECTED" });
+      },
+      decide: async () => {
+        decisions += 1;
+        return decisions === 1
+          ? '{"kind":"action","action":{"kind":"click","uid":"0.1#ab"}}'
+          : '{"kind":"done","summary":"gave up","evidence":[]}';
+      },
+    };
+
+    const result = await runComputerLoop({ instruction: "press the chord", maxSteps: 3 }, deps);
+
+    const refused = result.steps.find((step) => step.action === "click");
+    expect(refused?.reason).toBeDefined();
+    expect(refused?.reason!.length).toBeLessThanOrEqual(400);
+  });
+
+  it("stops when the model keeps asking for a write it already dispatched", async () => {
+    // A skipped write did not change the window. The history tells the model
+    // the write already happened, and a model that asks again anyway is not
+    // going to be answered by a third identical request. Measured: a model
+    // asked to type three lines asked for one of them four times and spent
+    // every remaining step on writes that were never sent.
+    const field: ComputerNode = {
+      ...saveButton,
+      role: "AXTextField",
+      label: "Name",
+      hasValue: true,
+      actions: ["set_value", "type_text"],
+    };
+    const answers = Array.from(
+      { length: 6 },
+      () => '{"kind":"action","action":{"kind":"type_text","uid":"0.1#ab","text":"same"}}',
+    );
+    let decisions = 0;
+    const deps: ComputerLoopDeps = {
+      observe: async () => observation([field]),
+      act: async () => ({
+        grantId: "cug_1",
+        revision: 3,
+        remainingBudget: 9,
+        dispatched: "accessibility-action",
+      }),
+      decide: async () => answers[Math.min(decisions++, answers.length - 1)],
+    };
+
+    const result = await runComputerLoop({ instruction: "type the text", maxSteps: 10 }, deps);
+
+    // The first write goes out; the repeat is skipped, and the second repeat
+    // ends the run instead of burning the rest of the budget.
+    const skipped = result.steps.filter((step) => step.verification === "skipped-duplicate");
+    expect(skipped).toHaveLength(2);
+    expect(result.outcome).toBe("failed");
+    expect(decisions).toBeLessThan(6);
+  });
+
+  it("keeps going when the model moves on to a different write", async () => {
+    // The skip counter is per payload. A model that skips one write and then
+    // writes something else is making progress, and must not be stopped for
+    // the write it skipped.
+    const field: ComputerNode = {
+      ...saveButton,
+      role: "AXTextField",
+      label: "Name",
+      hasValue: true,
+      actions: ["set_value", "type_text"],
+    };
+    const h = harness(
+      [
+        '{"kind":"action","action":{"kind":"type_text","uid":"0.1#ab","text":"first"}}',
+        '{"kind":"action","action":{"kind":"type_text","uid":"0.1#ab","text":"first"}}',
+        '{"kind":"action","action":{"kind":"type_text","uid":"0.1#ab","text":"second"}}',
+        '{"kind":"action","action":{"kind":"type_text","uid":"0.1#ab","text":"second"}}',
+        '{"kind":"action","action":{"kind":"type_text","uid":"0.1#ab","text":"third"}}',
+        '{"kind":"done","summary":"typed","evidence":[]}',
+      ],
+      { observe: () => observation([field]) },
+    );
+
+    const result = await runComputerLoop({ instruction: "type the lines", maxSteps: 10 }, h.deps);
+
+    expect(result.outcome).not.toBe("failed");
+    const writes = h.acted.filter((action) => action.kind === "type_text");
+    // "first", "second" and "third" each went out once.
+    expect(writes.map((action) => action.text)).toEqual(["first", "second", "third"]);
   });
 });
