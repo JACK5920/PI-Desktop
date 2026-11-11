@@ -60,6 +60,9 @@ const RATE_LIMIT_PATTERN =
 const EXHAUSTED_QUOTA_CODE_PATTERN =
   /\b(?:insufficient_quota|credit_balance_exhausted|organization_spend_limit_exceeded|project_spend_limit_exceeded|organization_usage_limit_exceeded|FreeUsageLimitError)\b/i;
 
+// Zhipu/Z.ai 1308 is a plan usage cap reset after hours, not a transient 429.
+const ZHIPU_USAGE_LIMIT_PATTERN = /"code"\s*:\s*"?1308(?![0-9])/;
+
 const EXHAUSTED_QUOTA_MESSAGE_PATTERN =
   /\b(?:billing|spending|credit|disk)\s+quotas?\b|\b(?:organization|project)\s+spend\s+limit\s+(?:reached|exceeded)\b|\bquota\b.{0,100}\b(?:plan|billing)\b|\binsufficient\s+credits\b|\brequires\s+more\s+credits\b|\bpayment\s+required\b/i;
 
@@ -648,6 +651,7 @@ export function classifyAgentError(err: unknown): ClassifiedAgentError {
   if (
     EXHAUSTED_QUOTA_CODE_PATTERN.test(rawMessage) ||
     EXHAUSTED_QUOTA_MESSAGE_PATTERN.test(rawMessage) ||
+    ZHIPU_USAGE_LIMIT_PATTERN.test(rawMessage) ||
     (typeof providerCode === "string" &&
       EXHAUSTED_QUOTA_CODE_PATTERN.test(providerCode))
   ) {

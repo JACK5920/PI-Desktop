@@ -3850,6 +3850,17 @@ async fn handle_request(
             Ok(json!({ "hits": hits }))
         }
 
+        "session.usageCost" => {
+            let session_id = params
+                .get("sessionId")
+                .and_then(|value| value.as_str())
+                .filter(|id| !id.is_empty())
+                .ok_or_else(|| rpc_err(1002, "sessionId required", "INVALID_PARAMS"))?;
+            let st = state.lock().await;
+            sessions::session_usage_cost(&st.db, session_id)
+                .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))
+        }
+
         "stats.getTokenUsageHistory" => {
             let bucket = params
                 .get("bucket")
@@ -7457,6 +7468,40 @@ mod tests {
             groups_after_delete["groups"][0]["primaryPath"],
             json!(remaining_canonical)
         );
+    }
+
+    #[tokio::test]
+    async fn session_usage_cost_rpc_reads_the_session_ledger() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let mut app_state = AppState::open(data_dir.path()).unwrap();
+        app_state.handshook = true;
+        let state = Arc::new(Mutex::new(app_state));
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let session_id = {
+            let st = state.lock().await;
+            let session = sessions::create_session(&st.db, None, None, None, None, None).unwrap();
+            let turn = sessions::begin_turn(&st.db, &session.id, None, None).unwrap();
+            let usage = json!({"operationId":"op", "providerId":"p", "inputTokens":3, "outputTokens":1, "totalTokens":4,
+                "costStatus":"estimated", "cost":{"input":0.01,"output":0.02,"cacheRead":0,"cacheWrite":0,"total":0.03}});
+            sessions::record_usage(&st.db, &session.id, &turn, &usage).unwrap();
+            session.id
+        };
+        let error = handle_request(state.clone(), "session.usageCost", json!({}), tx.clone())
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, 1002);
+        let result = handle_request(
+            state,
+            "session.usageCost",
+            json!({ "sessionId": session_id }),
+            tx,
+        )
+        .await
+        .unwrap();
+        assert_eq!(result["requestCount"], 1);
+        assert_eq!(result["providers"][0]["providerId"], "p");
+        assert_eq!(result["providers"][0]["total"], 0.03);
+        assert_eq!(result["providers"][0]["reportedRequests"], 0);
     }
 
     /// ADR 0334: `fastMode` is an optional boolean on create and configure;

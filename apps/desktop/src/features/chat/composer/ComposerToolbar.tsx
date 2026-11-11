@@ -16,7 +16,9 @@ import { ComposerControlSlots } from "./ComposerControlSlots";
 import { TooltipButton } from "../../../components/ui";
 import {
   IconArrowUp,
+  IconPause,
   IconPlus,
+  IconPlay,
   IconSparkles,
   IconStop,
   IconUndo2,
@@ -65,6 +67,10 @@ export type ComposerToolbarProps = {
   runActive: boolean;
   hasDraftContent: boolean;
   abort: AppState["abort"];
+  taskPaused?: boolean;
+  pausePending?: boolean;
+  pauseTask?: () => Promise<void>;
+  resumeTask?: () => Promise<void>;
   submit: () => Promise<void>;
   workSessionId?: string;
   workSessionLabel?: string;
@@ -107,6 +113,10 @@ export function ComposerToolbar({
   runActive,
   hasDraftContent,
   abort,
+  taskPaused = false,
+  pausePending = false,
+  pauseTask,
+  resumeTask,
   submit,
   workSessionId,
   workSessionLabel,
@@ -238,15 +248,49 @@ export function ComposerToolbar({
           </TooltipButton>
         ) : null}
         {runActive && !hasDraftContent ? (
+          pauseTask ? (
+            <TooltipButton
+              type="button"
+              className="pause-btn"
+              tooltip={t("chat.pauseGeneratingTooltip")}
+              ariaLabel={t("chat.pauseGenerating")}
+              aria-description={t("chat.stopGenerating")}
+              disabled={!stopAllowed || pausePending}
+              onClick={() => void pauseTask()}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                if (stopAllowed) void abort();
+              }}
+            >
+              <IconPause size={14} />
+            </TooltipButton>
+          ) : (
+            <TooltipButton
+              type="button"
+              className="stop-btn"
+              tooltip={t("chat.stopGenerating")}
+              ariaLabel={t("chat.stopGenerating")}
+              disabled={!stopAllowed}
+              onClick={() => void abort()}
+            >
+              <IconStop size={14} />
+            </TooltipButton>
+          )
+        ) : taskPaused && !hasDraftContent ? (
           <TooltipButton
             type="button"
-            className="stop-btn"
-            tooltip={t("chat.stopGenerating")}
-            ariaLabel={t("chat.stopGenerating")}
-            disabled={!stopAllowed}
-            onClick={() => void abort()}
+            className="resume-btn"
+            tooltip={t("chat.resumePausedTaskTooltip")}
+            ariaLabel={t("chat.resumePausedTask")}
+            aria-description={t("chat.stopGenerating")}
+            disabled={!resumeTask}
+            onClick={() => void resumeTask?.()}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              if (stopAllowed) void abort();
+            }}
           >
-            <IconStop size={14} />
+            <IconPlay size={14} />
           </TooltipButton>
         ) : (
           <TooltipButton

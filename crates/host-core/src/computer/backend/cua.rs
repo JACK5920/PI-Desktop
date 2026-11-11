@@ -47,6 +47,22 @@ const MAX_MARKDOWN_CHARS: usize = 120_000;
 /// returns an empty tree.
 const WALK_TIMEOUT_MS: u64 = 20_000;
 
+/// How many nodes to ask the driver for.
+///
+/// This is deliberately larger than `MAX_NODES`: the driver truncates the
+/// walk at its budget, and the truncation cuts the *tail* of the tree -- which
+/// on a long window is where the composer and the action buttons live. A
+/// window read at the driver's smaller budget can therefore omit the very
+/// control the caller is about to use, while the model still only ever sees
+/// the first `MAX_NODES` nodes.
+///
+/// Measured on a Chromium chat window with a long thread: its tree is 432
+/// nodes, and a budget of 500 stopped the walk inside the message list with
+/// the input box absent, while 800 returned the whole tree. 900 leaves
+/// headroom for a longer thread without reading much more than the window
+/// actually contains.
+const DRIVER_WALK_NODES: u64 = 900;
+
 /// The driver's own ceiling for one `scroll` call (`amount` is a 1..=50 tick
 /// count, and anything above 50 is silently clamped by the driver).
 const SCROLL_MAX_AMOUNT: i64 = 50;
@@ -54,12 +70,98 @@ const SCROLL_MAX_AMOUNT: i64 = 50;
 pub struct CuaDesktop {
     client: Arc<McpClient>,
     snapshots: Arc<SnapshotCache>,
+    /// The value the target held before the write that is being performed.
+    ///
+    /// A write is confirmed by what the field holds afterwards, and the field
+    /// may well have held the same text already: `type_text` types at the
+    /// caret, so a field that already ends with the requested text looks the
+    /// same before and after. The value from before the write is what tells
+    /// the two apart.
+    baseline: Arc<std::sync::Mutex<Option<(i32, u64, usize, String)>>>,
 }
 
 /// The driver's error code for "this surface drops posted input; retry with
 /// delivery_mode foreground". Matched on the refusal code the driver embeds in
 /// its message, since that is the only structured part this client keeps.
 const BACKGROUND_UNAVAILABLE: &str = "background_unavailable";
+
+/// Whether a field that now holds `actual` received `expected`.
+///
+/// `set_value` replaces the field, so the field must hold exactly what was
+/// written. `type_text` types characters into the focused control, so the
+/// field ends with what was written -- unless the control dropped some of
+/// it, which is exactly what a `false` verdict has to report.
+fn write_confirmed(actual: &str, expected: &str, baseline: Option<&str>) -> bool {
+    // An empty write is not a confirmed write. Every string ends with the
+    // empty string, so the suffix test would otherwise report a write of
+    // nothing as a write that landed.
+    if expected.is_empty() {
+        return false;
+    }
+    // A text field normalises the line endings of what it is given.
+    // Measured on a Windows text field: "\n" came back as "\r", "\r\n" as
+    // "\r", and "a\r\nb" as "a\rb". That is the platform's own line-ending
+    // convention, not a lost character, so both sides are normalised before
+    // they are compared -- otherwise every write that contained a line
+    // ending would be reported as a write that did not land.
+    // The field's line endings are the platform's, so the field is compared
+    // in the platform's convention: a "\n" that came back as "\r" is the
+    // same line ending, and the trailing one the field adds on top of the
+    // text is not part of the text.
+    //
+    // The expected side is the text as it was written, so its line endings
+    // are read the same way -- otherwise a write of "hello" would be compared
+    // against a field that holds "hello\r" and reported as a lost write.
+    let as_field = |text: &str| text.replace("\r\n", "\r").replace('\n', "\r");
+    let actual = as_field(actual);
+    let actual = actual.strip_suffix('\r').unwrap_or(&actual);
+    let expected = as_field(expected);
+    let expected = expected.strip_suffix('\r').unwrap_or(&expected);
+    if actual == expected {
+        return true;
+    }
+    // A typed write puts the text at the caret, so the field ends with it. That
+    // is only proof of THIS write when the field did not already end with it:
+    // a field that already held the text looks the same before and after a
+    // write that was dropped.
+    //
+    // The value from before the write is what tells the two apart. Without
+    // it the best that can be said is "the field ends with the text", which
+    // is not the same thing as "the text was just typed".
+    if let Some(before) = baseline {
+        let before = as_field(before);
+        let before = before.strip_suffix('\r').unwrap_or(&before);
+        if before.ends_with(&expected) {
+            return false;
+        }
+    }
+    actual.ends_with(&expected)
+}
+
+/// How many times a written field is read back before the write is called
+/// unconfirmed.
+///
+/// The write and the tree are not in step: a keystroke reaches the
+/// application through the input queue and the accessibility tree catches up
+/// a moment later. Measured on a Chromium composer, the first read after the
+/// write still showed the old text.
+const WRITE_CONFIRM_ATTEMPTS: u32 = 4;
+/// The pause between two read-back attempts.
+const WRITE_CONFIRM_INTERVAL: std::time::Duration = std::time::Duration::from_millis(120);
+
+/// Whether the driver's refusal names the foreground escalation.
+///
+/// The driver refuses background keystrokes on a surface whose input stack
+/// drops posted events -- a Chromium composer is exactly that -- and it says
+/// so with a structured `background_unavailable` code. That refusal is not a
+/// transient failure: re-issuing the same action unchanged fails the same
+/// way, so the retry has to carry `delivery_mode: "foreground"`.
+///
+/// Every other refusal propagates. The bridge only overrides the driver's own
+/// default when the driver asked for it in its error.
+fn escalates_to_foreground(message: &str) -> bool {
+    message.contains(BACKGROUND_UNAVAILABLE)
+}
 
 /// Translate one chord token into the driver's Windows vocabulary.
 ///
@@ -110,6 +212,7 @@ impl CuaDesktop {
         Ok(Self {
             client: McpClient::spawn()?,
             snapshots: Arc::new(SnapshotCache::new()),
+            baseline: Arc::new(std::sync::Mutex::new(None)),
         })
     }
 
@@ -119,6 +222,7 @@ impl CuaDesktop {
         Self {
             client,
             snapshots: Arc::new(SnapshotCache::new()),
+            baseline: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -152,9 +256,12 @@ impl CuaDesktop {
 
     /// Walk one window and translate the markdown tree into `Node`s.
     ///
-    /// The driver returns the tree as markdown only: with
-    /// `tree_format: "elements"` the `name` and `control_type` fields come back
-    /// empty, so the markdown is the single source of truth for both.
+    /// The tree is read in the structured `elements` form rather than as
+    /// markdown. A markdown row prints a value verbatim, and a value holding a
+    /// newline breaks the row in half, so the quoted label of that row never
+    /// closes and the row is dropped. A Chromium chat composer holds exactly
+    /// such a value -- its placeholder ends in a newline -- so on markdown the
+    /// composer was simply not in the tree.
     fn inspect_window(
         &self,
         target: &TargetRef,
@@ -164,7 +271,8 @@ impl CuaDesktop {
             "pid": target.pid,
             "window_id": target.window,
             "max_elements": clamp_walk_elements(max_nodes),
-            "timeout_ms": WALK_TIMEOUT_MS
+            "timeout_ms": WALK_TIMEOUT_MS,
+            "tree_format": "elements"
         });
         let result = self
             .client
@@ -182,11 +290,6 @@ impl CuaDesktop {
             ));
         }
 
-        let markdown = result
-            .field("tree_markdown")
-            .as_str()
-            .unwrap_or_default()
-            .to_string();
         let complete = result
             .field("elements_complete")
             .as_bool()
@@ -196,29 +299,26 @@ impl CuaDesktop {
             .as_u64()
             .unwrap_or(0) as usize;
 
-        let (nodes, rows) = parse_markdown_tree(&markdown, &snapshot_id);
-
-        let markdown_len = markdown.len();
+        let elements = result.field("elements");
+        let walked = elements.as_array().map(|list| list.len()).unwrap_or(0);
+        let (nodes, rows) = parse_elements_tree(&elements, &snapshot_id);
+        let values = element_values(&elements, &snapshot_id);
         let entry = SnapshotEntry {
             snapshot_id: snapshot_id.clone(),
             rows,
-            markdown,
+            markdown: String::new(),
             truncated: !complete,
             element_count,
+            values,
         };
 
-        let truncated = !complete || markdown_len > MAX_MARKDOWN_CHARS;
-        let nodes: Vec<Node> = if markdown_len > MAX_MARKDOWN_CHARS {
-            // Keep the head of the tree; the tail is what a caller can re-read
-            // with a narrower `query`.
-            let keep = nodes.len() * MAX_MARKDOWN_CHARS / markdown_len.max(1);
-            nodes.into_iter().take(keep.max(1)).collect()
-        } else {
-            nodes
-        };
+        // The structured tree is bounded by the node budget instead of by a
+        // character count, so the cut is decided by the node count alone.
+        let truncated = !complete;
 
         Ok((
             RawInspection {
+                total_nodes: walked,
                 nodes,
                 truncated,
                 // cua-driver reports `elements_complete`, so a complete walk is
@@ -229,6 +329,7 @@ impl CuaDesktop {
             entry,
         ))
     }
+
 
     /// Whether the combo box reads back as showing `option`.
     ///
@@ -249,7 +350,7 @@ impl CuaDesktop {
                 json!({
                     "pid": target.pid,
                     "window_id": target.window,
-                    "max_elements": 500,
+                    "max_elements": DRIVER_WALK_NODES,
                     "timeout_ms": WALK_TIMEOUT_MS
                 }),
             )
@@ -299,7 +400,7 @@ impl CuaDesktop {
                 json!({
                     "pid": target.pid,
                     "window_id": target.window,
-                    "max_elements": 500,
+                    "max_elements": DRIVER_WALK_NODES,
                     "timeout_ms": WALK_TIMEOUT_MS
                 }),
             )
@@ -349,7 +450,7 @@ impl CuaDesktop {
     ) -> Result<(), DesktopError> {
         match self.client.call_tool(tool, args.clone()) {
             Ok(_) => Ok(()),
-            Err(McpError::Protocol(message)) if message.contains(BACKGROUND_UNAVAILABLE) => {
+            Err(McpError::Protocol(message)) if escalates_to_foreground(&message) => {
                 args["delivery_mode"] = json!("foreground");
                 self.client.call_tool(tool, args).map_err(map_err)?;
                 Ok(())
@@ -395,12 +496,116 @@ impl CuaDesktop {
             None => Err(DesktopError::ElementNotFound),
         }
     }
+    /// Read the value the target holds, so a write can be told apart from a
+    /// field that already held the same text.
+    ///
+    /// A write is confirmed by what the field holds afterwards. That is not
+    /// enough on its own: `type_text` types at the caret, so a field that
+    /// already ended with the requested text looks the same before and after
+    /// the write, and a suffix check would report a dropped write as a landed
+    /// one. The value from before the write is what tells them apart.
+    fn take_baseline(&self, target: &TargetRef, token: &str) {
+        let Some(row) = token.rsplit(':').next().and_then(|row| row.parse::<usize>().ok()) else {
+            return;
+        };
+        // The value comes from the snapshot the caller already holds. Reading
+        // the tree again would replace that snapshot and stale the handle the
+        // write is about to use.
+        let before = self
+            .snapshots
+            .get(target.pid, target.window)
+            .and_then(|entry| entry.values.get(token).cloned());
+        if let Ok(mut slot) = self.baseline.lock() {
+            *slot = before.map(|value| (target.pid, target.window, row, value));
+        }
+    }
+
+    /// The value one row currently holds, read from the driver's tree.
+    fn read_value(&self, target: &TargetRef, row: usize) -> Option<String> {
+        let result = self
+            .client
+            .call_tool(
+                tools::GET_WINDOW_STATE,
+                json!({
+                    "pid": target.pid,
+                    "window_id": target.window,
+                    "max_elements": DRIVER_WALK_NODES,
+                    "timeout_ms": WALK_TIMEOUT_MS,
+                    "tree_format": "elements"
+                }),
+            )
+            .ok()?;
+        let elements = result.field("elements");
+        let items = elements.as_array()?;
+        let element = items.iter().find(|item| {
+            item.get("element_index")
+                .and_then(Value::as_u64)
+                .map(|index| index as usize == row)
+                .unwrap_or(false)
+        })?;
+        element.get("value").and_then(Value::as_str).map(str::to_string)
+    }
+
+    /// One read-back of the written row, or `None` while the tree has not
+    /// caught up with the write yet.
+    fn read_back_write(
+        &self,
+        target: &TargetRef,
+        row: usize,
+        expected: &str,
+        baseline: Option<&str>,
+    ) -> Option<bool> {
+        let result = self
+            .client
+            .call_tool(
+                tools::GET_WINDOW_STATE,
+                json!({
+                    "pid": target.pid,
+                    "window_id": target.window,
+                    "max_elements": DRIVER_WALK_NODES,
+                    "timeout_ms": WALK_TIMEOUT_MS,
+                    "tree_format": "elements"
+                }),
+            )
+            .ok()?;
+        let elements = result.field("elements");
+        let items = match elements.as_array() {
+            Some(items) => items,
+            None => {
+                tracing::info!(target: "computer", row, "confirm_write: the driver returned no elements array");
+                return None;
+            }
+        };
+        let element = match items.iter().find(|item| {
+            item.get("element_index")
+                .and_then(Value::as_u64)
+                .map(|index| index as usize == row)
+                .unwrap_or(false)
+        }) {
+            Some(element) => element,
+            None => {
+                tracing::info!(target: "computer", row, "confirm_write: the row is not in the elements array");
+                return None;
+            }
+        };
+        let value = match element.get("value").and_then(Value::as_str) {
+            Some(value) => value,
+            None => {
+                tracing::info!(target: "computer", row, "confirm_write: the row carries no value");
+                return None;
+            }
+        };
+        Some(write_confirmed(value, expected, baseline))
+    }
+
 }
 
 
 fn clamp_walk_elements(max_nodes: usize) -> u64 {
-    // The driver caps at 5000; below that, honour the caller.
-    (max_nodes.max(50) as u64).min(5000)
+    // The driver caps at 5000; below that, honour the caller. The walk is
+    // always given at least `DRIVER_WALK_NODES` so that a truncated walk
+    // cannot silently drop the controls at the tail of the tree.
+    (max_nodes.max(50) as u64).max(DRIVER_WALK_NODES).min(5000)
 }
 
 fn map_err(error: McpError) -> DesktopError {
@@ -477,6 +682,187 @@ fn raw_target_from_window(window: &Value) -> Option<RawTarget> {
         // flagging them; a window it lists is one it can reach.
         elevated: false,
     })
+}
+
+/// The value every row held at the time of the read, keyed by uid.
+///
+/// A write is confirmed by what the field holds afterwards, and a field may
+/// well have held the same text already -- `type_text` types at the caret, so
+/// a field that already ends with the requested text looks the same before
+/// and after the write. The value from before the write is what tells the two
+/// apart.
+fn element_values(
+    elements: &Value,
+    snapshot_id: &str,
+) -> std::collections::HashMap<String, String> {
+    let mut values = std::collections::HashMap::new();
+    let Some(items) = elements.as_array() else {
+        return values;
+    };
+    for item in items {
+        let Some(row) = item.get("element_index").and_then(Value::as_u64) else {
+            continue;
+        };
+        let Some(value) = item.get("value").and_then(Value::as_str) else {
+            continue;
+        };
+        values.insert(format!("{snapshot_id}:{row}"), value.to_string());
+    }
+    values
+}
+
+/// Parse the driver's structured tree into `Node`s.
+///
+/// The driver can return the tree as markdown or as a structured `elements`
+/// array. The structured form is preferred: a markdown row prints a value
+/// verbatim, and a value that contains a newline breaks the row in half, so
+/// the quoted label of that row no longer closes and the row is dropped
+/// entirely. A Chromium chat composer holds exactly such a value (its
+/// placeholder ends in a newline), so on markdown the composer was simply
+/// absent from the tree.
+///
+/// The structured form carries the same fields the markdown rows carry --
+/// role, label, value, actions -- plus the parent row and the element token,
+/// so the translation is direct.
+fn parse_elements_tree(
+    elements: &Value,
+    snapshot_id: &str,
+) -> (Vec<Node>, std::collections::HashMap<String, usize>) {
+    let mut nodes: Vec<Node> = Vec::new();
+    let mut rows: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let Some(items) = elements.as_array() else {
+        return (nodes, rows);
+    };
+
+    // The driver numbers its rows, and `element_index` is that number. The
+    // node list is keyed by it, so a parent can be looked up directly.
+    let mut by_row: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+    // (parent row, role) -> how many same-role siblings have been seen, so
+    // each node's `identity` can end in a stable ordinal.
+    let mut siblings: std::collections::HashMap<(Option<usize>, String), usize> =
+        std::collections::HashMap::new();
+
+    for item in items {
+        let Some(raw_role) = item.get("role").and_then(Value::as_str) else {
+            continue;
+        };
+        let role = canonical_role(raw_role);
+        if role.is_empty() {
+            continue;
+        }
+        let Some(row) = item.get("element_index").and_then(Value::as_u64) else {
+            continue;
+        };
+        let row = row as usize;
+        let parent_row = item
+            .get("parent_index")
+            .and_then(Value::as_u64)
+            .map(|value| value as usize);
+
+        // The driver's `actions` list names the UIA patterns a row exposes.
+        //
+        // `text` on its own is NOT a write capability. Measured on a live
+        // Chromium composer tree: a read-only message Text row reports
+        // `actions=["text"]`, and the driver refuses `set_value` on it with
+        // "does not implement ValuePattern". The real composer Edit reports
+        // `actions=["set_value","text"]` and accepts the write. Mapping `text`
+        // to a write action made every read-only label in the window look like
+        // an input field, and moved the tree-budget anchor off the composer
+        // onto a message row.
+        //
+        // A row that carries `set_value` *and* `text` is a real field: it can
+        // take a value as a whole and it can be typed into character by
+        // character, so both actions belong to it.
+        let mut has_set_value = false;
+        let mut has_text = false;
+        let mut actions = match item.get("actions").and_then(Value::as_array) {
+            Some(list) => list
+                .iter()
+                .filter_map(|value| value.as_str())
+                .filter_map(|token| match token.trim().to_ascii_lowercase().as_str() {
+                    "invoke" | "press" | "click" => Some(ActionKind::Click),
+                    "set_value" | "setvalue" => {
+                        has_set_value = true;
+                        Some(ActionKind::SetValue)
+                    }
+                    "toggle" => Some(ActionKind::Click),
+                    "select" | "selection" => Some(ActionKind::Select),
+                    "expand" | "collapse" => Some(ActionKind::Click),
+                    "scroll" | "scrollitem" => Some(ActionKind::Scroll),
+                    "type_text" | "typetext" => Some(ActionKind::TypeText),
+                    "text" => {
+                        has_text = true;
+                        None
+                    }
+                    _ => None,
+                })
+                .fold(Vec::new(), |mut out: Vec<ActionKind>, kind| {
+                    if !out.contains(&kind) {
+                        out.push(kind);
+                    }
+                    out
+                }),
+            None => Vec::new(),
+        };
+        if has_set_value && has_text && !actions.contains(&ActionKind::TypeText) {
+            actions.push(ActionKind::TypeText);
+        }
+        let label = item
+            .get("label")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|label| !label.is_empty())
+            .map(|label| unescape_markdown_label(label));
+
+        // Whether the element holds a value the caller can write into.
+        //
+        // The driver's `value` field also carries the text of a read-only row
+        // (a message body reports its own text as `value`), so keying on the
+        // field alone marked every label in the window as a writable field.
+        // `has_value` gates `set_value` in the answer validator, so it must
+        // mean "this control takes a value" — which is what the driver says
+        // by advertising `set_value`.
+        let has_value = actions.contains(&ActionKind::SetValue);
+
+        let parent = parent_row.and_then(|candidate| by_row.get(&candidate).copied());
+
+        let ordinal = siblings
+            .entry((parent_row, role.clone()))
+            .and_modify(|count| *count += 1)
+            .or_insert(0usize);
+        let segment = format!("{role}#{ordinal}");
+        let identity = match parent {
+            Some(parent_index) => match nodes[parent_index].identity.as_deref() {
+                Some(base) => format!("{base}/{segment}"),
+                None => segment,
+            },
+            None => segment,
+        };
+
+        let index = nodes.len();
+        nodes.push(Node {
+            uid: format!("{snapshot_id}:{row}"),
+            identity: Some(identity),
+            role,
+            label,
+            has_value,
+            enabled: item
+                .get("enabled")
+                .and_then(Value::as_bool)
+                .unwrap_or_else(|| actions.iter().any(|kind| is_dispatchable(*kind))),
+            focused: item
+                .get("focused")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            bounds: None,
+            parent,
+            actions,
+        });
+        rows.insert(nodes[index].uid.clone(), row);
+        by_row.insert(row, index);
+    }
+
+    (nodes, rows)
 }
 
 /// Parse the driver's markdown tree into `Node`s.
@@ -703,22 +1089,17 @@ fn unescape_markdown_label(input: &str) -> String {
 }
 
 /// Map the driver's action words onto this crate's `ActionKind`.
-/// Whether this action can actually be dispatched at a window element.
+/// Whether the action can actually be dispatched at a window element.
+///
+/// The judgement lives on `ActionKind` so the node budget and this backend
+/// cannot drift apart: a node the budget kept because it is dispatchable must
+/// be dispatchable here too.
 ///
 /// `TypeText` is included because the driver can type into a focused field,
 /// but a row that only advertises text (`actions=[text]`, the markdown word for
 /// "readable") maps to nothing here — that is the point of the distinction.
 fn is_dispatchable(kind: ActionKind) -> bool {
-    matches!(
-        kind,
-        ActionKind::Click
-            | ActionKind::DoubleClick
-            | ActionKind::RightClick
-            | ActionKind::SetValue
-            | ActionKind::TypeText
-            | ActionKind::Select
-            | ActionKind::Scroll
-    )
+    kind.is_dispatchable()
 }
 
 fn parse_actions(input: &str) -> Vec<ActionKind> {
@@ -731,15 +1112,33 @@ fn parse_actions(input: &str) -> Vec<ActionKind> {
     };
     let body = &input[body_start..body_start + end_rel];
     let mut out: Vec<ActionKind> = Vec::new();
+    let mut has_set_value = false;
+    let mut has_text = false;
     for token in body.split(',') {
         let kind = match token.trim().to_ascii_lowercase().as_str() {
             "invoke" | "press" | "click" => Some(ActionKind::Click),
-            "set_value" | "setvalue" => Some(ActionKind::SetValue),
+            "set_value" | "setvalue" => {
+                has_set_value = true;
+                Some(ActionKind::SetValue)
+            }
             "toggle" => Some(ActionKind::Click),
             "select" | "selection" => Some(ActionKind::Select),
             "expand" | "collapse" => Some(ActionKind::Click),
             "scroll" | "scrollitem" => Some(ActionKind::Scroll),
-            "text" => Some(ActionKind::TypeText),
+            "type_text" | "typetext" => Some(ActionKind::TypeText),
+            // `text` marks a text-bearing element, not a writable one.
+            //
+            // Measured on a live Chromium composer: a read-only message row
+            // reports `actions=[text]` and the driver refuses `set_value` on
+            // it with "does not implement ValuePattern". The real composer
+            // Edit reports `actions=[set_value,text]` and accepts `set_value`.
+            // Mapping `text` to a write action made every read-only label
+            // look like an input field, which moved the tree-budget anchor
+            // off the composer and onto a message row.
+            "text" => {
+                has_text = true;
+                None
+            }
             _ => None,
         };
         if let Some(kind) = kind {
@@ -747,6 +1146,12 @@ fn parse_actions(input: &str) -> Vec<ActionKind> {
                 out.push(kind);
             }
         }
+    }
+    // A row that carries `set_value` *and* `text` is a real field: it can
+    // take a value as a whole and it can be typed into character by
+    // character, so both actions belong to it.
+    if has_set_value && has_text && !out.contains(&ActionKind::TypeText) {
+        out.push(ActionKind::TypeText);
     }
     // The driver reports a list row as `actions=[select]` because it drives it
     // through UIA's SelectionItem pattern. Selection is what a click does to a
@@ -760,7 +1165,9 @@ fn parse_actions(input: &str) -> Vec<ActionKind> {
     out
 }
 
+
 impl Desktop for CuaDesktop {
+
     fn capabilities(&self) -> Capabilities {
         Capabilities {
             platform: "win32".into(),
@@ -771,6 +1178,55 @@ impl Desktop for CuaDesktop {
             session_type: None,
             input_unsupported_reason: None,
         }
+    }
+    /// Read the field back and report whether it now holds `expected`.
+    ///
+    /// The driver reports each row's current `value` in its structured tree,
+    /// so a write can be checked without exposing the value to the model:
+    /// only the verdict leaves this function.
+    /// Read the field back and report whether it now holds `expected`.
+    ///
+    /// The driver reports each row's current `value` in its structured tree,
+    /// so a write can be checked without exposing the value to the model:
+    /// only the verdict leaves this function.
+    fn confirm_write(
+        &self,
+        target: &TargetRef,
+        uid: Option<&str>,
+        expected: &str,
+    ) -> Option<bool> {
+        let uid = uid?;
+        // The uid is `<snapshot>:<row>`; the row is what identifies the
+        // element in the next read.
+        let row: usize = uid.rsplit(':').next()?.parse().ok()?;
+        // The write and the tree are not in step. A keystroke reaches the
+        // application through the input queue, and the accessibility tree is
+        // updated a moment later -- measured on a Chromium composer, the
+        // field still held the old text on the first read after the write.
+        // So the read is retried for a short while before the write is
+        // called unconfirmed.
+        let baseline = self
+            .baseline
+            .lock()
+            .ok()
+            .and_then(|slot| {
+                slot.clone()
+                    .filter(|(pid, window, baseline_row, _)| {
+                        *pid == target.pid && *window == target.window && *baseline_row == row
+                    })
+                    .map(|(_, _, _, value)| value)
+            });
+        for attempt in 0..WRITE_CONFIRM_ATTEMPTS {
+            if attempt > 0 {
+                std::thread::sleep(WRITE_CONFIRM_INTERVAL);
+            }
+            if let Some(verdict) =
+                self.read_back_write(target, row, expected, baseline.as_deref())
+            {
+                return Some(verdict);
+            }
+        }
+        None
     }
 
     fn list_targets(&self) -> Result<Vec<RawTarget>, DesktopError> {
@@ -853,6 +1309,9 @@ impl Desktop for CuaDesktop {
             ActionKind::SetValue => {
                 let token = self.element_token(target, uid)?;
                 let value = action.text.as_deref().ok_or(DesktopError::NotActionable)?;
+                // The value the field holds now is the baseline the write is
+                // measured against.
+                self.take_baseline(target, &token);
                 self.client
                     .call_tool(
                         tools::SET_VALUE,
@@ -929,6 +1388,13 @@ impl Desktop for CuaDesktop {
             }
             ActionKind::TypeText => {
                 let text = action.text.as_deref().ok_or(DesktopError::NotActionable)?;
+                if let Some(token) = uid {
+                    // The value the field holds now is the baseline the write
+                    // is measured against: `type_text` types at the caret, so
+                    // a field that already ends with the requested text looks
+                    // the same before and after the write.
+                    self.take_baseline(target, token);
+                }
                 let mut args = json!({
                     "pid": target.pid,
                     "window_id": target.window,
@@ -1042,6 +1508,7 @@ impl Desktop for CuaDesktop {
     }
 }
 
+
 /// The look-then-act program `select_via_popup` runs inside the driver.
 ///
 /// Kept as a plain function so it can be reviewed next to the prose: everything
@@ -1056,7 +1523,7 @@ const row = parseInt(String(token).split(":").pop(), 10);
 
 // 1) Open the popup. Foreground on purpose: a synthetic click is dropped by the
 //    rendered list, which is exactly what set_value already failed to do here.
-const st0 = await cua.call("get_window_state", {{pid: {pid}, window_id: {window}, max_elements: 500, timeout_ms: 20000}});
+const st0 = await cua.call("get_window_state", {{pid: {pid}, window_id: {window}, max_elements: {DRIVER_WALK_NODES}, timeout_ms: 20000}});
 let opened = false;
 try {{
   await cua.call("click", {{pid: {pid}, window_id: {window}, element_token: token, action: "expand"}});
@@ -1077,7 +1544,7 @@ if (!opened) {{
 let snap = null, optRow = -1, optFrame = null;
 for (let i = 0; i < 12; i++) {{
   await cua.sleep(300);
-  const st = await app.getState({{max_elements: 500, timeout_ms: 20000}});
+  const st = await app.getState({{max_elements: {DRIVER_WALK_NODES}, timeout_ms: 20000}});
   const lines = (st.tree_markdown || "").split("\n");
   const hit = lines.find(line => line.indexOf(want) >= 0 && line.indexOf("ListItem") >= 0);
   if (!hit) continue;
@@ -1091,7 +1558,7 @@ for (let i = 0; i < 12; i++) {{
 if (optRow < 0) throw new Error("option " + want + " never appeared in the open list");
 
 // 3) Click the row. Coordinates when the popup exposes them, the token otherwise.
-const st2 = await cua.call("get_window_state", {{pid: {pid}, window_id: {window}, max_elements: 500, timeout_ms: 20000}});
+const st2 = await cua.call("get_window_state", {{pid: {pid}, window_id: {window}, max_elements: {DRIVER_WALK_NODES}, timeout_ms: 20000}});
 const wb2 = st2.window_bounds;
 const args = optFrame
   ? {{ pid: {pid}, window_id: {window},
@@ -1103,7 +1570,7 @@ await cua.call("click", args);
 await cua.sleep(500);
 
 // 4) Prove it took, rather than reporting the driver's "sent" as success.
-const st3 = await app.getState({{max_elements: 500, timeout_ms: 20000}});
+const st3 = await app.getState({{max_elements: {DRIVER_WALK_NODES}, timeout_ms: 20000}});
 const line = (st3.tree_markdown || "").split("\n").find(entry => entry.indexOf("[" + row + "] ComboBox") >= 0);
 if (!line || line.indexOf('value="' + want + '"') < 0) {{
   throw new Error("the list closed without the combo showing " + want);
@@ -1116,6 +1583,9 @@ return {{ selected: want }};
         option_literal = option_literal,
     )
 }
+
+
+
 
 #[cfg(test)]
 mod tests {
@@ -1246,17 +1716,27 @@ mod tests {
     }
 
     #[test]
-    fn a_row_that_only_carries_text_is_not_selectable() {
-        // The reverse guard: the Click added above must not leak onto rows the
-        // driver only marked as readable text. `actions=[text]` maps to
-        // TypeText, which stays dispatchable on purpose — an edit field can be
-        // typed into without advertising a click.
+    fn a_row_that_only_carries_text_is_read_only() {
+        // The reverse guard: `actions=[text]` marks a text-bearing element, not
+        // a writable one.
+        //
+        // Measured on a live Chromium composer tree: a read-only message row
+        // reports `actions=[text]`, and the driver refuses `set_value` on it
+        // with "does not implement ValuePattern". The real composer Edit
+        // reports `actions=[set_value,text]` and accepts the write. Mapping
+        // `text` to a write action therefore made every read-only label in the
+        // window look like an input field.
         let line = "- [4] Text \"clicks=0\" [actions=[text]]\n";
         let (nodes, _) = parse_markdown_tree(line, "s");
         assert_eq!(nodes.len(), 1);
         assert!(!nodes[0].actions.contains(&ActionKind::Select));
         assert!(!nodes[0].actions.contains(&ActionKind::Click));
-        assert!(nodes[0].actions.contains(&ActionKind::TypeText));
+        assert!(!nodes[0].actions.contains(&ActionKind::TypeText));
+        assert!(!nodes[0].actions.contains(&ActionKind::SetValue));
+        assert!(
+            !nodes[0].has_value,
+            "a readable row holds no value the caller can write into"
+        );
     }
 
     #[test]
@@ -1384,4 +1864,264 @@ mod tests {
         let (nodes, _) = parse_markdown_tree(line, "s");
         assert_eq!(nodes[0].actions, vec![ActionKind::Click]);
     }
+
+    #[test]
+    fn the_driver_walk_budget_is_not_capped_by_the_model_node_budget() {
+        // The model only ever sees MAX_NODES rows, but the driver walk is
+        // truncated at its own budget and the cut removes the tail of the
+        // tree -- which is where the composer and the action buttons live.
+        // Asking the driver for no more than the model's budget can therefore
+        // drop the very control the caller is about to use.
+        assert!(
+            DRIVER_WALK_NODES as usize > crate::computer::MAX_NODES,
+            "the driver walk budget must exceed the model node budget"
+        );
+        assert!(
+            clamp_walk_elements(50) >= DRIVER_WALK_NODES,
+            "a small caller budget must not lower the driver walk budget"
+        );
+        assert!(
+            clamp_walk_elements(5000) <= 5000,
+            "the driver walk budget must respect the driver's own ceiling"
+        );
+    }
+
+    #[test]
+    fn the_popup_script_asks_the_driver_for_the_full_walk_budget() {
+        let script = popup_script(42, 100, "\"s:1\"", "\"Option A\"");
+        assert!(
+            script.contains(&format!("max_elements: {DRIVER_WALK_NODES}")),
+            "the popup script must not read a truncated tree: {script}"
+        );
+    }
+
+    #[test]
+    fn the_driver_walk_budget_covers_a_long_chromium_thread() {
+        // Measured: a Chromium chat window with a long thread has a 432-node
+        // tree, and a budget of 500 stopped the walk inside the message list
+        // with the composer absent. The budget has to clear that.
+        assert!(
+            DRIVER_WALK_NODES >= 700,
+            "the driver walk budget must cover a long thread's composer"
+        );
+        assert!(
+            DRIVER_WALK_NODES >= 700,
+            "the driver walk budget must cover a long thread's composer"
+        );
+    }
+
+    #[test]
+    fn the_structured_tree_keeps_a_row_whose_value_holds_a_newline() {
+        // The reason the host reads the structured tree instead of the
+        // markdown rendering: a markdown row prints a value verbatim, and a
+        // value that ends in a newline splits the row in half, so the quoted
+        // label of that row never closes and the row is dropped entirely.
+        //
+        // A Chromium composer holds exactly such a value -- its placeholder
+        // ends in a newline -- so on markdown the composer was simply not in
+        // the tree, and the run could not find the field it had to type into.
+        let elements = json!([
+            {
+                "role": "Document",
+                "element_index": 0,
+                "actions": ["set_value", "text", "scroll"],
+                "label": "回复消息确认",
+                "value": "app://-/index.html"
+            },
+            {
+                "role": "Edit",
+                "element_index": 418,
+                "parent_index": 0,
+                "actions": ["set_value", "text"],
+                "label": "和 Codex 一起工作",
+                "value": "和 Codex 一起工作\n"
+            }
+        ]);
+        let (nodes, rows) = parse_elements_tree(&elements, "s00000001");
+        assert_eq!(nodes.len(), 2, "a multi-line value must not drop its row");
+        assert_eq!(rows.len(), 2);
+        let edit = nodes
+            .iter()
+            .find(|node| node.role == "edit")
+            .expect("the composer must be in the tree");
+        assert_eq!(edit.uid, "s00000001:418");
+        assert!(edit.actions.contains(&ActionKind::SetValue));
+        assert!(edit.has_value);
+    }
+
+    #[test]
+    fn the_structured_tree_keeps_a_read_only_row_out_of_the_write_set() {
+        // A read-only message row carries the driver's `text` action, and so
+        // does the real composer. The difference is `set_value`, which only a
+        // real field advertises.
+        //
+        // Measured: the driver refuses `set_value` on the read-only row with
+        // "does not implement ValuePattern", and accepts it on the composer.
+        let elements = json!([
+            {
+                "role": "Text",
+                "element_index": 381,
+                "parent_index": 0,
+                "actions": ["text"],
+                "label": "19:44"
+            },
+            {
+                "role": "Edit",
+                "element_index": 418,
+                "parent_index": 0,
+                "actions": ["set_value", "text"],
+                "label": "和 Codex 一起工作",
+                "value": "和 Codex 一起工作\n"
+            }
+        ]);
+        let (nodes, _) = parse_elements_tree(&elements, "s1");
+        let text = nodes
+            .iter()
+            .find(|node| node.role == "text")
+            .expect("the read-only row must be in the tree");
+        assert!(
+            !text.actions.contains(&ActionKind::SetValue),
+            "a read-only row must not offer a write"
+        );
+        assert!(
+            !text.actions.contains(&ActionKind::TypeText),
+            "a read-only row must not look like an input field"
+        );
+        assert!(!text.has_value, "a read-only row holds no writable value");
+        assert!(
+            text.actions.is_empty(),
+            "a read-only row offers no dispatchable action: {:?}",
+            text.actions
+        );
+    }
+
+    #[test]
+    fn a_field_that_carries_both_set_value_and_text_takes_typed_text() {
+        // A real field can be written as a whole and typed into character by
+        // character, so both actions belong to it.
+        let elements = json!([
+            {
+                "role": "Edit",
+                "element_index": 418,
+                "actions": ["set_value", "text"],
+                "label": "和 Codex 一起工作",
+                "value": "和 Codex 一起工作\n"
+            }
+        ]);
+        let (nodes, _) = parse_elements_tree(&elements, "s1");
+        assert!(nodes[0].actions.contains(&ActionKind::SetValue));
+        assert!(nodes[0].actions.contains(&ActionKind::TypeText));
+    }
+
+    #[test]
+    fn a_structured_node_keeps_its_parent_and_its_identity_path() {
+        let elements = json!([
+            {
+                "role": "Document",
+                "element_index": 0,
+                "actions": ["set_value", "text", "scroll"],
+                "label": "回复消息确认"
+            },
+            {
+                "role": "Group",
+                "element_index": 1,
+                "parent_index": 0,
+                "actions": ["invoke"]
+            },
+            {
+                "role": "Edit",
+                "element_index": 418,
+                "parent_index": 1,
+                "actions": ["set_value", "text"],
+                "label": "和 Codex 一起工作",
+                "value": "和 Codex 一起工作\n"
+            }
+        ]);
+        let (nodes, _) = parse_elements_tree(&elements, "s1");
+        assert_eq!(nodes.len(), 3);
+        assert_eq!(nodes[0].parent, None);
+        assert_eq!(nodes[1].parent, Some(0));
+        assert_eq!(nodes[2].parent, Some(1));
+        assert_eq!(
+            nodes[2].identity.as_deref(),
+            Some("document#0/pane#0/edit#0")
+        );
+    }
+
+    #[test]
+    #[test]
+    fn a_written_field_is_confirmed_by_its_read_back() {
+        // The tree the caller reads never publishes a field's content, so a
+        // write cannot be confirmed from it. The driver does publish the
+        // field's current value, and the comparison happens inside the
+        // backend -- only the verdict crosses the boundary.
+        assert!(write_confirmed("hello", "hello", None));
+        // A text field's value often carries a trailing newline the platform
+        // adds, so an exact comparison would report a landed write as a lost
+        // one.
+        assert!(write_confirmed("hello\n", "hello", None));
+    }
+
+    #[test]
+    fn a_write_is_confirmed_across_the_platform_line_ending() {
+        // Measured on a Windows text field: "\n" came back as "\r",
+        // "\r\n" as "\r", and "a\r\nb" as "a\rb". That is the
+        // platform's own line-ending convention, so a write that contained a
+        // line ending still landed.
+        assert!(write_confirmed("hello\r", "hello\n", None));
+        assert!(write_confirmed("hello\r", "hello\r\n", None));
+        assert!(write_confirmed("a\rb", "a\r\nb", None));
+        assert!(write_confirmed("hello\r", "hello", None));
+    }
+
+    #[test]
+    fn a_write_is_not_confirmed_when_the_field_holds_something_else() {
+        assert!(!write_confirmed("goodbye", "hello", None));
+        // An empty write is not a confirmed write.
+        assert!(!write_confirmed("", "", None));
+    }
+
+    #[test]
+    fn a_typed_field_is_confirmed_when_it_ends_with_what_was_typed() {
+        // `type_text` types characters into the focused control, so the field
+        // ends with what was written rather than holding exactly it.
+        assert!(write_confirmed("first second", "second", None));
+        assert!(write_confirmed("first second\n", "second", None));
+        // A field that holds the text somewhere in the middle did not receive
+        // it as a typed suffix.
+        assert!(!write_confirmed("first second", "first", None));
+    }
+
+    #[test]
+    fn a_typed_write_into_a_field_that_already_held_the_text_is_not_confirmed() {
+        // The suffix check alone would report a write that was dropped as a
+        // write that landed: the field already ended with the text, so it
+        // looks the same before and after. The value from before the write is
+        // what tells them apart.
+        assert!(!write_confirmed("prefix second", "second", Some("prefix second")));
+        // The same field, and the text really was typed this time.
+        assert!(write_confirmed("prefix second", "second", Some("prefix")));
+    }
+
+
+    fn only_the_drivers_own_escalation_refusal_reaches_the_foreground_retry() {
+        // Measured on a live Chromium composer: `type_text` on the window
+        // answers with a structured `background_unavailable` refusal that
+        // names the escalation. Retrying the same action unchanged fails the
+        // same way, so the retry has to carry `delivery_mode: "foreground"`.
+        //
+        // Every other refusal has to propagate untouched: the bridge only
+        // overrides the driver's own default when the driver asked for it.
+        assert!(escalates_to_foreground(
+            "type_text refused [background_unavailable]: Background delivery is not available \
+             for target window class 'Chrome_WidgetWin_1' on this event kind (text_input). \
+             Retry this action with delivery_mode:\"foreground\""
+        ));
+        assert!(!escalates_to_foreground(
+            "set_value refused [tool_invocation_failed]: element [381] does not implement \
+             ValuePattern or RangeValuePattern"
+        ));
+        assert!(!escalates_to_foreground("cua-driver timed out: get_window_state"));
+    }
 }
+

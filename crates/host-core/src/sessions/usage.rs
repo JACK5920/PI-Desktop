@@ -204,9 +204,92 @@ pub fn record_usage(db: &Database, session_id: &str, turn_id: &str, usage: &Valu
     Ok(true)
 }
 
+#[derive(Default)]
+struct CostBucket {
+    total: f64,
+    priced: i64,
+    reported: i64,
+    unpriced: i64,
+}
+
+/// All session requests, including failed or stopped turns; never infer prices.
+pub fn session_usage_cost(db: &Database, session_id: &str) -> Result<Value> {
+    let mut stmt = db.conn().prepare_cached(
+        "SELECT usage_json, input_tokens, output_tokens FROM turns WHERE session_id = ?1",
+    )?;
+    let rows = stmt.query_map(params![session_id], |row| {
+        Ok((
+            row.get::<_, Option<String>>(0)?,
+            row.get::<_, Option<i64>>(1)?.unwrap_or(0),
+            row.get::<_, Option<i64>>(2)?.unwrap_or(0),
+        ))
+    })?;
+    let mut buckets: std::collections::BTreeMap<Option<String>, CostBucket> = Default::default();
+    let mut turn_count = 0_i64;
+    let mut request_count = 0_i64;
+    for row in rows {
+        let (usage_json, input_tokens, output_tokens) = row?;
+        let usage = usage_json
+            .as_deref()
+            .and_then(|raw| serde_json::from_str::<Value>(raw).ok());
+        let records = usage.as_ref().map(operations).unwrap_or_default();
+        let recorded_tokens = usage
+            .as_ref()
+            .map(|value| count(value, "totalTokens"))
+            .unwrap_or(0)
+            .max(input_tokens.max(0).saturating_add(output_tokens.max(0)));
+        if records.is_empty() && recorded_tokens == 0 {
+            continue;
+        }
+        turn_count += 1;
+        for record in &records {
+            let provider = record
+                .get("providerId")
+                .and_then(Value::as_str)
+                .filter(|id| !id.is_empty())
+                .map(str::to_owned);
+            let bucket = buckets.entry(provider).or_default();
+            request_count += 1;
+            if known_cost(record) {
+                bucket.priced += 1;
+                bucket.total += record
+                    .get("cost")
+                    .and_then(|cost| cost.get("total"))
+                    .and_then(Value::as_f64)
+                    .unwrap_or(0.0);
+                if record.get("costStatus").and_then(Value::as_str) == Some("reported") {
+                    bucket.reported += 1;
+                }
+            } else {
+                bucket.unpriced += 1;
+            }
+        }
+        if recorded_tokens > sum_counts(&records, "totalTokens")
+            && (records.is_empty()
+                || usage
+                    .as_ref()
+                    .and_then(|value| value.get("aggregation"))
+                    .and_then(Value::as_str)
+                    == Some("aggregate"))
+        {
+            buckets.entry(None).or_default().unpriced += 1;
+            request_count += 1;
+        }
+    }
+    let providers: Vec<Value> = buckets.into_iter().map(|(provider, bucket)| {
+        let mut value = json!({ "total": bucket.total, "pricedRequests": bucket.priced, "reportedRequests": bucket.reported, "unpricedRequests": bucket.unpriced });
+        if let Some(provider) = provider { value["providerId"] = json!(provider); }
+        value
+    }).collect();
+    Ok(
+        json!({ "sessionId": session_id, "turnCount": turn_count, "requestCount": request_count, "providers": providers }),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uuid::Uuid;
 
     fn operation(id: &str, known: bool) -> Value {
         let mut value = json!({"operationId": id, "usageOrigin": "pi", "inputTokens": 12, "outputTokens": 3, "totalTokens": 15, "costStatus": "unknown"});
@@ -239,6 +322,38 @@ mod tests {
             assert_eq!(total["costStatus"], "reported");
             assert_eq!(total["cost"]["total"], 0.15);
         }
+    }
+
+    #[test]
+    fn session_cost_rollup_includes_billed_requests_and_counts_unknown_costs() {
+        let dir = std::env::temp_dir().join(format!("pi-usage-cost-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Database::open(&dir.join("test.sqlite")).unwrap();
+        let session = super::super::create_session(&db, None, None, None, None, None).unwrap();
+        let turn = super::super::begin_turn(&db, &session.id, None, None).unwrap();
+        let usage = json!({"operationId":"request-1", "providerId":"provider-a", "inputTokens":10, "outputTokens":2, "totalTokens":12,
+            "costStatus":"estimated", "cost":{"input":0.12,"output":0.03,"cacheRead":0,"cacheWrite":0,"total":0.15}});
+        record_usage(&db, &session.id, &turn, &usage).unwrap();
+        super::super::end_turn(&db, &turn, "aborted", None, None, false).unwrap();
+        let legacy = super::super::begin_turn(&db, &session.id, None, None).unwrap();
+        let legacy_usage = json!({"inputTokens":5,"outputTokens":1,"totalTokens":6});
+        super::super::end_turn(&db, &legacy, "completed", None, Some(&legacy_usage), false)
+            .unwrap();
+
+        let summary = session_usage_cost(&db, &session.id).unwrap();
+        assert_eq!(summary["turnCount"], 2);
+        assert_eq!(summary["requestCount"], 2);
+        let provider = summary["providers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|bucket| bucket["providerId"] == "provider-a")
+            .unwrap();
+        assert_eq!(provider["total"], 0.15);
+        assert_eq!(provider["pricedRequests"], 1);
+        assert_eq!(summary["providers"][0]["unpricedRequests"], 1);
+        drop(db);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

@@ -65,6 +65,8 @@ interruption keeps the durable session in Agent.
 idle <-> running <-> waiting_permission
            \/ aborted
            \/ error
+running -- pause request --> finish current assistant/tool boundary --> idle (paused checkpoint)
+paused checkpoint -- resume --> a new user turn in the same session
 ```
 
 | status | meaning |
@@ -126,6 +128,16 @@ turn that has ended.
    denied and the agent may continue or end based on runtime handling
 6. Session status returns to idle after terminal turn states are persisted
 7. Changing the renderer's active project/session does not transition or abort
+8. Pause is a graceful stop request, not provider-stream suspension. It is
+   considered paused only when the active turn has settled after its current
+   assistant response and tool batch. Immediate Stop remains Abort.
+9. Resume is a new prompt over the persisted transcript; it never replays the
+   old request or tool call. The continuation prompt directs the Agent to
+   inspect recorded results and ask before retrying an uncertain side effect.
+10. Only an explicit safe-pause checkpoint is eligible for optional startup
+    continuation. `autoResumePausedTasks` defaults off. A turn interrupted
+    before reaching the checkpoint is never automatically replayed, preserving
+    ADR 0053's no-replay rule.
    any background session
 8. A tool transition retains the originating session's persisted project root,
    or that session's own scratch root when it is temporary; it never adopts the

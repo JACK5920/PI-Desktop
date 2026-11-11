@@ -46,6 +46,20 @@ export type UsageOperation = Omit<MessageUsage, "operations" | "aggregation"> & 
   operationId: string;
 };
 
+/** Authoritative all-turn cost rollup; unpriced requests are reported separately. */
+export type SessionUsageCost = {
+  sessionId: string;
+  turnCount: number;
+  requestCount: number;
+  providers: Array<{
+    providerId?: string;
+    total: number;
+    pricedRequests: number;
+    reportedRequests: number;
+    unpricedRequests: number;
+  }>;
+};
+
 export { addUsage, contextOccupancyTokens, withUsageIdentity } from "../message-usage.js";
 
 export type MessageAttachment = {
@@ -115,6 +129,8 @@ export type UiMessage = {
   /** Provider/model that produced this assistant turn, when known. */
   modelId?: string;
   providerId?: string;
+  /** Concrete model reported by the provider when routing/fallback changes the requested model. */
+  responseModelId?: string;
   /** Token usage for the assistant turn, when the provider reported it. */
   usage?: MessageUsage;
   /** Elapsed assistant response duration used to calculate output throughput. */

@@ -79,6 +79,8 @@ export const SETTINGS_NAV: SettingsNavEntry[] = [
       "settings.power",
       "settings.keepAwakeWhileRunning",
       "settings.keepAwakeWhileRunningDesc",
+      "settings.autoResumePausedTasks",
+      "settings.autoResumePausedTasksDesc",
       "settings.network",
       "settings.proxy",
       "settings.proxySystem",

@@ -395,6 +395,13 @@ pub struct SnapshotEntry {
     pub markdown: String,
     pub truncated: bool,
     pub element_count: usize,
+    /// The value each row held at the time of the read.
+    ///
+    /// A write is confirmed by what the field holds afterwards, and the
+    /// field may well have held the same text already. This is what tells
+    /// the two apart, and it is kept here because reading the tree again
+    /// would replace the snapshot and stale the handle the caller holds.
+    pub values: HashMap<String, String>,
 }
 
 impl SnapshotCache {

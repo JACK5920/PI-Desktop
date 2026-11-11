@@ -459,6 +459,10 @@ export function normalizeSettings(settings: AppSettings): AppSettings {
     sidebarRunningRail: settings.sidebarRunningRail === true,
     keepCommandsExpanded: settings.keepCommandsExpanded !== false,
     scheduledTasksEnabled: settings.scheduledTasksEnabled !== false,
+    autoResumePausedTasks: settings.autoResumePausedTasks === true,
+    pausedTaskSessionIds: Array.isArray(settings.pausedTaskSessionIds)
+      ? [...new Set(settings.pausedTaskSessionIds.filter((id) => typeof id === "string" && id.length <= 256))]
+      : [],
     goalBudgetDefaults: normalizeGoalBudgetDefaults(settings.goalBudgetDefaults),
     transcriptDisplayMode: isTranscriptDisplayModeValue(settings.transcriptDisplayMode)
       ? settings.transcriptDisplayMode
@@ -590,6 +594,24 @@ export function validateSettingsWrite(settings: AppSettings): AppSettings {
     typeof settings.scheduledTasksEnabled !== "boolean"
   ) {
     throw Object.assign(new Error("scheduledTasksEnabled is invalid"), {
+      errorCode: "INVALID_PARAMS",
+    });
+  }
+  if (
+    Object.prototype.hasOwnProperty.call(settings, "autoResumePausedTasks") &&
+    typeof settings.autoResumePausedTasks !== "boolean"
+  ) {
+    throw Object.assign(new Error("autoResumePausedTasks is invalid"), {
+      errorCode: "INVALID_PARAMS",
+    });
+  }
+  if (
+    Object.prototype.hasOwnProperty.call(settings, "pausedTaskSessionIds") &&
+    (!Array.isArray(settings.pausedTaskSessionIds) || settings.pausedTaskSessionIds.some(
+      (id) => typeof id !== "string" || id.length > 256,
+    ))
+  ) {
+    throw Object.assign(new Error("pausedTaskSessionIds is invalid"), {
       errorCode: "INVALID_PARAMS",
     });
   }
@@ -841,6 +863,8 @@ export const api = {
     })),
   getSessionCollaboration: (sessionId: string) =>
     invoke<SessionCollaborationSummary>(IPC.invoke.sessionCollaboration, { sessionId }),
+  getSessionUsageCost: (sessionId: string) =>
+    invoke<import("@pi-desktop/shared").SessionUsageCost>(IPC.invoke.sessionUsageCost, { sessionId }),
   deleteSession: (id: string) => invoke(IPC.invoke.sessionDelete, id),
   getSessionScratchPath: (sessionId: string) =>
     invoke<{ path: string }>(IPC.invoke.sessionGetScratchPath, { sessionId }),

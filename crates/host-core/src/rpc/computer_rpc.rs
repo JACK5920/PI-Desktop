@@ -118,7 +118,20 @@ mod tests {
         });
         let policy = computer_policy_from_settings(Some(&stored));
         assert!(policy.refuses("credentialuibroker.exe", "Credential UI"));
+        assert!(policy.refuses("credentialuibroker.exe", "Credential UI"));
         assert!(policy.allows_sensitive_input());
+    }
+
+    #[test]
+    fn rpc_schema_reports_the_version_this_binary_speaks() {
+        // The consumer compares this against the range it supports. A sidecar
+        // that cannot report a version is the incompatibility the check
+        // exists to catch, so the field must always be present.
+        assert_eq!(
+            crate::computer::COMPUTER_RPC_SCHEMA_VERSION,
+            1,
+            "bump the host-side supported range in packages/shared when this changes"
+        );
     }
 }
 
@@ -148,11 +161,23 @@ pub(crate) async fn handle(
 ) -> Result<Value, JsonRpcError> {
     let desktop = backend::active();
     match method {
+        // The schema version of the `computer.*` surface. Separate from
+        // `capabilities` on purpose: capabilities describe what this machine
+        // can do, the schema version describes the shape of the contract, and
+        // a consumer must be able to check the second without reading the
+        // first. A mismatch is a build mismatch - the Electron bundle and
+        // this sidecar are versioned separately - and it has to be visible
+        // before any action is taken rather than as a confusing failure
+        // halfway through a run.
+        "computer.rpcSchema" => Ok(json!({
+            "schemaVersion": computer::COMPUTER_RPC_SCHEMA_VERSION,
+            "hostCoreVersion": env!("CARGO_PKG_VERSION"),
+        })),
+
         // Capabilities are readable while the feature is off: the settings page
         // has to be able to say "unsupported here" before anything is enabled.
         "computer.capabilities" => Ok(serde_json::to_value(desktop.capabilities())
             .map_err(|error| rpc_err(1000, error.to_string(), "INTERNAL"))?),
-
         // The settings row asks the OS on the user's click. It stays readable
         // while the feature is off: the grant is what makes computer use usable
         // at all, and asking for it must not require turning the feature on

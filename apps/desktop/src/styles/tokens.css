@@ -36,6 +36,13 @@
   --accent-900: #303030;
 
   --ds-bg-primary: var(--gray-900);
+  /* Codex-style user turn plate, sampled from the supplied reference. */
+  --ds-user-bubble-bg: #173e76;
+  --ds-user-bubble-fg: #f7f9ff;
+  --ds-user-bubble-border: color-mix(in oklab, #8cb8ff 16%, transparent);
+  --ds-composer-primary-bg: #2c67c5;
+  --ds-composer-primary-hover: #3976d2;
+  --ds-composer-primary-fg: #ffffff;
   --ds-settings-rail-bg: var(--ds-bg-under);
   --ds-bg-sidebar: var(--ds-settings-rail-bg, var(--ds-bg-under));
   /*
@@ -222,6 +229,12 @@
   color-scheme: light;
   /* Codex electron-light */
   --ds-bg-primary: #ffffff;
+  --ds-user-bubble-bg: #dceaff;
+  --ds-user-bubble-fg: #14233a;
+  --ds-user-bubble-border: color-mix(in oklab, #245da6 18%, transparent);
+  --ds-composer-primary-bg: #2c67c5;
+  --ds-composer-primary-hover: #3976d2;
+  --ds-composer-primary-fg: #ffffff;
   --ds-settings-rail-bg: #f3f3f3;
   --ds-bg-sidebar: var(--ds-settings-rail-bg, #f3f3f3);
   --ds-bg-secondary: #f9f9f9;

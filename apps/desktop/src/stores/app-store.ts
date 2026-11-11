@@ -36,6 +36,7 @@ import {
   latestPlanProposal,
 } from "../lib/plan-mode-state";
 import { settleBootstrapRequests } from "../lib/bootstrap-result";
+import { PAUSED_TASK_CONTINUATION_PROMPT, withPausedTask, withoutPausedTask } from "../lib/paused-task-recovery";
 import {
   createSessionRuntime,
   type SessionRuntime,
@@ -424,6 +425,46 @@ export const useAppStore = create<AppState>((set, get) => {
           sessionOutcomes: latestSessionOutcomes(notifications.notifications),
         };
       });
+
+      // Only tasks explicitly paused after a completed Agent turn are safe to
+      // continue automatically. An uncleanly interrupted run has no marker and
+      // is never replayed. Clear each marker durably before submitting so a
+      // crash during recovery cannot duplicate the continuation on next boot.
+      const safelyPausedIds = (settings?.autoResumePausedTasks === true
+        ? settings.pausedTaskSessionIds ?? []
+        : []).filter((id) => hydratedSessions.some((session) =>
+        session.id === id && session.source !== "pi-native" && !id.startsWith("remote:"),
+      ));
+      if (safelyPausedIds.length > 0 && settings) {
+        const cleared = safelyPausedIds.reduce(withoutPausedTask, settings);
+        void api.setSettings(cleared).then(async () => {
+          if (generation !== bootstrapGeneration) return;
+          set({ settings: cleared });
+          const failedIds: string[] = [];
+          for (const sessionId of safelyPausedIds) {
+            if (generation !== bootstrapGeneration) return;
+            const accepted = await get().sendPrompt(
+              PAUSED_TASK_CONTINUATION_PROMPT,
+              undefined,
+              sessionId,
+            );
+            if (!accepted) failedIds.push(sessionId);
+          }
+          if (failedIds.length > 0 && generation === bootstrapGeneration) {
+            const latest = get().settings ?? cleared;
+            const restored = failedIds.reduce(withPausedTask, latest);
+            try {
+              await api.setSettings(restored);
+              set({ settings: restored });
+            } catch {
+              // No automatic retry: failure to restore a marker must not turn
+              // into an unbounded or duplicate submission loop.
+            }
+          }
+        }).catch(() => {
+          // Preserve the durable checkpoint when it cannot be claimed.
+        });
+      }
 
       // The artifact's surface depends on which plugin views are launchable, and
       // the launcher list is only read after `ready`. Resolve it before the

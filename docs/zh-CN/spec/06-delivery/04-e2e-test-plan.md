@@ -10344,3 +10344,24 @@ PluginPack 产物的解包目录，仅用于开发验证。验收 #1711 前需�
 - **步骤：** 1. 空输入时按 `Alt+Space`（macOS 为 `⌥+Space`），检查分组标题、行数、每行磁贴数和标题操作。2. 输入 `1+1`，检查首个磁贴与详情行，按 Enter 并检查打开的面板。3. 重新打开启动器，依次输入 `wx`、`weixin`、`微信`，确认命中同一应用。4. 输入 `pi`，确认 `PI-Desktop` 插件只出现一次，并可通过名称、拼音和首字母找到。5. 拖动面板边缘放大再缩小，检查每行磁贴数；退出并重启后再次打开。6. 输入可匹配超过 24 项的查询，检查标题操作和窗口高度。7. 禁用一个曾在最近使用或已固定列表中的插件，重新打开启动器，检查空输入视图及旧查询。8. 向搜索框粘贴 500 个字符的无意义文本。9. 固定一个应用，退出重启，再以空输入打开启动器。10. 安装一个名称与某个已安装应用相同的插件（例如 `Calculator`），然后打开启动器。
 - **预期：** 最近使用分组显示最多两行、每行八个磁贴；固定分组在有固定项时最多一行八个磁贴。最近使用标题显示真实数量，并提供 `Show all {count} →` 和 `All plugins →`。触发器插件优先显示且不重复展示详情；面板只消费一次 `1+1`。三种拼写均能找到同一应用。每种窗口宽度均保持八列，窗口高度与内容一致，重启后恢复拖动过的宽度。超过 24 个结果时显示溢出数量并提示继续输入。禁用的插件从最近、固定与搜索结果中移除，但其他项目仍可正常打开。500 字符输入不会卡住面板，并返回无匹配。插件与同名应用分别显示并保持各自打开行为。
 - **自动化覆盖：** `pnpm --filter @pi-desktop/desktop test` 中的 `launcher-search.test.mjs` 覆盖排序、分组上限、溢出计数、触发器整段匹配、256 字符限制和全部插件视图；`launcher-store.test.mjs` 覆盖固定、八项上限、最近记录、旧数据迁移和清理；`plugin-launcher-height.test.mjs` 覆盖高度计算和钳制；`local-apps.test.mjs` 覆盖本地应用发现、边界、图标预算与缓存、拖放目标和不透明 ID 启动；`plugin-launcher-state.test.mjs` 覆盖窗口尺寸钳制与重新居中。Rust `plugins` 测试覆盖清单规则。分组网格、内容高度、缩放、重启与面板载荷往返的 Electron 交互验收仍待专用启动器 E2E 脚本。
+
+
+### E2E-会话费用与引用文件定位
+
+- **路径：** 在本地会话中对聊天文件引用选择“在文件夹中显示”，再分别测试无法解析的引用和远程会话。打开历史已分页长会话的用量详情，覆盖报告费用、估算费用和未知费用请求；新请求后刷新。
+- **预期：** 只定位准确解析出的文件；无法解析时不执行；远程会话不显示本机定位。会话费用来自 Host 完整轮次台账，包含已停止/失败请求并按提供方分组。无价格请求标为下限；不猜测未知价格；原生 Pi 会话不显示 Desktop 台账总额。
+- **覆盖：** `chat-file-open-with-menu.test.mjs`、Host 会话费用测试及 ContextUsageInspector 费用展示测试。
+
+
+### E2E-PI-runtime-1.5-adoption-and-transcript-reliability
+
+- 路径：验证压缩容量采用检查点/当前精确模型但不重写历史用量；尾部分页读取末条消息之后的检查点；系统通知前后重建运行中子代理；粘贴截图时断言跳过原生目录探测而普通文件仍走原流程。覆盖 Pi 1.5 的已报告费用、实际服务模型元数据、扩展执行输出边界和 Zhipu 1308 终止分类。
+- 预期：未知上下文容量明确标为估算；重启读取仍保留最新尾随检查点；系统通知不清除运行中子代理；截图粘贴不受原生探测等待；提供方费用不被误标为估算；实际服务模型元数据有长度/字符边界；扩展输出的 stdout/stderr 合计不超限且截断返回失败；套餐额度不重试。
+- 覆盖：compaction-context-usage.test.mjs、Host transcript window tests、send-now-subagent-rendering.test.mjs、composer-directory-paste.test.mjs、Agent Runtime usage/error/response-model/managed-exec tests 和 message-meta-served-model.test.mjs。
+- 状态：自动化单元与有限集成回归，不需要真实 provider。
+
+### E2E-Composer-safe-task-pause-resume
+
+- **路径：** 使用确定性 provider fixture 启动本地 Agent 任务，完成一个工具结果；运行中点暂停，等待当前 turn 边界后恢复。再覆盖立即停止、渲染器重载、自动恢复关闭/开启时的应用重启，以及工具结果尚未记录时的中断。
+- **预期：** 暂停请求在当前 assistant/tool 边界完成后才生效；停止仍为立即 Abort。恢复会新增一条 continuation 用户消息，不重放旧工具调用。关闭自动恢复时保留暂停检查点；开启时启动先消费 marker 再提交一次 continuation。操作中途的不确定中断绝不自动重放。蓝色消息气泡和暂停/继续按钮在浅色、深色主题下使用主题 token 并保持可读。
+- **覆盖：** `paused-task-recovery.test.mjs`、`paused-task-settings.test.mjs`、桌面类型检查及主题表面 E2E；不连接真实 provider，不执行有副作用的真实工具。

@@ -149,6 +149,165 @@ describe("runComputerLoop", () => {
     expect(result.verification).toBe("model-confirmed");
   });
 
+  it("refuses a second write of the same text to the same field", async () => {
+    // The element list never shows a field's content, so a model cannot tell
+    // a landed write from a lost one. Measured: a model asked to type one
+    // line alternated `type_text` and `set_value` with the same text for
+    // eight steps. The second write of the same text is refused, whichever
+    // action kind it uses.
+    const field: ComputerNode = {
+      ...saveButton,
+      role: "AXTextField",
+      label: "Name",
+      hasValue: true,
+      actions: ["set_value", "type_text"],
+    };
+    const h = harness(
+      [
+        '{"kind":"action","action":{"kind":"type_text","uid":"0.1#ab","text":"same"}}',
+        '{"kind":"action","action":{"kind":"set_value","uid":"0.1#ab","text":"same"}}',
+        '{"kind":"done","summary":"typed","evidence":[]}',
+      ],
+      { observe: () => observation([field]) },
+    );
+
+    await runComputerLoop({ instruction: "type the text" }, h.deps);
+
+    const writes = h.acted.filter((action) => action.kind === "type_text" || action.kind === "set_value");
+    expect(writes).toHaveLength(1);
+    const skipped = h.activity.filter((event) => event.phase === "acting");
+    expect(skipped.length).toBe(1);
+  });
+
+  it("accepts an empty evidence list when the host confirmed the write", async () => {
+    // The field has to offer the write, or the step is refused before the
+    // host ever sees it.
+    const field: ComputerNode = {
+      ...saveButton,
+      role: "AXTextField",
+      label: "Name",
+      hasValue: true,
+      actions: ["set_value"],
+    };
+    // A write's result is the content of a field, and the accessibility tree
+    // never publishes a field's content -- so there is no element the model
+    // could cite. The host can read the field back and compare it with what
+    // was written, and that verdict is stronger than any citation.
+    const h = harness(
+      [
+        '{"kind":"action","action":{"kind":"set_value","uid":"0.1#ab","text":"written"}}',
+        '{"kind":"done","summary":"typed","evidence":[]}',
+      ],
+      {
+        observe: () => observation([field]),
+        act: () => undefined,
+      },
+    );
+    const deps: ComputerLoopDeps = {
+      ...h.deps,
+      act: async () => ({
+        grantId: "cug_1",
+        revision: 3,
+        remainingBudget: 9,
+        dispatched: "accessibility-action",
+        verified: true,
+      }),
+    };
+
+    const result = await runComputerLoop({ instruction: "type the text" }, deps);
+
+    expect(result.outcome).toBe("done");
+    expect(result.verification).toBe("model-confirmed");
+    expect(result.summary).toContain("read the field back");
+  });
+
+  it("does not carry a write confirmation across a later action", async () => {
+    // The confirmation belongs to the write it verified. A run-scoped flag
+    // carried an old verdict forward: a confirmed write followed by a click
+    // that did nothing would still let the model close with an empty evidence
+    // list and be told the result was confirmed.
+    const field: ComputerNode = {
+      ...saveButton,
+      role: "AXTextField",
+      label: "Name",
+      hasValue: true,
+      actions: ["set_value", "type_text", "click"],
+    };
+    const h = harness(
+      [
+        '{"kind":"action","action":{"kind":"set_value","uid":"0.1#ab","text":"written"}}',
+        '{"kind":"action","action":{"kind":"click","uid":"0.1#ab"}}',
+        '{"kind":"done","summary":"typed","evidence":[]}',
+      ],
+      { observe: () => observation([field]) },
+    );
+    const deps: ComputerLoopDeps = {
+      ...h.deps,
+      act: async (action) => ({
+        grantId: "cug_1",
+        revision: 3,
+        remainingBudget: 9,
+        dispatched: "accessibility-action",
+        // The write was confirmed; the click that followed was not.
+        verified: action.kind === "set_value" ? true : undefined,
+      }),
+    };
+
+    const result = await runComputerLoop({ instruction: "type the text" }, deps);
+
+    expect(result.outcome).not.toBe("done");
+    expect(result.verification).not.toBe("model-confirmed");
+  });
+
+  it("does not accept an empty evidence list when the host could not confirm the write", async () => {
+    // The same shape without the host's verdict is still a self-report at
+    // best, and the refusal is the honest answer.
+    const h = harness(
+      [
+        '{"kind":"action","action":{"kind":"set_value","uid":"0.1#ab","text":"written"}}',
+        '{"kind":"done","summary":"typed","evidence":[]}',
+      ],
+      { observe: () => observation([field]), act: () => undefined },
+    );
+    const deps: ComputerLoopDeps = {
+      ...h.deps,
+      act: async () => ({
+        grantId: "cug_1",
+        revision: 3,
+        remainingBudget: 9,
+        dispatched: "accessibility-action",
+        verified: false,
+      }),
+    };
+
+    const result = await runComputerLoop({ instruction: "type the text" }, deps);
+
+    expect(result.outcome).not.toBe("done");
+  });
+
+  it("does not write a read-back onto a step the host refused", async () => {
+    // The model asked for an action the element does not offer. Nothing was
+    // dispatched, so the tree that follows says nothing about that action --
+    // writing "observed-change" onto it would claim the application reacted
+    // to something it never received.
+    const readOnly: ComputerNode = { ...saveButton, actions: [] };
+    const h = harness([
+      '{"kind":"action","action":{"kind":"click","uid":"0.1#ab"}}',
+      '{"kind":"done","summary":"never happened","evidence":[]}',
+    ], {
+      observe: () => observation([readOnly]),
+    });
+
+    const result = await runComputerLoop({ instruction: "click the button" }, h.deps);
+
+    const refused = result.steps.find((step) => step.action === "click");
+    expect(refused).toBeDefined();
+    expect(refused?.ok).toBe(false);
+    expect(refused?.verification).toBe("refused");
+    expect(refused?.errorCode).toBe("COMPUTER_ACTION_REJECTED");
+    expect(h.acted).toHaveLength(0);
+  });
+
   it("re-observes stale completion evidence and accepts only a UID in the latest Host observation", async () => {
     let observations = 0;
     const h = harness([
@@ -841,5 +1000,196 @@ describe("runComputerLoop", () => {
       };
       expect(renderHistory([changed, still])).not.toContain(hint);
     });
+  });
+});
+
+describe("repeated write guard", () => {
+  // The element list renders `has-value`, never the value, so a model cannot
+  // tell a landed write from a lost one. Without a guard it answered by
+  // writing the same value into the same field over and over.
+  const textField: ComputerNode = {
+    uid: "0.2#cd",
+    identity: "AXTextField#0",
+    role: "AXTextField",
+    label: "Name",
+    hasValue: true,
+    enabled: true,
+    focused: false,
+    bounds: { x: 150, y: 240, width: 200, height: 24 },
+    actions: ["set_value"],
+  };
+
+  it("dispatches the same write to the same field only once", async () => {
+    const write = JSON.stringify({
+      kind: "action",
+      action: { kind: "set_value", uid: textField.uid, text: "PI-INTERNAL-PROBE" },
+    });
+    const h = harness([write], { observe: () => observation([textField]) });
+    const result = await runComputerLoop({ instruction: "set the name", maxSteps: 6 }, h.deps);
+
+    const writes = h.acted.filter((action) => action.kind === "set_value");
+    expect(writes.length).toBe(1);
+    expect(result.steps.filter((step) => step.action === "set_value").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("still dispatches a different value to the same field", async () => {
+    const first = JSON.stringify({
+      kind: "action",
+      action: { kind: "set_value", uid: textField.uid, text: "one" },
+    });
+    const second = JSON.stringify({
+      kind: "action",
+      action: { kind: "set_value", uid: textField.uid, text: "two" },
+    });
+    const h = harness([first, second], { observe: () => observation([textField]) });
+    await runComputerLoop({ instruction: "set the name", maxSteps: 6 }, h.deps);
+
+    const writes = h.acted.filter((action) => action.kind === "set_value");
+    expect(writes.map((action) => action.text)).toEqual(["one", "two"]);
+  });
+
+  it("leaves repeated clicks alone", async () => {
+    const click = JSON.stringify({ kind: "action", action: { kind: "click", uid: saveButton.uid } });
+    const h = harness([click], { observe: () => observation([saveButton]) });
+    await runComputerLoop({ instruction: "click save twice", maxSteps: 6 }, h.deps);
+
+    const clicks = h.acted.filter((action) => action.kind === "click");
+    expect(clicks.length).toBeGreaterThan(1);
+  });
+});
+describe("switch to the current window", () => {
+  // Switching to the window already in focus changes nothing. Recorded as a
+  // success it told the model the switch had worked, and a model that could
+  // not find its window answered by switching again and again until the step
+  // limit ran out.
+  it("treats a switch to the window already in focus as a no-op, not a failure", async () => {
+    // The model asked to be where the host already is. Recorded as a refusal
+    // it told the model the switch had failed, and a model that could not find
+    // its window answered by switching again and again until the step limit
+    // ran out.
+    const answers = [
+      '{"kind":"switch","window":"77:12","note":"over here"}',
+      '{"kind":"done","summary":"already there","evidence":["0.1#ab"]}',
+    ];
+    let decisions = 0;
+    const deps: ComputerLoopDeps = {
+      observe: async () =>
+        observation([saveButton], {
+          windows: [
+            { targetId: "77:12", appName: "Example", title: "Document", appKey: "example", bounds: grant().bounds },
+          ],
+        }),
+      act: async () => {
+        throw new Error("must not act");
+      },
+      decide: async () => answers[Math.min(decisions++, answers.length - 1)],
+    };
+    const result = await runComputerLoop({ instruction: "look at this" }, deps);
+    const switchStep = result.steps.find((step) => step.action === "switch");
+    expect(switchStep).toMatchObject({ ok: true, verification: "observed" });
+    expect(switchStep?.errorCode).toBeUndefined();
+  });
+
+  it("stops a run that keeps switching to the same window", async () => {
+    // The model never found its window and answered with the same switch every
+    // time. Two identical refusals end the run instead of burning the steps.
+    const answers = ['{"kind":"switch","window":"77:12","note":"over here"}'];
+    let decisions = 0;
+    const deps: ComputerLoopDeps = {
+      observe: async () =>
+        observation([saveButton], {
+          windows: [
+            { targetId: "77:12", appName: "Example", title: "Document", appKey: "example", bounds: grant().bounds },
+          ],
+        }),
+      act: async () => {
+        throw new Error("must not act");
+      },
+      decide: async () => answers[Math.min(decisions++, answers.length - 1)],
+    };
+    const result = await runComputerLoop({ instruction: "look at this", maxSteps: 20 }, deps);
+    expect(result.outcome).toBe("failed");
+    expect(result.steps.filter((step) => step.action === "switch")).toHaveLength(2);
+  });
+});
+describe("completion evidence for a consumed element", () => {
+  // A menu item disappears the moment it is clicked — that is what closing a
+  // menu means. A model that cites the item it just clicked cites a uid that
+  // no longer resolves, and the completion check refused a click that plainly
+  // landed.
+  it("accepts a citation for an element the action consumed", async () => {
+    const menuItem = {
+      uid: "0.9#mm",
+      identity: "AXMenuItem#0",
+      role: "AXMenuItem",
+      label: "全选",
+      hasValue: false,
+      enabled: true,
+      focused: false,
+      bounds: { x: 20, y: 30, width: 90, height: 22 },
+      actions: ["click" as const],
+    };
+    const clickItem = JSON.stringify({ kind: "action", action: { kind: "click", uid: menuItem.uid } });
+    const doneCitingItem = JSON.stringify({
+      kind: "done",
+      summary: "clicked 全选",
+      evidence: [menuItem.uid],
+    });
+
+    let decisions = 0;
+    let observes = 0;
+    const deps: ComputerLoopDeps = {
+      observe: async () => {
+        observes += 1;
+        // 1: decision read (menu open) · 2: read after the click (menu closed)
+        // · 3: the read that verifies the done answer (menu still closed)
+        const menuOpen = observes === 1 || observes === 3;
+        return observation(menuOpen ? [menuItem] : []);
+      },
+      act: async () => ({ grantId: "cug_1", revision: 3, remainingBudget: 9, dispatched: "accessibility-action" }),
+      decide: async () => (decisions++ === 0 ? clickItem : doneCitingItem),
+    };
+
+    const result = await runComputerLoop({ instruction: "click 全选", maxSteps: 6 }, deps);
+    expect(result.outcome).toBe("unverified");
+    expect(result.verification).toBe("unverified-by-design");
+    expect(result.steps.some((step) => step.action === "click" && step.ok)).toBe(true);
+  });
+
+  it("still refuses a citation for an element the action did not consume", async () => {
+    const menuItem = {
+      uid: "0.9#mm",
+      identity: "AXMenuItem#0",
+      role: "AXMenuItem",
+      label: "全选",
+      hasValue: false,
+      enabled: true,
+      focused: false,
+      bounds: { x: 20, y: 30, width: 90, height: 22 },
+      actions: ["click" as const],
+    };
+    const clickItem = JSON.stringify({ kind: "action", action: { kind: "click", uid: menuItem.uid } });
+    // The model cites a uid it was never shown.
+    const doneCitingGhost = JSON.stringify({
+      kind: "done",
+      summary: "clicked something",
+      evidence: ["0.9#ghost"],
+    });
+
+    let decisions = 0;
+    let observes = 0;
+    const deps: ComputerLoopDeps = {
+      observe: async () => {
+        observes += 1;
+        return observation(observes <= 1 ? [menuItem] : []);
+      },
+      act: async () => ({ grantId: "cug_1", revision: 3, remainingBudget: 9, dispatched: "accessibility-action" }),
+      decide: async () => (decisions++ === 0 ? clickItem : doneCitingGhost),
+    };
+
+    const result = await runComputerLoop({ instruction: "click 全选", maxSteps: 6 }, deps);
+    // The citation names a uid the model was never shown, so this is not the
+    // consumed-element case: it must not be reported as one.
+    expect(result.verification).not.toBe("unverified-by-design");
   });
 });

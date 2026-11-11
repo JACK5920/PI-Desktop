@@ -1492,6 +1492,7 @@ impl Desktop for FakeDesktop {
                 node("0.1", "AXButton", vec![ActionKind::Click]),
                 node("0.2", "AXTextField", vec![ActionKind::SetValue]),
             ],
+            total_nodes: 2,
             truncated: false,
             fidelity: Fidelity::Full,
         })

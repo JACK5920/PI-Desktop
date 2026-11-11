@@ -20,6 +20,13 @@ import {
   normalizeLargePasteThreshold,
 } from "@pi-desktop/shared";
 import { useAppStore } from "../stores/app-store";
+import { api } from "../lib/api";
+import {
+  PAUSED_TASK_CONTINUATION_PROMPT,
+  cancelTaskPauseRequest,
+  requestTaskPause,
+  withoutPausedTask,
+} from "../lib/paused-task-recovery";
 import { latestTurnContextInspector } from "../lib/latest-turn-context";
 import { isActivePlanExecution } from "../lib/plan-mode-state";
 import { headAsk, queuedAskCount } from "../lib/pending-asks";
@@ -85,7 +92,11 @@ export function Composer({
   const editQueuedPrompt = useAppStore((s) => s.editQueuedPrompt);
   const sendQueuedNow = useAppStore((s) => s.sendQueuedNow);
   const abort = useAppStore((s) => s.abort);
+  const [pausePending, setPausePending] = useState(false);
   const isRunning = useAppStore((s) => s.isRunning);
+  useEffect(() => {
+    if (!isRunning) setPausePending(false);
+  }, [isRunning]);
   const planningState = useAppStore((s) =>
     s.activeSessionId ? s.planningStates[s.activeSessionId] : undefined,
   );
@@ -97,10 +108,67 @@ export function Composer({
   );
   const sessions = useAppStore((s) => s.sessions);
   const activeSessionId = useAppStore((s) => s.activeSessionId);
+  const activeGoalLifecycle = useAppStore((s) =>
+    s.activeSessionId ? s.goalLifecycles[s.activeSessionId] : undefined,
+  );
   const activeSessionSummary = sessions.find(
     (session) => session.id === activeSessionId,
   );
   const capabilitySession = activeSessionSummary ?? (activeSessionId?.startsWith("remote:") ? { id: activeSessionId } : undefined);
+  const goalManagedTask = activeGoalLifecycle?.status === "active" || activeGoalLifecycle?.status === "paused";
+  const pauseSupported = !!activeSessionId && !goalManagedTask && sessionAllows(capabilitySession, "canStop") && !isRemoteSession(capabilitySession) && activeSessionSummary?.source !== "pi-native";
+  const taskPaused = !!activeSessionId && !goalManagedTask && (settings?.pausedTaskSessionIds ?? []).includes(activeSessionId);
+  const pauseTask = async () => {
+    if (!activeSessionId || pausePending || !sessionAllows(capabilitySession, "canStop") || isRemoteSession(capabilitySession) || activeSessionSummary?.source === "pi-native") return;
+    requestTaskPause(activeSessionId);
+    setPausePending(true);
+    try {
+      const result = await api.stop(activeSessionId);
+      if (!result?.requested) {
+        cancelTaskPauseRequest(activeSessionId);
+        setPausePending(false);
+        showToast(t("chat.pauseGeneratingFailed"), { variant: "warning" });
+      }
+    } catch {
+      cancelTaskPauseRequest(activeSessionId);
+      setPausePending(false);
+      showToast(t("chat.pauseGeneratingFailed"), { variant: "error" });
+    }
+  };
+  const stopTask = async () => {
+    if (activeSessionId) {
+      cancelTaskPauseRequest(activeSessionId);
+      const currentSettings = useAppStore.getState().settings;
+      if (currentSettings?.pausedTaskSessionIds?.includes(activeSessionId)) {
+        const next = withoutPausedTask(currentSettings, activeSessionId);
+        useAppStore.setState({ settings: next });
+        try {
+          await api.setSettings(next);
+        } catch {
+          showToast(t("chat.pauseGeneratingFailed"), { variant: "error" });
+        }
+      }
+    }
+    await abort();
+  };
+  const resumeTask = async () => {
+    if (!activeSessionId || !taskPaused) return;
+    const currentSettings = useAppStore.getState().settings;
+    if (!currentSettings) return;
+    const next = withoutPausedTask(currentSettings, activeSessionId);
+    await api.setSettings(next);
+    useAppStore.setState({ settings: next });
+    const accepted = await sendPrompt(PAUSED_TASK_CONTINUATION_PROMPT, undefined, activeSessionId);
+    if (!accepted) {
+      const latest = useAppStore.getState().settings ?? next;
+      const restored = {
+        ...latest,
+        pausedTaskSessionIds: [...new Set([...(latest.pausedTaskSessionIds ?? []), activeSessionId])],
+      };
+      await api.setSettings(restored);
+      useAppStore.setState({ settings: restored });
+    }
+  };
   const composerTransforms = useMemo(
     () =>
       (sessionAllows(capabilitySession, "canUseLocalTools") ? plugins : [])
@@ -124,17 +192,7 @@ export function Composer({
   const sessionCompactions = useAppStore((s) =>
     s.activeSessionId ? s.sessionCompactions[s.activeSessionId] : undefined,
   );
-  // One inspector in the composer toolbar, always the newest turn with usage.
-  const composerContextUsage = useMemo(
-    () =>
-      latestTurnContextInspector(
-        liveMessages,
-        providerModels,
-        providers,
-        sessionCompactions,
-      ),
-    [liveMessages, providerModels, providers, sessionCompactions],
-  );
+  const recentModels = useAppStore((s) => s.recentModels);
   const configureActiveSession = useAppStore((s) => s.configureActiveSession);
   const showToast = useAppStore((s) => s.showToast);
   const composerPrefill = useAppStore((s) => s.composerPrefill);
@@ -350,13 +408,23 @@ export function Composer({
       : sessionPermissionMode;
   const composerPermissionMode: Exclude<PermissionMode, "inherit"> =
     mode === "goal" ? "auto" : effectivePermissionMode;
-  const recentModels = useAppStore((s) => s.recentModels);
   const selectedModel = remoteSession ? { providerId: activeSession?.providerId, modelId: activeSession?.modelId } : inheritedSessionModelBinding({
     draft: activeSession ?? draftConfiguration,
     settings,
     providers,
     recentModels,
   });
+  // One inspector in the composer toolbar, always the newest turn with usage.
+  const composerContextUsage = useMemo(
+    () => latestTurnContextInspector(
+      liveMessages,
+      providerModels,
+      providers,
+      sessionCompactions,
+      selectedModel,
+    ),
+    [liveMessages, providerModels, providers, sessionCompactions, selectedModel.providerId, selectedModel.modelId],
+  );
   const provider = providers.find(candidate => candidate.id === selectedModel.providerId);
   const modelId = selectedModel.modelId;
   const selectedModelCatalog = provider ? providerModels[provider.id] : undefined;
@@ -666,7 +734,11 @@ export function Composer({
             undoComposerTransform={composerTransformController.undoLast}
             runActive={runActive}
             hasDraftContent={hasDraftContent}
-            abort={abort}
+            abort={stopTask}
+            taskPaused={taskPaused}
+            pausePending={pausePending}
+            pauseTask={pauseSupported ? pauseTask : undefined}
+            resumeTask={resumeTask}
             submit={submitFromComposer}
             workSessionId={activeSessionId ?? undefined}
             workSessionLabel={activeSessionSummary?.title}

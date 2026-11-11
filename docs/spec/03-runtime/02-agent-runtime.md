@@ -73,6 +73,14 @@ runtime returns `{ requested: false }`; immediate `abort()` remains the
 separate cancellation path. `abort()` resolves only after the named active
 operation has completed its cancellation cleanup, so the same runtime can
 accept a follow-up prompt as soon as the abort request returns.
+
+The Composer's Pause action uses this graceful boundary. It persists a paused
+checkpoint only after the corresponding `agent_end`; Resume submits a new
+continuation prompt against the transcript and never replays an old request or
+tool call. `AppSettings.autoResumePausedTasks` defaults to false and applies
+only to these completed-boundary checkpoints. A mid-action Host restart is
+not a safe checkpoint and never triggers automatic replay (ADR 0354 / ADR
+0053).
 Cancellation remains busy until both the parent operation and all running
 delegates have retired. Concurrent aborts join that same cleanup. A parent's
 terminal event cannot make a new prompt admissible while a child is still
@@ -2029,3 +2037,6 @@ retries and images retain physical account/model attribution. Nested immediate
 parent and owning Task remain distinct. The migration does not add coding-agent
 AgentSession, Codemode or virtual routing. See the coding-agent design review for
 future adoption conditions.
+
+
+Trusted extension `setThinkingLevel` must update both the runtime preference and the Agent state used by the next provider request. The getter and actual request reasoning level must agree after provider capability clamping.

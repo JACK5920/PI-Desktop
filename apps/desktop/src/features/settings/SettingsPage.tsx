@@ -578,6 +578,18 @@ export function SettingsPage() {
                   saveSettings={saveSettings}
                 />
                 <SettingsRow
+                  title={t("settings.autoResumePausedTasks")}
+                  description={t("settings.autoResumePausedTasksDesc")}
+                >
+                  <SettingsToggle
+                    checked={settings.autoResumePausedTasks === true}
+                    label={t("settings.autoResumePausedTasks")}
+                    onChange={() => void saveSettings({
+                      autoResumePausedTasks: settings.autoResumePausedTasks !== true,
+                    })}
+                  />
+                </SettingsRow>
+                <SettingsRow
                   title={t("settings.enterToSend")}
                   description={t("settings.enterToSendDesc")}
                 >

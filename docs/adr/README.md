@@ -412,5 +412,6 @@ Each ADR includes:
 | 0350 | [Grant Computer Use the desktop scope with a revocable Stop boundary](0350-computer-use-whole-desktop-grant.md) | Accepted for implementation (D688; amends ADR 0349) |
 | 0352 | [Launch installed local applications from the plugin launcher](0352-plugin-launcher-local-apps.md) | Accepted |
 | 0353 | [Make Computer Use application restrictions user-configurable](0353-configurable-computer-use-restrictions.md) | Accepted (D690; amends ADR 0349 / 0350) |
+| 0354 | [Pause Agent tasks at a safe turn boundary](0354-safe-agent-task-pause-and-resume.md) | Accepted for implementation; preserves no-replay for uncertain interrupted work |
 
 | model-reasoning-effort-override | [Model reasoning effort override](model-reasoning-effort-override.md) | Proposed |

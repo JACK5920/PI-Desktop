@@ -92,7 +92,14 @@ pub enum DesktopError {
 
 pub struct RawInspection {
     pub nodes: Vec<Node>,
+    /// Whether the backend itself cut the tree.
     pub truncated: bool,
+    /// How many nodes the backend walked before the host's own budget was
+    /// applied. The host cuts the tree to its node budget, and the caller has
+    /// to be told when that happened -- otherwise it reads a list it
+    /// believes is complete and concludes that an element the window plainly
+    /// shows does not exist.
+    pub total_nodes: usize,
     pub fidelity: Fidelity,
 }
 
@@ -159,6 +166,29 @@ pub trait Desktop: Send + Sync {
         _allow_sensitive_input: bool,
     ) -> Result<Dispatched, DesktopError> {
         self.perform(target, uid, action)
+    }
+
+    /// Read the target back and report whether it now holds `expected`.
+    ///
+    /// A write's result is the content of a field, and the accessibility tree
+    /// never publishes a field's content -- the element list says only that
+    /// the field holds a value. So the caller that asked for the write cannot
+    /// confirm it from the tree, and a model that has to confirm it from the
+    /// tree either guesses or keeps retrying.
+    ///
+    /// The backend can answer it, because the driver reports the field's
+    /// current value in its structured tree. This asks the backend to compare
+    /// that value against what was written and report the verdict.
+    ///
+    /// `None` means the backend cannot tell, which is not a failure: the
+    /// caller then reports the write as dispatched and unconfirmed.
+    fn confirm_write(
+        &self,
+        _target: &TargetRef,
+        _uid: Option<&str>,
+        _expected: &str,
+    ) -> Option<bool> {
+        None
     }
 
     /// Process ids that belong to this application, so policy can refuse our
@@ -338,6 +368,18 @@ impl Desktop for ArcDesktop {
     }
     fn secure_input_active(&self) -> bool {
         self.0.secure_input_active()
+    }
+    fn confirm_write(
+        &self,
+        target: &TargetRef,
+        uid: Option<&str>,
+        expected: &str,
+    ) -> Option<bool> {
+        // The adapter has to forward this one. Without it the wrapper answers
+        // the trait's default -- "the backend cannot tell" -- while the
+        // backend underneath can, and a confirmed write is reported as an
+        // unconfirmed one.
+        self.0.confirm_write(target, uid, expected)
     }
     fn perform(
         &self,

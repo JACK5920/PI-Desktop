@@ -702,6 +702,23 @@ describe("classifyAgentError", () => {
     });
   });
 
+  it.each([
+    '429 {"error":{"code":"1308","message":"Plan usage limit reached"}}',
+    '429: {"error":{"code":1308,"message":"Usage limit reached"}}',
+  ])("does not retry the Zhipu usage-limit code: %s", (message) => {
+    expect(classifyAgentError(Object.assign(new Error(message), { status: 429 }))).toMatchObject({
+      code: "PROVIDER_ERROR",
+      retriable: false,
+    });
+  });
+
+  it("keeps an unrelated 429 mentioning 1308 retryable", () => {
+    expect(classifyAgentError(Object.assign(
+      new Error('429 {"error":{"code":"1302","message":"request 13080 rate limit"}}'),
+      { status: 429 },
+    ))).toMatchObject({ code: "PROVIDER_RATE_LIMITED", retriable: true });
+  });
+
   // OpenRouter reports an empty balance as HTTP 402. Backing off cannot add
   // credits, so the same-turn transient budget must not replay the request.
   it.each([

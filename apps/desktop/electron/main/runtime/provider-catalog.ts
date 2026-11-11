@@ -181,6 +181,11 @@ export function createProviderCatalogRuntime({
         .infiniteProviderRetry === true,
       keepAwakeWhileRunning: (value as T & { keepAwakeWhileRunning?: unknown })
         .keepAwakeWhileRunning === true,
+      autoResumePausedTasks: (value as T & { autoResumePausedTasks?: unknown })
+        .autoResumePausedTasks === true,
+      pausedTaskSessionIds: Array.isArray((value as T & { pausedTaskSessionIds?: unknown }).pausedTaskSessionIds)
+        ? [...new Set((value as T & { pausedTaskSessionIds: unknown[] }).pausedTaskSessionIds.filter((id): id is string => typeof id === "string" && id.length <= 256))]
+        : [],
       scheduledTasksEnabled: (value as T & { scheduledTasksEnabled?: unknown })
         .scheduledTasksEnabled !== false,
       goalBudgetDefaults: normalizeGoalBudgetDefaults(value.goalBudgetDefaults),
@@ -206,6 +211,8 @@ export function createProviderCatalogRuntime({
       defaultCommandShell?: unknown;
       infiniteProviderRetry?: unknown;
       keepAwakeWhileRunning?: unknown;
+      autoResumePausedTasks?: unknown;
+      pausedTaskSessionIds?: unknown;
       scheduledTasksEnabled?: unknown;
       goalBudgetDefaults?: unknown;
       jevEnabled?: unknown;
@@ -245,6 +252,24 @@ export function createProviderCatalogRuntime({
       typeof value.keepAwakeWhileRunning !== "boolean"
     ) {
       throw Object.assign(new Error("keepAwakeWhileRunning is invalid"), {
+        errorCode: ErrorCodes.INVALID_PARAMS,
+      });
+    }
+    if (
+      Object.prototype.hasOwnProperty.call(value, "autoResumePausedTasks") &&
+      typeof value.autoResumePausedTasks !== "boolean"
+    ) {
+      throw Object.assign(new Error("autoResumePausedTasks is invalid"), {
+        errorCode: ErrorCodes.INVALID_PARAMS,
+      });
+    }
+    if (
+      Object.prototype.hasOwnProperty.call(value, "pausedTaskSessionIds") &&
+      (!Array.isArray(value.pausedTaskSessionIds) || value.pausedTaskSessionIds.some(
+        (id) => typeof id !== "string" || id.length > 256,
+      ))
+    ) {
+      throw Object.assign(new Error("pausedTaskSessionIds is invalid"), {
         errorCode: ErrorCodes.INVALID_PARAMS,
       });
     }

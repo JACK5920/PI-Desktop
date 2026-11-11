@@ -163,6 +163,9 @@ export type ContextCompactionStatus = {
  */
 export type ContextCompactionMark = ContextCompactionStatus & {
   id: string;
+  /** Model whose context window this checkpoint was built for. */
+  providerId?: string;
+  modelId?: string;
   /** Last message the checkpoint covers; the row renders right after it. */
   throughMessageId: string;
   /** False when the window rolled over without asking for a summary. */

@@ -635,13 +635,13 @@
   align-items: center;
   justify-content: center;
   border-radius: var(--radius-full);
-  background: var(--ds-accent);
-  color: var(--ds-bg-primary);
+  background: var(--ds-composer-primary-bg);
+  color: var(--ds-composer-primary-fg);
   transition: opacity var(--motion-duration-fast) var(--motion-ease-out), transform var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .send-btn:hover:not(:disabled) {
-  opacity: 0.9;
+  background: var(--ds-composer-primary-hover);
 }
 
 .send-btn:disabled {
@@ -670,8 +670,37 @@
   background: color-mix(in oklab, var(--ds-text-primary) 22%, transparent);
 }
 
+.pause-btn,
+.resume-btn {
+  display: inline-flex;
+  height: 28px;
+  width: 28px;
+  flex: 0 0 28px;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-full);
+  background: var(--ds-composer-primary-bg);
+  color: var(--ds-composer-primary-fg);
+  transition:
+    background var(--motion-duration-fast) var(--motion-ease-out),
+    opacity var(--motion-duration-fast) var(--motion-ease-out),
+    transform var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.pause-btn:hover:not(:disabled),
+.resume-btn:hover:not(:disabled) {
+  background: var(--ds-composer-primary-hover);
+}
+
+.pause-btn:disabled,
+.resume-btn:disabled {
+  opacity: 0.55;
+}
+
 .send-btn:active:not(:disabled),
-.stop-btn:active:not(:disabled) {
+.stop-btn:active:not(:disabled),
+.pause-btn:active:not(:disabled),
+.resume-btn:active:not(:disabled) {
   transform: scale(0.94);
 }
 

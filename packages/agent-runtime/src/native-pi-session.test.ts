@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentSession, ModelRuntime, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
-import { createAssistantMessageEventStream, PI_ATTRIBUTION, Type, type AssistantMessage } from "@earendil-works/pi-ai";
+import { createAssistantMessageEventStream, PI_ATTRIBUTION, type AssistantMessage } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import { NativePiSessionService } from "./native-pi-session.js";
 import {
   acquireNativePiSessionLease,
@@ -534,7 +535,7 @@ describe("native continuation review regressions", () => {
       expect(identities).toHaveLength(1);
       expect(identities[0]).toMatchObject({
         userAgent: "detailed",
-        version: "1.4.0",
+        version: "1.5.0",
         attribution: enabled ? PI_ATTRIBUTION : null,
       });
     } finally {

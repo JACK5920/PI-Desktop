@@ -624,6 +624,7 @@ impl Desktop for WindowsDesktop {
             nodes.push(self.node_for(&element, index, target, bounds, allow_sensitive_input)?);
         }
         Ok(RawInspection {
+            total_nodes: count,
             nodes,
             truncated: count > limit,
             fidelity: Fidelity::Partial,

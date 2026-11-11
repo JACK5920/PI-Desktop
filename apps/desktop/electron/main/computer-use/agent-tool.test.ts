@@ -45,6 +45,7 @@ function hostFixture(enabled = true, configuredModel = true, computerUseOverride
       } as T;
       if (method === "computer.grantDescribe") return { grant: { ...grant, capture: fixtureCapture } } as T;
       if (method === "computer.listTargets") return { targets: [] } as T;
+      if (method === "computer.rpcSchema") return { schemaVersion: 1, hostCoreVersion: "0.21.0" } as T;
       if (method === "computer.act") return { grantId: grant.grantId, revision: 1, remainingBudget: 3, dispatched: "accessibility-action" } as T;
       return { revoked: true } as T;
     },
@@ -134,6 +135,7 @@ describe("Computer local tool", () => {
         } as T;
         if (method === "computer.grantDescribe") return { grant: { ...grant, capture: "a11y-and-pixels" } } as T;
         if (method === "computer.listTargets") return { targets: [] } as T;
+      if (method === "computer.rpcSchema") return { schemaVersion: 1, hostCoreVersion: "0.21.0" } as T;
         if (method === "computer.grantRevoke") return { revoked: true } as T;
         throw new Error(`Unexpected Host RPC: ${method}`);
       },
@@ -197,6 +199,7 @@ describe("Computer local tool", () => {
         } as T;
         if (method === "computer.grantDescribe") return { grant: { ...grant, capture: "a11y-and-pixels" } } as T;
         if (method === "computer.listTargets") return { targets: [] } as T;
+      if (method === "computer.rpcSchema") return { schemaVersion: 1, hostCoreVersion: "0.21.0" } as T;
         if (method === "computer.grantRevoke") return { revoked: true } as T;
         throw new Error(`Unexpected Host RPC: ${method} ${JSON.stringify(params)}`);
       },
@@ -353,6 +356,7 @@ describe("Computer local tool", () => {
           secureInput: false,
         } as T;
         if (method === "computer.grantDescribe") return { grant: { ...grant, revision, remainingBudget } } as T;
+        if (method === "computer.rpcSchema") return { schemaVersion: 1, hostCoreVersion: "0.21.0" } as T;
         if (method === "computer.listTargets") return { targets: [{
           targetId: grant.targetId,
           appName: "Fixture",
@@ -520,6 +524,7 @@ describe("Computer local tool", () => {
         }
         if (method === "computer.grantDescribe") return { grant: liveGrant } as T;
         if (method === "computer.listTargets") return { targets: [] } as T;
+      if (method === "computer.rpcSchema") return { schemaVersion: 1, hostCoreVersion: "0.21.0" } as T;
         if (method === "computer.grantRevoke") {
           const reason = (params as { reason?: unknown } | undefined)?.reason;
           if (typeof reason === "string") {
@@ -618,5 +623,123 @@ describe("Computer local tool", () => {
     expect(otherSessionController.signal.aborted).toBe(false);
     expect(getActiveComputerUseRun()).toBeNull();
     expect(calls.some(({ method }) => method === "computer.inspect")).toBe(true);
+  });
+});
+
+describe("Computer local tool failure semantics", () => {
+  // `isError` means "nothing happened on the machine". A run that dispatched
+  // real input is not that, even when UIA cannot prove the result. Folding
+  // those together made the agent believe the desktop was untouched and redo
+  // work that had already landed.
+  const dispatchStep = {
+    index: 0,
+    action: "click" as const,
+    ok: true,
+    target: "Continue",
+    verification: "observed-change" as const,
+  };
+
+  async function runWith(outcome: string, steps: unknown[], verification?: string) {
+    const { host } = hostFixture(true, false);
+    const resolveProvider = vi.fn(async () => ({
+      id: "chat-provider", name: "Chat provider", modelId: "chat-model", apiKey: "fixture-only",
+      supportsReasoning: false, supportedThinkingLevels: ["off" as const],
+    }));
+    computerRuntime.runComputerLoop.mockResolvedValue({
+      outcome,
+      summary: "ran",
+      steps,
+      ...(verification ? { verification } : {}),
+    } as never);
+    const handler = createComputerUseTool({ getHost: () => host, resolveProvider });
+    return handler({
+      sessionId: "session-1",
+      toolCallId: "tool-semantics",
+      args: { instruction: "do the thing" },
+      signal: new AbortController().signal,
+    });
+  }
+
+  it("reports a completed run as success", async () => {
+    const result = await runWith("done", []);
+    expect(result.ok).toBe(true);
+    expect(result.isError).toBe(false);
+  });
+
+  it("does not call a run that dispatched input an error", async () => {
+    const result = await runWith("unverified", [dispatchStep], "unverified-by-design");
+    expect(result.isError).toBe(false);
+  });
+
+  it("does not call a step-limited run an error when it dispatched input", async () => {
+    const result = await runWith("step-limit", [dispatchStep]);
+    expect(result.isError).toBe(false);
+  });
+
+  it("still calls a refused run an error", async () => {
+    const result = await runWith("failed", []);
+    expect(result.isError).toBe(true);
+  });
+
+  it("still calls an unverified run that dispatched nothing an error", async () => {
+    const result = await runWith("unverified", [], "unverified");
+    expect(result.isError).toBe(true);
+  });
+});
+describe("Computer RPC schema mismatch", () => {
+  // The Electron bundle and the host-core sidecar are versioned separately.
+  // When they disagree about the shape of the `computer.*` payloads, the run
+  // has to stop before a grant exists and before any input is sent - not
+  // fail in the middle of one with a puzzling error.
+  async function runWithSchema(schema: unknown) {
+    const { host, calls } = hostFixture(true, false);
+    const original = host.call.bind(host);
+    const patched = {
+      ...host,
+      async call<T>(method: string, params?: unknown): Promise<T> {
+        if (method === "computer.rpcSchema") return schema as T;
+        return original<T>(method, params);
+      },
+    };
+    const resolveProvider = vi.fn(async () => ({
+      id: "chat-provider", name: "Chat provider", modelId: "chat-model", apiKey: "fixture-only",
+      supportsReasoning: false, supportedThinkingLevels: ["off" as const],
+    }));
+    computerRuntime.runComputerLoop.mockResolvedValue({ outcome: "done", summary: "ok", steps: [] });
+    const handler = createComputerUseTool({ getHost: () => patched, resolveProvider });
+    const result = await handler({
+      sessionId: "session-1",
+      toolCallId: "tool-schema",
+      args: { instruction: "do the thing" },
+      signal: new AbortController().signal,
+    });
+    return { result, calls };
+  }
+
+  it("refuses a host that speaks a newer schema", async () => {
+    const { result, calls } = await runWithSchema({ schemaVersion: 99, hostCoreVersion: "9.9.9" });
+    expect(result.ok).toBe(false);
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.content)).toContain("COMPUTER_RPC_SCHEMA_MISMATCH");
+    // No grant may exist when the contract does not match.
+    expect(calls.some((call) => call.method === "computer.grantCreate")).toBe(false);
+  });
+
+  it("refuses a host that speaks an older schema", async () => {
+    const { result, calls } = await runWithSchema({ schemaVersion: 0 });
+    expect(result.isError).toBe(true);
+    expect(calls.some((call) => call.method === "computer.grantCreate")).toBe(false);
+  });
+
+  it("refuses a host that cannot report a schema at all", async () => {
+    const { result, calls } = await runWithSchema(undefined);
+    expect(result.isError).toBe(true);
+    expect(calls.some((call) => call.method === "computer.grantCreate")).toBe(false);
+  });
+
+  it("proceeds when the schema matches", async () => {
+    const { result, calls } = await runWithSchema({ schemaVersion: 1, hostCoreVersion: "0.21.0" });
+    expect(result.ok).toBe(true);
+    expect(calls.some((call) => call.method === "computer.grantCreate")).toBe(true);
   });
 });

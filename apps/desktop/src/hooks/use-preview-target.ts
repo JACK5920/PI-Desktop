@@ -416,3 +416,27 @@ export function useCopyChatFileRef() {
     [resolveRef, showToast, t],
   );
 }
+
+/** Reveal the exact resolved transcript reference in the system file manager. */
+export function useRevealChatFileRef() {
+  const { t } = useTranslation();
+  const resolveRef = useResolveChatFileRef();
+  const paneSessionId = useSlotSessionId();
+  const sessionId = useAppStore((s) => paneSessionId || s.activeSessionId);
+  const showToast = useAppStore((s) => s.showToast);
+
+  return useCallback(
+    (path: string, baseDir?: string) => {
+      void (async () => {
+        const resolved = await resolveRef(path, baseDir);
+        if (!resolved) return;
+        try {
+          await api.fsReveal(resolved.absolutePath, sessionId ?? undefined);
+        } catch {
+          showToast(t("chat.fileRevealFailed"), { variant: "error" });
+        }
+      })();
+    },
+    [resolveRef, sessionId, showToast, t],
+  );
+}

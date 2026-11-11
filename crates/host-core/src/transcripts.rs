@@ -1028,8 +1028,8 @@ pub fn read_transcript(data_dir: &Path, session_id: &str) -> Result<Vec<MessageR
 /// `message_start` and `message_limit` are physical message-line positions,
 /// the same coordinate space as [`TranscriptLayout::message_count`]. Unlike a
 /// sequential scan, the cost here is proportional to the window, not to the
-/// history in front of it. Compaction lines are always returned in full: the
-/// chain is small and the newest element is required for model context.
+/// history in front of it. Bounded reads include the active checkpoint and
+/// checkpoints inside the window, including trailing ones for a tail window.
 pub fn read_transcript_window_with_layout(
     data_dir: &Path,
     session_id: &str,
@@ -1066,11 +1066,15 @@ pub fn read_transcript_window_with_layout(
             {
                 picked.push(active);
             }
-            let window_end = layout
-                .message_offsets
-                .get(end.saturating_sub(1))
-                .copied()
-                .unwrap_or(window_start);
+            let window_end = if end == total && end > start {
+                layout.file_len
+            } else {
+                layout
+                    .message_offsets
+                    .get(end.saturating_sub(1))
+                    .copied()
+                    .unwrap_or(window_start)
+            };
             picked.extend(
                 layout
                     .compaction_offsets
@@ -1855,6 +1859,34 @@ mod tests {
         assert_eq!(read.messages.len(), 1);
         assert_eq!(read.messages[0].id, "m3");
         assert_eq!(read.compactions.len(), 1);
+    }
+
+    #[test]
+    fn layout_tail_window_keeps_trailing_compaction_checkpoints() {
+        let dir = tempdir().unwrap();
+        append_message(dir.path(), "s1", "now", &record("m1", "one")).unwrap();
+        append_compaction(dir.path(), "s1", "now", &compaction()).unwrap();
+        append_message(dir.path(), "s1", "now", &record("m2", "two")).unwrap();
+        let mut latest = compaction();
+        latest.id = "cp2".into();
+        latest.through_message_id = "m2".into();
+        latest.details = Some(json!({ "generation": 2, "contextTokens": 26_136 }));
+        append_compaction(dir.path(), "s1", "now", &latest).unwrap();
+        let mut final_checkpoint = latest.clone();
+        final_checkpoint.id = "cp3".into();
+        final_checkpoint.details = Some(json!({ "generation": 3, "contextTokens": 20_619 }));
+        append_compaction(dir.path(), "s1", "now", &final_checkpoint).unwrap();
+
+        let layout = refresh_layout(dir.path(), "s1", TranscriptLayout::default()).unwrap();
+        let read =
+            read_transcript_window_with_layout(dir.path(), "s1", &layout, 1, Some(1)).unwrap();
+        assert_eq!(read.messages.len(), 1);
+        assert_eq!(read.messages[0].id, "m2");
+        assert_eq!(read.compactions.last().unwrap().id, "cp3");
+        assert_eq!(
+            read.compactions.last().unwrap().details,
+            final_checkpoint.details
+        );
     }
 
     #[test]

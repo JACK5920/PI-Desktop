@@ -362,6 +362,17 @@ export type ComputerActResult = {
   remainingBudget: number;
   /** What the backend actually dispatched, for the audit trail and the log. */
   dispatched: "accessibility-action" | "window-event" | "system-input";
+  /**
+   * Whether a content write was confirmed by reading the field back.
+   *
+   * A write's result is the content of a field, and the accessibility tree
+   * never publishes a field's content, so the caller cannot confirm it from
+   * the tree. The backend can: it reads the field back and compares it with
+   * what was written, and only the verdict crosses this boundary.
+   *
+   * Absent when the backend could not tell -- which is not a failure.
+   */
+  verified?: boolean;
 };
 
 
@@ -371,6 +382,14 @@ export type ComputerUseVerification =
   | "dispatched"
   | "observed-change"
   | "observed-no-change"
+  /**
+   * The action was not dispatched: the loop had already sent the same write
+   * to the same element and did not send it twice. The model has to be able
+   * to tell this apart from a dispatched action, because the element list
+   * never shows a field's content -- without the distinction the model keeps
+   * retrying the same write until the step limit.
+   */
+  | "skipped-duplicate"
   | "model-confirmed"
   /**
    * The action ran, the accessibility tree really did not change, and the
@@ -499,4 +518,57 @@ export function validateComputerToolArgs(value: unknown): ComputerToolArgs {
     args.observeOnly = input.observeOnly;
   }
   return args;
+}
+
+/**
+ * Schema version of the `computer.*` RPC surface this build understands.
+ *
+ * The Electron bundle and the `host-core` sidecar are versioned separately,
+ * so an update can leave them out of step. Every shape change to the RPC
+ * payload - a renamed field, a changed enum, a new required argument - is a
+ * breaking change, and the mismatch has to be visible before an action runs
+ * rather than as a puzzling failure in the middle of a run.
+ *
+ * The host declares the range it supports; `host-core` reports the version
+ * it speaks. A version outside the range is refused.
+ */
+export const COMPUTER_RPC_SCHEMA_MIN = 1;
+export const COMPUTER_RPC_SCHEMA_MAX = 1;
+
+/** What `host-core` reports about the contract it speaks. */
+export type ComputerRpcSchema = {
+  schemaVersion: number;
+  hostCoreVersion?: string;
+};
+
+/**
+ * Whether a host-reported schema version is one this build can talk to.
+ *
+ * A host that reports nothing at all is treated as incompatible rather than
+ * as compatible: an older sidecar that predates the version field is exactly
+ * the case this check exists to catch.
+ */
+export function isComputerRpcSchemaCompatible(version: unknown): boolean {
+  if (typeof version !== "number" || !Number.isInteger(version)) return false;
+  return version >= COMPUTER_RPC_SCHEMA_MIN && version <= COMPUTER_RPC_SCHEMA_MAX;
+}
+
+/**
+ * A message a caller can show the user when the two sides do not match.
+ *
+ * It names both versions and what to do, because the failure is a build
+ * mismatch and the fix is not something the user can reason out from a
+ * stack trace.
+ */
+export function computerRpcSchemaMismatchMessage(
+  reported: unknown,
+  hostCoreVersion?: string,
+): string {
+  const shown = typeof reported === "number" ? String(reported) : "unknown";
+  const side = hostCoreVersion ? ` (host-core ${hostCoreVersion})` : "";
+  return (
+    `The Computer Use RPC contract does not match this build: host-core speaks schema ${shown}${side}, ` +
+    `this build supports ${COMPUTER_RPC_SCHEMA_MIN}-${COMPUTER_RPC_SCHEMA_MAX}. ` +
+    `Update PI-Desktop so the app and its host-core sidecar are the same version.`
+  );
 }

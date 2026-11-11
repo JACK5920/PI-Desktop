@@ -613,16 +613,25 @@ fn inspect_with_rebind(
             Refusal::from(error)
         })?;
     grant.last_activity = now;
+    // The tree the caller sees is the tree the host kept. When the host's own
+    // node budget cut something away, the caller has to be told -- otherwise
+    // it reads a list it believes is complete and concludes that an element
+    // the window plainly shows does not exist.
+    let total_nodes = raw.total_nodes;
+    let nodes = bound_nodes(raw.nodes);
+    let truncated = raw.truncated || nodes.len() < total_nodes;
     Ok(Inspection {
         grant_id: grant.grant_id.clone(),
         revision: grant.revision,
         bounds: grant.bounds,
         fidelity: raw.fidelity,
-        nodes: bound_nodes(raw.nodes),
-        truncated: raw.truncated,
+        nodes,
+        truncated,
         secure_input: false,
     })
 }
+
+
 
 /// Bind a window if one was named, then inspect whatever is bound.
 ///
@@ -707,16 +716,164 @@ pub fn inspect_bound(
 
 /// Labels come from windows the user does not control, so they are bounded
 /// here rather than trusted from a backend.
+///
+/// The node budget may not simply keep the head of the tree. A window with a
+/// long sidebar or a long conversation puts hundreds of nodes in front of the
+/// control the caller actually wants -- the composer of a chat window, for
+/// instance, sits after the whole message history. Cutting the tail there
+/// removes exactly the element the next step has to act on, so the run fails
+/// with "no such element" while the window plainly shows it.
+///
+/// Keeping only the tail is just as wrong. The scope root is the node every
+/// other node hangs off, and the ancestor chain of a kept tail node reaches
+/// back to it. Dropping the head therefore breaks the tree the caller reads:
+/// the surviving nodes have no root, and a caller that walks `parent` to
+/// recognise a window finds nothing.
+///
+/// So the budget is spent by priority, not by position:
+///
+/// 1. the scope root and the ancestors of every kept node, because a node
+///    without its chain describes no place;
+/// 2. every control that can take content, because a composer that was cut
+///    away leaves the caller with nothing it can type into;
+/// 3. the remaining interactive controls, newest first, since a control the
+///    user just used matters more than one from the top of the window;
+/// 4. whatever is left goes to the newest content rows, because the tail of
+///    a conversation is the part that is still about to change.
+///
+/// The kept indices are no longer contiguous, so `parent` is remapped onto
+/// the new positions and the tree still describes itself.
 fn bound_nodes(nodes: Vec<Node>) -> Vec<Node> {
-    nodes
+    // A malformed tree can point a row at itself, at a later row, or in a
+    // circle. The tree the caller reads has to stay acyclic: a node whose
+    // parent chain never ends describes no place in the window, and a caller
+    // that follows the chain can loop forever. So the parent links are
+    // severed before anything else looks at them -- including the path that
+    // does not need a cut at all.
+    let mut nodes = nodes;
+    for index in 0..nodes.len() {
+        let mut seen = vec![false; nodes.len()];
+        seen[index] = true;
+        let mut cursor = nodes[index].parent;
+        while let Some(parent) = cursor {
+            if parent >= nodes.len() || seen[parent] {
+                nodes[index].parent = None;
+                break;
+            }
+            seen[parent] = true;
+            cursor = nodes[parent].parent;
+        }
+    }
+
+    if nodes.len() <= MAX_NODES {
+        return truncate_labels(nodes);
+    }
+
+
+
+    // Ranked by how much a node must survive the cut.
+    //
+    // The scope root is the node nothing else hangs off; it is kept whatever
+    // else happens, because it is the anchor the ancestor chains resolve to.
+    let mut priority: Vec<(usize, u8)> = Vec::with_capacity(nodes.len());
+    for (index, node) in nodes.iter().enumerate() {
+        let rank = if node.parent.is_none() {
+            0
+        } else if node.actions.iter().any(|action| action.writes_content()) {
+            1
+        } else if node.actions.iter().any(|action| action.is_dispatchable()) {
+            2
+        } else {
+            3
+        };
+        priority.push((index, rank));
+    }
+
+    // Within a rank the newer node wins: a control the user just used is more
+    // relevant than one from the top of a long window, and the newest rows of
+    // a conversation are the ones about to change.
+    priority.sort_by(|a, b| a.1.cmp(&b.1).then(b.0.cmp(&a.0)));
+
+    // Every kept node needs its ancestor chain, or it hangs off a node that
+    // is not in the tree: a node whose parent was cut describes no place in
+    // the window, and the caller reads the tree to know where it is acting.
+    //
+    // So the ancestors are counted as part of the candidate's cost. A
+    // candidate whose chain does not fit in the remaining budget is skipped
+    // rather than taken and paid for afterwards -- taking it first and
+    // adding the chain afterwards is what let the tree grow past the budget
+    // (measured: 403 nodes returned for a 400-node budget).
+    let mut chosen = vec![false; nodes.len()];
+    let mut keep: Vec<usize> = Vec::with_capacity(MAX_NODES);
+    for (index, _) in priority.iter() {
+        if keep.len() >= MAX_NODES {
+            break;
+        }
+        if chosen[*index] {
+            continue;
+        }
+        // The chain this candidate needs, itself and its ancestors.
+        //
+        // The walk is bounded: a tree whose rows point at a later row, or at
+        // themselves, would otherwise loop forever. The rows come from the
+        // platform's own numbering, so a malformed one has to be survivable
+        // rather than a panic.
+        let mut chain: Vec<usize> = Vec::new();
+        let mut cursor = Some(*index);
+        while let Some(candidate) = cursor {
+            if candidate >= nodes.len() || chosen[candidate] || chain.contains(&candidate) {
+                break;
+            }
+            chain.push(candidate);
+            cursor = nodes[candidate].parent;
+        }
+        if keep.len() + chain.len() > MAX_NODES {
+            continue;
+        }
+        for candidate in &chain {
+            chosen[*candidate] = true;
+        }
+        keep.extend(chain);
+    }
+
+    keep.sort_unstable();
+    keep.dedup();
+    // The kept indices are no longer contiguous, so `parent` has to be
+    // remapped onto the new positions.
+    let mut remap = vec![usize::MAX; nodes.len()];
+    for (position, index) in keep.iter().enumerate() {
+        remap[*index] = position;
+    }
+    let mut kept: Vec<Node> = keep
         .into_iter()
-        .take(MAX_NODES)
-        .map(|mut node| {
-            node.label = node.label.map(|label| super::truncate_label(&label));
-            node.role = super::truncate_label(&node.role);
+        .map(|index| {
+            let mut node = nodes[index].clone();
+            node.parent = node.parent.and_then(|parent| {
+                // A parent row outside the tree cannot be remapped, and the
+                // node then describes no place in the window. The rows come
+                // from the platform's own numbering, so a malformed one has to
+                // be survivable rather than a panic.
+                let mapped = remap.get(parent).copied().unwrap_or(usize::MAX);
+                if mapped == usize::MAX {
+                    None
+                } else {
+                    Some(mapped)
+                }
+            });
             node
         })
-        .collect()
+        .collect();
+    truncate_labels(std::mem::take(&mut kept))
+}
+
+fn truncate_labels(mut nodes: Vec<Node>) -> Vec<Node> {
+    for node in &mut nodes {
+        if let Some(label) = node.label.take() {
+            node.label = Some(super::truncate_label(&label));
+        }
+        node.role = super::truncate_label(&node.role);
+    }
+    nodes
 }
 
 /// Validate one action against the live grant, without dispatching it.
@@ -895,11 +1052,21 @@ pub fn act(
     if grant.remaining_budget == 0 {
         grant.state = GrantState::Expired;
     }
+    // A content write is confirmed by reading the field back, because the
+    // tree the caller reads never shows what a field holds. The comparison
+    // happens inside the backend, so the content itself never leaves it.
+    let verified = match (kind, action.text.as_deref()) {
+        (ActionKind::SetValue | ActionKind::TypeText, Some(text)) => {
+            desktop.confirm_write(&grant.target, action.uid.as_deref(), text)
+        }
+        _ => None,
+    };
     Ok(ActResult {
         grant_id: grant.grant_id.clone(),
         revision: grant.revision,
         remaining_budget: grant.remaining_budget,
         dispatched,
+        verified,
     })
 }
 
@@ -910,4 +1077,240 @@ pub fn revoke(grant: &mut Grant, expired: bool) {
         GrantState::Revoked
     };
     grant.remaining_budget = 0;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn node(uid: &str, role: &str, actions: Vec<ActionKind>, parent: Option<usize>) -> Node {
+        Node {
+            uid: uid.to_string(),
+            identity: Some(uid.to_string()),
+            role: role.to_string(),
+            label: Some(format!("label-{uid}")),
+            has_value: actions.contains(&ActionKind::SetValue),
+            enabled: true,
+            focused: false,
+            bounds: None,
+            parent,
+            actions,
+        }
+    }
+
+    /// A window shaped like a real chat window: a scope root, a long run of
+    /// message text, and the composer at the very end.
+    fn chat_window(text_rows: usize) -> Vec<Node> {
+        let mut nodes = vec![node("root", "document", vec![ActionKind::Scroll], None)];
+        for index in 0..text_rows {
+            nodes.push(node(
+                &format!("text-{index}"),
+                "text",
+                vec![ActionKind::Scroll],
+                Some(0),
+            ));
+        }
+        // The composer: a group that holds the field and the buttons.
+        let group = nodes.len();
+        nodes.push(node("group", "group", vec![ActionKind::Click], Some(0)));
+        nodes.push(node(
+            "composer",
+            "edit",
+            vec![ActionKind::SetValue, ActionKind::TypeText],
+            Some(group),
+        ));
+        nodes.push(node("send", "button", vec![ActionKind::Click], Some(group)));
+        nodes
+    }
+
+    #[test]
+    fn a_tree_that_fits_the_budget_is_returned_unchanged() {
+        let nodes = chat_window(10);
+        let kept = bound_nodes(nodes.clone());
+        assert_eq!(kept.len(), nodes.len());
+        assert_eq!(kept[0].uid, "root");
+        assert_eq!(kept[kept.len() - 2].uid, "composer");
+    }
+
+    #[test]
+    fn the_kept_tree_never_exceeds_the_budget() {
+        // The ancestor chain is added when a node is kept, so a budget that is
+        // applied before the chain is added is not a budget at all: the tree
+        // grew past it. Measured on a Chromium chat window, 403 nodes came
+        // back for a 400-node budget.
+        //
+        // The shape is drawn rather than written out: the bug needs a node
+        // whose parent was not picked yet, and hand-writing a tree that
+        // produces that reliably is what made this test pass while the bug
+        // was still there.
+        let mut seed: u64 = 0x5eed_1234_9abc_def0;
+        let mut next = move || {
+            // xorshift: a fixed sequence, so a failure is reproducible.
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        for shape in 0..64 {
+            let count = MAX_NODES + 40;
+            let mut nodes: Vec<Node> = Vec::with_capacity(count);
+            nodes.push(node("root", "document", vec![ActionKind::Scroll], None));
+            for index in 0..count {
+                // The parent is an earlier row most of the time, but not
+                // always: a row whose parent comes later is ordinary in a real
+                // tree, and it is what makes the chain cost something.
+                let parent = if next() % 4 == 0 {
+                    None
+                } else if next() % 2 == 0 {
+                    Some(index + 1 + (next() % 8) as usize)
+                } else {
+                    Some((next() % (index.max(1) as u64)) as usize)
+                };
+                let role = match next() % 4 {
+                    0 => "button",
+                    1 => "text",
+                    2 => "group",
+                    _ => "edit",
+                };
+                let actions = match role {
+                    "button" => vec![ActionKind::Click],
+                    "text" => vec![ActionKind::Scroll],
+                    "group" => vec![ActionKind::Scroll],
+                    _ => vec![ActionKind::SetValue, ActionKind::TypeText],
+                };
+                nodes.push(node(&format!("n-{index}"), role, actions, parent));
+            }
+            let kept = bound_nodes(nodes);
+            assert!(
+                kept.len() <= MAX_NODES,
+                "shape {shape}: the tree grew past the budget: {} nodes",
+                kept.len()
+            );
+        }
+    }
+
+    #[test]
+    fn a_cyclic_parent_chain_is_cut() {
+        // The rows come from the platform's own numbering, so a malformed one
+        // has to be survivable. A tree whose parent chain never ends describes
+        // no place in the window, and a caller that follows the chain can loop
+        // forever.
+        let mut nodes = vec![
+            node("root", "document", vec![ActionKind::Scroll], None),
+            node("a", "group", vec![ActionKind::Scroll], Some(2)),
+            node("b", "group", vec![ActionKind::Scroll], Some(1)),
+        ];
+        // A row that points at itself.
+        nodes.push(node("self", "group", vec![ActionKind::Scroll], Some(3)));
+        // A row that points past the end of the tree.
+        nodes.push(node("forward", "group", vec![ActionKind::Scroll], Some(99)));
+
+        let kept = bound_nodes(nodes);
+
+        // Every kept node's chain has to end, and no chain may repeat.
+        for node in &kept {
+            let mut seen = vec![false; kept.len()];
+            let mut cursor = node.parent;
+            while let Some(parent) = cursor {
+                assert!(
+                    parent < kept.len(),
+                    "the parent index is out of range: {parent} of {}",
+                    kept.len()
+                );
+                assert!(!seen[parent], "the parent chain loops at {parent}");
+                seen[parent] = true;
+                cursor = kept[parent].parent;
+            }
+        }
+    }
+
+    #[test]
+    fn the_budget_keeps_the_scope_root() {
+        // The root is the node every other node hangs off. Dropping it leaves
+        // the caller with a tree that describes no place in the window.
+        let nodes = chat_window(MAX_NODES + 200);
+        let kept = bound_nodes(nodes);
+        assert_eq!(kept[0].uid, "root");
+        assert!(
+            kept[0].parent.is_none(),
+            "the scope root must not gain a parent"
+        );
+    }
+
+    #[test]
+    fn the_budget_keeps_the_composer_and_its_ancestors() {
+        // The composer sits behind the whole message history. A budget that
+        // only kept the head of the tree cut it away, and the run then failed
+        // with "no such element" while the window plainly showed it.
+        let nodes = chat_window(MAX_NODES + 200);
+        let kept = bound_nodes(nodes);
+        let composer = kept
+            .iter()
+            .find(|node| node.uid == "composer")
+            .expect("the composer must survive the cut");
+        assert!(composer.actions.contains(&ActionKind::SetValue));
+        // Its parent has to be in the tree as well, and the parent index has
+        // to point at it after the remap.
+        let parent = composer
+            .parent
+            .expect("a kept node keeps its parent");
+        assert_eq!(kept[parent].uid, "group");
+        assert_eq!(kept[kept[parent].parent.unwrap()].uid, "root");
+    }
+
+    #[test]
+    fn every_kept_node_keeps_a_parent_that_is_also_kept() {
+        // `parent` is an index into this very list, so a node whose parent was
+        // cut describes no place in the window.
+        let nodes = chat_window(MAX_NODES + 200);
+        let kept = bound_nodes(nodes);
+        for (index, node) in kept.iter().enumerate() {
+            if let Some(parent) = node.parent {
+                assert!(
+                    parent < index,
+                    "a parent must come before its child: {node:?}"
+                );
+                assert!(
+                    parent < kept.len(),
+                    "the parent index must stay inside the list: {node:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_budget_never_returns_more_than_the_budget() {
+        let nodes = chat_window(MAX_NODES * 3);
+        let kept = bound_nodes(nodes);
+        assert!(kept.len() <= MAX_NODES, "kept {} nodes", kept.len());
+    }
+
+    #[test]
+    fn a_write_capable_control_outranks_a_read_only_row() {
+        // A read-only label and a text field can sit next to each other. The
+        // field is what the caller has to act on, so it survives the cut and
+        // the label does not have to.
+        let mut nodes = vec![node("root", "document", vec![ActionKind::Scroll], None)];
+        for index in 0..(MAX_NODES + 50) {
+            nodes.push(node(
+                &format!("text-{index}"),
+                "text",
+                vec![ActionKind::Scroll],
+                Some(0),
+            ));
+        }
+        let group = nodes.len();
+        nodes.push(node("group", "group", vec![ActionKind::Click], Some(0)));
+        nodes.push(node(
+            "field",
+            "edit",
+            vec![ActionKind::SetValue, ActionKind::TypeText],
+            Some(group),
+        ));
+        let kept = bound_nodes(nodes);
+        assert!(
+            kept.iter().any(|node| node.uid == "field"),
+            "the writable field must survive the cut"
+        );
+    }
 }

@@ -67,6 +67,11 @@ describe("contextCompactionMark", () => {
     ).toMatchObject({ generation: 2, contextTokens: 18_400 });
   });
 
+  it("carries the exact provider/model that owns the checkpoint context window", () => {
+    expect(contextCompactionMark(record({ providerId: "p", modelId: "m" })))
+      .toMatchObject({ providerId: "p", modelId: "m" });
+  });
+
   it("describes one compaction for its transcript row and the inspector", () => {
     expect(contextCompactionMark(record({ details: { generation: 3 } }))).toEqual({
       id: "checkpoint-1",

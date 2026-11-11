@@ -206,8 +206,75 @@ describe("validateAnswerAction", () => {
     expect(result).toMatchObject({ ok: false });
   });
 
-  it("refuses an action the element does not offer", () => {
-    const result = validateAnswerAction({ kind: "right_click", uid: "0.1#ab" }, inspection());
+  it("refuses an accessibility action the element does not offer", () => {
+    // `select` is a UIA pattern, so an element that does not expose it must
+    // still be refused. Pointer gestures are different — see the next test.
+    const result = validateAnswerAction({ kind: "select", uid: "0.1#ab" }, inspection());
+    expect(result).toMatchObject({ ok: false });
+  });
+
+  it("accepts a stray note inside an action body", () => {
+    // The note belongs to the answer, not to the action. A model that puts it
+    // inside the body has not asked for anything different, and refusing the
+    // whole step for a stray reason field costs a step and buys nothing.
+    const parsed = parseLoopAnswer(
+      '{"kind":"action","action":{"kind":"scroll","uid":"0.1#ab","scroll":{"dx":0,"dy":3},"note":"scroll down"}}',
+    );
+    expect(parsed).toMatchObject({ ok: true });
+    if (parsed.ok) {
+      expect(parsed.answer).toMatchObject({ kind: "action" });
+      if (parsed.answer.kind === "action") {
+        expect(parsed.answer.action.note).toBeUndefined();
+        expect(parsed.answer.action.scroll).toEqual({ dx: 0, dy: 3 });
+      }
+    }
+  });
+
+  it("still refuses an action body with a field that changes the action", () => {
+    // Tolerating `note` does not open the schema: a field that would change
+    // what the action does is still refused.
+    const parsed = parseLoopAnswer(
+      '{"kind":"action","action":{"kind":"click","uid":"0.1#ab","element":"something"}}',
+    );
+    expect(parsed).toMatchObject({ ok: false });
+  });
+
+  it("allows a pointer gesture on any enabled element, offered or not", () => {
+    // UIA reports the programmable patterns a control exposes, never "can be
+    // right-clicked". Refusing the gesture on elements whose pattern list
+    // lacked it made right-click, double-click and hover unusable.
+    for (const kind of ["right_click", "double_click", "hover"] as const) {
+      const result = validateAnswerAction({ kind, uid: "0.1#ab" }, inspection());
+      expect(result).toMatchObject({ ok: true });
+    }
+  });
+
+  it("allows a scroll on an element that does not advertise a scroll pattern", () => {
+    // Scrolling is the wheel over the window: the host dispatches it against
+    // the window and uses the element handle only as a hint about where the
+    // pointer sits. A Chromium conversation pane advertises no
+    // ScrollPattern, so requiring one refused the scroll on the very
+    // element the user was reading.
+    const pane = node({ role: "pane", actions: [] });
+    const result = validateAnswerAction(
+      { kind: "scroll", uid: pane.uid, scroll: { dx: 0, dy: 3 } },
+      inspection([pane]),
+    );
+    expect(result).toMatchObject({ ok: true });
+  });
+
+  it("still refuses a scroll on a disabled element", () => {
+    const disabled = node({ enabled: false });
+    const result = validateAnswerAction(
+      { kind: "scroll", uid: disabled.uid, scroll: { dx: 0, dy: 3 } },
+      inspection([disabled]),
+    );
+    expect(result).toMatchObject({ ok: false });
+  });
+
+  it("still refuses a pointer gesture on a disabled element", () => {
+    const disabled = node({ enabled: false });
+    const result = validateAnswerAction({ kind: "right_click", uid: disabled.uid }, inspection([disabled]));
     expect(result).toMatchObject({ ok: false });
   });
 

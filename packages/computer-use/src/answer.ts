@@ -169,7 +169,13 @@ export function parseLoopAnswer(text: string): AnswerParse {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return reject("action without a body", value);
   const body = raw as Record<string, unknown>;
   const allowed = ["kind", "uid", "point", "to", "text", "keys", "scroll", "option"];
-  if (Object.keys(body).some((key) => !allowed.includes(key))) {
+  // `note` is the one field the body tolerates. It belongs to the answer, not
+  // to the action, and a model that puts it inside the body has not asked for
+  // anything different -- refusing the whole step for a stray reason field
+  // costs a step and buys nothing. The field itself is dropped below, so it
+  // never reaches the host.
+  const tolerated = new Set([...allowed, "note"]);
+  if (Object.keys(body).some((key) => !tolerated.has(key))) {
     return reject("action body with unexpected fields", raw);
   }
   const actionKind = body.kind;
@@ -256,6 +262,27 @@ export type ValidationResult =
   | { ok: false; reason: string };
 
 /**
+ * Actions that are pointer gestures rather than accessibility patterns.
+ *
+ * UIA reports the programmable patterns a control exposes — Invoke, Expand,
+ * SetValue — and never says "this can be right-clicked". Every visible
+ * element can be right-clicked, double-clicked or hovered, so requiring the
+ * element to offer the action refused those gestures on every control whose
+ * pattern list happened not to include them.
+ *
+ * `scroll` belongs here for the same reason. Scrolling is the wheel over the
+ * window: the host dispatches it against the window and uses the element
+ * handle only as a hint about where the pointer sits. A Chromium conversation
+ * pane does not advertise a ScrollPattern, so requiring one refused the
+ * scroll on the very element the user was reading.
+ */
+const POINTER_ONLY_ACTIONS: ReadonlySet<ComputerActionKind> = new Set([
+  "right_click",
+  "double_click",
+  "hover",
+  "scroll",
+]);
+/**
  * Bind an answer to the observation it was produced from.
  *
  * The model may only name elements it was just shown, and may only ask for an
@@ -276,11 +303,16 @@ export function validateAnswerAction(
     if (!node.enabled) return { ok: false, reason: "the element is disabled" };
     if (action.kind === "set_value") {
       if (!node.hasValue) return { ok: false, reason: "the element holds no value" };
-    } else if (
-      action.kind !== "press_keys" &&
+    } else if (action.kind !== "press_keys" && !POINTER_ONLY_ACTIONS.has(action.kind) && (
       !node.actions.includes(action.kind) &&
       !(action.kind === "select" && isSemanticallySelectableRole(node.role))
-    ) {
+    )) {
+      // A pointer gesture is not something an element has to "offer": UIA
+      // reports the programmable patterns a control exposes (Invoke, Expand,
+      // SetValue…), never "can be right-clicked". Any visible element can be
+      // right-clicked, double-clicked or hovered, so requiring an offered
+      // action refused those on every element whose pattern list did not
+      // happen to include them.
       return { ok: false, reason: "the element does not offer that action" };
     }
   }

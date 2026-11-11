@@ -47,6 +47,8 @@ import {
   newerGoalLifecycle,
 } from "../../lib/goal-lifecycle-state";
 import { formatToolValue } from "../../lib/tool-display";
+import { api } from "../../lib/api";
+import { consumeTaskPauseRequest, withPausedTask, withoutPausedTask } from "../../lib/paused-task-recovery";
 import type { AppState } from "../app-state";
 import type { SessionRuntime } from "../runtime/session-runtime";
 import type { StoreAccess } from "./types";
@@ -281,6 +283,37 @@ export function createEventsSlice({
         }
       }
       const event = envelope.event;
+      if (event.type === "agent_start") {
+        const currentSettings = get().settings;
+        if (currentSettings?.pausedTaskSessionIds?.includes(envelope.sessionId)) {
+          const nextSettings = withoutPausedTask(currentSettings, envelope.sessionId);
+          void api.setSettings(nextSettings).then(() => {
+            if (get().settings?.pausedTaskSessionIds?.includes(envelope.sessionId)) {
+              set({ settings: nextSettings });
+            }
+          }).catch(() => undefined);
+        }
+      }
+      const pauseSettledAtBoundary = event.type === "agent_end"
+        ? consumeTaskPauseRequest(envelope.sessionId)
+        : false;
+      if (event.type === "error") {
+        consumeTaskPauseRequest(envelope.sessionId);
+      }
+      if (pauseSettledAtBoundary) {
+        const currentSettings = get().settings;
+        if (currentSettings) {
+          const nextSettings = withPausedTask(currentSettings, envelope.sessionId);
+          void api.setSettings(nextSettings).then(() => {
+            const latest = get().settings;
+            if (latest && !latest.pausedTaskSessionIds?.includes(envelope.sessionId)) {
+              set({ settings: withPausedTask(latest, envelope.sessionId) });
+            }
+          }).catch(() => {
+            get().showToast(i18n.t("chat.pauseGeneratingFailed"), { variant: "error" });
+          });
+        }
+      }
       if (event.type === "agent_end" || event.type === "error") {
         runtime.submittedComposerDrafts.delete(envelope.sessionId);
       }

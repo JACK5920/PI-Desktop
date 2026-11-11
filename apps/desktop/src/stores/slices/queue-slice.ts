@@ -8,6 +8,7 @@ import type {
   QueuedTurnSummary,
 } from "@pi-desktop/shared";
 import { api } from "../../lib/api";
+import { withoutPausedTask } from "../../lib/paused-task-recovery";
 import { isRemoteSession, sessionAllows } from "../../lib/remote-session-safety";
 import {
   enqueueQueuedPrompt,
@@ -479,6 +480,12 @@ export function createQueueSlice({
           const accepted = await get().enqueuePrompt(content, draft, sessionId);
           if (accepted) onAccepted?.(sessionId);
           return accepted;
+        }
+        const pausedSettings = get().settings;
+        if (pausedSettings?.pausedTaskSessionIds?.includes(sessionId)) {
+          const cleared = withoutPausedTask(pausedSettings, sessionId);
+          await api.setSettings(cleared);
+          set({ settings: cleared });
         }
         const startedIn = sessionId;
         const annotationSnapshot: ResponseAnnotation[] = (

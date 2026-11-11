@@ -71,7 +71,7 @@ function harness(read = async () => summary, sidecar = null) {
   });
   const handle = handlers.get(IPC.invoke.sessionCollaboration);
   assert.equal(typeof handle, "function");
-  return { handle, calls, clearHost: () => { host = null; } };
+  return { handle, handlers, calls, clearHost: () => { host = null; } };
 }
 
 function rendererApi(invoke) {
@@ -128,6 +128,28 @@ test("the summary handler rejects missing, non-string and oversized session IDs"
     await assert.rejects(handle(input), { errorCode: ErrorCodes.INVALID_ARGUMENT });
   }
   assert.deepEqual(calls, []);
+});
+
+test("session cost crosses only the whitelisted IPC and Host read path", async () => {
+  const cost = { sessionId: "worker-session-id", turnCount: 2, requestCount: 3, providers: [] };
+  const { handlers, calls } = harness(async (method) => {
+    assert.equal(method, "session.usageCost");
+    return cost;
+  });
+  const handle = handlers.get(IPC.invoke.sessionUsageCost);
+  const { api, bridge } = rendererApi(async (channel, ...args) => {
+    assert.equal(channel, IPC.invoke.sessionUsageCost);
+    return { ok: true, data: await handle(...args) };
+  });
+  assert.equal(IPC_WHITELIST.has(IPC.invoke.sessionUsageCost), true);
+  assert.equal(bridge.channels.invoke.sessionUsageCost, IPC.invoke.sessionUsageCost);
+  assert.deepEqual(await api.getSessionUsageCost("worker-session-id"), cost);
+  assert.deepEqual(calls, [{ method: "session.usageCost", input: { sessionId: "worker-session-id" } }]);
+  await assert.rejects(handle({ sessionId: "   " }), { errorCode: ErrorCodes.INVALID_ARGUMENT });
+  assert.equal(calls.length, 1);
+  const native = await handle({ sessionId: "native-pi:imported" });
+  assert.deepEqual(native, { sessionId: "native-pi:imported", turnCount: 0, requestCount: 0, providers: [] });
+  assert.equal(calls.length, 1, "native transcripts have no Desktop ledger request");
 });
 
 test("the handler normalizes the ID and never forwards unrelated caller fields", async () => {

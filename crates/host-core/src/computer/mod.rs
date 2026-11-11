@@ -140,6 +140,19 @@ pub struct Target {
     pub refused_reason: Option<TargetRefusal>,
 }
 
+/// Schema version of the `computer.*` RPC surface.
+///
+/// The host process and this binary ship together, but they are not the same
+/// build: the host's Electron bundle and the `host-core` sidecar can be at
+/// different versions after an update. A change to the shape of an RPC
+/// payload - a renamed field, a changed enum, a new required argument - is a
+/// breaking change, and the consumer has to be able to notice it.
+///
+/// The version travels with `computer.capabilities`, which every consumer
+/// already reads, so a mismatch is detectable before any action is taken
+/// rather than as a confusing failure halfway through a run.
+pub const COMPUTER_RPC_SCHEMA_VERSION: u32 = 1;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Capabilities {
@@ -287,6 +300,38 @@ impl ActionKind {
         true
     }
 
+    /// Whether the action writes content into the target rather than merely
+    /// navigating to it.
+    ///
+    /// A text field carries `set_value` / `type_text` / `press_keys`; a button
+    /// carries `click`; a scroll area carries `scroll`. Only the first group
+    /// can put text into the window, and it is the group that has to survive a
+    /// node-budget cut -- a composer that was cut away leaves the caller with
+    /// nothing it can type into.
+    pub fn writes_content(self) -> bool {
+        matches!(self, ActionKind::SetValue | ActionKind::TypeText | ActionKind::PressKeys)
+    }
+
+    /// Whether the action can be dispatched at a window element.
+    ///
+    /// The pointer gestures are included because UIA reports the patterns a
+    /// control exposes, never "can be right-clicked"; a caller must still be
+    /// able to point at an element and gesture at it.
+    pub fn is_dispatchable(self) -> bool {
+        matches!(
+            self,
+            ActionKind::Click
+                | ActionKind::DoubleClick
+                | ActionKind::RightClick
+                | ActionKind::Hover
+                | ActionKind::SetValue
+                | ActionKind::TypeText
+                | ActionKind::PressKeys
+                | ActionKind::Select
+                | ActionKind::Scroll
+        )
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             ActionKind::Click => "click",
@@ -430,6 +475,17 @@ pub struct ActResult {
     pub revision: u32,
     pub remaining_budget: u64,
     pub dispatched: Dispatched,
+    /// Whether a content write was confirmed by reading the field back.
+    ///
+    /// A write's result is the content of a field, and the accessibility tree
+    /// never publishes a field's content, so the caller cannot confirm it
+    /// from the tree. The backend can: it reads the field back and compares it
+    /// with what was written. Only the verdict crosses this boundary, never
+    /// the content.
+    ///
+    /// `None` means the backend could not tell -- not a failure.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verified: Option<bool>,
 }
 
 /// Every refusal the capability can produce. The variants map one-to-one onto

@@ -306,6 +306,7 @@ async fn inspect_atspi(
     }
 
     Ok(RawInspection {
+        total_nodes: nodes.len(),
         nodes,
         truncated: truncated || !pending.is_empty(),
         fidelity: Fidelity::Partial,

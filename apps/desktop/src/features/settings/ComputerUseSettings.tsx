@@ -140,7 +140,7 @@ export function ComputerUseSettingsSection({
   };
 
   return (
-    <SettingsCard title={t("settings.computerUseTitle")}>
+    <SettingsCard className="computer-use-settings-page">
       <SettingsRow title={t("settings.computerUseEnabled")}>
         <SettingsToggle
           checked={computerUse.enabled}

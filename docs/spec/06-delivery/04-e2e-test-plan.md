@@ -20456,3 +20456,24 @@ permission-request UI below has isolated fixture automation.
   `apps/desktop/electron/main/computer-use/agent-tool.test.ts`, and the
   Computer Use widget's verification-state rendering.
 - **Status:** Unit and isolated runtime regression coverage.
+
+
+### E2E-SESSION-cost-and-transcript-file-reveal
+
+- **Path:** Inspect a transcript file reference in a local session and choose **Show in folder**; repeat for an unresolved reference and a remote session. Open usage details for a long session whose transcript is paginated, then record reported, estimated and unpriced requests. Refresh after a new request.
+- **Expected:** Reveal targets only the resolved file, missing references do nothing, and remote sessions do not offer local reveal. Cost is read from the full Host ledger, includes stopped/failed requests and groups by provider. Unpriced requests are identified as a lower bound; unknown prices are never guessed; native Pi sessions show no Desktop ledger total.
+- **Coverage:** `chat-file-open-with-menu.test.mjs`, Host session-cost tests, and ContextUsageInspector cost-display tests.
+
+
+### E2E-PI-runtime-1.5-adoption-and-transcript-reliability
+
+- Path: Verify compaction capacity follows the checkpoint/current exact model without rewriting historical request usage; read a bounded tail when checkpoints follow its final message; reconstruct live delegations across system notices; paste a screenshot and assert the native directory probe is skipped while ordinary files still use it. Exercise Pi 1.5 reported cost, served-model metadata, extension exec output boundaries, and terminal Zhipu 1308 classification.
+- Expected: Unknown context capacity is explicitly estimated, the newest trailing checkpoint survives reload, system notices do not clear active delegates, screenshot paste stays responsive, provider-reported cost is not reclassified as estimated, served-model metadata is bounded, extension output never exceeds its combined byte cap and truncated results fail, and plan usage caps are not retried.
+- Coverage: compaction-context-usage.test.mjs, Host transcript window tests, send-now-subagent-rendering.test.mjs, composer-directory-paste.test.mjs, Agent Runtime usage/error/response-model/managed-exec tests, and message-meta-served-model.test.mjs.
+- Status: Automated unit and bounded integration regressions; no live provider is required.
+
+### E2E-COMPOSER-safe-task-pause-resume
+
+- **Path:** Start a local Agent turn with a deterministic provider fixture and a completed tool result; request Pause while it is running, wait for the turn boundary, then Resume. Repeat with immediate Stop, a renderer reload, an app restart with the setting disabled, and an app restart with it enabled. Include a run that is interrupted before its current tool result is recorded.
+- **Expected:** Pause requests a graceful boundary and is not represented as stopped until `agent_end`; Stop remains immediate Abort. Resume adds one continuation user turn and does not replay the old tool call. With auto-resume off, the safe checkpoint remains paused; with it on, startup consumes the marker before submitting exactly one continuation. A mid-action interruption is never automatically replayed. Blue message bubbles and pause/resume controls use theme tokens and remain legible in light and dark themes.
+- **Coverage:** `paused-task-recovery.test.mjs`, `node --test apps/desktop/test/paused-task-recovery.test.mjs`, desktop typecheck, and theme-surface E2E. No live provider or real side-effecting tool is used.
