@@ -84,8 +84,21 @@ pub fn find_binary() -> Option<PathBuf> {
         let local = std::env::var_os("LOCALAPPDATA").map(PathBuf::from);
         let home = std::env::var_os("USERPROFILE").map(PathBuf::from);
         if let Some(local) = local.as_ref() {
-            candidates.push(local.join("Programs").join("Cua").join("cua-driver").join("bin").join(exe));
-            candidates.push(local.join("Programs").join("Cua").join("cua-driver").join(exe));
+            candidates.push(
+                local
+                    .join("Programs")
+                    .join("Cua")
+                    .join("cua-driver")
+                    .join("bin")
+                    .join(exe),
+            );
+            candidates.push(
+                local
+                    .join("Programs")
+                    .join("Cua")
+                    .join("cua-driver")
+                    .join(exe),
+            );
             candidates.push(local.join("Programs").join("cua-driver").join(exe));
         }
         if let Some(home) = home.as_ref() {
@@ -221,7 +234,9 @@ impl McpClient {
                 Ok((got_id, Ok(value))) if got_id == id => return Ok(value),
                 // A response for an older, already-abandoned request. Drop it.
                 Ok((_, _)) => continue,
-                Err(RecvTimeoutError::Timeout) => return Err(McpError::Timeout(method.to_string())),
+                Err(RecvTimeoutError::Timeout) => {
+                    return Err(McpError::Timeout(method.to_string()))
+                }
                 Err(RecvTimeoutError::Disconnected) => {
                     return Err(McpError::Spawn("server closed stdout".into()))
                 }
@@ -321,7 +336,9 @@ impl ToolResult {
                         .and_then(Value::as_str)
                 })
                 .unwrap_or("tool_error");
-            return Err(McpError::Protocol(format!("{tool} refused [{code}]: {text}")));
+            return Err(McpError::Protocol(format!(
+                "{tool} refused [{code}]: {text}"
+            )));
         }
         Ok(Self {
             structured: raw.get("structuredContent").cloned(),
@@ -368,6 +385,15 @@ pub mod tools {
     pub const HOTKEY: &str = "hotkey";
     pub const SCROLL: &str = "scroll";
     pub const DRAG: &str = "drag";
+    /// Restore a window and make it foreground.
+    ///
+    /// The driver refuses every action on a minimized window with
+    /// `window_minimized`: the element resolves to the Win32 iconic sentinel
+    /// coordinates, so the action would be posted off-screen and silently do
+    /// nothing. Its refusal names this tool as the way out, so the bridge has
+    /// to have it -- otherwise a minimized window is a dead end with no advice
+    /// the model can act on.
+    pub const BRING_TO_FRONT: &str = "bring_to_front";
     /// Multi-step script executed inside one driver session. Required wherever
     /// an action needs look-then-act: a fresh `capture_id` and a live element
     /// token only survive within a single connection, so a popup that has to be
@@ -402,6 +428,14 @@ pub struct SnapshotEntry {
     /// the two apart, and it is kept here because reading the tree again
     /// would replace the snapshot and stale the handle the caller holds.
     pub values: HashMap<String, String>,
+    /// The role each row had at the time of the read.
+    ///
+    /// The role is what tells a menu bar item apart from a tree item that
+    /// also expands, and the two need different actions: opening a menu is
+    /// an expand, while a tree item that is merely expanded has not been
+    /// clicked. The role is kept per row because the snapshot is the only
+    /// place the read that produced it is still described.
+    pub roles: HashMap<String, String>,
 }
 
 impl SnapshotCache {
@@ -423,9 +457,9 @@ impl SnapshotCache {
     }
 
     pub fn row_for_uid(&self, pid: i32, window: u64, uid: &str) -> Option<usize> {
-        self.inner
-            .lock()
-            .ok()
-            .and_then(|map| map.get(&(pid, window)).and_then(|e| e.rows.get(uid).copied()))
+        self.inner.lock().ok().and_then(|map| {
+            map.get(&(pid, window))
+                .and_then(|e| e.rows.get(uid).copied())
+        })
     }
 }

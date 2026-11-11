@@ -78,12 +78,80 @@ pub struct CuaDesktop {
     /// same before and after. The value from before the write is what tells
     /// the two apart.
     baseline: Arc<std::sync::Mutex<Option<(i32, u64, usize, String)>>>,
+    /// Whether this connection has enumerated the desktop's windows.
+    ///
+    /// The enumeration is what makes the driver's own chord diagnostics lie,
+    /// so the bridge has to know it happened to read them correctly.
+    /// See `ACCELERATOR_SCAN_TIMEOUT`.
+    enumerated: Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// The driver's error code for "this surface drops posted input; retry with
 /// delivery_mode foreground". Matched on the refusal code the driver embeds in
 /// its message, since that is the only structured part this client keeps.
 const BACKGROUND_UNAVAILABLE: &str = "background_unavailable";
+/// The driver's wording for an accessibility scan that ran out of time.
+///
+/// The driver refuses a chord on a target whose accessibility tree exposes no
+/// accelerator for it, and it reports that two ways. One is settled: "could
+/// not find a UIA AcceleratorKey ... matching ctrl+s". The other is a scan
+/// that ran out of time -- "UIA accelerator scan exceeded 4000ms; a UIA
+/// provider in the target app is likely unresponsive".
+///
+/// Measured on a live target, the second wording is not a timeout at all. It
+/// is what the driver answers once the connection has enumerated the
+/// desktop's windows: a fresh driver process answers the settled wording in
+/// ~50ms, and the same chord after one `list_windows` answers with the
+/// timeout wording in ~4ms. A scan that exceeded 4000ms cannot answer in
+/// 4ms. The contamination is sticky -- no other call clears it -- and it
+/// spares the actions that work: on every target whose chord actually
+/// lands, the chord still lands after an enumeration. What it changes is the
+/// wording of a refusal that was already a refusal, and the wording it
+/// replaces is the one that carries the driver's advice:
+///
+///   "Common cause: the action is nested behind a closed menu ... use an
+///    exposed accelerator or `click` the matching element directly."
+///
+/// The timeout wording carries no such advice, so the bridge restores the
+/// settled wording -- advice included -- rather than passing on a message
+/// that names a cause that did not happen.
+const ACCELERATOR_SCAN_TIMEOUT: &str = "accelerator scan exceeded";
+
+/// The driver's refusal for an action on a minimized window.
+///
+/// The driver resolves the element to the Win32 iconic sentinel coordinates
+/// off the edge of every display, so the action would be posted where no
+/// window is and would silently do nothing. Its refusal names
+/// `bring_to_front` as the way out.
+///
+/// Measured on a live target: with the window minimized, a click on a menu
+/// item is refused with this wording and nothing else happens -- the window
+/// stays minimized and the action never lands. Without a way to restore the
+/// window, a minimized target is a dead end, and the advice the model can act
+/// on is a refusal it cannot fix.
+const WINDOW_MINIMIZED: &str = "window_minimized";
+
+/// The driver's refusal for an expand on an element that cannot be expanded.
+///
+/// Measured on a live target: a tree item refuses with "ExpandCollapsePattern
+/// unavailable", while a menu bar item expands. The wording is what tells the
+/// two apart, and it is the difference between a menu that opens and an
+/// ordinary button that is clicked.
+const EXPAND_UNAVAILABLE: &str = "ExpandCollapsePattern unavailable";
+
+/// The settled wording the driver uses when a target exposes no accelerator
+/// for a chord, and the advice it attaches.
+///
+/// This is the diagnostic the timeout wording stands in for, so restoring it
+/// restores the advice with it. The wording is written to hold on any
+/// target: the scan count is left out because the bridge does not know it,
+/// and the rest of the sentence is the part that guides the caller.
+const SETTLED_ACCELERATOR_REFUSAL: &str =
+    "the target exposes no accelerator for this chord, and its accessibility provider did not \
+     answer in time. Common cause: the action is nested behind a closed menu (e.g. modern \
+     Notepad's Save under the File menu) -- its element isn't in the visible subtree until the \
+     menu is opened. Call `get_window_state` to inspect the available UIA actions, then use an \
+     exposed accelerator or `click` the matching element directly.";
 
 /// Whether a field that now holds `actual` received `expected`.
 ///
@@ -163,6 +231,55 @@ fn escalates_to_foreground(message: &str) -> bool {
     message.contains(BACKGROUND_UNAVAILABLE)
 }
 
+/// Whether a chord refusal is worth another attempt.
+///
+/// The driver's timeout wording is only a timeout when it is one. Measured on
+/// a live target, the same chord on the same window answers with the settled
+/// wording ("could not find a UIA AcceleratorKey") in a fresh driver process
+/// and with the timeout wording ("accelerator scan exceeded 4000ms") after the
+/// connection has enumerated the desktop's windows -- in ~4ms, which no
+/// 4000ms scan can do. The enumeration is what turns the diagnostic into a
+/// lie, and the lie is sticky: no later call clears it.
+///
+/// So a timeout wording only leaves the question open on a connection that
+/// has not enumerated yet. After an enumeration it is a settled refusal
+/// wearing the wrong words, and retrying it cannot succeed -- it would spend
+/// the action's budget to arrive at the same refusal.
+fn chord_retry_is_worth_it(message: &str, enumerated: bool) -> bool {
+    if !message.contains(ACCELERATOR_SCAN_TIMEOUT) {
+        return false;
+    }
+    !enumerated
+}
+
+/// The refusal to report for a chord the driver refused with the timeout
+/// wording on a connection that has already enumerated.
+///
+/// The timeout wording names a cause that did not happen and carries no
+/// advice. The settled wording it stands in for names the real cause and
+/// says what to do about it, so that is what the caller is told. The advice
+/// is the part that matters: on a modern Notepad the chord is refused
+/// because the action sits behind a closed menu, and the way through is to
+/// open the menu and click the item.
+fn chord_refusal_message(message: &str, enumerated: bool) -> String {
+    if chord_retry_is_worth_it(message, enumerated) {
+        return message.to_string();
+    }
+    if !message.contains(ACCELERATOR_SCAN_TIMEOUT) {
+        return message.to_string();
+    }
+    format!(
+        "{message} The settled answer for this target is that it exposes no accelerator for \
+              the chord. {SETTLED_ACCELERATOR_REFUSAL}"
+    )
+}
+
+/// Whether a refusal is the driver's answer to an action on a minimized
+/// window.
+fn window_is_minimized(message: &str) -> bool {
+    message.contains(WINDOW_MINIMIZED)
+}
+
 /// Translate one chord token into the driver's Windows vocabulary.
 ///
 /// The model writes chords in the macOS idiom — the prompt's own example is
@@ -213,6 +330,7 @@ impl CuaDesktop {
             client: McpClient::spawn()?,
             snapshots: Arc::new(SnapshotCache::new()),
             baseline: Arc::new(std::sync::Mutex::new(None)),
+            enumerated: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         })
     }
 
@@ -223,6 +341,7 @@ impl CuaDesktop {
             client,
             snapshots: Arc::new(SnapshotCache::new()),
             baseline: Arc::new(std::sync::Mutex::new(None)),
+            enumerated: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 
@@ -235,6 +354,12 @@ impl CuaDesktop {
             .client
             .call_tool(tools::LIST_WINDOWS, json!({}))
             .map_err(map_err)?;
+        // Enumerating the desktop is what puts the driver into the state where
+        // its chord diagnostics turn into the timeout wording. The bridge has
+        // to remember that it did this, because that is the only way to tell
+        // the two wordings apart afterwards.
+        self.enumerated
+            .store(true, std::sync::atomic::Ordering::SeqCst);
         // The driver returns both `windows` and the legacy alias
         // `_legacy_windows`; the structured array is authoritative.
         let windows = result
@@ -290,18 +415,12 @@ impl CuaDesktop {
             ));
         }
 
-        let complete = result
-            .field("elements_complete")
-            .as_bool()
-            .unwrap_or(false);
-        let element_count = result
-            .field("element_count")
-            .as_u64()
-            .unwrap_or(0) as usize;
+        let complete = result.field("elements_complete").as_bool().unwrap_or(false);
+        let element_count = result.field("element_count").as_u64().unwrap_or(0) as usize;
 
         let elements = result.field("elements");
         let walked = elements.as_array().map(|list| list.len()).unwrap_or(0);
-        let (nodes, rows) = parse_elements_tree(&elements, &snapshot_id);
+        let (nodes, rows, roles) = parse_elements_tree(&elements, &snapshot_id);
         let values = element_values(&elements, &snapshot_id);
         let entry = SnapshotEntry {
             snapshot_id: snapshot_id.clone(),
@@ -310,6 +429,7 @@ impl CuaDesktop {
             truncated: !complete,
             element_count,
             values,
+            roles,
         };
 
         // The structured tree is bounded by the node budget instead of by a
@@ -324,12 +444,15 @@ impl CuaDesktop {
                 // cua-driver reports `elements_complete`, so a complete walk is
                 // full fidelity for this driver — but the model still only sees
                 // what markdown rendered, hence `Partial` when anything was cut.
-                fidelity: if truncated { Fidelity::Partial } else { Fidelity::Full },
+                fidelity: if truncated {
+                    Fidelity::Partial
+                } else {
+                    Fidelity::Full
+                },
             },
             entry,
         ))
     }
-
 
     /// Whether the combo box reads back as showing `option`.
     ///
@@ -375,7 +498,6 @@ impl CuaDesktop {
         Ok(ComboReading::Unreadable)
     }
 
-
     /// Click the option row whose label matches, when the driver already lists
     /// it as a child of the combo box.
     ///
@@ -388,11 +510,7 @@ impl CuaDesktop {
     /// routes `click` through UIA's SelectionItem.Select and it works, while its
     /// own `select` tool answers `permission_denied` on the same row. Measured
     /// on a WPF combo box, both statements reproduced.
-    fn click_option_row(
-        &self,
-        target: &TargetRef,
-        option: &str,
-    ) -> Result<bool, DesktopError> {
+    fn click_option_row(&self, target: &TargetRef, option: &str) -> Result<bool, DesktopError> {
         let result = self
             .client
             .call_tool(
@@ -410,7 +528,11 @@ impl CuaDesktop {
             .as_str()
             .unwrap_or_default()
             .to_string();
-        let capture = result.field("snapshot_id").as_str().unwrap_or_default().to_string();
+        let capture = result
+            .field("snapshot_id")
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
         let quoted = format!("ListItem \"{option}\"");
         let Some(line) = markdown.lines().find(|line| line.contains(&quoted)) else {
             return Ok(false);
@@ -443,10 +565,30 @@ impl CuaDesktop {
     ///
     /// This is the one place the bridge overrides the driver's own default, and
     /// the driver asked for it in its error. Every other failure propagates.
+    ///
+    /// A scan that ran out of time is the one failure worth another attempt.
+    /// The driver refuses a chord on a target whose accessibility tree exposes
+    /// no accelerator for it, and it reports that either as a settled answer
+    /// ("could not find a UIA AcceleratorKey") or as a scan that timed out
+    /// ("accelerator scan exceeded 4000ms; a UIA provider in the target app is
+    /// likely unresponsive"). The first is final. The second, on a connection
+    /// that has not enumerated yet, names a cause that can pass, so the chord
+    /// gets one more try.
+    ///
+    /// One retry, not more. A target that genuinely exposes no accelerator
+    /// answers with the settled wording every time, so repeating past that
+    /// would only spend the action's time.
+    ///
+    /// After the connection has enumerated the desktop's windows the timeout
+    /// wording stops being a timeout: it is the settled refusal wearing the
+    /// wrong words, and the words it replaces are the ones carrying the
+    /// driver's advice. So the bridge restores that advice rather than
+    /// retrying a refusal that cannot change.
     fn press_with_escalation(
         &self,
         tool: &str,
         mut args: Value,
+        target: &TargetRef,
     ) -> Result<(), DesktopError> {
         match self.client.call_tool(tool, args.clone()) {
             Ok(_) => Ok(()),
@@ -455,10 +597,219 @@ impl CuaDesktop {
                 self.client.call_tool(tool, args).map_err(map_err)?;
                 Ok(())
             }
+            Err(McpError::Protocol(message)) if window_is_minimized(&message) => {
+                // The action was addressed to a window that was not on screen,
+                // so the action itself was never wrong. Restore the window and
+                // try it again unchanged.
+                tracing::info!(
+                    target: "computer",
+                    tool,
+                    "the target window is minimized; restoring it and trying again"
+                );
+                self.restore_window(target)?;
+                self.client.call_tool(tool, args).map_err(map_err)?;
+                Ok(())
+            }
+            Err(McpError::Protocol(message))
+                if tool == tools::HOTKEY
+                    && chord_retry_is_worth_it(&message, self.has_enumerated()) =>
+            {
+                tracing::info!(
+                    target: "computer",
+                    tool,
+                    "the accessibility scan timed out; retrying the chord once",
+                );
+                self.client.call_tool(tool, args).map_err(map_err)?;
+                Ok(())
+            }
+            Err(McpError::Protocol(message)) => {
+                // The chord advice only belongs to a chord: a refused write
+                // says nothing about accelerators.
+                let message = if tool == tools::HOTKEY {
+                    chord_refusal_message(&message, self.has_enumerated())
+                } else {
+                    message
+                };
+                Err(DesktopError::Failed(message))
+            }
             Err(error) => Err(map_err(error)),
         }
     }
 
+    /// Whether this connection has enumerated the desktop's windows.
+    fn has_enumerated(&self) -> bool {
+        self.enumerated.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Whether a click on this element should open a menu on the way.
+    ///
+    /// Only a menu item does. A tree item can expand too, and a combo box
+    /// can, and both of them expand for a different reason: a tree item that
+    /// is expanded has not been clicked, and the caller asked for a click.
+    /// Expanding one of those instead of clicking it would report success
+    /// for an action that did not happen.
+    ///
+    /// Measured on a live Notepad: the menu bar item is a `menu-item` with
+    /// `actions=["invoke","expand"]`, and expanding it puts the commands
+    /// under it into the tree. The commands themselves are `menu-item`s too,
+    /// so the role alone does not say which of the two a click is aimed at --
+    /// but a command that is already visible does not need opening, and the
+    /// expand of a visible command is refused by the driver, so the role
+    /// check is enough to keep the plain click for it.
+    fn opens_a_menu(&self, target: &TargetRef, uid: Option<&str>) -> bool {
+        let Some(uid) = uid else { return false };
+        let Some(entry) = self.snapshots.get(target.pid, target.window) else {
+            return false;
+        };
+        matches!(
+            entry.roles.get(uid).map(String::as_str),
+            Some("menu-item") | Some("menu-bar")
+        )
+    }
+
+    /// Click an element, opening a menu on the way if it is one.
+    ///
+    /// A menu bar item holds no command of its own: the commands live in the
+    /// menu that opens under it, and they are not in the tree until it is
+    /// open. Measured on a live Notepad: before, the tree holds "File" and
+    /// no "Save"; after the item is expanded, the tree holds "Save", "Save
+    /// As", "Save All" and the rest, and 29 elements become 56.
+    ///
+    /// So a click on a menu bar item is not the end of the road. The driver
+    /// refuses the expand on an element that cannot be expanded
+    /// ("ExpandCollapsePattern unavailable"), so the expand is attempted and
+    /// the plain click is the fallback -- the fallback is what an ordinary
+    /// button gets, and it is what a menu bar item gets on a target whose
+    /// menu does not open that way.
+    ///
+    /// The expand is not a substitute for the click: a menu bar item that is
+    /// expanded is still a menu bar item, and the command under it is a
+    /// separate element that the caller clicks next.
+    fn click_opening_a_menu(
+        &self,
+        target: &TargetRef,
+        tool: &str,
+        args: &Value,
+    ) -> Result<(), DesktopError> {
+        self.click_opening_a_menu_once(target, tool, args, true)
+    }
+
+    /// The click itself, with the number of times the window may be restored
+    /// still left.
+    ///
+    /// The restore is bounded because the window can refuse to come back: a
+    /// window that stays minimized would otherwise turn one click into an
+    /// endless loop of restores.
+    fn click_opening_a_menu_once(
+        &self,
+        target: &TargetRef,
+        tool: &str,
+        args: &Value,
+        may_restore: bool,
+    ) -> Result<(), DesktopError> {
+        let mut expand_args = args.clone();
+        expand_args["action"] = json!("expand");
+        match self.client.call_tool(tool, expand_args.clone()) {
+            Ok(_) => {
+                tracing::info!(
+                    target: "computer",
+                    tool,
+                    "expanded a menu bar item so the items under it become reachable"
+                );
+                // The item is open now, so the menu is on screen. The click
+                // that opened it is what the driver would have done anyway.
+                Ok(())
+            }
+            Err(error) => {
+                if Self::expand_failed(&error) {
+                    // The element cannot be expanded, so it is not a menu.
+                    // The click itself is still worth making.
+                    return self.call_with_window_restore(tool, args.clone(), target);
+                }
+                if may_restore && Self::refusal_is_minimized(&error) {
+                    // The expand was refused because the window is off
+                    // screen, not because the element is the wrong one. So the
+                    // window is restored and the whole thing is tried again:
+                    // the element may well be a menu bar item after all.
+                    tracing::info!(
+                        target: "computer",
+                        tool,
+                        "the target window is minimized; restoring it and trying again"
+                    );
+                    self.restore_window(target)?;
+                    return self.click_opening_a_menu_once(target, tool, args, false);
+                }
+                Err(map_err(error))
+            }
+        }
+    }
+
+    /// Whether a refusal is the driver's answer to an action on a minimized
+    /// window.
+    fn refusal_is_minimized(error: &McpError) -> bool {
+        match error {
+            McpError::Protocol(message) => window_is_minimized(message),
+            McpError::Rpc { message, .. } => window_is_minimized(message),
+            _ => false,
+        }
+    }
+
+    /// Whether a refusal is the driver's answer to an expand on an element
+    /// that cannot be expanded.
+    fn expand_failed(error: &McpError) -> bool {
+        match error {
+            McpError::Protocol(message) => message.contains(EXPAND_UNAVAILABLE),
+            McpError::Rpc { message, .. } => message.contains(EXPAND_UNAVAILABLE),
+            _ => false,
+        }
+    }
+
+    /// Restore a window that the driver refuses to act on because it is
+    /// minimized.
+    ///
+    /// The driver's refusal names `bring_to_front` as the way out, and the
+    /// bridge has to be the one that takes it: the model cannot call a driver
+    /// tool, and the refusal it sees is not something it can resolve on its
+    /// own. Measured on a live target, `bring_to_front` reports the window as
+    /// foreground and the very next action lands.
+    fn restore_window(&self, target: &TargetRef) -> Result<(), DesktopError> {
+        self.client
+            .call_tool(
+                tools::BRING_TO_FRONT,
+                json!({ "pid": target.pid, "window_id": target.window }),
+            )
+            .map_err(map_err)?;
+        Ok(())
+    }
+
+    /// Call a driver tool, and if the driver refuses because the target
+    /// window is minimized, restore the window and try the same action once
+    /// more.
+    ///
+    /// The retry carries the action unchanged, because the action was never
+    /// wrong: it was addressed to a window that was not on screen. The
+    /// driver's own refusal says so.
+    fn call_with_window_restore(
+        &self,
+        tool: &str,
+        args: Value,
+        target: &TargetRef,
+    ) -> Result<(), DesktopError> {
+        match self.client.call_tool(tool, args.clone()) {
+            Ok(_) => Ok(()),
+            Err(McpError::Protocol(message)) if window_is_minimized(&message) => {
+                tracing::info!(
+                    target: "computer",
+                    tool,
+                    "the target window is minimized; restoring it and trying again"
+                );
+                self.restore_window(target)?;
+                self.client.call_tool(tool, args).map_err(map_err)?;
+                Ok(())
+            }
+            Err(error) => Err(map_err(error)),
+        }
+    }
     /// Open a combo box and click the option row, entirely inside one driver
     /// session.
     ///
@@ -480,7 +831,10 @@ impl CuaDesktop {
             .map_err(|e| DesktopError::Failed(format!("token did not encode: {e}")))?;
         let script = popup_script(target.pid, target.window, &token_literal, &option_literal);
         self.client
-            .call_tool(tools::RUN_SCRIPT, json!({ "script": script, "timeout_ms": 60_000 }))
+            .call_tool(
+                tools::RUN_SCRIPT,
+                json!({ "script": script, "timeout_ms": 60_000 }),
+            )
             .map_err(map_err)?;
         Ok(())
     }
@@ -505,7 +859,11 @@ impl CuaDesktop {
     /// the write, and a suffix check would report a dropped write as a landed
     /// one. The value from before the write is what tells them apart.
     fn take_baseline(&self, target: &TargetRef, token: &str) {
-        let Some(row) = token.rsplit(':').next().and_then(|row| row.parse::<usize>().ok()) else {
+        let Some(row) = token
+            .rsplit(':')
+            .next()
+            .and_then(|row| row.parse::<usize>().ok())
+        else {
             return;
         };
         // The value comes from the snapshot the caller already holds. Reading
@@ -543,7 +901,10 @@ impl CuaDesktop {
                 .map(|index| index as usize == row)
                 .unwrap_or(false)
         })?;
-        element.get("value").and_then(Value::as_str).map(str::to_string)
+        element
+            .get("value")
+            .and_then(Value::as_str)
+            .map(str::to_string)
     }
 
     /// One read-back of the written row, or `None` while the tree has not
@@ -597,9 +958,7 @@ impl CuaDesktop {
         };
         Some(write_confirmed(value, expected, baseline))
     }
-
 }
-
 
 fn clamp_walk_elements(max_nodes: usize) -> u64 {
     // The driver caps at 5000; below that, honour the caller. The walk is
@@ -727,11 +1086,16 @@ fn element_values(
 fn parse_elements_tree(
     elements: &Value,
     snapshot_id: &str,
-) -> (Vec<Node>, std::collections::HashMap<String, usize>) {
+) -> (
+    Vec<Node>,
+    std::collections::HashMap<String, usize>,
+    std::collections::HashMap<String, String>,
+) {
     let mut nodes: Vec<Node> = Vec::new();
     let mut rows: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut roles: std::collections::HashMap<String, String> = std::collections::HashMap::new();
     let Some(items) = elements.as_array() else {
-        return (nodes, rows);
+        return (nodes, rows, roles);
     };
 
     // The driver numbers its rows, and `element_index` is that number. The
@@ -859,10 +1223,11 @@ fn parse_elements_tree(
             actions,
         });
         rows.insert(nodes[index].uid.clone(), row);
+        roles.insert(nodes[index].uid.clone(), nodes[index].role.clone());
         by_row.insert(row, index);
     }
 
-    (nodes, rows)
+    (nodes, rows, roles)
 }
 
 /// Parse the driver's markdown tree into `Node`s.
@@ -877,7 +1242,10 @@ fn parse_elements_tree(
 /// Only lines carrying `[N]` become nodes; they are the ones with a token.
 /// Untagged lines are container or static text rows and only contribute depth,
 /// so the parent chain still points at the nearest node above them.
-fn parse_markdown_tree(markdown: &str, snapshot_id: &str) -> (Vec<Node>, std::collections::HashMap<String, usize>) {
+fn parse_markdown_tree(
+    markdown: &str,
+    snapshot_id: &str,
+) -> (Vec<Node>, std::collections::HashMap<String, usize>) {
     let mut nodes: Vec<Node> = Vec::new();
     let mut rows: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     // (indent depth, index into `nodes`) for the node stack, so `parent` can be
@@ -925,8 +1293,7 @@ fn parse_markdown_tree(markdown: &str, snapshot_id: &str) -> (Vec<Node>, std::co
         // field with no `value=` at all but still lists `set_value` in its
         // actions, so keying on the literal would make an empty field look
         // unwritable — which is exactly the state every field starts in.
-        let has_value = after_label.contains("[value=")
-            || actions.contains(&ActionKind::SetValue);
+        let has_value = after_label.contains("[value=") || actions.contains(&ActionKind::SetValue);
         let uid = format!("{snapshot_id}:{row}");
 
         while let Some((depth, _)) = stack.last() {
@@ -1064,7 +1431,11 @@ fn take_quoted(input: &str) -> (Option<String>, &str) {
                 let inner = &input[1..offset];
                 let label = unescape_markdown_label(inner);
                 let rest = input.get(offset + 1..).unwrap_or("").trim_start();
-                let label = if label.trim().is_empty() { None } else { Some(label) };
+                let label = if label.trim().is_empty() {
+                    None
+                } else {
+                    Some(label)
+                };
                 return (label, rest);
             }
             _ => {}
@@ -1165,9 +1536,7 @@ fn parse_actions(input: &str) -> Vec<ActionKind> {
     out
 }
 
-
 impl Desktop for CuaDesktop {
-
     fn capabilities(&self) -> Capabilities {
         Capabilities {
             platform: "win32".into(),
@@ -1189,12 +1558,7 @@ impl Desktop for CuaDesktop {
     /// The driver reports each row's current `value` in its structured tree,
     /// so a write can be checked without exposing the value to the model:
     /// only the verdict leaves this function.
-    fn confirm_write(
-        &self,
-        target: &TargetRef,
-        uid: Option<&str>,
-        expected: &str,
-    ) -> Option<bool> {
+    fn confirm_write(&self, target: &TargetRef, uid: Option<&str>, expected: &str) -> Option<bool> {
         let uid = uid?;
         // The uid is `<snapshot>:<row>`; the row is what identifies the
         // element in the next read.
@@ -1205,23 +1569,18 @@ impl Desktop for CuaDesktop {
         // field still held the old text on the first read after the write.
         // So the read is retried for a short while before the write is
         // called unconfirmed.
-        let baseline = self
-            .baseline
-            .lock()
-            .ok()
-            .and_then(|slot| {
-                slot.clone()
-                    .filter(|(pid, window, baseline_row, _)| {
-                        *pid == target.pid && *window == target.window && *baseline_row == row
-                    })
-                    .map(|(_, _, _, value)| value)
-            });
+        let baseline = self.baseline.lock().ok().and_then(|slot| {
+            slot.clone()
+                .filter(|(pid, window, baseline_row, _)| {
+                    *pid == target.pid && *window == target.window && *baseline_row == row
+                })
+                .map(|(_, _, _, value)| value)
+        });
         for attempt in 0..WRITE_CONFIRM_ATTEMPTS {
             if attempt > 0 {
                 std::thread::sleep(WRITE_CONFIRM_INTERVAL);
             }
-            if let Some(verdict) =
-                self.read_back_write(target, row, expected, baseline.as_deref())
+            if let Some(verdict) = self.read_back_write(target, row, expected, baseline.as_deref())
             {
                 return Some(verdict);
             }
@@ -1237,7 +1596,9 @@ impl Desktop for CuaDesktop {
         // Re-enumerate rather than trust the id: the driver mints ids from live
         // enumeration on every call, so the only honest answer is a fresh look.
         let targets = self.list_windows_raw()?;
-        Ok(targets.into_iter().find(|t| t.target.target_id == target_id))
+        Ok(targets
+            .into_iter()
+            .find(|t| t.target.target_id == target_id))
     }
 
     fn measure(&self, target: &TargetRef) -> Result<Measured, DesktopError> {
@@ -1267,8 +1628,6 @@ impl Desktop for CuaDesktop {
         super::self_pid_chain(4)
     }
 
-
-
     fn secure_input_active(&self) -> bool {
         // cua-driver exposes no "a password field has focus right now" probe.
         // The contract says a backend that cannot tell must answer `true`, and
@@ -1294,16 +1653,31 @@ impl Desktop for CuaDesktop {
                     ActionKind::RightClick => tools::RIGHT_CLICK,
                     _ => tools::CLICK,
                 };
-                self.client
-                    .call_tool(
-                        tool,
-                        json!({
-                            "pid": target.pid,
-                            "window_id": target.window,
-                            "element_token": token
-                        }),
-                    )
-                    .map_err(map_err)?;
+                let args = json!({
+                    "pid": target.pid,
+                    "window_id": target.window,
+                    "element_token": token
+                });
+                if kind == ActionKind::Click && self.opens_a_menu(target, uid) {
+                    // A menu bar item is not the end of the road: the items
+                    // under it only exist once it is open. Measured on a live
+                    // Notepad: the tree holds "File" and nothing under it,
+                    // and after the item is expanded the tree holds "Save",
+                    // "Save As" and the rest -- 29 elements become 56.
+                    //
+                    // So the menu is opened on the way past, which is what
+                    // makes the item the caller asked for reachable at all.
+                    // The driver refuses the expand on an element that cannot
+                    // be expanded ("ExpandCollapsePattern unavailable"), so
+                    // the plain click is the fallback rather than a guess.
+                    self.click_opening_a_menu(target, tool, &args)?;
+                } else {
+                    // Everything else is clicked. A tree item and a combo box
+                    // can expand as well, and expanding one of those instead
+                    // of clicking it would report success for an action that
+                    // did not happen.
+                    self.call_with_window_restore(tool, args, target)?;
+                }
                 Ok(Dispatched::AccessibilityAction)
             }
             ActionKind::SetValue => {
@@ -1312,17 +1686,16 @@ impl Desktop for CuaDesktop {
                 // The value the field holds now is the baseline the write is
                 // measured against.
                 self.take_baseline(target, &token);
-                self.client
-                    .call_tool(
-                        tools::SET_VALUE,
-                        json!({
-                            "pid": target.pid,
-                            "window_id": target.window,
-                            "element_token": token,
-                            "value": value
-                        }),
-                    )
-                    .map_err(map_err)?;
+                self.call_with_window_restore(
+                    tools::SET_VALUE,
+                    json!({
+                        "pid": target.pid,
+                        "window_id": target.window,
+                        "element_token": token,
+                        "value": value
+                    }),
+                    target,
+                )?;
                 Ok(Dispatched::AccessibilityAction)
             }
             ActionKind::Select => {
@@ -1352,9 +1725,7 @@ impl Desktop for CuaDesktop {
                     )
                     .is_ok();
 
-                if wrote
-                    && self.combo_reads_back(target, &token, option)
-                        == Ok(ComboReading::Shows)
+                if wrote && self.combo_reads_back(target, &token, option) == Ok(ComboReading::Shows)
                 {
                     return Ok(Dispatched::AccessibilityAction);
                 }
@@ -1401,13 +1772,18 @@ impl Desktop for CuaDesktop {
                     "text": text
                 });
                 if let Some(token) = uid {
-                    if self.snapshots.get(target.pid, target.window).is_some_and(|e| e.rows.contains_key(token)) {
+                    if self
+                        .snapshots
+                        .get(target.pid, target.window)
+                        .is_some_and(|e| e.rows.contains_key(token))
+                    {
                         args["element_token"] = json!(token);
                     }
                 }
-                self.client
-                    .call_tool(tools::TYPE_TEXT, args)
-                    .map_err(map_err)?;
+                // The foreground escalation matters here: a Chromium composer
+                // drops posted keystrokes and answers with a structured
+                // refusal that names the escalation.
+                self.press_with_escalation(tools::TYPE_TEXT, args, target)?;
                 Ok(Dispatched::SystemInput)
             }
             ActionKind::PressKeys => {
@@ -1417,7 +1793,11 @@ impl Desktop for CuaDesktop {
                     "window_id": target.window
                 });
                 if let Some(token) = uid {
-                    if self.snapshots.get(target.pid, target.window).is_some_and(|e| e.rows.contains_key(token)) {
+                    if self
+                        .snapshots
+                        .get(target.pid, target.window)
+                        .is_some_and(|e| e.rows.contains_key(token))
+                    {
                         args["element_token"] = json!(token);
                     }
                 }
@@ -1441,11 +1821,11 @@ impl Desktop for CuaDesktop {
                         // A chord is one `hotkey`: modifiers first, one key last.
                         let mut hot_args = args.clone();
                         hot_args["keys"] = json!(parts);
-                        self.press_with_escalation(tools::HOTKEY, hot_args)
+                        self.press_with_escalation(tools::HOTKEY, hot_args, target)
                     } else {
                         let mut key_args = args.clone();
                         key_args["key"] = json!(parts[0]);
-                        self.press_with_escalation(tools::PRESS_KEY, key_args)
+                        self.press_with_escalation(tools::PRESS_KEY, key_args, target)
                     };
                     dispatched?;
                 }
@@ -1477,7 +1857,11 @@ impl Desktop for CuaDesktop {
                     "amount": amount
                 });
                 if let Some(token) = uid {
-                    if self.snapshots.get(target.pid, target.window).is_some_and(|e| e.rows.contains_key(token)) {
+                    if self
+                        .snapshots
+                        .get(target.pid, target.window)
+                        .is_some_and(|e| e.rows.contains_key(token))
+                    {
                         args["element_token"] = json!(token);
                     }
                 }
@@ -1507,7 +1891,6 @@ impl Desktop for CuaDesktop {
         }
     }
 }
-
 
 /// The look-then-act program `select_via_popup` runs inside the driver.
 ///
@@ -1584,9 +1967,6 @@ return {{ selected: want }};
     )
 }
 
-
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1626,7 +2006,10 @@ mod tests {
 
         let first_uids: Vec<&str> = first.iter().map(|n| n.uid.as_str()).collect();
         let second_uids: Vec<&str> = second.iter().map(|n| n.uid.as_str()).collect();
-        assert_ne!(first_uids, second_uids, "uid must still change per snapshot");
+        assert_ne!(
+            first_uids, second_uids,
+            "uid must still change per snapshot"
+        );
     }
 
     #[test]
@@ -1667,7 +2050,10 @@ mod tests {
     fn parses_roles_labels_and_actions() {
         let (nodes, rows) = parse_markdown_tree(SAMPLE, "s1");
         assert_eq!(rows.len(), 4);
-        let button = nodes.iter().find(|n| n.label.as_deref() == Some("WPF-BUTTON")).unwrap();
+        let button = nodes
+            .iter()
+            .find(|n| n.label.as_deref() == Some("WPF-BUTTON"))
+            .unwrap();
         // The driver's `Button` is stored under this crate's spelling. The
         // parser canonicalises every role, so the tree a caller reads back is
         // already in the vocabulary policy and the answer validator branch on.
@@ -1688,7 +2074,8 @@ mod tests {
         // accepts only `combo-box` / `list` / `list-item`. A raw `ComboBox`
         // reaching the validator is refused before the backend is called, so
         // this mapping is load-bearing rather than cosmetic.
-        let line = "- [11] ComboBox \"Select:\" [value=\"--choose--\" actions=[expand,set_value]]\n\
+        let line =
+            "- [11] ComboBox \"Select:\" [value=\"--choose--\" actions=[expand,set_value]]\n\
                     - [13] ListItem \"Electron-1\" [actions=[invoke,select]]\n\
                     - [14] TreeItem \"root\" [actions=[expand]]\n\
                     - [15] Widget \"unknown role\" [actions=[invoke]]\n";
@@ -1779,7 +2166,11 @@ mod tests {
             .map(normalise_key)
             .collect();
         assert_eq!(parts, vec!["ctrl", "a"]);
-        assert_eq!(parts.len(), 2, "a chord must be a full hotkey argument list");
+        assert_eq!(
+            parts.len(),
+            2,
+            "a chord must be a full hotkey argument list"
+        );
         // A bare key is one press_key, not a one-element hotkey (the driver
         // requires minItems 2 for hotkey).
         let single: Vec<&str> = "tab".split('+').map(normalise_key).collect();
@@ -1824,7 +2215,10 @@ mod tests {
         // still owns the depth slot, which keeps parent indices pointing at real
         // nodes rather than at offsets into a filtered list.
         let button_index = nodes.iter().position(|n| n.uid == "s1:5").unwrap();
-        assert!(nodes[button_index].parent.is_none() || nodes[button_index].parent.unwrap() < button_index);
+        assert!(
+            nodes[button_index].parent.is_none()
+                || nodes[button_index].parent.unwrap() < button_index
+        );
     }
 
     #[test]
@@ -1837,7 +2231,8 @@ mod tests {
 
     #[test]
     fn rows_without_a_prefix_are_ignored() {
-        let (nodes, rows) = parse_markdown_tree("- Window \"No rows here\"\n- Text \"plain\"\n", "s");
+        let (nodes, rows) =
+            parse_markdown_tree("- Window \"No rows here\"\n- Text \"plain\"\n", "s");
         assert!(nodes.is_empty());
         assert!(rows.is_empty());
     }
@@ -1848,7 +2243,8 @@ mod tests {
         // `set_value`. If `has_value` keyed on the literal alone, every text
         // field would look unwritable before the first character was typed —
         // and `set_value` would be refused by the answer validator.
-        let line = "- [9] Edit \"Text input:\" [id=txt help=\"type here\" actions=[set_value,text]]";
+        let line =
+            "- [9] Edit \"Text input:\" [id=txt help=\"type here\" actions=[set_value,text]]";
         let (nodes, _) = parse_markdown_tree(line, "s");
         assert_eq!(nodes.len(), 1);
         assert!(
@@ -1937,7 +2333,7 @@ mod tests {
                 "value": "和 Codex 一起工作\n"
             }
         ]);
-        let (nodes, rows) = parse_elements_tree(&elements, "s00000001");
+        let (nodes, rows, _roles) = parse_elements_tree(&elements, "s00000001");
         assert_eq!(nodes.len(), 2, "a multi-line value must not drop its row");
         assert_eq!(rows.len(), 2);
         let edit = nodes
@@ -1974,7 +2370,7 @@ mod tests {
                 "value": "和 Codex 一起工作\n"
             }
         ]);
-        let (nodes, _) = parse_elements_tree(&elements, "s1");
+        let (nodes, _, _roles) = parse_elements_tree(&elements, "s1");
         let text = nodes
             .iter()
             .find(|node| node.role == "text")
@@ -2008,7 +2404,7 @@ mod tests {
                 "value": "和 Codex 一起工作\n"
             }
         ]);
-        let (nodes, _) = parse_elements_tree(&elements, "s1");
+        let (nodes, _, _roles) = parse_elements_tree(&elements, "s1");
         assert!(nodes[0].actions.contains(&ActionKind::SetValue));
         assert!(nodes[0].actions.contains(&ActionKind::TypeText));
     }
@@ -2037,7 +2433,7 @@ mod tests {
                 "value": "和 Codex 一起工作\n"
             }
         ]);
-        let (nodes, _) = parse_elements_tree(&elements, "s1");
+        let (nodes, _, _roles) = parse_elements_tree(&elements, "s1");
         assert_eq!(nodes.len(), 3);
         assert_eq!(nodes[0].parent, None);
         assert_eq!(nodes[1].parent, Some(0));
@@ -2048,7 +2444,6 @@ mod tests {
         );
     }
 
-    #[test]
     #[test]
     fn a_written_field_is_confirmed_by_its_read_back() {
         // The tree the caller reads never publishes a field's content, so a
@@ -2098,12 +2493,16 @@ mod tests {
         // write that landed: the field already ended with the text, so it
         // looks the same before and after. The value from before the write is
         // what tells them apart.
-        assert!(!write_confirmed("prefix second", "second", Some("prefix second")));
+        assert!(!write_confirmed(
+            "prefix second",
+            "second",
+            Some("prefix second")
+        ));
         // The same field, and the text really was typed this time.
         assert!(write_confirmed("prefix second", "second", Some("prefix")));
     }
 
-
+    #[test]
     fn only_the_drivers_own_escalation_refusal_reaches_the_foreground_retry() {
         // Measured on a live Chromium composer: `type_text` on the window
         // answers with a structured `background_unavailable` refusal that
@@ -2121,7 +2520,97 @@ mod tests {
             "set_value refused [tool_invocation_failed]: element [381] does not implement \
              ValuePattern or RangeValuePattern"
         ));
-        assert!(!escalates_to_foreground("cua-driver timed out: get_window_state"));
+        assert!(!escalates_to_foreground(
+            "cua-driver timed out: get_window_state"
+        ));
+    }
+
+    #[test]
+    fn only_a_scan_that_ran_out_of_time_is_worth_another_attempt() {
+        // Measured on a live Notepad editor: the driver refuses a chord whose
+        // accelerator it cannot find, and it says so two ways. The settled
+        // answer came back in ~50ms on a fresh driver process. The timeout
+        // wording came back in ~4ms on the same chord after the connection
+        // had enumerated the desktop's windows -- a scan that exceeded
+        // 4000ms cannot answer in 4ms, so that wording is the settled
+        // refusal wearing the wrong words, and it arrives only after an
+        // enumeration.
+        //
+        // So the timeout wording is worth another attempt only while the
+        // connection has not enumerated. Afterwards it is final, and
+        // repeating it would spend the action's budget to arrive at the same
+        // refusal.
+        const TIMEOUT_WORDING: &str =
+            "hotkey refused [tool_invocation_failed]: hotkey (UIA path): UIA accelerator scan \
+             exceeded 4000ms; a UIA provider in the target app is likely unresponsive";
+
+        assert!(chord_retry_is_worth_it(TIMEOUT_WORDING, false));
+        assert!(!chord_retry_is_worth_it(TIMEOUT_WORDING, true));
+
+        // The settled answer is final either way: the target exposes no
+        // accelerator, and repeating the chord only spends the action's time.
+        assert!(!chord_retry_is_worth_it(
+            "hotkey refused [tool_invocation_failed]: hotkey on a modern XAML / UWP target \
+             could not find a UIA AcceleratorKey or `(Ctrl+X)`-style name hint matching `ctrl+s` \
+             (scanned 42 element(s)).",
+            false
+        ));
+        assert!(!chord_retry_is_worth_it(
+            "hotkey refused [tool_invocation_failed]: hotkey on a modern XAML / UWP target \
+             could not find a UIA AcceleratorKey or `(Ctrl+X)`-style name hint matching `ctrl+s` \
+             (scanned 42 element(s)).",
+            true
+        ));
+
+        // Every other refusal is final too.
+        assert!(!chord_retry_is_worth_it(
+            "set_value refused [tool_invocation_failed]: element [381] does not implement \
+             ValuePattern or RangeValuePattern",
+            false
+        ));
+        assert!(!chord_retry_is_worth_it(
+            "cua-driver timed out: get_window_state",
+            false
+        ));
+    }
+
+    #[test]
+    fn an_enumerated_connection_restores_the_advice_the_timeout_wording_replaced() {
+        // The timeout wording names a cause that did not happen -- a provider
+        // that is "likely unresponsive" -- and carries no advice at all. The
+        // settled wording it stands in for names the real cause and says what
+        // to do about it: open the menu, click the item.
+        //
+        // The advice is the part that lets the caller recover, so the refusal
+        // the caller is told has to carry it.
+        const TIMEOUT_WORDING: &str =
+            "hotkey refused [tool_invocation_failed]: hotkey (UIA path): UIA accelerator scan \
+             exceeded 4000ms; a UIA provider in the target app is likely unresponsive";
+
+        let restored = chord_refusal_message(TIMEOUT_WORDING, true);
+        assert!(
+            restored.contains("click` the matching element directly")
+                || restored.contains("click the matching element directly"),
+            "the advice has to survive: {restored}"
+        );
+        assert!(
+            restored.contains("closed menu"),
+            "the real cause has to be named: {restored}"
+        );
+
+        // Before an enumeration the timeout is a timeout, and it is reported
+        // as the driver worded it.
+        let untouched = chord_refusal_message(TIMEOUT_WORDING, false);
+        assert!(untouched.contains("accelerator scan exceeded 4000ms"));
+        assert!(!untouched.contains("closed menu"));
+
+        // A refusal that is not the timeout wording is passed through as it
+        // is: the bridge only rewrites the one diagnostic it has measured to
+        // be wrong.
+        const SETTLED: &str =
+            "hotkey refused [tool_invocation_failed]: hotkey on a modern XAML / UWP target \
+             could not find a UIA AcceleratorKey matching `ctrl+s` (scanned 42 element(s)).";
+        assert_eq!(chord_refusal_message(SETTLED, true), SETTLED);
+        assert_eq!(chord_refusal_message(SETTLED, false), SETTLED);
     }
 }
-
