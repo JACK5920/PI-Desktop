@@ -122,6 +122,12 @@ function normalizeMarkdownFilePath(url: string): string {
   // Keep a drive letter from being interpreted as a URI scheme by the
   // renderer and sanitizer; the anchor decodes this back before file lookup.
   const decoded = safeDecodeUri(url);
+  // Some Markdown producers encode a Windows drive path as a root-relative URL.
+  const rootedWindowsPath = /^\/([A-Za-z]:[\\/].*)$/u.exec(decoded)?.[1];
+  if (rootedWindowsPath) {
+    if (!parseFileRef(rootedWindowsPath)) return url;
+    return encodeWindowsPathForHref(rootedWindowsPath);
+  }
   if (parseFileRef(decoded) && parseFileRefPosition(decoded)) return encodeURIComponent(decoded);
   if (!/^[A-Za-z]:[\\/]/.test(decoded)) return url;
   if (!parseFileRef(decoded)) return url;
