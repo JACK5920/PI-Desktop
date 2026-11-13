@@ -13,6 +13,8 @@ Plan 和 Goal 是**合约模式**：两者在执行之前协商提案
 (`plan | goal`) 是区分它们的地方，下图读起来是一样的
 将 Goal/Plan 替换为 Plan/Goal：
 
+Composer 的模式菜单还提供内置 Goal 阶段模板。选择模板后，通过现有会话配置流程切换到 Goal 模式，并在 Composer 当前光标处插入可编辑的请求草稿；已有草稿文本和附件会保留。模板只是输入指引，不是持久化提案，也不会创建第二条任务记录。以 Goal 模式发送后仍由现有 Agent `SubmitGoal` 流程生成不可变提案快照，并沿用现有审批界面与 Host 管理的 Goal 生命周期。用户可以发送前编辑模板草稿，也可以按现有流程处理模型生成的契约。
+
 ```text
 Agent / inactive
   -- user selects Plan while idle OR Agent calls EnterPlanMode --> Plan / planning

@@ -10,6 +10,16 @@ and share one projection, one approval row, and one hard deny (**D198**). `kind`
 (`plan | goal`) is what distinguishes them, and the diagram below reads the same
 with Goal/`SubmitGoal` substituted for Plan/`SubmitPlan`:
 
+The Composer's mode menu also offers built-in Goal templates. Selecting one
+stages Goal mode through the existing session-configuration path and inserts a
+editable request scaffold at the current Composer caret; existing
+draft text and attachments are preserved. The template is input guidance, not a
+durable proposal or a second task record. Sending it in Goal mode continues
+through the existing Agent `SubmitGoal` flow, immutable proposal snapshot,
+approval surface, and Host-owned Goal lifecycle. The user can edit the scaffold
+before sending; the model-produced contract is resolved through the existing
+approval behavior.
+
 ```text
 Agent / inactive
   -- user selects Plan while idle OR Agent calls EnterPlanMode --> Plan / planning

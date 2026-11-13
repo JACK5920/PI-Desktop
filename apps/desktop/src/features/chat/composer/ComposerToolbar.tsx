@@ -1,30 +1,31 @@
-import type { Dispatch, SetStateAction } from "react";
-import type { TFunction } from "i18next";
 import {
   keybindingDisplayParts,
   type Mode,
   type PermissionMode,
-  type ShortcutPlatform,
-  type SessionThinkingLevel,
   type PluginComposerTransformMeta,
+  type SessionThinkingLevel,
+  type ShortcutPlatform,
 } from "@pi-desktop/shared";
-import { type AppState, useAppStore } from "../../../stores/app-store";
-import { ComposerModePicker } from "./ComposerModePicker";
-import { ComposerPermissionPicker } from "./ComposerPermissionPicker";
+import type { TFunction } from "i18next";
+import type { Dispatch, SetStateAction } from "react";
 import { ContextUsageInspector } from "../../../components/ContextUsageInspector";
-import { ComposerControlSlots } from "./ComposerControlSlots";
-import { TooltipButton } from "../../../components/ui";
 import {
   IconArrowUp,
   IconPause,
-  IconPlus,
   IconPlay,
+  IconPlus,
   IconSparkles,
   IconStop,
   IconUndo2,
 } from "../../../components/icons";
+import { TooltipButton } from "../../../components/ui";
+import { type AppState, useAppStore } from "../../../stores/app-store";
 import { LiveVoiceControls } from "../../voice/live/LiveVoiceControls";
+import { ComposerControlSlots } from "./ComposerControlSlots";
 import { ComposerModelPicker } from "./ComposerModelPicker";
+import { ComposerModePicker } from "./ComposerModePicker";
+import { ComposerPermissionPicker } from "./ComposerPermissionPicker";
+import type { GoalTemplate } from "./goal-templates.mjs";
 import type { useComposerModelMenu } from "./hooks/useComposerModelMenu";
 
 type ModelMenuController = ReturnType<typeof useComposerModelMenu>;
@@ -50,6 +51,7 @@ export type ComposerToolbarProps = {
   pickAndAttach: () => Promise<void>;
   configureActiveSession: AppState["configureActiveSession"];
   showToast: AppState["showToast"];
+  onSelectGoalTemplate: (template: GoalTemplate) => void | Promise<void>;
   modelMenu: ModelMenuController;
   modelLabel: string;
   thinkingLabel: string;
@@ -97,6 +99,7 @@ export function ComposerToolbar({
   pickAndAttach,
   configureActiveSession,
   showToast,
+  onSelectGoalTemplate,
   modelMenu,
   modelLabel,
   thinkingLabel,
@@ -167,6 +170,7 @@ export function ComposerToolbar({
               });
             }
           }}
+          onSelectGoalTemplate={onSelectGoalTemplate}
         />
         <ComposerPermissionPicker t={t} mode={mode}
           composerPermissionMode={composerPermissionMode}

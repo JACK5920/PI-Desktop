@@ -1,10 +1,11 @@
-import type { Dispatch, SetStateAction } from "react";
-import type { TFunction } from "i18next";
 import type { Mode } from "@pi-desktop/shared";
+import type { TFunction } from "i18next";
+import type { Dispatch, SetStateAction } from "react";
+import { IconCheck, IconChevronDown } from "../../../components/icons";
 import { AnchoredMenu } from "../../../components/settings/AnchoredMenu";
 import { TooltipButton } from "../../../components/ui";
-import { IconCheck, IconChevronDown } from "../../../components/icons";
 import { ModeIcon } from "./ComposerModeIcon";
+import { GOAL_TEMPLATES, type GoalTemplate } from "./goal-templates.mjs";
 import { MODE_CYCLE, MODE_LABEL_KEYS } from "./model";
 
 /**
@@ -23,6 +24,7 @@ export function ComposerModePicker({
   controlsBlocked,
   onCloseOtherMenus,
   onSelect,
+  onSelectGoalTemplate,
 }: {
   t: TFunction;
   mode: Mode;
@@ -32,6 +34,7 @@ export function ComposerModePicker({
   controlsBlocked: boolean;
   onCloseOtherMenus: () => void;
   onSelect: (mode: Mode) => void | Promise<void>;
+  onSelectGoalTemplate: (template: GoalTemplate) => void | Promise<void>;
 }) {
   const label = t(MODE_LABEL_KEYS[mode]);
   return (
@@ -94,6 +97,31 @@ export function ComposerModePicker({
           {mode === candidate ? <IconCheck size={13} /> : null}
         </button>
       ))}
+      <div className="composer-plus-sep" role="separator" />
+      <div className="composer-menu-section-label" role="presentation">
+        {t("goal.templates.heading")}
+      </div>
+      {GOAL_TEMPLATES.map((template) => (
+        <button
+          key={template.id}
+          type="button"
+          role="menuitem"
+          disabled={controlsBlocked}
+          className="composer-plus-item composer-goal-template-item"
+          onClick={async () => {
+            setOpen(false);
+            await onSelectGoalTemplate(template);
+          }}
+        >
+          <span className="flex-1 text-left">
+            <span className="composer-goal-template-title">{t(template.labelKey)}</span>
+            <span className="composer-goal-template-description">{t(template.descriptionKey)}</span>
+          </span>
+        </button>
+      ))}
+      <div className="composer-menu-hint" role="presentation">
+        {t("goal.templates.hint")}
+      </div>
     </AnchoredMenu>
   );
 }

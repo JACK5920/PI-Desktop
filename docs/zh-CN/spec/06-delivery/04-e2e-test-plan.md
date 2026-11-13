@@ -10365,3 +10365,9 @@ PluginPack 产物的解包目录，仅用于开发验证。验收 #1711 前需�
 - **路径：** 使用确定性 provider fixture 启动本地 Agent 任务，完成一个工具结果；运行中点暂停，等待当前 turn 边界后恢复。再覆盖立即停止、渲染器重载、自动恢复关闭/开启时的应用重启，以及工具结果尚未记录时的中断。
 - **预期：** 暂停请求在当前 assistant/tool 边界完成后才生效；停止仍为立即 Abort。恢复会新增一条 continuation 用户消息，不重放旧工具调用。关闭自动恢复时保留暂停检查点；开启时启动先消费 marker 再提交一次 continuation。操作中途的不确定中断绝不自动重放。蓝色消息气泡和暂停/继续按钮在浅色、深色主题下使用主题 token 并保持可读。
 - **覆盖：** `paused-task-recovery.test.mjs`、`paused-task-settings.test.mjs`、桌面类型检查及主题表面 E2E；不连接真实 provider，不执行有副作用的真实工具。
+
+### E2E-COMPOSER-goal-template-draft
+
+- **路径：** 分别从 Agent、Plan、Goal 打开 Composer 模式菜单并选择每个内置 Goal 模板；验证会话切到 Goal 模式，且在光标位置插入可编辑的草稿。再覆盖光标两侧已有文本及带文件附件的草稿。编辑模板后，用确定性 Goal provider fixture 发送并返回 `SubmitGoal`，然后通过现有审批界面处理生成的提案。
+- **预期：** 选择模板会保留原有草稿文本和附件，不会自行创建提案或生命周期记录，也不会改写不可变审批快照。以 Goal 模式发送后只创建正常的 `SubmitGoal` 提案，并沿用现有审批与 Host 管理的生命周期。拒绝后仍按现有行为返回可编辑的 Goal 规划状态。
+- **覆盖：** `goal-templates.test.mjs`、`composer-mode-menu.test.mjs`、i18n catalog 一致性、Goal 提案/审批测试和桌面类型检查；不使用真实 provider，也不新增持久化数据源。

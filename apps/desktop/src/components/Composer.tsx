@@ -65,6 +65,7 @@ import { ComposerInput } from "../features/chat/composer/ComposerInput";
 import { useComposerModelMenu } from "../features/chat/composer/hooks/useComposerModelMenu";
 import { useVoiceInput } from "../features/voice/useVoiceInput";
 import { ComposerToolbar } from "../features/chat/composer/ComposerToolbar";
+import { insertGoalTemplate, type GoalTemplate } from "../features/chat/composer/goal-templates.mjs";
 import { ComposerStatus } from "../features/chat/composer/ComposerStatus";
 import { ComposerAnnotationAttachments } from "../features/chat/composer/ComposerAnnotationAttachments";
 
@@ -550,6 +551,32 @@ export function Composer({
     return submit(steering);
   };
 
+  const selectGoalTemplate = async (template: GoalTemplate) => {
+    try {
+      await configureActiveSession({
+        mode: "goal",
+        providerId: provider?.id,
+        modelId,
+        thinkingLevel,
+      });
+      const inserted = insertGoalTemplate(
+        draft.readLiveDraft(),
+        draft.cursor,
+        t(template.promptKey),
+      );
+      draft.applyEditorDraft(
+        inserted.text,
+        draft.activeFileReferences,
+        inserted.caret,
+      );
+      invalidateComposerTransforms();
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), {
+        variant: "error",
+      });
+    }
+  };
+
   // Keep the legacy listener for already-started or IPC-owned Dictation, but
   // the Composer no longer exposes a Dictation control or overlay.
   useVoiceInput({
@@ -719,6 +746,7 @@ export function Composer({
             pickAndAttach={pickAndAttach}
             configureActiveSession={configureActiveSession}
             showToast={showToast}
+            onSelectGoalTemplate={selectGoalTemplate}
             modelMenu={modelMenu}
             modelLabel={modelLabel}
             thinkingLabel={thinkingLabel}

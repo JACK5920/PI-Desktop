@@ -70,6 +70,50 @@
   visibility: hidden;
 }
 
+.composer-mode-menu {
+  width: min(300px, calc(100vw - 24px));
+}
+
+.composer-mode-menu .composer-plus-sep {
+  margin-block: 5px;
+}
+
+.composer-menu-section-label,
+.composer-menu-hint {
+  padding: 5px 10px;
+  color: var(--ds-text-secondary);
+  font-size: var(--text-xs);
+  line-height: var(--leading-compact);
+}
+
+.composer-menu-section-label {
+  font-weight: 600;
+}
+
+.composer-menu-hint {
+  padding-top: 7px;
+}
+
+.composer-goal-template-item {
+  align-items: flex-start;
+}
+
+.composer-goal-template-title,
+.composer-goal-template-description {
+  display: block;
+  white-space: normal;
+}
+
+.composer-goal-template-title {
+  font-weight: 600;
+}
+
+.composer-goal-template-description {
+  margin-top: 2px;
+  color: var(--ds-text-secondary);
+  font-size: var(--text-xs);
+}
+
 .composer-model-menu {
   position: fixed;
   top: 0;
