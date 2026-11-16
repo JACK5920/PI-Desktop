@@ -12,6 +12,7 @@ export type SettingsTabId =
   | "shortcuts"
   | "instructions"
   | "agent"
+  | "agentEngines"
   | "skills"
   | "mcp"
   | "subagents"
@@ -228,6 +229,22 @@ export const SETTINGS_NAV: SettingsNavEntry[] = [
       "settings.importSourceCodex",
       "settings.importSourcePi",
       "settings.importSourceCcSwitch",
+    ],
+  },
+  {
+    id: "agentEngines",
+    labelKey: "settings.nav.agentEngines",
+    titleKey: "settings.agentEngines.title",
+    group: "agent",
+    keywordKeys: [
+      "settings.agentEngines.defaultEngine",
+      "settings.agentEngines.ompDescription",
+      "settings.omp.installed",
+      "settings.omp.latest",
+      "settings.omp.install",
+      "settings.omp.update",
+      "settings.omp.rollback",
+      "settings.omp.importLocal",
     ],
   },
   {

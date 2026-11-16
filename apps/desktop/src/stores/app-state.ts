@@ -34,6 +34,7 @@ import type {
   SessionTodoSnapshot,
   UiMessage,
 } from "@pi-desktop/shared";
+import type { AgentEngineId } from "../../../../packages/shared/src/agent-engine-registry.mjs";
 import type { SettingsTabId } from "../lib/settings-search";
 import type { TranscriptSearchTarget, TranscriptView } from "../lib/transcript-reading";
 import type { TranscriptReadingPosition } from "../lib/transcript-reading-position";
@@ -89,6 +90,8 @@ export type AgentTurnResult = {
   turnId: string;
   finishedAt: number;
   errorCode?: string;
+  partial?: boolean;
+  artifacts?: import("../lib/api").ArtifactSummary[];
 };
 
 export type PendingPlanRefreshResult = "pending" | "terminal" | "unavailable";
@@ -125,6 +128,8 @@ export type RefreshSessionsOptions = {
  */
 export type DraftSessionConfiguration = {
   mode?: Mode;
+  /** Engine choice for the chat this draft will become. */
+  agentEngine?: AgentEngineId;
   thinkingLevel?: SessionThinkingLevel;
   providerId?: string;
   modelId?: string;
@@ -274,6 +279,8 @@ export type AppState = {
     id: string,
     opts?: { record?: boolean } & NavigationOptions,
   ) => Promise<void>;
+  /** Replace the renderer cache after a verified native-engine transcript rewrite. */
+  syncNativeSessionTranscript: (sessionId: string, messages: UiMessage[]) => void;
   newSession: (options?: {
     projectPath?: string | null;
     remoteProject?: RemoteProjectTarget;
@@ -295,7 +302,14 @@ export type AppState = {
     thinkingLevel: SessionThinkingLevel;
     permissionMode?: PermissionMode;
     fastMode?: boolean;
+    agentEngine?: AgentEngineId;
   }) => Promise<void>;
+  /**
+   * Switch the Agent engine for the current conversation (or the new-task
+   * draft when no conversation is open). The choice is also remembered as the
+   * default for conversations started later.
+   */
+  setAgentEngine: (engine: AgentEngineId) => Promise<void>;
   /** Returns true once accepted unless concurrent smart Stop restores it. */
   sendPrompt: (
     content: string,
@@ -330,7 +344,7 @@ export type AppState = {
     content: string,
     attachments?: UiMessage["attachments"],
   ) => Promise<boolean>;
-  retryLastPrompt: () => Promise<void>;
+  retryLastPrompt: (messageId?: string) => Promise<void>;
   clearError: () => void;
   dismissAssistantErrorMessage: (messageId: string) => void;
   activateMessageRevision: (rootUserId: string, revisionIndex: number) => Promise<void>;
@@ -478,6 +492,7 @@ export type AppState = {
   } | null;
   /** Open (or activate) the transcript tab of one delegated subagent. */
   openSubagentTab: (delegationId: string, agentName?: string) => void;
+  openOmpSubagentBatchTab: (toolCallId: string, agentId?: string, agentLabel?: string) => void;
   /** Abort one session's running turn, visible or not. */
   abortSession: (sessionId: string) => Promise<void>;
   openWorkPanel: () => void;

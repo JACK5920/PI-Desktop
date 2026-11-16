@@ -15,6 +15,8 @@ import type { Logger } from "../logger";
 import type { PersistenceOutbox } from "../persistence-outbox";
 import type { ComposerCommandService } from "./composer-ipc";
 import type { IpcRegistrar } from "./types";
+import { getAgentEngine, type AgentEngineId } from "../../../../../packages/shared/src/agent-engine-registry.mjs";
+import type { OmpRpcRuntime } from "../omp/rpc-runtime";
 
 export type AgentIpcDependencies = {
   registrar: IpcRegistrar;
@@ -37,6 +39,8 @@ export type AgentIpcDependencies = {
   claimedExecutionSessions: Map<string, string>;
   resolveAgentRuntimeLaunch: (...args: any[]) => Promise<any>;
   acquireSessionOperation: (sessionId: string) => Promise<() => void>;
+  beginManualCompaction: (sessionId: string) => void;
+  endManualCompaction: (sessionId: string) => void;
   finishTurn: FinishTurn;
   /**
    * Record a cancellation before the cancel request is issued, so a terminal
@@ -52,6 +56,7 @@ export type AgentIpcDependencies = {
   optionalWorkspaceRoot: () => Promise<string | null>;
   composerCommandService: Pick<ComposerCommandService, "buildComposerCommands">;
   loadComposerTemplatesCached: (root: string | null) => Promise<ComposerTemplate[]>;
+  ompRpcRuntime?: OmpRpcRuntime;
 };
 
 function rejectNativeAgentOperation(sessionId: string): void {
@@ -100,6 +105,8 @@ export function registerAgentIpc({
   claimedExecutionSessions,
   resolveAgentRuntimeLaunch,
   acquireSessionOperation,
+  beginManualCompaction,
+  endManualCompaction,
   finishTurn,
   lockAbortReason,
   finishApprovedExecution,
@@ -110,7 +117,12 @@ export function registerAgentIpc({
   optionalWorkspaceRoot,
   composerCommandService,
   loadComposerTemplatesCached,
+  ompRpcRuntime,
 }: AgentIpcDependencies): void {
+  // Manual compaction is a cancellable session operation. This mark keeps
+  // prompt admission and duplicate-compaction checks closed after setup releases
+  // the shared operation lock so Stop can reach the runtime promptly.
+  const compactingSessions = new Set<string>();
   let host: HostProcess | null = null;
   let sidecar: AgentSidecar | null = null;
   let agentHostBridge: AgentHostBridge | null = null;
@@ -141,9 +153,12 @@ export function registerAgentIpc({
         errorCode: ErrorCodes.TURN_NOT_FOUND,
       });
     }
-    const context = await sidecar.call<{ projectPath?: string; remoteWorkspace?: unknown; supportsVision: boolean }>(
-      "agent.steeringContext", { sessionId: req.sessionId, expectedTurnId: req.expectedTurnId },
-    );
+    const ompOwnsSession = ompRpcRuntime?.isRunning(req.sessionId) === true;
+    const context = ompOwnsSession
+      ? { projectPath: undefined, remoteWorkspace: undefined, supportsVision: true }
+      : await sidecar.call<{ projectPath?: string; remoteWorkspace?: unknown; supportsVision: boolean }>(
+          "agent.steeringContext", { sessionId: req.sessionId, expectedTurnId: req.expectedTurnId },
+        );
     const localProjectPath = context.remoteWorkspace ? undefined : context.projectPath;
     const mcpExpansion = /^\/mcp:\S/.test(req.content)
       ? expandMcpInvocation(
@@ -171,12 +186,47 @@ export function registerAgentIpc({
       ...(mcpExpansion ? { command: mcpExpansion.command } : {}),
       status: "complete",
       createdAt: new Date().toISOString(),
-      steering: true,
+      ...(req.streamingBehavior === "followUp" ? {} : { steering: true }),
       ...(prepared.length ? { attachments: prepared.map((attachment) => attachment.message) } : {}),
       ...(voiceOrigin ? { voiceOrigin } : {}),
     };
     // Revalidate inside the runtime after all file/host IO. A stale target must
     // never turn into a normal prompt or alter the next turn's configuration.
+    if (ompOwnsSession) {
+      const images = prepared.filter((attachment) => attachment.inlineData && attachment.message.kind === "image")
+        .map((attachment) => ({ data: attachment.inlineData!, mimeType: attachment.message.mimeType ?? "image/png" }));
+      if (req.streamingBehavior === "followUp") {
+        await ompRpcRuntime!.command(req.sessionId, "prompt", {
+          message: appendPromptFallbackPaths(steerContent, prepared),
+          ...(images.length ? { images } : {}),
+          streamingBehavior: "followUp",
+        });
+      } else {
+        await ompRpcRuntime!.command(req.sessionId, "steer", {
+          message: appendPromptFallbackPaths(steerContent, prepared),
+          ...(images.length ? { images } : {}),
+        });
+      }
+      // OMP owns its native conversation, while Host keeps PI's durable mirror
+      // for the app transcript and restart recovery. Persist only after OMP has
+      // accepted the control message, so a rejected steer cannot leave a ghost.
+      try {
+        await host.call("session.appendMessage", {
+          sessionId: req.sessionId,
+          message,
+          turnId: req.expectedTurnId,
+        });
+      } catch (error) {
+        // The OMP command is already accepted; never report this as a rejected
+        // delivery because a retry could duplicate the user's native input.
+        logger.app("session", "warn", "OMP input accepted but PI transcript mirror append failed", {
+          sessionId: req.sessionId,
+          turnId: req.expectedTurnId,
+          data: { error: String(error) },
+        });
+      }
+      return { accepted: true, turnId: req.expectedTurnId };
+    }
     return sidecar.call<{ accepted: boolean; turnId: string }>("agent.steer", {
       sessionId: req.sessionId, expectedTurnId: req.expectedTurnId, message,
       content: appendPromptFallbackPaths(steerContent, prepared),
@@ -217,6 +267,11 @@ export function registerAgentIpc({
     if (!host) throw new Error("host unavailable");
     const releaseSessionOperation = await acquireSessionOperation(req.sessionId);
     try {
+    if (compactingSessions.has(req.sessionId)) {
+      throw Object.assign(new Error("Session is already compacting"), {
+        errorCode: ErrorCodes.AGENT_BUSY,
+      });
+    }
     const sessionMessage = await resolveSessionMessageInput(host, req);
     // Install the renderer's prompt-time snapshot before any asynchronous
     // setup. This closes the gap where a fast completion could beat the
@@ -242,7 +297,18 @@ export function registerAgentIpc({
     }
     // Validate explicit MCP selection before a turn or history replacement.
     // Use the session's project, never the currently focused renderer project.
-    const mcpExpansion = !sessionMessage && /^\/mcp:\S/.test(req.content)
+    // The conversation's own pin wins: switching engines in one chat must not
+    // reroute another. Only a chat that never pinned one follows the default.
+    const engineId =
+      typeof session.agentEngine === "string" ? session.agentEngine : settings.agentEngine ?? "pi";
+    const selectedEngine = getAgentEngine(engineId);
+    if (!selectedEngine) throw new Error(`Unknown Agent engine: ${String(engineId)}`);
+    if (selectedEngine.id === "omp" && (sessionMessage || req.sessionMessageId || req.truncateFromMessageId || req.truncateBefore !== undefined)) {
+      throw Object.assign(new Error("OMP 原生会话当前不支持编辑旧消息或回退 PI 历史；为避免两套会话分支错位，本次操作未修改历史。"), {
+        errorCode: ErrorCodes.INVALID_ARGUMENT,
+      });
+    }
+    const mcpExpansion = selectedEngine.id === "pi" && !sessionMessage && /^\/mcp:\S/.test(req.content)
       ? expandMcpInvocation(
           req.content,
           await composerCommandService.buildComposerCommands(
@@ -331,12 +397,31 @@ export function registerAgentIpc({
       session = refreshed.session ?? session;
     }
 
-    const launch = await resolveAgentRuntimeLaunch(
-      req.sessionId,
-      session,
-      settings,
-    );
-    sidecar.setProjectInstructionRoot(req.sessionId, launch.workspaceRoot ?? launch.projectPath);
+    const ompCwd = session.projectPath?.trim() || process.env.USERPROFILE || process.env.HOME || ".";
+    let launch: any;
+    if (selectedEngine.id === "omp") {
+      if (!ompRpcRuntime) throw new Error("当前系统不支持 OMP RPC 引擎");
+      const attached = await ompRpcRuntime.attach({
+        sessionId: req.sessionId,
+        cwd: ompCwd,
+        ...(typeof session.projectPath === "string" && session.projectPath.trim() ? { workspaceRoot: session.projectPath.trim() } : {}),
+      });
+      const state = attached.state as { model?: { provider?: string; id?: string } } | undefined;
+      const ompModel = state?.model;
+      if (!ompModel?.provider || !ompModel?.id) {
+        throw Object.assign(new Error("OMP 尚未选择模型。请先在输入框的 OMP 模型菜单中选择可用模型。"), { errorCode: "OMP_MODEL_NOT_SELECTED" });
+      }
+      launch = {
+        providerId: ompModel.provider,
+        modelId: ompModel.id,
+        projectPath: session.projectPath ?? undefined,
+        workspaceRoot: session.projectPath ?? undefined,
+        sidecarParams: { mode: "agent", provider: { modelConfig: { input: ["text", "image"] } } },
+      };
+    } else {
+      launch = await resolveAgentRuntimeLaunch(req.sessionId, session, settings);
+      sidecar.setProjectInstructionRoot(req.sessionId, launch.workspaceRoot ?? launch.projectPath);
+    }
 
     // Open a durable turn row, then persist the user message under it.
     const turn = await host.call<{ turnId?: string }>("session.beginTurn", {
@@ -365,7 +450,7 @@ export function registerAgentIpc({
     let skillMentions: UiMessage["skillMentions"];
     let agentMentions: UiMessage["agentMentions"];
     const hasSlashToken = /(^|\s)\/\S/.test(req.content);
-    if (!sessionMessage && !mcpExpansion && (hasSlashToken || req.content.includes("@"))) {
+    if (selectedEngine.id === "pi" && !sessionMessage && !mcpExpansion && (hasSlashToken || req.content.includes("@"))) {
       try {
         const root = await optionalWorkspaceRoot();
         const mentionsByAgent = await resolvePromptAgentMentions({
@@ -425,9 +510,7 @@ export function registerAgentIpc({
 
     // The binding's image override already shaped this modelConfig, so the
     // transport gate and the settings switch cannot disagree.
-    const supportsVision = visionFromModelConfig(
-      launch.sidecarParams.provider.modelConfig,
-    );
+    const supportsVision = selectedEngine.id === "omp" || visionFromModelConfig(launch.sidecarParams.provider.modelConfig);
     let preparedAttachments: PreparedPromptAttachment[];
     try {
       preparedAttachments = await preparePromptAttachments(
@@ -549,9 +632,8 @@ export function registerAgentIpc({
     // provenance Main-owned and tied to the durable turn, never the prompt text.
     if (isTrustedCompletionNotice) completionNoticeTurns.add(durableTurnId);
     try {
-      result = await sidecar.call<{ accepted: boolean; turnId: string }>(
-        "agent.prompt",
-        {
+      const dispatchers: Record<AgentEngineId, () => Promise<{ accepted: boolean; turnId: string }>> = {
+        pi: () => sidecar!.call<{ accepted: boolean; turnId: string }>("agent.prompt", {
           ...launch.sidecarParams,
           // The host-created durable turn is the approval identity used by
           // Rust. The runtime must not replace it with a provider-local UUID.
@@ -588,8 +670,21 @@ export function registerAgentIpc({
           // ceiling still routes through the session's stored mode until
           // host-core `session.beginTurn` accepts the scoped param.
           ...(req.permissionMode ? { permissionMode: req.permissionMode } : {}),
+        }),
+        omp: async () => {
+          if (!ompRpcRuntime) throw new Error("当前系统不支持 OMP RPC 引擎");
+          const images = preparedAttachments.filter((attachment) => attachment.inlineData && attachment.message.kind === "image")
+            .map((attachment) => ({ data: attachment.inlineData!, mimeType: attachment.message.mimeType ?? "image/png" }));
+          return ompRpcRuntime.prompt({
+            sessionId: req.sessionId,
+            cwd: ompCwd,
+            ...(typeof session.projectPath === "string" && session.projectPath.trim() ? { workspaceRoot: session.projectPath.trim() } : {}),
+            message: modelContent,
+            images,
+          });
         },
-      );
+      };
+      result = await dispatchers[selectedEngine.id]();
     } catch (e) {
       completionNoticeTurns.delete(durableTurnId);
       await finishTurn(req.sessionId, "error", (e as any)?.errorCode, {
@@ -616,25 +711,51 @@ export function registerAgentIpc({
         errorCode: ErrorCodes.AGENT_BUSY,
       });
     }
-    const settings = await host.call<any>("settings.get");
-    const detail = await host.call<{ session?: any }>("session.get", {
-      id: req.sessionId,
-    });
-    if (!detail.session) {
-      throw Object.assign(new Error("Session not found"), {
-        errorCode: ErrorCodes.NOT_FOUND,
+    // Serialize setup with prompt admission. Once the compacting mark is
+    // installed, release this lock before the model call: Stop uses the same
+    // gate and must be able to abort a long-running compaction.
+    const releaseSessionOperation = await acquireSessionOperation(req.sessionId);
+    let ownsCompaction = false;
+    let launch: Awaited<ReturnType<typeof resolveAgentRuntimeLaunch>>;
+    let detail: { session?: any };
+    let startedWith: string | undefined;
+    try {
+      if (activeTurns.has(req.sessionId)) {
+        throw Object.assign(new Error("Session already has an active turn"), {
+          errorCode: ErrorCodes.AGENT_BUSY,
+        });
+      }
+      if (compactingSessions.has(req.sessionId)) {
+        throw Object.assign(new Error("Session is already compacting"), {
+          errorCode: ErrorCodes.AGENT_BUSY,
+        });
+      }
+      const settings = await host.call<any>("settings.get");
+      detail = await host.call<{ session?: any }>("session.get", {
+        id: req.sessionId,
       });
+      if (!detail.session) {
+        throw Object.assign(new Error("Session not found"), {
+          errorCode: ErrorCodes.NOT_FOUND,
+        });
+      }
+      launch = await resolveAgentRuntimeLaunch(
+        req.sessionId,
+        detail.session,
+        settings,
+      );
+      sidecar.setProjectInstructionRoot(req.sessionId, launch.workspaceRoot ?? launch.projectPath);
+      // Ownership is recorded only after every setup step succeeds. A rejected
+      // duplicate cannot clear this call's mark in its finally path.
+      compactingSessions.add(req.sessionId);
+      beginManualCompaction(req.sessionId);
+      ownsCompaction = true;
+      startedWith = compactionRecordId(detail.session) ?? undefined;
+    } finally {
+      releaseSessionOperation();
     }
-    const launch = await resolveAgentRuntimeLaunch(
-      req.sessionId,
-      detail.session,
-      settings,
-    );
-    sidecar.setProjectInstructionRoot(req.sessionId, launch.workspaceRoot ?? launch.projectPath);
-    // A lost reply is not the sidecar's verdict: the sidecar keeps summarizing
-    // and persists the checkpoint through host-core, so the durable record
-    // decides whether this manual compaction succeeded (issue #795).
-    const startedWith = compactionRecordId(detail.session);
+
+    try {
     let result: unknown;
     try {
       result = await sidecar.call("agent.compact", launch.sidecarParams);
@@ -656,6 +777,15 @@ export function registerAgentIpc({
       data: { providerId: launch.providerId, modelId: launch.modelId },
     });
     return result;
+    } finally {
+      if (ownsCompaction) {
+        compactingSessions.delete(req.sessionId);
+        endManualCompaction(req.sessionId);
+      }
+      // A compaction_end event normally wakes the queue; this explicit kick
+      // also covers an RPC timeout or failure path where the event was missed.
+      getAgentHostBridge()?.agentHost.kick(req.sessionId);
+    }
   });
 
   handle(IPC.invoke.agentAbort, async (req: { sessionId: string; turnId?: string }) => {
@@ -680,15 +810,21 @@ export function registerAgentIpc({
       [...claimedExecutionSessions].find(
         ([, sessionId]) => sessionId === req.sessionId,
       )?.[0];
+    if (ompRpcRuntime?.isRunning(req.sessionId)) {
+      agentExtensions.cancelPrompts(req.sessionId);
+      cancelSessionTools(req.sessionId, "Session turn was aborted");
+      await ompRpcRuntime.abort(req.sessionId);
+      return { ok: true, aborted: true };
+    }
     let result: unknown;
     try {
       // An open extension prompt resolves with its abort value (spec 16 §9).
       agentExtensions.cancelPrompts(req.sessionId);
       cancelSessionTools(req.sessionId, "Session turn was aborted");
       result = await sidecar.call("agent.abort", {
-        ...req,
-        ...(abortedTurnId ? { turnId: abortedTurnId } : {}),
-      });
+            ...req,
+            ...(abortedTurnId ? { turnId: abortedTurnId } : {}),
+          });
     } finally {
       // A turn that already stopped owning the session is refused inside the
       // finalizer, so the identity captured above is the only one used here.
@@ -724,6 +860,12 @@ export function registerAgentIpc({
   });
 
   handle(IPC.invoke.agentStop, async (req: AgentStopRequest) => {
+    if (ompRpcRuntime?.isRunning(req.sessionId)) {
+      // OMP RPC exposes abort (not PI's graceful stop-at-tool-boundary).
+      // Use OMP's own lifecycle and let prompt_result settle the durable turn.
+      await ompRpcRuntime.abort(req.sessionId);
+      return { requested: true };
+    }
     if (!sidecar) throw new Error("sidecar unavailable");
     const activeTurnId = activeTurns.get(req.sessionId);
     if (req.turnId && activeTurnId !== req.turnId) {
@@ -740,6 +882,10 @@ export function registerAgentIpc({
   });
 
   handle(IPC.invoke.agentGetStatus, async (sessionId: string) => {
+    if (ompRpcRuntime?.isRunning(sessionId)) {
+      const state = await ompRpcRuntime.command(sessionId, "get_state");
+      return { sessionId, ...(state.data as object), engine: "omp" };
+    }
     if (!sidecar) throw new Error("sidecar unavailable");
     return sidecar.call("agent.getStatus", { sessionId });
   });
@@ -799,10 +945,10 @@ export function registerAgentIpc({
   });
 
   handle(IPC.invoke.askToolResolve, async (resolution: AskToolResolution) => {
-    if (!sidecar) throw new Error("sidecar unavailable");
     const sessionId = String(resolution?.sessionId ?? "").trim();
     const requestId = String(resolution?.requestId ?? "").trim();
     if (!sessionId || !requestId) throw new Error("asktool resolution identity required");
+    if (!sidecar) throw new Error("sidecar unavailable");
     // Prefer the Host-owned input path when it still holds this ask: it
     // deletes the pending input before settling the sidecar, so switching
     // windows back to the session cannot resurrect the answered card via
@@ -834,7 +980,8 @@ export function registerAgentIpc({
     const empty: PendingInteractiveRequests = { asks: [], permissions: [] };
     if (sessionId.startsWith("native-pi:")) return empty;
     const bridge = getAgentHostBridge();
-    return bridge ? bridge.pendingInteractiveRequests(sessionId) : empty;
+    const hostPending = bridge ? await bridge.pendingInteractiveRequests(sessionId) : empty;
+    return hostPending;
   });
 
   handle(IPC.invoke.plansPending, async (input: { sessionId?: string } = {}) => {

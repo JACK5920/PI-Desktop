@@ -112,7 +112,7 @@ pub fn search(db: &Database, query: &str, offset: i64, limit: i64) -> Result<Sea
             (SELECT oi.plugin_id FROM session_import_origins oi
              WHERE oi.session_id = s.id AND json_extract(oi.origin_json, '$.managed') = 1) AS managed_by_plugin,
             s.side_chat_parent_id, s.side_chat_source_message_id, s.side_chat_excerpt,
-            s.side_chat_promoted
+            s.side_chat_promoted, s.agent_engine
          FROM sessions s LEFT JOIN projects p ON p.id = s.project_id
          LEFT JOIN matched ON matched.session_id = s.id
          WHERE s.deleted_at IS NULL

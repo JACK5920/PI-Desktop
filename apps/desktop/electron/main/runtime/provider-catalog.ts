@@ -26,6 +26,7 @@ import {
   catalogModelConfigFor,
   type ModelsDevCatalog,
 } from "../models-dev-catalog";
+import { getAgentEngine } from "../../../../../packages/shared/src/agent-engine-registry.mjs";
 
 const ErrorCodes = {
   ...SharedErrorCodes,
@@ -188,6 +189,7 @@ export function createProviderCatalogRuntime({
         : [],
       scheduledTasksEnabled: (value as T & { scheduledTasksEnabled?: unknown })
         .scheduledTasksEnabled !== false,
+      agentEngine: getAgentEngine(String((value as T & { agentEngine?: unknown }).agentEngine ?? "pi"))?.id ?? "pi",
       goalBudgetDefaults: normalizeGoalBudgetDefaults(value.goalBudgetDefaults),
       jevEnabled: (value as T & { jevEnabled?: unknown }).jevEnabled === true,
       transcriptDisplayMode:
@@ -222,7 +224,11 @@ export function createProviderCatalogRuntime({
       macosWindowTranslucency?: unknown;
       transcriptDisplayMode?: unknown;
       radialMenu?: unknown;
+      agentEngine?: unknown;
     };
+    if (Object.prototype.hasOwnProperty.call(value, "agentEngine") && (typeof value.agentEngine !== "string" || !getAgentEngine(value.agentEngine))) {
+      throw Object.assign(new Error("agentEngine is invalid"), { errorCode: ErrorCodes.INVALID_PARAMS });
+    }
     if (
       Object.prototype.hasOwnProperty.call(value, "goalBudgetDefaults") &&
       !isGoalBudget(value.goalBudgetDefaults)

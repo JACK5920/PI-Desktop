@@ -507,20 +507,22 @@ pub(crate) fn reconcile_all(
         // A second failure is reported, not swallowed.
         match sync_plugin_providers(db, secrets, &plugin.id, &declared, plugin.enabled) {
             Ok(count) => written += count,
-            Err(first) => match sync_plugin_providers(db, secrets, &plugin.id, &declared, plugin.enabled) {
-                Ok(count) => {
-                    tracing::info!(plugin = %plugin.id, %first, "plugin provider sync recovered on retry");
-                    written += count;
+            Err(first) => {
+                match sync_plugin_providers(db, secrets, &plugin.id, &declared, plugin.enabled) {
+                    Ok(count) => {
+                        tracing::info!(plugin = %plugin.id, %first, "plugin provider sync recovered on retry");
+                        written += count;
+                    }
+                    Err(second) => {
+                        tracing::warn!(
+                            plugin = %plugin.id,
+                            %first,
+                            %second,
+                            "plugin provider sync failed twice; its rows are unchanged"
+                        );
+                    }
                 }
-                Err(second) => {
-                    tracing::warn!(
-                        plugin = %plugin.id,
-                        %first,
-                        %second,
-                        "plugin provider sync failed twice; its rows are unchanged"
-                    );
-                }
-            },
+            }
         }
     }
     // A plugin removed while the host was down — or an uninstall whose row

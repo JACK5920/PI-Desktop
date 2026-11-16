@@ -1,4 +1,5 @@
 import { memo } from "react";
+import { useTranslation } from "react-i18next";
 import type { AgentActivity, UiMessage } from "@pi-desktop/shared";
 import type { AssistantTurnPart } from "../../../lib/assistant-turns";
 import type { SubagentOutcome, SubagentTiming } from "../../../lib/subagent-topology";
@@ -25,6 +26,7 @@ const SmoothMessageBubble = memo(function SmoothMessageBubble({ message, streami
   streaming: boolean;
   selectable: boolean;
 }) {
+  const { t } = useTranslation();
   const smoothStreaming = useAppStore((s) => s.settings?.smoothStreaming !== false);
   // Opt-in feature: an absent setting keeps cards out of the transcript.
   const inlineVisualizations = useAppStore((s) => s.settings?.inlineVisualizations === true);
@@ -45,6 +47,27 @@ const SmoothMessageBubble = memo(function SmoothMessageBubble({ message, streami
   );
   const remote = isGenUiRemoteOwner(sessionId, session);
   const selectionEligible = selectable && sessionAllows(session, "canEditMessages");
+  const hasOrderedImages = message.inlineContent?.some((block) => block.type === "image") === true;
+  let visibleTextOffset = 0;
+  const orderedContent = hasOrderedImages ? message.inlineContent?.map((block, index) => {
+    if (block.type === "text") {
+      const visibleText = displayContent.slice(visibleTextOffset, visibleTextOffset + block.text.length);
+      visibleTextOffset += block.text.length;
+      return visibleText ? <div className="prose-chat" key={`text:${index}`}><Markdown
+        source={visibleText}
+        streaming={streaming}
+        // Annotation offsets refer to the complete message, not each native
+        // block. Keep them only when a single text block owns the whole reply.
+        responseAnnotations={message.inlineContent?.length === 1 ? responseAnnotations : undefined}
+        annotationSessionId={sessionId}
+      /></div> : null;
+    }
+    // Do not reveal an image until all preceding text has streamed in.
+    if (displayContent.length < visibleTextOffset) return null;
+    return <div className="omp-inline-image-block" key={`image:${index}`}>
+      <img src={block.dataUrl} alt={t("chat.ompInlineImageAlt", { index: index + 1 })} loading="lazy" />
+    </div>;
+  }) : null;
   return (
     <div
       className={`message-bubble assistant-turn-fragment${streaming ? " streaming" : ""}${showCursor ? " smooth-cursor" : ""}`}
@@ -55,12 +78,15 @@ const SmoothMessageBubble = memo(function SmoothMessageBubble({ message, streami
       data-selection-eligible={selectionEligible ? "true" : "false"}
       data-selection-streaming={streaming ? "true" : "false"}
     >
-      {genUi.content ? <div className="prose-chat"><Markdown
+      {hasOrderedImages ? orderedContent : genUi.content ? <div className="prose-chat"><Markdown
         source={genUi.content}
         streaming={streaming}
         responseAnnotations={responseAnnotations}
         annotationSessionId={sessionId}
       /></div> : null}
+      {!hasOrderedImages && message.inlineImages?.length ? <div className="omp-inline-images" aria-label="OMP response images">
+        {message.inlineImages.map((image, index) => <img key={`${image.mimeType}:${index}`} src={image.dataUrl} alt={t("chat.ompInlineImageAlt", { index: index + 1 })} loading="lazy" />)}
+      </div> : null}
       <GenUiCards references={genUi.references} sessionId={sessionId} remote={remote} />
       {message.error ? <AssistantErrorMessage message={message} /> : null}
     </div>

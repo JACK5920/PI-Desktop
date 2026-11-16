@@ -1,12 +1,14 @@
 export type WorkPanelTabKind =
   | "new"
   | "review"
+  | "artifacts"
   | "branch-review"
   | "github-pr-review"
   | "side-chat"
   | "file"
   | "plugin"
-  | "subagent";
+  | "subagent"
+  | "omp-subagent-batch";
 
 export type WorkPanelTab = {
   id: string;
@@ -14,6 +16,8 @@ export type WorkPanelTab = {
   label?: string;
   kind: WorkPanelTabKind;
   resource?: string;
+  /** OMP child agent selected in a batch detail tab. */
+  agentId?: string;
   /** Guest URL or workspace path for the Browser plugin view (D333). */
   location?: string;
   /** Stored attachment mimeType for extension-less `attachments/<sha256>` images. */
@@ -91,7 +95,7 @@ export function switchWorkPanelContextState(
 }
 
 export function toolWorkPanelTab(
-  kind: Exclude<WorkPanelTabKind, "new" | "file" | "plugin" | "subagent">,
+  kind: Exclude<WorkPanelTabKind, "new" | "file" | "plugin" | "subagent" | "omp-subagent-batch">,
 ): WorkPanelTab {
   return { id: kind, kind };
 }
@@ -140,6 +144,11 @@ export function subagentWorkPanelTab(
     resource: delegationId,
     ...(agentName ? { label: agentName } : {}),
   };
+}
+
+/** OMP-native batch detail, keyed by the parent OMP tool call id. */
+export function ompSubagentBatchWorkPanelTab(toolCallId: string, agentId?: string, agentLabel?: string): WorkPanelTab {
+  return { id: `omp-subagent-batch:${toolCallId}${agentId ? `:${agentId}` : ""}`, kind: "omp-subagent-batch", resource: toolCallId, ...(agentId ? { agentId } : {}), ...(agentLabel ? { label: agentLabel } : {}) };
 }
 
 /** A transient follow-up transcript that leaves its parent chat selected. */
@@ -254,12 +263,12 @@ export function parsePluginViewRef(
 export function isKnownWorkPanelTab(tab: WorkPanelTab): boolean {
   return (
     Boolean(tab) &&
-    (tab.kind === "new" || tab.kind === "review" ||
+    (tab.kind === "new" || tab.kind === "review" || tab.kind === "artifacts" ||
       tab.kind === "branch-review" ||
       tab.kind === "github-pr-review" ||
       tab.kind === "side-chat" ||
       tab.kind === "file" || tab.kind === "plugin" ||
-      tab.kind === "subagent")
+      tab.kind === "subagent" || tab.kind === "omp-subagent-batch")
   );
 }
 

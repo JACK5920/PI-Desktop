@@ -262,10 +262,9 @@ test("a superseded startup attempt cannot publish over the retry", () => {
   // guard it could land after the retry already showed the shell and reset the
   // view the user is working in.
   assert.match(store, /const generation = \+\+bootstrapGeneration;/);
-  assert.equal(
-    (store.match(/if \(generation !== bootstrapGeneration\) return;/g) ?? []).length,
-    2,
-    "both the success and the failure path must refuse to publish",
+  assert.ok(
+    (store.match(/if \(generation !== bootstrapGeneration\) return;/g) ?? []).length >= 2,
+    "both the success and failure path must refuse to publish; intermediate awaits may add further guards",
   );
 });
 

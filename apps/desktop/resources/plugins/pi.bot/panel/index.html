@@ -1,0 +1,506 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="pi-plugin-chrome" content="v2" />
+    <title>MiniMax Bot</title>
+    <style>
+      /*
+       * 一套页面，两种落位：
+       *   停靠在工作面板里的视图 —— --pi-plugin-titlebar-height 是 0px，没有拖动带；
+       *   独立窗口（pi.ui.openPanel）—— 26px，宿主画标题栏和窗口键。
+       * 两种都不再额外占一行：正常情况下这个页面里没有任何常驻条，
+       * 状态只在「正在连」「连不上」时以浮层出现，连上就消失。
+       */
+      :root {
+        /*
+         * 配色直接对齐原版客户端（miniapp/client/app.css），深浅两套都抄过来。
+         *
+         * 为什么必须动态：宿主 preload 会采样这个页面 body 的 background 来给
+         * 窗口拖动带上色（pageSurface → --pi-plugin-panel-page-background）。
+         * 原版客户端默认 theme 是 'system'，也就是跟着 prefers-color-scheme 走；
+         * 而 panel 页和 iframe 同处一个渲染进程，这个媒体查询对两边必然给出
+         * 同一个结果 —— 所以跟着它换色，页头就一定和内容同色。
+         * 写死任何一个色值都会在用户切换主题时变成一个撞色的条。
+         */
+        color-scheme: light dark;
+        /* 浅色：[data-theme='light'] */
+        --page: #fcfcfc;
+        --fg: #141414;
+        --muted: #6e6e6e;
+        --surface: #ffffff;
+        --line: rgba(20, 20, 20, 0.1);
+        --ok: #12a150;
+        --warn: #e46a12;
+        --bad: #e5323f;
+        --alert-bg: rgba(255, 255, 255, 0.97);
+        --panel-bg: rgba(255, 255, 255, 0.99);
+        --dock-bg: rgba(255, 255, 255, 0.92);
+        --btn-bg: #f0f0f0;
+        --btn-hover: #e6e6e6;
+        --track: rgba(20, 20, 20, 0.06);
+        --sheen: rgba(20, 20, 20, 0.3);
+        --shadow-soft: rgba(20, 20, 20, 0.12);
+        --shadow-hard: rgba(20, 20, 20, 0.16);
+        --link: #2f6fd0;
+      }
+      /*
+       * 深色值只在 data-panel-theme="dark" 时生效。这个属性由脚本解析：
+       * 「自动」时按 prefers-color-scheme 落成 light/dark 再写上，所以 CSS
+       * 不用再写一遍媒体查询，两种来源共用同一份色值。
+       */
+      :root[data-panel-theme="dark"] {
+        /* 深色：[data-theme='dark'] */
+        --page: #141414;
+        --fg: #f2f2f2;
+        --muted: #9a9a9a;
+        --surface: #1f1f1f;
+        --line: rgba(255, 255, 255, 0.08);
+        --ok: #2fc06b;
+        --warn: #f08a3c;
+        --bad: #f05561;
+        --alert-bg: rgba(31, 31, 31, 0.97);
+        --panel-bg: rgba(25, 25, 25, 0.99);
+        --dock-bg: rgba(31, 31, 31, 0.92);
+        --btn-bg: #2a2a2a;
+        --btn-hover: #343434;
+        --track: rgba(255, 255, 255, 0.08);
+        --sheen: rgba(255, 255, 255, 0.32);
+        --shadow-soft: rgba(0, 0, 0, 0.5);
+        --shadow-hard: rgba(0, 0, 0, 0.6);
+        --link: #7aa7f0;
+      }
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0; height: 100%;
+        background: var(--page); color: var(--fg);
+        font: 13px/1.5 system-ui, "Segoe UI", "Microsoft YaHei", sans-serif;
+        overflow: hidden;
+      }
+      body { padding-top: var(--pi-plugin-titlebar-height, 0px); }
+
+      #frame { display: block; width: 100%; height: 100%; border: 0; background: var(--page); }
+
+      /* 顶部 2px 流光：只表示「正在把界面拉起来」，不占布局。 */
+      #progress {
+        position: absolute; top: var(--pi-plugin-titlebar-height, 0px); left: 0; right: 0;
+        height: 2px; z-index: 20; overflow: hidden; background: var(--track);
+      }
+      #progress::after {
+        content: ""; position: absolute; inset: 0;
+        width: 40%; background: linear-gradient(90deg, transparent, var(--sheen), transparent);
+        animation: slide 1.1s ease-in-out infinite;
+      }
+      @keyframes slide {
+        from { transform: translateX(-100%); }
+        to { transform: translateX(350%); }
+      }
+
+      /* 出问题时的浮层：浮在内容之上，不把界面往下推。 */
+      #alert {
+        position: absolute; z-index: 30;
+        top: calc(var(--pi-plugin-titlebar-height, 0px) + 10px);
+        left: 10px; right: 10px;
+        display: flex; align-items: center; gap: 10px;
+        padding: 7px 10px;
+        border: 1px solid var(--line); border-radius: 8px;
+        background: var(--alert-bg);
+        box-shadow: 0 6px 20px var(--shadow-soft);
+        backdrop-filter: blur(6px);
+      }
+      #alert[hidden] { display: none; }
+      #dot { width: 8px; height: 8px; border-radius: 50%; background: var(--warn); flex: 0 0 auto; }
+      #dot.bad { background: var(--bad); }
+      #msg { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+      #msg b { color: var(--fg); font-weight: 600; }
+      #msg code { color: var(--link); }
+
+      button {
+        flex: 0 0 auto;
+        font: inherit; color: var(--fg);
+        background: var(--btn-bg); border: 1px solid var(--line);
+        border-radius: 6px; padding: 3px 9px; cursor: pointer;
+      }
+      button:hover { background: var(--btn-hover); }
+      button:disabled { opacity: .5; cursor: default; }
+
+      /* 诊断详情：盖在内容上，可滚动，看完关掉即可。 */
+      #detail {
+        position: absolute; z-index: 31;
+        top: calc(var(--pi-plugin-titlebar-height, 0px) + 56px);
+        left: 10px; right: 10px; max-height: 60%;
+        margin: 0; padding: 10px 12px;
+        overflow: auto;
+        border: 1px solid var(--line); border-radius: 8px;
+        background: var(--panel-bg);
+        color: var(--muted);
+        font: 12px/1.55 ui-monospace, Consolas, monospace;
+        white-space: pre-wrap; word-break: break-word;
+        box-shadow: 0 10px 30px var(--shadow-hard);
+      }
+      #detail[hidden] { display: none; }
+
+      /*
+       * 右下角的小圆点：默认几乎透明，鼠标移上去才展开成按钮组。
+       * 放在右下角是因为界面正文和输入框都不占那一块，代价最小。
+       */
+      #dock {
+        position: absolute; z-index: 25;
+        right: 12px; bottom: 12px;
+        display: flex; align-items: center; gap: 6px;
+        padding: 4px; border-radius: 999px;
+        background: var(--dock-bg);
+        border: 1px solid var(--line);
+        box-shadow: 0 4px 14px var(--shadow-soft);
+        opacity: .3; transition: opacity .15s ease;
+      }
+      #dock:hover, #dock:focus-within { opacity: 1; }
+      /* 刚打开时轻呼吸一下，让人知道右下角有救急入口；几秒后自己安静下来。 */
+      #dock.hint { opacity: .8; animation: breathe 1.5s ease-in-out 3; }
+      @keyframes breathe {
+        0%, 100% { transform: scale(1); }
+        50% { transform: scale(1.06); }
+      }
+      #dock[hidden] { display: none; }
+      #dock button { padding: 3px 8px; font-size: 12px; border-radius: 999px; }
+      #handle {
+        width: 22px; height: 22px; padding: 0; border-radius: 50%;
+        font-size: 13px; line-height: 1; display: grid; place-items: center;
+      }
+      #dock .more { display: none; }
+      #dock.open .more { display: inline-flex; }
+    </style>
+  </head>
+  <body>
+    <div id="progress"></div>
+
+    <div id="alert" hidden>
+      <span id="dot"></span>
+      <div id="msg">正在连接 Bot 团队服务…</div>
+      <button id="detail-btn" type="button" hidden>详情</button>
+      <button id="retry" type="button" hidden>重试</button>
+      <button id="close-alert" type="button" hidden>×</button>
+    </div>
+
+    <pre id="detail" hidden></pre>
+
+    <div id="dock" hidden>
+      <button id="btn-theme" class="more" type="button" title="面板配色：跟随时是自动，也可以锁定浅色或深色">跟随系统</button>
+      <button id="btn-window" class="more" type="button" title="在独立窗口中打开（更适合长对话）">独立窗口</button>
+      <button id="btn-browser" class="more" type="button" title="在系统浏览器中打开同一套界面">浏览器</button>
+      <button id="btn-retry" class="more" type="button" title="重新连接 Bot 服务">重连</button>
+      <button id="handle" type="button" title="MiniMax Bot" aria-label="MiniMax Bot 选项">⋯</button>
+    </div>
+
+    <iframe id="frame" title="MiniMax Bot" allow="clipboard-read; clipboard-write"></iframe>
+
+    <script>
+      const frame = document.getElementById("frame");
+      const progress = document.getElementById("progress");
+      const alertBox = document.getElementById("alert");
+      const dot = document.getElementById("dot");
+      const msg = document.getElementById("msg");
+      const detail = document.getElementById("detail");
+      const detailBtn = document.getElementById("detail-btn");
+      const retryBtn = document.getElementById("retry");
+      const closeAlert = document.getElementById("close-alert");
+      const dock = document.getElementById("dock");
+      const handle = document.getElementById("handle");
+      const btnWindow = document.getElementById("btn-window");
+      const btnBrowser = document.getElementById("btn-browser");
+      const btnRetry = document.getElementById("btn-retry");
+      const btnTheme = document.getElementById("btn-theme");
+
+      /*
+       * 面板配色。默认「自动」跟着 prefers-color-scheme 走：原版客户端的默认主题
+       * 就是 system，而 panel 页和 iframe 在同一个渲染进程里，这个媒体查询对
+       * 两边必然给出同一个答案，所以宿主采到的底色和内容一定同色。
+       *
+       * 但原版也允许手动锁浅/深，那个选择存在它自己的 localStorage 里，跨 origin
+       * 读不到。留一个手动档兜底：颜色对不上时点一下切过去就行。
+       */
+      const THEME_KEY = "pibot.panel.theme";
+      const THEME_ORDER = ["auto", "light", "dark"];
+      const THEME_LABELS = { auto: "跟随系统", light: "浅色", dark: "深色" };
+      const darkQuery = window.matchMedia("(prefers-color-scheme: dark)");
+
+      function savedTheme() {
+        try {
+          const value = localStorage.getItem(THEME_KEY);
+          return value === "light" || value === "dark" ? value : "auto";
+        } catch {
+          return "auto";
+        }
+      }
+
+      function applyPanelTheme() {
+        const preference = savedTheme();
+        const resolved =
+          preference === "auto" ? (darkQuery.matches ? "dark" : "light") : preference;
+        document.documentElement.dataset.panelTheme = resolved;
+        if (btnTheme) btnTheme.textContent = THEME_LABELS[preference];
+      }
+
+      function cyclePanelTheme() {
+        const next = THEME_ORDER[(THEME_ORDER.indexOf(savedTheme()) + 1) % THEME_ORDER.length];
+        try {
+          localStorage.setItem(THEME_KEY, next);
+        } catch {
+          /* 存不下就只影响这一次，不阻断交互 */
+        }
+        applyPanelTheme();
+      }
+
+      // 系统主题变了要跟着变，否则「自动」档会停在旧值上。
+      darkQuery.addEventListener("change", applyPanelTheme);
+      btnTheme?.addEventListener("click", (event) => {
+        event.stopPropagation();
+        cyclePanelTheme();
+      });
+      applyPanelTheme();
+
+      // 宿主在 preload 里（页面脚本之前）写好了落位：view（停靠视图）/ panel（独立窗口）/ widget。
+      // 万一没写上，就用标题栏高度兜底——视图那边宿主总会把它压成 0px。
+      // 判不出来时按 view 处理：宁可少一个按钮，也不要凭空多弹一个独立窗口。
+      const surface = (() => {
+        const declared = document.documentElement.dataset.piPluginPanelShape || "";
+        if (declared) return declared;
+        const bar = getComputedStyle(document.documentElement)
+          .getPropertyValue("--pi-plugin-titlebar-height")
+          .trim();
+        if (bar === "0px") return "view";
+        if (bar) return "panel";
+        return "view";
+      })();
+      const invoke = (channel, payload) => window.pluginBridge.invoke(channel, payload);
+
+      let currentOrigin = "";
+      let slowTimer = 0;
+      let alertClosable = false;
+
+      const showProgress = (on) => { progress.hidden = !on; };
+      const showAlert = (state, html, closable = false) => {
+        dot.className = state === "bad" ? "bad" : "";
+        msg.innerHTML = html;
+        alertBox.hidden = false;
+        alertClosable = closable;
+        closeAlert.hidden = !closable;
+      };
+      const hideAlert = () => { alertBox.hidden = true; };
+      const showDetail = (text) => {
+        detail.textContent = text;
+        detail.hidden = false;
+        detailBtn.hidden = false;
+        detailBtn.textContent = "隐藏详情";
+      };
+      const hideDetail = () => {
+        detail.hidden = true;
+        detailBtn.textContent = "详情";
+      };
+
+      detailBtn.addEventListener("click", () => {
+        if (detail.hidden) showDetail(detail.textContent); else hideDetail();
+      });
+      closeAlert.addEventListener("click", () => { hideAlert(); hideDetail(); });
+
+      // 右下角小圆点：点开才露出三个动作，避免常驻一排按钮。
+      const closeDock = () => dock.classList.remove("open");
+      handle.addEventListener("click", (event) => {
+        event.stopPropagation();
+        dock.classList.toggle("open");
+      });
+      document.addEventListener("click", closeDock);
+      dock.addEventListener("click", (event) => event.stopPropagation());
+
+      /* ---- 空闲回收：页面还开着就续命，页面关掉就通知插件回收 ---- */
+      const HEARTBEAT_VISIBLE_MS = 20000;
+      const HEARTBEAT_HIDDEN_MS = 60000;
+      let heartbeatTimer = 0;
+      const beat = () => {
+        if (!window.pluginBridge) return;
+        invoke("pibot.touch").catch(() => undefined);
+        scheduleBeat();
+      };
+      const scheduleBeat = () => {
+        clearTimeout(heartbeatTimer);
+        const delay = document.visibilityState === "hidden" ? HEARTBEAT_HIDDEN_MS : HEARTBEAT_VISIBLE_MS;
+        heartbeatTimer = window.setTimeout(beat, delay);
+      };
+      document.addEventListener("visibilitychange", scheduleBeat);
+      // 页面被销毁（关标签页 / 关窗口）时喊一声，插件按 5 秒宽限回收；
+      // 万一来不及送到，还有空闲回收兜底。
+      window.addEventListener("pagehide", () => {
+        clearTimeout(heartbeatTimer);
+        try { invoke("pibot.release").catch(() => undefined); } catch { /* 页面正在销毁 */ }
+      });
+
+      /* ---- 连接 ---- */
+      /*
+       * 面板自身能不能访问本地服务，问 fetch 比问 iframe 靠谱。
+       *
+       * iframe 加载失败时 Chromium 照样触发 load 事件，网页侧分辨不出来，
+       * 结果就是「一片空白」。而这个页面自己发一条 no-cors 请求，走的是
+       * 同一套 session 网络策略（manifest.net.domains / 宿主的出站白名单），
+       * 被拦就 reject —— 这正是 iframe 会遇到的同一堵墙。
+       */
+      const reachable = async (origin) => {
+        try {
+          await fetch(`${origin}/bot`, {
+            mode: "no-cors",
+            cache: "no-store",
+            signal: AbortSignal.timeout(4000),
+          });
+          return { ok: true };
+        } catch (error) {
+          return { ok: false, reason: String((error && error.message) || error) };
+        }
+      };
+
+      const connect = async () => {
+        retryBtn.hidden = true;
+        hideDetail();
+        hideAlert();
+        showProgress(true);
+        // 起服务通常一秒内完事，这段时间只有顶部那条 2px 进度，页面上不多一行。
+        // 超过 2 秒还没连上才浮现层说一句，免得用户以为页面死了。
+        clearTimeout(slowTimer);
+        slowTimer = window.setTimeout(() => {
+          showAlert("", "正在启动 Bot 团队服务…");
+        }, 2000);
+
+        try {
+          if (!window.pluginBridge || typeof window.pluginBridge.invoke !== "function") {
+            throw new Error("面板桥不可用：请从 PI-Desktop 的插件视图或面板打开本页");
+          }
+
+          // 独立窗口首次打开时补一次出站白名单，兼容尚未更新的打包版宿主
+          // （旧宿主「打开面板」那条 IPC 没带 manifest.net.domains，白名单为空
+          // 会白屏；该缺陷已在宿主源码中修复）。停靠视图由宿主正确下发，不需要
+          // 也不应该在这里再开一个窗口，所以只在 panel 形态补一次。
+          if (surface === "panel" && !sessionStorage.getItem("pibot.policy")) {
+            sessionStorage.setItem("pibot.policy", "1");
+            try { await invoke("pibot.ensurePolicy", { surface }); } catch (error) {
+              console.warn("白名单补全失败，继续尝试直连：", error);
+            }
+          }
+
+          const info = await invoke("pibot.origin");
+          if (!info || typeof info.origin !== "string") throw new Error("插件未返回服务地址");
+          currentOrigin = info.origin;
+
+          const target = `${info.origin}/bot`;
+
+          // 先自己确认一遍「这个面板真的能连上本地服务」，再决定挂不挂 iframe。
+          // 连不上就把话说清楚，而不是挂一张白纸上去。
+          const probe = await reachable(info.origin);
+          if (!probe.ok) {
+            clearTimeout(slowTimer);
+            showProgress(false);
+            showAlert(
+              "bad",
+              "<b>面板连不上本地服务</b>",
+              true,
+            );
+            retryBtn.hidden = false;
+            dock.hidden = false;
+            await dumpDiagnostics();
+            showDetail(
+              [
+                `落位形态: ${surface}`,
+                `服务地址: ${info.origin}`,
+                `探测失败原因: ${probe.reason}`,
+                "",
+                "说明：面板是宿主沙箱里的网页，能访问哪些主机由 manifest.net.domains 决定。",
+                "插件侧已经确认服务在跑（否则上面会直接报连不上）。所以这里只剩一种可能：",
+                "面板这一侧的出站白名单没拿到 net.domains —— 宿主「打开面板」那条 IPC 的老问题。",
+                "",
+                "眼下可用的三条出路：右下角「浏览器」直接开同一套界面；",
+                "「独立窗口」走另一条会正确下发白名单的路径；或切到工作面板的停靠视图。",
+              ].join("\n"),
+            );
+            return;
+          }
+          frame.src = target;
+
+          // 停靠视图里给一个「弹出独立窗口」的出口：长对话在独立窗口里更舒服。
+          if (surface === "view") btnWindow.hidden = false;
+          dock.hidden = false;
+          dock.classList.add("hint");
+          window.setTimeout(() => dock.classList.remove("hint"), 5200);
+          scheduleBeat();
+
+          // iframe 被出站策略拦住时不会触发可区分的错误事件，所以按时限反过来判定。
+          const timer = setTimeout(async () => {
+            clearTimeout(slowTimer);
+            showProgress(false);
+            showAlert("bad", "<b>页面没有加载出来</b>：宿主出站策略可能拦了本地服务", true);
+            retryBtn.hidden = false;
+            btnWindow.hidden = surface !== "view";
+            await dumpDiagnostics();
+          }, 8000);
+
+          frame.addEventListener("load", () => {
+            clearTimeout(timer);
+            clearTimeout(slowTimer);
+            // 连上就什么都不显示：没有常驻状态条，内容拿到整块高度。
+            showProgress(false);
+            // 已经报过错就别盖回去：Chromium 加载失败同样会触发 load，
+            // 无脑 hideAlert() 会把「连不上」的提示吞掉，看起来就是白屏。
+            if (!alertClosable) hideAlert();
+          }, { once: true });
+        } catch (error) {
+          clearTimeout(slowTimer);
+          showProgress(false);
+          showAlert("bad", "<b>无法连接 Bot 服务</b>", true);
+          retryBtn.hidden = false;
+          showDetail(String(error && error.message ? error.message : error));
+        }
+      };
+
+      const dumpDiagnostics = async () => {
+        try {
+          const diag = await invoke("pibot.diagnose");
+          const lines = [
+            `落位形态: ${surface}（view=停靠视图 / panel=独立窗口）`,
+            `服务地址: ${diag.origin}`,
+            `运行模式: ${diag.mode}`,
+            `宿主给的 manifest.net: ${JSON.stringify(diag.manifestNet)}`,
+            `宿主给的 permissions: ${JSON.stringify(diag.manifestPermissions)}`,
+            `插件自测 pi.net.fetch: ${diag.fetchOk === null ? "未执行" : diag.fetchOk ? "通过" : "失败"}`,
+            diag.fetchError ? `失败原因: ${diag.fetchError}` : "",
+            "",
+            "说明：面板是宿主沙箱里的网页，能访问哪些主机由 manifest.net.domains 决定。",
+            "若 manifest.net 为 null 或空数组，说明宿主没把该字段交给插件，本地服务会被当成越权出站。",
+          ].filter(Boolean);
+          showDetail(lines.join("\n"));
+        } catch (error) {
+          showDetail(`诊断失败: ${String(error && error.message ? error.message : error)}`);
+        }
+      };
+
+      retryBtn.addEventListener("click", () => void connect());
+      btnRetry.addEventListener("click", () => { closeDock(); void connect(); });
+      btnBrowser.addEventListener("click", async () => {
+        closeDock();
+        try {
+          await invoke("pibot.openExternal");
+        } catch (error) {
+          showAlert("bad", "<b>打开浏览器失败</b>", true);
+          showDetail(String(error && error.message ? error.message : error));
+        }
+      });
+      btnWindow.addEventListener("click", async () => {
+        closeDock();
+        try {
+          await invoke("pibot.openWindow");
+        } catch (error) {
+          showAlert("bad", "<b>打开独立窗口失败</b>", true);
+          showDetail(String(error && error.message ? error.message : error));
+        }
+      });
+
+      void connect();
+    </script>
+  </body>
+</html>

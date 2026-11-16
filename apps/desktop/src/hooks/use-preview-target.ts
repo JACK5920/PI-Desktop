@@ -91,7 +91,8 @@ export type ResolvedChatFileRef = {
 export type ChatFileOpenDestination =
   | "file-manager"
   | "built-in-browser"
-  | "default-browser";
+  | "default-browser"
+  | "default-application";
 
 export type ChatFileOpenOptions = {
   line?: number;
@@ -309,7 +310,7 @@ export function useOpenChatFileRef() {
           openUrl(resolved.absolutePath);
           return;
         }
-        if (destination === "default-browser") {
+        if (destination === "default-browser" || destination === "default-application") {
           if (current.workspace?.remote) {
             showToast(t("chat.defaultBrowserOpenFailed"), {
               variant: "error",
@@ -319,7 +320,7 @@ export function useOpenChatFileRef() {
           try {
             await api.fsOpen(resolved.absolutePath, mimeType, sessionId);
           } catch {
-            showToast(t("chat.defaultBrowserOpenFailed"), {
+            showToast(t(destination === "default-browser" ? "chat.defaultBrowserOpenFailed" : "chat.fileOpenFailed"), {
               variant: "error",
             });
           }

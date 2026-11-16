@@ -355,7 +355,7 @@ export function AppShell() {
           </Suspense>
         ) : null}
         <SearchDialog open={searchOpen} onClose={() => setSearchOpen(false)} />
-        <ToastHost anchorElement={page === "settings" ? null : toastAnchor} />
+        <ToastHost anchorElement={page === "settings" ? null : toastAnchor} placement={page === "settings" ? "bottom" : "top"} />
         <LiveVoiceStatusHost />
         <PluginRendererHost />
         <ExtensionPromptHost />

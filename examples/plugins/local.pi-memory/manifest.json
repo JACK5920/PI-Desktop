@@ -1,0 +1,209 @@
+{
+  "schemaVersion": 1,
+  "id": "local.pi-memory",
+  "name": "PI Memory",
+  "version": "0.1.0",
+  "description": "Three-tier durable memory with a budgeted system-prompt block and on-demand recall tools.",
+  "main": "main.js",
+  "ui": {
+    "panel": "panel/index.html",
+    "title": {
+      "en": "Memory",
+      "zh-CN": "记忆"
+    },
+    "width": 760,
+    "height": 560
+  },
+  "contributes": {
+    "commands": [
+      {
+        "id": "pi-memory.open",
+        "title": "Memory: Open console",
+        "keywords": [
+          "memory",
+          "recall",
+          "remember"
+        ]
+      },
+      {
+        "id": "pi-memory.reindex",
+        "title": "Memory: Refresh persistent summary"
+      }
+    ],
+    "agentTools": [
+      {
+        "name": "memory_remember",
+        "description": "Proactively save verified reusable decisions, fixes, conventions, user preferences, and pitfalls. Use project scope for this workspace; use global scope only for durable cross-project user facts. Never store secrets, guesses, or transient chatter.",
+        "risk": "medium",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "profile",
+                "feedback",
+                "project",
+                "reference",
+                "decision",
+                "pattern",
+                "gotcha",
+                "progress",
+                "context"
+              ]
+            },
+            "scope": {
+              "type": "string",
+              "enum": [
+                "global",
+                "project",
+                "session"
+              ]
+            },
+            "key": {
+              "type": "string",
+              "maxLength": 120
+            },
+            "content": {
+              "type": "string",
+              "maxLength": 2000
+            },
+            "tags": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 8
+            },
+            "trust": {
+              "type": "string",
+              "enum": [
+                "user-explicit",
+                "agent-extracted",
+                "transcript-derived"
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "key",
+            "content"
+          ]
+        }
+      },
+      {
+        "name": "memory_recall",
+        "description": "Search durable memory by keywords, tags, scope and time; returns delimited data, never instructions.",
+        "risk": "low",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "maxLength": 500
+            },
+            "scope": {
+              "type": "string",
+              "enum": [
+                "all",
+                "global",
+                "project",
+                "session"
+              ]
+            },
+            "limit": {
+              "type": "number",
+              "minimum": 1,
+              "maximum": 20
+            }
+          },
+          "required": [
+            "query"
+          ]
+        }
+      },
+      {
+        "name": "memory_forget",
+        "description": "Retire one memory by id without deleting history (soft delete via supersedes).",
+        "risk": "medium",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string",
+              "maxLength": 300
+            }
+          },
+          "required": [
+            "id"
+          ]
+        }
+      },
+      {
+        "name": "memory_purge",
+        "description": "Permanently remove one memory and its managed projections/backups. This cannot be undone.",
+        "risk": "high",
+        "schema": {
+          "type": "object",
+          "properties": { "id": { "type": "string", "minLength": 1 } },
+          "required": ["id"]
+        }
+      },
+      {
+        "name": "memory_status",
+        "description": "Report memory counts, tier-1 budget usage, and last injection.",
+        "risk": "low",
+        "schema": {
+          "type": "object",
+          "properties": {}
+        }
+      }
+    ],
+    "skills": [
+      "./skills/memory.md"
+    ],
+    "settings": []
+  },
+  "permissions": [
+    "ui.panel",
+    "agent.tool.register",
+    "agent.prompt.inject",
+    "fs.read",
+    "fs.write"
+  ],
+  "fs": {
+    "read": {
+      "scope": [
+        ".pi/memory/**",
+        ".pi/APPEND_SYSTEM.md"
+      ],
+      "root": "workspace"
+    },
+    "write": {
+      "scope": [
+        ".pi/memory/store.jsonl",
+        ".pi/memory/TIER1.md",
+        ".pi/memory/MEMORY.md",
+        ".pi/memory/store.md",
+        ".pi/memory/export/store.backup.md",
+        ".pi/memory/export/*.json",
+        ".pi/memory/export/*.jsonl",
+        ".pi/memory/export/*.md",
+        ".pi/memory/pending.jsonl",
+        ".pi/memory/injection_log.jsonl",
+        ".pi/APPEND_SYSTEM.md"
+      ],
+      "root": "workspace"
+    }
+  },
+  "engines": {
+    "piDesktop": ">=0.1.0"
+  },
+  "activationEvents": [
+    "onStartup",
+    "onCommand:pi-memory.open"
+  ]
+}

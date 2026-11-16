@@ -1346,6 +1346,31 @@
   padding: 3px 10px 3px 4px;
 }
 
+.review-line-feedback {
+  display: inline-flex;
+  flex: 0 0 24px;
+  align-items: center;
+  justify-content: center;
+  margin: 2px 4px 2px 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ds-text-faint);
+  opacity: 0;
+  cursor: pointer;
+}
+
+.review-change-diff .diff-line:hover .review-line-feedback,
+.review-line-feedback:focus-visible {
+  opacity: 1;
+}
+
+.review-line-feedback:hover,
+.review-line-feedback:focus-visible {
+  background: var(--ds-surface-hover);
+  color: var(--ds-text-primary);
+}
+
 .review-change-diff .diff-line.add {
   background: color-mix(in oklab, var(--ds-success) 14%, transparent);
 }
@@ -1384,6 +1409,30 @@
   background: var(--ds-tile);
   padding: 12px 14px;
 }
+
+.turn-artifacts-card {
+  width: min(100%, var(--chat-prose-max-width, 720px));
+  margin: 10px 0 6px;
+  overflow: hidden;
+  border: 1px solid color-mix(in oklab, var(--ds-border) 75%, transparent);
+  border-radius: var(--radius-md);
+  background: var(--ds-tile);
+}
+.turn-artifacts-heading { display: flex; align-items: center; gap: 8px; padding: 9px 11px; color: var(--ds-text-secondary); font-size: var(--text-sm); }
+.turn-artifacts-heading strong { color: var(--ds-text-primary); font-weight: var(--font-weight-semibold); }
+.turn-artifacts-heading span { margin-left: auto; color: var(--ds-text-muted); font-size: var(--text-xs-plus); }
+.turn-artifacts-all { border: 0; background: transparent; color: var(--ds-accent); font-size: var(--text-xs-plus); cursor: pointer; }
+.turn-artifacts-all:hover { text-decoration: underline; }
+.turn-artifacts-list { display: flex; flex-direction: column; border-top: 1px solid var(--ds-border-subtle); }
+.turn-artifact-row { display: flex; min-width: 0; align-items: center; gap: 8px; padding: 7px 10px; }
+.turn-artifact-row + .turn-artifact-row { border-top: 1px solid var(--ds-border-subtle); }
+.turn-artifact-open { display: flex; min-width: 0; flex: 1; flex-direction: column; align-items: flex-start; border: 0; background: transparent; color: var(--ds-text-primary); text-align: left; cursor: pointer; }
+.turn-artifact-open strong, .turn-artifact-open span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.turn-artifact-open span { color: var(--ds-text-muted); font-size: var(--text-xs-plus); }
+.turn-artifact-open:disabled { cursor: default; opacity: .65; }
+.turn-artifact-evidence { flex: 0 0 auto; color: var(--ds-text-muted); font-size: var(--text-xs); }
+.turn-artifact-reveal { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--ds-text-secondary); padding: 5px; cursor: pointer; }
+.turn-artifact-reveal:hover { background: var(--ds-hover); color: var(--ds-text-primary); }
 
 .turn-outcome-card.failed {
   background: color-mix(in oklab, var(--ds-error) 7%, transparent);
@@ -1683,6 +1732,16 @@
 .message-meta-chip.model {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Which runtime produced the reply has to be readable at a glance, so the
+   engine badge is slightly stronger than the model chip but still quiet. */
+.message-meta-engine {
+  font-weight: var(--font-weight-semibold);
+}
+
+.message-meta-engine[data-engine="omp"] {
+  background: color-mix(in oklab, var(--ds-text-primary) 12%, transparent);
 }
 
 /* Turn usage capsule: the completed turn's speed and total stay visible; the
@@ -2782,7 +2841,8 @@
 }
 
 /* Nodes are raised tiles on the group's tile; connectors are tinted 2px bars
-   rather than hairlines, and the dotted canvas is gone (D297). */
+   rather than hairlines, and the dotted canvas is gone (D297). Keep a 72px
+   minimum so the 36px trunk insets still reach the center of short cards. */
 .subagent-topology {
   display: grid;
   min-width: 0;
@@ -2869,6 +2929,7 @@
 .subagent-topology-node {
   position: relative;
   min-width: 0;
+  min-height: 72px;
   margin: 0;
   border-radius: var(--radius-md);
   background: var(--ds-raised);
@@ -2877,10 +2938,11 @@
 
 .subagent-topology-node::before {
   position: absolute;
-  top: 35px;
+  top: 50%;
   right: 100%;
   width: 15px;
   height: 2px;
+  transform: translateY(-50%);
   background: var(--ds-tile-deep);
   content: "";
 }
@@ -2910,6 +2972,47 @@
 .subagent-topology-node-actions {
   position: relative;
 }
+
+.omp-batch-child-agents {
+  display: grid;
+  max-height: 260px;
+  gap: 4px;
+  overflow: auto;
+  padding: 0 8px 8px;
+}
+
+.omp-batch-child-agent {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid var(--ds-border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+  background: var(--ds-raised);
+  color: var(--ds-text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.omp-batch-child-agent:hover { background: var(--ds-bg-hover); }
+.omp-batch-child-agent:focus-visible { outline: 2px solid var(--ds-accent); outline-offset: 1px; }
+.omp-batch-child-agent-name { overflow: hidden; font-size: var(--text-xs); text-overflow: ellipsis; white-space: nowrap; }
+.omp-batch-child-agent small { overflow: hidden; color: var(--ds-text-muted); font-size: var(--text-2xs); text-overflow: ellipsis; white-space: nowrap; }
+
+.omp-subagent-turn-card { overflow: hidden; }
+.omp-subagent-turn-card-header { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 10px; border-bottom: 1px solid var(--ds-border-subtle); padding: 10px 12px; }
+.omp-subagent-turn-card-heading { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
+.omp-subagent-turn-card-heading strong { overflow: hidden; color: var(--ds-text-primary); font-size: var(--text-sm); text-overflow: ellipsis; white-space: nowrap; }
+.omp-subagent-turn-card-heading > span { overflow-wrap: anywhere; color: var(--ds-text-muted); font-size: var(--text-xs); }
+.omp-subagent-turn-card-unknown { flex: none; color: var(--ds-warning); font-size: var(--text-xs); }
+.omp-subagent-turn-agents { display: grid; min-width: 0; gap: 2px; padding: 4px 8px 8px; }
+.omp-subagent-turn-agent { min-width: 0; border-bottom: 1px solid var(--ds-border-subtle); }
+.omp-subagent-turn-agent:last-of-type { border-bottom: 0; }
+.omp-subagent-turn-agent .subagent-topology-node-header { min-height: 0; border-radius: var(--radius-sm); padding: 7px 8px; }
+.omp-subagent-turn-more { min-height: 30px; margin: 4px 0 0; border: 1px solid var(--ds-border-subtle); border-radius: var(--radius-sm); background: var(--ds-raised); color: var(--ds-text-secondary); cursor: pointer; font-size: var(--text-xs); }
+.omp-subagent-turn-more:hover { background: var(--ds-bg-hover); color: var(--ds-text-primary); }
+.omp-subagent-turn-empty { margin: 0; padding: 10px 12px; color: var(--ds-text-muted); font-size: var(--text-xs); }
 
 .subagent-topology-node-actions > .subagent-stop-button {
   position: absolute;
@@ -3067,10 +3170,14 @@
 }
 
 .subagent-topology-node-status {
-  flex: none;
+  width: 14ch;
+  max-width: 14ch;
+  flex: 0 0 14ch;
+  overflow: hidden;
   color: var(--ds-text-muted);
   font-family: var(--font-mono);
   font-size: var(--text-2xs);
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -3091,6 +3198,18 @@
 
 .subagent-topology-node-summary {
   margin-top: 4px;
+}
+
+.subagent-topology-node-activity {
+  display: block;
+  min-width: 0;
+  margin-top: 3px;
+  overflow: hidden;
+  color: var(--ds-accent);
+  font-size: var(--text-2xs);
+  line-height: var(--leading-normal);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .subagent-topology-node-steps {
@@ -4218,3 +4337,7 @@
     opacity: 0.7;
   }
 }
+.omp-inline-images { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.omp-inline-images img { display: block; max-width: min(100%, 560px); max-height: 420px; object-fit: contain; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--surface-1); }
+.omp-inline-image-block { display: block; margin: 8px 0; }
+.omp-inline-image-block img { display: block; max-width: min(100%, 560px); max-height: 420px; object-fit: contain; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--surface-1); }

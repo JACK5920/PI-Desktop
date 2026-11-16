@@ -1,5 +1,6 @@
 import { constants as bufferConstants } from "node:buffer";
 import { spawn } from "node:child_process";
+import { constants as osConstants } from "node:os";
 import { StringDecoder } from "node:string_decoder";
 import type { ExtensionExecOptions, ExtensionExecResult } from "./runner.js";
 
@@ -41,7 +42,7 @@ export function managedExec(command: string, args: string[], cwd: string,
     let settled = false;
     let killTimer: ReturnType<typeof setTimeout> | undefined;
     let timeout: ReturnType<typeof setTimeout> | undefined;
-    const finish = (error?: unknown, code?: number | null) => {
+    const finish = (error?: unknown, code?: number | null, exitSignal?: NodeJS.Signals | null) => {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
@@ -57,7 +58,8 @@ export function managedExec(command: string, args: string[], cwd: string,
         stderr += stderrDecoder.end();
       }
       if (spawnError && !stderr) stderr = spawnError.message;
-      const exitCode = code ?? (killed ? 143 : spawnError ? 1 : 0);
+      const signalNumber = exitSignal ? osConstants.signals[exitSignal] : undefined;
+      const exitCode = code ?? (signalNumber ? 128 + signalNumber : killed ? 143 : 1);
       // A truncated result must never read as success.
       resolve({ stdout, stderr, code: truncated && exitCode === 0 ? 1 : exitCode, killed, truncated });
     };
@@ -115,6 +117,6 @@ export function managedExec(command: string, args: string[], cwd: string,
         finish(undefined, 1);
       } else finish(error);
     });
-    child.once("close", (code) => finish(undefined, code));
+    child.once("close", (code, exitSignal) => finish(undefined, code, exitSignal));
   });
 }

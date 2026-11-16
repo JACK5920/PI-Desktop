@@ -34,7 +34,7 @@ test("user turns keep a compact right-aligned plate", () => {
   // percentage chip cap cannot stretch it to the 82%/600px ceiling.
   assert.match(
     userBubbleStyles,
-    /width:\s*max-content;[\s\S]*?max-width:\s*100%;[\s\S]*?background:\s*color-mix\(in oklab,\s*var\(--ds-text-primary\) 8%,\s*transparent\);/,
+    /width:\s*max-content;[\s\S]*?max-width:\s*100%;[\s\S]*?background:\s*var\(--ds-user-bubble-bg\);/,
   );
   assert.doesNotMatch(userBubbleStyles, /var\(--ds-accent\)/);
 });

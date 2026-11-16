@@ -131,7 +131,7 @@ test("a development build takes its own userData before the single-instance lock
 
 test("main resolves one data directory and publishes it to everything below", () => {
   assert.match(installationSource, /const defaultDataDir = desktopDataDir\(isDevelopmentBuild\);/);
-  assert.match(entrySource, /prepareStorage\(defaultDataDir, !singleInstanceRequired\)/);
+  assert.match(entrySource, /prepareStorage\(defaultDataDir, storageOverridden\)/);
   assert.match(indexSource, /const storage = getStorageBootstrap\(\);/);
   assert.match(indexSource, /const dataDir = storage\.preferences\.roots\.data;/);
   // The plugin runtime resolves this root from the environment rather than
@@ -139,13 +139,14 @@ test("main resolves one data directory and publishes it to everything below", ()
   assert.match(indexSource, /process\.env\.PI_DESKTOP_DATA_DIR = dataDir;/);
   assert.doesNotMatch(indexSource, /join\(homedir\(\), "\.pi-desktop"\)/);
 
-  // Publishing happens after the lock verdict, which reads the same variable:
-  // moving the write above `singleInstanceRequired` would make every launch
-  // look like it had been given an explicit data directory and skip the lock.
+  // The same resolved profile controls Electron's lock. Explicit data-dir
+  // overrides must not disable the lock: two launches pointed at one profile
+  // would otherwise both start writers and child processes.
   const lockVerdict = installationSource.indexOf(
-    "const singleInstanceRequired = !process.env.PI_DESKTOP_DATA_DIR;",
+    "const hasSingleInstanceLock = app.requestSingleInstanceLock();",
   );
   assert.ok(lockVerdict > 0);
+  assert.match(entrySource, /if \(hasSingleInstanceLock\)/);
   assert.doesNotMatch(installationSource, /process\.env\.PI_DESKTOP_DATA_DIR = dataDir;/);
   assert.match(entrySource, /from ["']\.\/installation["']/);
   assert.match(entrySource, /\.then\([\s\S]*?import\(["']\.\/index["']\)/);

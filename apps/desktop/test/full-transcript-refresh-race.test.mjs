@@ -22,6 +22,25 @@ test("late full-history read cannot replace a newer streaming cache", async t =>
   assert.equal(runtime.sessionTranscriptCache.get("session"), newer);
 });
 
+test("late session-detail read merges an edit that landed while the read was pending", async t => {
+  const before = { id: "user-1", role: "user", content: "before edit" };
+  const after = { id: "user-1", role: "user", content: "after edit" };
+  const next = { id: "assistant-1", role: "assistant", content: "new answer", status: "streaming" };
+  const state = { activeSessionId: "other", messages: [], retainedTranscripts: {}, runningSessions: {} };
+  const runtime = createSessionRuntime({ get: () => state, set() {} });
+  runtime.cacheSessionTranscript("session", [before]);
+  let finish;
+  t.mock.method(api, "getSession", () => new Promise(resolve => { finish = resolve; }));
+
+  const reading = runtime.loadSessionDetail("session", { messageLimit: 100, contentLimit: 64 * 1024 });
+  runtime.cacheSessionTranscript("session", [after, next]);
+  finish({ session: { messages: [before], messageStart: 0, hasMoreBefore: false } });
+
+  const detail = await reading;
+  assert.deepEqual(detail.session.messages, [after, next]);
+  assert.deepEqual(runtime.sessionTranscriptCache.get("session"), [after, next]);
+});
+
 test("unchanged full-history reads populate the cache, while uncached reads leave it alone", async t => {
   const state = { activeSessionId: "session", messages: [], retainedTranscripts: {}, runningSessions: {} };
   const runtime = createSessionRuntime({ get: () => state, set() {} });

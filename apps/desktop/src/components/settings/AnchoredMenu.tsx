@@ -202,7 +202,7 @@ export function AnchoredMenu({
         return;
       }
       const current = menu.querySelector<HTMLElement>(
-        '[aria-selected="true"]:not([disabled])',
+        '[aria-selected="true"]:not([disabled]), [aria-checked="true"]:not([disabled])',
       );
       const target =
         current ?? menu.querySelector<HTMLElement>("button:not([disabled])");

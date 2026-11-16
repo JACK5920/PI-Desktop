@@ -37,7 +37,7 @@ test("the capsule renders only from turn usage and replaces the legacy chip", ()
   assert.match(capsule, /chat\.usageThroughputEstimated/);
   assert.match(shared, /const showThroughput = !usage && throughput !== undefined/);
   assert.match(shared, /showThroughput \? \(/);
-  assert.match(shared, /!modelId && !showThroughput && !showTurnUsage/);
+  assert.match(shared, /!engine && !displayModel && !showThroughput && !showTurnUsage/);
 });
 
 test("the capsule wires hover, focus, grace close, Escape, and outside press", () => {

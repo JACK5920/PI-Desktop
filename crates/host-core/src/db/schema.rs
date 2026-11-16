@@ -118,6 +118,10 @@ CREATE TABLE sessions (
   provider_id TEXT,
   model_id    TEXT,
   mode        TEXT NOT NULL DEFAULT 'agent',
+  -- The engine a conversation runs on is part of its own identity: switching
+  -- engines inside a chat must not follow the app-wide default into other
+  -- conversations. NULL keeps following that default until the user switches.
+  agent_engine TEXT CHECK (agent_engine IN ('pi', 'omp')),
   title_source TEXT NOT NULL DEFAULT 'legacy'
                CHECK (title_source IN ('legacy', 'default', 'manual', 'generated')),
   thinking_level TEXT NOT NULL DEFAULT 'off'
@@ -273,6 +277,24 @@ CREATE TABLE artifacts (
 ) WITHOUT ROWID;
 CREATE INDEX idx_artifacts_time ON artifacts(updated_at DESC);
 
+CREATE TABLE artifact_events (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  turn_id TEXT,
+  tool_call_id TEXT,
+  path TEXT NOT NULL,
+  previous_path TEXT,
+  op TEXT NOT NULL,
+  source TEXT NOT NULL,
+  confidence TEXT NOT NULL,
+  exists_after INTEGER NOT NULL,
+  size_bytes INTEGER,
+  sha256 TEXT,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX idx_artifact_events_session_time ON artifact_events(session_id, created_at DESC, id);
+CREATE INDEX idx_artifact_events_turn ON artifact_events(session_id, turn_id, created_at DESC);
+
 CREATE TABLE message_revisions (
   id              TEXT PRIMARY KEY,
   session_id      TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
@@ -398,6 +420,9 @@ CREATE TABLE IF NOT EXISTS goal_lifecycles (
   tokens_used           INTEGER NOT NULL DEFAULT 0 CHECK (tokens_used >= 0),
   elapsed_ms            INTEGER NOT NULL DEFAULT 0 CHECK (elapsed_ms >= 0),
   cycle_started_at      INTEGER NOT NULL DEFAULT 0 CHECK (cycle_started_at >= 0),
+  objective_title       TEXT NOT NULL DEFAULT '',
+  objective_markdown    TEXT NOT NULL DEFAULT '',
+  objective_revision    INTEGER NOT NULL DEFAULT 1 CHECK (objective_revision > 0),
   stop_reason           TEXT,
   latest_report_json    TEXT,
   created_at            INTEGER NOT NULL,

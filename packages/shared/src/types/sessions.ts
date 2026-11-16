@@ -6,6 +6,7 @@ import type { PermissionMode } from "./permissions.js";
 import type { UiMessage } from "./messages.js";
 import type { PlanHistoryEntry, PlanningState } from "./plans.js";
 import type { SessionWorktreeSummary } from "./worktree.js";
+import type { AgentEngineId } from "../agent-engine-registry.mjs";
 
 /**
  * Which authority owns a session's transcript.
@@ -56,6 +57,12 @@ export type SessionSummary = {
   modelId?: string;
   providerId?: string;
   mode: Mode;
+  /**
+   * Agent engine pinned to this conversation. Missing means the conversation
+   * still follows the app-wide default: every chat created before engines were
+   * per-conversation, and any chat the user has never switched inside.
+   */
+  agentEngine?: AgentEngineId;
   thinkingLevel: SessionThinkingLevel;
   /** Per-session permission mode; `inherit` follows the global default (D115). */
   permissionMode: PermissionMode;

@@ -23,6 +23,10 @@ import { ImageHoverCard, type ImageHoverAnchor } from "../../../components/Image
 import { useDisclosureAnchorNotifier } from "../../../lib/disclosure-anchor-context";
 import { isThinkingActive } from "../../../lib/turn-process";
 import { resolveShowThinking } from "../../../lib/thinking-visibility";
+import {
+  resolveTranscriptDisplayMode,
+  shouldAutoOpenThinking,
+} from "../../../lib/transcript-display-mode";
 import { TranscriptSearchContext } from "../../../lib/transcript-search-context";
 import { useSlotSessionId } from "../../../plugins/renderer-slots/use-slots";
 import { disclosureKey, useAutomaticDisclosure } from "./disclosure";
@@ -160,6 +164,7 @@ export function CopyButton({
   );
 }
 export function MessageMeta({
+  engine,
   modelId,
   responseModelId,
   usage,
@@ -167,6 +172,7 @@ export function MessageMeta({
   responseOutputTokens,
   responseOutputEstimated,
 }: {
+  engine?: "pi" | "omp";
   modelId?: string;
   responseModelId?: string;
   usage?: MessageUsage;
@@ -184,19 +190,27 @@ export function MessageMeta({
   const showTurnUsage =
     usage !== undefined && turnUsageBreakdown(usage).totalTokens > 0;
   const showThroughput = !usage && throughput !== undefined;
-  if (!modelId && !showThroughput && !showTurnUsage) {
+  const displayModel = modelId ?? responseModelId;
+  if (!engine && !displayModel && !showThroughput && !showTurnUsage) {
     return null;
   }
   return (
     <div className="message-meta">
-      {modelId ? (
-        responseModelId ? (
+      {engine ? (
+        <span className="message-meta-chip message-meta-engine" data-engine={engine}>
+          {t(engine === "omp" ? "settings.omp.engineOmp" : "settings.omp.enginePi")}
+        </span>
+      ) : null}
+      {displayModel ? (
+        modelId && responseModelId ? (
           <span className="message-meta-chip model"
             title={t("chat.servedByModel", { requested: modelId, served: responseModelId })}
             aria-label={t("chat.servedByModel", { requested: modelId, served: responseModelId })}>
             {responseModelId}
           </span>
-        ) : <span className="message-meta-chip model" title={modelId}>{modelId}</span>
+        ) : (
+          <span className="message-meta-chip model" title={displayModel}>{displayModel}</span>
+        )
       ) : null}
       {usage && showTurnUsage ? (
         <TurnUsageCapsule
@@ -709,7 +723,12 @@ export const ThinkingRow = memo(function ThinkingRow({
   const { t } = useTranslation();
   const detailsId = useId();
   const revealRequest = useMessageRevealRequest(message.id);
-  const disclosure = useAutomaticDisclosure(autoOpen, revealRequest, disclosureKey("thinking", message.id));
+  const transcriptDisplayMode = useAppStore((state) => resolveTranscriptDisplayMode(state.settings));
+  const disclosure = useAutomaticDisclosure(
+    shouldAutoOpenThinking(autoOpen, transcriptDisplayMode),
+    revealRequest,
+    disclosureKey("thinking", message.id),
+  );
   const { open, toggle: toggleDisclosure, collapse: collapseDisclosure } = disclosure;
   const titleRef = disclosure.titleRef;
   const toggleRow = useCallback(() => {

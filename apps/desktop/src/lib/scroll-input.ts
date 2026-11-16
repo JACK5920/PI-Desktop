@@ -56,6 +56,10 @@ export function readScrollInputContext(
       nearestOwner !== owner &&
       consumesVerticalScroll(nearestOwner),
   };
+  if (event.type === "wheel" && "deltaX" in event && "deltaY" in event) {
+    context.deltaX = Number(event.deltaX);
+    context.deltaY = Number(event.deltaY);
+  }
   if (event instanceof KeyboardEvent) {
     context.key = event.key;
     context.editable =

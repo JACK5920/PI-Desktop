@@ -1,11 +1,11 @@
 use super::{create_migration_backup, Connection, Context, Path, Result, GOAL_LIFECYCLE_SCHEMA};
 use rusqlite::Transaction;
 
-/// Schema v28 stores mutable Goal lifecycle and per-run checkpoints outside
-/// the immutable Plan/Goal approval row. Existing Goal executions have no
-/// criterion-level evidence, so they are retained as interrupted and require
-/// an explicit user resume rather than being reported complete or replayed.
-fn migrate_v27_to_v28_tx(tx: &Transaction<'_>) -> Result<()> {
+/// Reconstruct the derived Goal lifecycle tables and safely backfill any
+/// approved Goal execution represented by the durable approval rows. This is
+/// shared by the v27 migration and the repair path for older databases whose
+/// schema version advanced without those tables.
+pub(crate) fn ensure_goal_lifecycle_schema_tx(tx: &Transaction<'_>) -> Result<()> {
     tx.execute_batch(GOAL_LIFECYCLE_SCHEMA)?;
     tx.execute_batch(
         "INSERT INTO goal_lifecycles (
@@ -43,6 +43,15 @@ fn migrate_v27_to_v28_tx(tx: &Transaction<'_>) -> Result<()> {
          JOIN goal_lifecycles lifecycle ON lifecycle.proposal_id = approval.request_id
          ON CONFLICT(execution_id) DO NOTHING;",
     )?;
+    Ok(())
+}
+
+/// Schema v28 stores mutable Goal lifecycle and per-run checkpoints outside
+/// the immutable Plan/Goal approval row. Existing Goal executions have no
+/// criterion-level evidence, so they are retained as interrupted and require
+/// an explicit user resume rather than being reported complete or replayed.
+fn migrate_v27_to_v28_tx(tx: &Transaction<'_>) -> Result<()> {
+    ensure_goal_lifecycle_schema_tx(tx)?;
     tx.pragma_update(None, "user_version", 28i64)?;
     Ok(())
 }

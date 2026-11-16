@@ -68,6 +68,12 @@ it("resolves a missing executable as a failed command with the spawn error", asy
   expect(result.stderr).toContain("ENOENT");
 });
 
+it.skipIf(process.platform === "win32")("reports an externally signal-terminated command as failed", async () => {
+  const owner = new AbortController();
+  const result = await managedExec(process.execPath, ["-e", "process.kill(process.pid, 'SIGKILL')"], tmpdir(), owner.signal);
+  expect(result).toMatchObject({ code: 137, killed: false, truncated: false });
+});
+
 it("rejects an invalid maxBuffer before spawning", () => {
   const owner = new AbortController();
   expect(() => managedExec(process.execPath, ["-e", ""], tmpdir(), owner.signal, { maxBuffer: -1 })).toThrow(RangeError);

@@ -58,9 +58,9 @@ test("pending input is retained but every composer/model mutation control is gat
   assert.match(composer, /disabled=\{controlsBlocked\}/);
   assert.match(
     composer,
-    /const controlsBlocked = approvalPending \|\| nativeSession \|\| !sessionAllows\(capabilitySession, "canConfigureModel"\);/,
+    /const controlsBlocked = agentEngine === "omp"\s*\?\s*nativeSession \|\| remoteSession \|\| isRunning\s*:\s*approvalPending \|\| nativeSession \|\| !sessionAllows\(capabilitySession, "canConfigureModel"\);/,
   );
-  assert.match(composer, /const sendBlocked = approvalPending \|\| pasting \|\| nativeInputBlocked;/);
+  assert.match(composer, /const sendBlocked = \(agentEngine !== "omp" && approvalPending\) \|\| pasting \|\| nativeInputBlocked \|\| agentEngineIssueMessage !== null;/);
   assert.match(store, /pendingPlans\[sessionId\]\?\.status === "pending"/);
   assert.match(store, /pendingPlans\[resolution\.sessionId\]/);
 });

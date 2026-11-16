@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "mcpServers": {
+    "minimax-bot": {
+      "type": "streamable-http",
+      "url": "http://127.0.0.1:9/mcp/minimax-bot",
+      "headers": {},
+      "description": "MiniMax Bot 团队工具：查看和管理 Bot、群聊，给其他 Bot 发消息，读写 Bot 记忆。",
+      "timeout": 900000
+    }
+  }
+}

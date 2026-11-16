@@ -277,7 +277,7 @@ test("expanded assistant activity rails collapse their disclosures", () => {
   assert.match(stylesSource, /\.disclosure-collapse-rail:focus-visible\s*\{/);
 });
 
-test("tool and search rows stay collapsed while thinking keeps its leaf default", () => {
+test("tool and search rows stay collapsed and thinking honors fully-folded defaults", () => {
   assert.match(transcriptDisclosureSource, /export function useAutomaticDisclosure\(/);
   assert.match(transcriptDisclosureSource, /revealRequest\?: number/);
   assert.match(transcriptDisclosureSource, /const currentOpen = useRef\(open\)/);
@@ -290,8 +290,8 @@ test("tool and search rows stay collapsed while thinking keeps its leaf default"
     transcriptSource,
     /<ThinkingRow[\s\S]*?\n\s*autoOpen\n/,
   );
-  // The leaf default stays with thinking only; a tool, hosted-search or plan
-  // row waits for an explicit user action in either mode.
+  // The leaf auto-open request stays with thinking only; the ThinkingRow
+  // resolves it against transcript mode, while other activity waits for action.
   assert.doesNotMatch(transcriptSource, /autoOpenLatest/);
   assert.doesNotMatch(transcriptSource, /<ToolRow[^>]*\sautoOpen/);
   assert.match(transcriptToolRowSource, /const disclosure = useAutomaticDisclosure\(\s*false,\s*revealRequest,\s*disclosureKey\("tool", message\.id\),\s*\);/);

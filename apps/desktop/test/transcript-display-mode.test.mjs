@@ -5,6 +5,7 @@ register(new URL("./helpers/ts-import-hooks.mjs", import.meta.url));
 const {
   isTranscriptDisplayMode,
   resolveTranscriptDisplayMode,
+  shouldAutoOpenThinking,
 } = await import("../src/lib/transcript-display-mode.ts");
 
 test("transcript display mode defaults to the released fully-folded layout", () => {
@@ -41,4 +42,11 @@ test("the deprecated command-folding preference cannot select a mode", () => {
   assert.equal(isTranscriptDisplayMode("command-first"), true);
   assert.equal(isTranscriptDisplayMode("fully-folded"), true);
   assert.equal(isTranscriptDisplayMode("compact"), false);
+});
+
+test("fully-folded mode keeps thinking disclosures closed by default", () => {
+  assert.equal(shouldAutoOpenThinking(true, "fully-folded"), false);
+  assert.equal(shouldAutoOpenThinking(false, "fully-folded"), false);
+  assert.equal(shouldAutoOpenThinking(true, "flat"), true);
+  assert.equal(shouldAutoOpenThinking(true, "command-first"), true);
 });

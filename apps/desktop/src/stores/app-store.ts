@@ -25,6 +25,7 @@ import {
 } from "../lib/sidebar-session-status";
 import {
   projectWorkspaceFromPath,
+  readLastOpenedSessionId,
   saveSidebarPreferences,
 } from "../lib/sidebar-preferences";
 import {
@@ -486,17 +487,33 @@ export const useAppStore = create<AppState>((set, get) => {
           branch: currentWorkspace.branch,
         });
       }
-      // Codex opens an empty draft home ("What can I help you build?") rather than
-      // restoring a prior transcript as the first paint. A live host plan is
-      // the exception: its owning session must be visible so approval can be
-      // restored after a renderer reload.
+      // Reopen the most recent conversation instead of a blank home: the model
+      // chip and the work-panel toggle are bound to a session, so an empty first
+      // paint leaves both disabled until the user starts typing. A live host
+      // plan still outranks the restore because its approval must be visible.
       const livePlanSessionId = activePendingPlans[0]?.sessionId;
-      if (livePlanSessionId) {
+      // Reopen the conversation the window was actually showing. Falling back
+      // to the most recently updated session jumped to whichever project had
+      // the newest activity, even when the user had been in a temporary chat.
+      const lastOpenedId = readLastOpenedSessionId();
+      const lastOpened = lastOpenedId
+        ? hydratedSessions.find((session) => session.id === lastOpenedId)
+        : undefined;
+      const restoreTarget = livePlanSessionId
+        ? hydratedSessions.find((session) => session.id === livePlanSessionId)
+        : lastOpened ??
+          sessionRuntime.latestSessionInScope(
+            hydratedSessions,
+            currentWorkspace?.path ?? null,
+            get().sessionMeta,
+          );
+      if (restoreTarget && !restoreTarget.id.startsWith("remote:")) {
+        await get().selectSession(restoreTarget.id);
+      } else if (livePlanSessionId) {
         await get().selectSession(livePlanSessionId);
       } else {
-        // App startup keeps the home composer unpersisted. Explicit New Task
-        // actions use the durable empty-session slot below, but launch itself
-        // must not create a history row merely because the app was opened.
+        // Nothing to restore yet: keep the home composer unpersisted so launch
+        // never creates a history row merely because the app was opened.
         set((s) => {
           const stack = s.navStack.slice(0, s.navIndex + 1);
           const nextStack = [...stack, { page: "chat" as const }].slice(-50);

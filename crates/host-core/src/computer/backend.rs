@@ -9,7 +9,6 @@
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-
 use super::{Action, Capabilities, Fidelity, Node, PermissionState, Rect};
 
 #[cfg(target_os = "windows")]
@@ -286,7 +285,10 @@ impl Desktop for UnsupportedDesktop {
 /// registry is consulted too, and that one is live.
 fn cua_backend_requested() -> bool {
     fn accepted(value: &str) -> bool {
-        matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "on")
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "on"
+        )
     }
 
     if let Ok(value) = std::env::var("CUA_DRIVER_BACKEND") {
@@ -309,7 +311,10 @@ fn cua_backend_requested() -> bool {
 fn read_user_env(name: &str) -> Option<String> {
     use windows_sys::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_SZ};
 
-    let subkey: Vec<u16> = "Environment".encode_utf16().chain(std::iter::once(0)).collect();
+    let subkey: Vec<u16> = "Environment"
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
     let value: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
     let mut buffer = [0u16; 256];
     let mut size = std::mem::size_of_val(&buffer) as u32;
@@ -364,17 +369,13 @@ impl Desktop for ArcDesktop {
         max_nodes: usize,
         allow: bool,
     ) -> Result<RawInspection, DesktopError> {
-        self.0.inspect_with_sensitive_input(target, max_nodes, allow)
+        self.0
+            .inspect_with_sensitive_input(target, max_nodes, allow)
     }
     fn secure_input_active(&self) -> bool {
         self.0.secure_input_active()
     }
-    fn confirm_write(
-        &self,
-        target: &TargetRef,
-        uid: Option<&str>,
-        expected: &str,
-    ) -> Option<bool> {
+    fn confirm_write(&self, target: &TargetRef, uid: Option<&str>, expected: &str) -> Option<bool> {
         // The adapter has to forward this one. Without it the wrapper answers
         // the trait's default -- "the backend cannot tell" -- while the
         // backend underneath can, and a confirmed write is reported as an
@@ -396,7 +397,8 @@ impl Desktop for ArcDesktop {
         action: &Action,
         allow: bool,
     ) -> Result<Dispatched, DesktopError> {
-        self.0.perform_with_sensitive_input(target, uid, action, allow)
+        self.0
+            .perform_with_sensitive_input(target, uid, action, allow)
     }
     fn self_pids(&self) -> Vec<i32> {
         self.0.self_pids()
@@ -531,13 +533,19 @@ mod tests {
         // A typo must not silently switch the backend under the user.
         for value in ["1", "true", "on", "TRUE", " On ", "1\n"] {
             assert!(
-                matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "on"),
+                matches!(
+                    value.trim().to_ascii_lowercase().as_str(),
+                    "1" | "true" | "on"
+                ),
                 "{value:?} should be accepted"
             );
         }
         for value in ["0", "false", "off", "", "yes", "enable"] {
             assert!(
-                !matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "on"),
+                !matches!(
+                    value.trim().to_ascii_lowercase().as_str(),
+                    "1" | "true" | "on"
+                ),
                 "{value:?} must not enable the bridge"
             );
         }
@@ -576,7 +584,9 @@ mod tests {
             .any(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "on"));
         eprintln!(
             "process={:?} registry={:?} -> requested={}",
-            from_process, from_registry, cua_backend_requested()
+            from_process,
+            from_registry,
+            cua_backend_requested()
         );
         assert_eq!(cua_backend_requested(), expected);
     }

@@ -44,6 +44,14 @@ export function useChatFileMenuItems() {
   const copyFileRef = useCopyChatFileRef();
   return useCallback(
     ({ path, baseDir }: ChatFileMenuTarget): ContextMenuItem[] => [
+      ...(nativeFilesAllowed
+        ? [{
+            id: "open-with-system-default",
+            label: t("chat.openWithDefaultApplication"),
+            icon: <IconExternal size={14} />,
+            onSelect: () => openFileRef(path, baseDir, undefined, { destination: "default-application" }),
+          }]
+        : []),
       ...(nativeFilesAllowed && isHtmlFilePath(path)
         ? [{
             id: "open-with",

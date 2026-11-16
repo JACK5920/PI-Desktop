@@ -415,7 +415,7 @@ describe("pi-ai hosted web search: streaming progress events", () => {
 
 describe("pi-agent-core hosted web search forwarding", () => {
   it("forwards hosted_search_update as message_update", async () => {
-    // Locks the agent-loop patch (patches/@earendil-works__pi-agent-core@0.87.1.patch):
+    // Locks the agent-loop patch (patches/@earendil-works__pi-agent-core@1.5.2.patch):
     // without it the loop's switch drops the event and search rounds render only
     // after the whole turn finishes.
     const { agentLoop } = await import("@earendil-works/pi-agent-core");

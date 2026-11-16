@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "name": "minimax-bot",
+  "displayName": "MiniMax Bot",
+  "version": "0.7.24",
+  "description": "把 MiniMax Code 变成一支长期在线的 Bot 团队：主 Bot 帮你搭团队，群聊里管理员接话、@ 点名接力，每个 Bot 有自己的章鱼形象和记忆，支持定时任务与用量统计。",
+  "author": "MiniMax Code",
+  "icon": "icon.png",
+  "category": "Productivity",
+  "exampleQueries": [
+    "打开 MiniMax Bot，让 Chief 帮我组一个写作小团队",
+    "在 MiniMax Bot 里建一个群，让写手和程序员一起写技术博客",
+    "让 MiniMax Bot 每天早上 9 点整理一份行业新闻"
+  ],
+  "apps": [],
+  "mcpServers": [
+    "servers.mcp.json"
+  ],
+  "skills": []
+}

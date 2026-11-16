@@ -39,7 +39,14 @@ export type ComposerDraftSnapshot = {
 
 export type ComposerPrefill = ComposerDraftSnapshot & {
   sessionId: string;
+  /** Append text such as OMP dictation to the existing draft rather than replacing it. */
+  append?: boolean;
 };
+
+export function applyComposerPrefillText(current: string, next: string, append = false): string {
+  if (!append || !current.trim()) return next;
+  return `${current}${current.endsWith("\n") ? "" : "\n"}${next}`;
+}
 
 type AbortMessage = {
   role: string;

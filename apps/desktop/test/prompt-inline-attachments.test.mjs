@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -41,7 +41,7 @@ test("an image the draft named inline records that text and keeps its place", as
   assert.equal(appendPromptFallbackPaths(content, [prepared]), content);
 });
 
-test("an image past the pixel limit takes the path fallback instead of inline bytes", async (t) => {
+test("an image past the pixel limit stays transiently inlined for runtime adaptation", async (t) => {
   const { data, path } = await fixture(t);
   // A small, valid PNG header for a 780 x 14182 full-page screenshot (#1913).
   const tall = Buffer.from(png);
@@ -59,8 +59,9 @@ test("an image past the pixel limit takes the path fallback instead of inline by
   );
   assert.equal(prepared.message.kind, "image");
   assert.match(prepared.message.ref, /^attachments\//);
-  assert.equal(prepared.inlineData, undefined);
-  assert.ok(appendPromptFallbackPaths("look at this", [prepared]).includes(prepared.fallbackPath));
+  assert.equal(Buffer.from(prepared.inlineData, "base64").compare(tall), 0);
+  assert.deepEqual(await readFile(join(data, prepared.message.ref)), tall);
+  assert.equal(appendPromptFallbackPaths("look at this", [prepared]), "look at this");
 });
 
 test("an image the prompt does not name inline keeps the trailing position", async (t) => {

@@ -156,6 +156,9 @@ export type ScrollInputType =
 export type ScrollInputContext = {
   /** Pressed key, for a `keydown`. */
   key?: string;
+  /** Native wheel deltas, used to retire follow before the scroll event arrives. */
+  deltaX?: number;
+  deltaY?: number;
   /** The key event came from a field/select that owns its own key input. */
   editable?: boolean;
   /** The focused control consumes this key as activation or selection. */
@@ -211,4 +214,18 @@ export function isScrollGestureInput(
     return context.key !== undefined && SCROLL_GESTURE_KEYS.has(context.key);
   }
   return true;
+}
+
+/** Whether a valid input explicitly asks to move toward older content. */
+export function isUpwardScrollIntent(
+  type: ScrollInputType,
+  context: ScrollInputContext = {},
+): boolean {
+  if (context.nestedOwner) return false;
+  if (type === "wheel") {
+    return typeof context.deltaY === "number" && context.deltaY < 0 &&
+      Math.abs(context.deltaY) >= Math.abs(context.deltaX ?? 0);
+  }
+  if (type === "keydown") return ["ArrowUp", "PageUp", "Home"].includes(context.key ?? "");
+  return false;
 }

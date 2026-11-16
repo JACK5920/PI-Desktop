@@ -2584,3 +2584,56 @@ fn plugin_ui_meta_parses_the_floating_widget_placement() {
     assert!(panel.always_on_top.is_none());
     assert!(panel.resizable.is_none());
 }
+
+/// Every bundled plugin must survive the host's own validator.
+///
+/// `is_contrib_id` in this crate rejects dots, while the TypeScript SDK's
+/// `validateManifest()` accepts them. A manifest that passes the SDK can
+/// therefore fail `read_manifest` here, and `sync_builtin` then drops the row
+/// from the registry -- the plugin disappears from the UI with nothing in the
+/// logs. This walks the real `resources/plugins` directory so that mistake
+/// fails the suite instead of reaching a user.
+#[test]
+fn every_bundled_plugin_manifest_passes_the_host_validator() {
+    let shipped = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("apps")
+        .join("desktop")
+        .join("resources")
+        .join("plugins");
+    // A crates-only checkout ships no plugins, so there is nothing to guard.
+    let Ok(shipped) = shipped.canonicalize() else {
+        return;
+    };
+
+    let mut checked = 0usize;
+    let mut rejected = Vec::new();
+    let entries = std::fs::read_dir(&shipped).expect("the bundled plugin directory is readable");
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.join("manifest.json").exists() {
+            continue;
+        }
+        checked += 1;
+        if let Err(error) = PluginManager::read_manifest(&path) {
+            let name = path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            rejected.push(format!("{name}: {error}"));
+        }
+    }
+
+    assert!(
+        rejected.is_empty(),
+        "the host rejects these bundled manifests, so sync_builtin drops them \
+         from the registry without a word:\n{}",
+        rejected.join("\n")
+    );
+    assert!(
+        checked > 0,
+        "no bundled plugin was found under {}",
+        shipped.display()
+    );
+}

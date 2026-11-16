@@ -1,7 +1,13 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { IPC, type PluginScenicThemesDestinationMeta, type PluginViewMeta } from "@pi-desktop/shared";
-import { normalizeThemeAssetPath, pluginThemeId, resolvePluginLocalizedString, themeAssetUrl } from "@pi-desktop/plugin-sdk";
+import {
+  normalizeThemeAssetPath,
+  parseNetDomains,
+  pluginThemeId,
+  resolvePluginLocalizedString,
+  themeAssetUrl,
+} from "@pi-desktop/plugin-sdk";
 import type { BrowserHost } from "../browser-host";
 import { BROWSER_PLUGIN_ID, BROWSER_VIEW_ID } from "../browser-host";
 import type { PluginRuntime } from "../plugin-runtime";
@@ -156,6 +162,14 @@ export function registerPluginUiIpc({
         typeof request === "object" && request !== null
           ? normalizeLauncherLaunch(request)
           : undefined;
+      // `sandbox: true` removes Node, not the network. A panel is a full web
+      // page, so opening it without the manifest allowlist would hand the
+      // plugin an unmetered egress channel that never consults the `net.fetch`
+      // permission. The `ui.openPanel` API and contributed views already carry
+      // this grant; without it here the same panel behaved differently
+      // depending on who opened it.
+      const parsedDomains = parseNetDomains(manifest.net?.domains);
+      const netDomains = parsedDomains.ok ? (parsedDomains.domains ?? []) : [];
       await pluginPanels.open({
         pluginId,
         title: resolvePluginLocalizedString(
@@ -171,6 +185,9 @@ export function registerPluginUiIpc({
         width: manifest.ui.width ?? 480,
         height: manifest.ui.height ?? 360,
         htmlPath,
+        netDomains,
+        netAnyHost: loaded.permissions.has("net.anyHost"),
+        allowMicrophone: loaded.permissions.has("ui.microphone"),
         ...(launch ? { launch } : {}),
       });
       return { ok: true };

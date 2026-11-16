@@ -818,6 +818,24 @@ describe("classifyAgentError", () => {
       });
   });
 
+  it.each(["EXECONNRESET", "ETIMEDOUTX", "ERR_EPIPE_ID"])(
+    "does not treat an errno-like substring as a network code: %s",
+    (message) => {
+      expect(classifyAgentError(new Error(`provider returned ${message}`)).code)
+        .not.toBe("NETWORK_ERROR");
+    },
+  );
+
+  it.each([
+    "403 AccountOverdueError: overdue balance",
+    '403 {"code":"AccountOverdueError","message":"account overdue balance"}',
+  ])("treats Volcengine overdue-account failures as terminal: %s", (message) => {
+    expect(classifyAgentError(new Error(message))).toMatchObject({
+      code: "PROVIDER_ERROR",
+      retriable: false,
+    });
+  });
+
   it("names the failing layer behind a nested DNS cause", () => {
     const err = new TypeError("fetch failed");
     (err as any).cause = Object.assign(
@@ -1060,7 +1078,7 @@ describe("classifyAgentError", () => {
     // unbounded detail: the message is untrusted text.
     const flood = `EDNS${"A".repeat(3_000)}`;
     expect(describeNetworkFailure(flood, flood).code).toBeUndefined();
-    expect(classifyAgentError(flood).details).not.toHaveProperty("networkCode");
+    expect(classifyAgentError(flood).details ?? {}).not.toHaveProperty("networkCode");
 
     // A body word that merely contains "proxy" is not a proxy layer either.
     const bodyWord = Object.assign(new TypeError("fetch failed"), {

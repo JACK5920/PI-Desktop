@@ -652,6 +652,66 @@
   background: color-mix(in oklab, var(--ds-text-primary) 28%, transparent);
 }
 
+/*
+ * One slot per row: the row button opens a docked tab, the trailing action
+ * opens the same plugin as a standalone window. They are siblings because a
+ * button cannot legally nest another button.
+ */
+.work-panel-launcher-item {
+  position: relative;
+  /* A single-column grid makes the row fill the slot without needing a
+     width/flex rule on the row itself. */
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+  /* Rows are flex items of the scrollable list: keep them at their full 40px
+     so a constrained list scrolls instead of compressing the click targets. */
+  flex-shrink: 0;
+}
+
+/* Only rows that carry the hover action need the extra right inset, so the
+   other rows keep their original geometry. */
+.work-panel-launcher-row[data-has-window-action] {
+  padding-right: 34px;
+}
+
+.work-panel-launcher-window {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ds-text-secondary);
+  opacity: 0;
+  transition:
+    opacity var(--motion-duration-fast) var(--motion-ease-out),
+    background var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+/* Revealed on hover or when the row is reached by keyboard. */
+.work-panel-launcher-item:hover .work-panel-launcher-window,
+.work-panel-launcher-window:focus-visible {
+  opacity: 1;
+}
+
+.work-panel-launcher-window:hover {
+  background: var(--ds-bg-hover);
+  color: var(--ds-text-primary);
+}
+
+.work-panel-launcher-window:focus-visible {
+  outline: 2px solid var(--ds-focus);
+  outline-offset: -2px;
+}
+
 .work-panel-launcher-row {
   display: flex;
   min-width: 0;
@@ -1361,6 +1421,7 @@
 }
 
 .file-viewer {
+  position: relative;
   display: flex;
   min-height: 0;
   flex: 1;
@@ -1403,6 +1464,13 @@
   flex-direction: column;
 }
 
+/* Overrides the chat transcript's composer-height offset: this pane has no
+ * docked composer, so the jump button sits just above the file bottom. */
+.file-viewer-jump {
+  bottom: 16px;
+  z-index: 4;
+}
+
 .file-viewer-code {
   margin: 0;
   padding: 10px 12px 20px;
@@ -1435,3 +1503,18 @@
   max-height: 100%;
   border-radius: var(--radius-sm);
 }
+.artifacts-tab { display: flex; min-width: 0; height: 100%; flex-direction: column; }
+.artifacts-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px; border-bottom: 1px solid var(--ds-border-subtle); }
+.artifacts-heading { display: flex; align-items: baseline; gap: 8px; margin-right: auto; color: var(--ds-text-primary); }
+.artifacts-heading span { color: var(--ds-text-muted); font-size: var(--text-xs-plus); }
+.artifacts-search { display: flex; min-width: min(100%, 180px); flex: 1; align-items: center; gap: 6px; }
+.artifacts-filter select { max-width: 150px; border: 1px solid var(--ds-border); border-radius: var(--radius-sm); background: var(--ds-input); color: var(--ds-text-primary); padding: 6px 8px; }
+.artifacts-scroll { min-height: 0; flex: 1; overflow: auto; padding: 8px 12px; }
+.artifact-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 9px; border-bottom: 1px solid var(--ds-border-subtle); }
+.artifact-main { display: flex; min-width: min(100%, 240px); flex: 1; align-items: center; gap: 8px; border: 0; background: transparent; color: var(--ds-text-primary); text-align: left; cursor: pointer; }
+.artifact-main:disabled { cursor: default; opacity: .65; }
+.artifact-labels { display: flex; min-width: 0; flex-direction: column; }
+.artifact-labels strong, .artifact-labels span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.artifact-labels span { color: var(--ds-text-muted); font-size: var(--text-xs-plus); }
+.artifact-meta, .artifact-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--ds-text-muted); font-size: var(--text-xs-plus); }
+.artifacts-load-more { display: flex; justify-content: center; padding: 8px 12px; border-top: 1px solid var(--ds-border-subtle); }

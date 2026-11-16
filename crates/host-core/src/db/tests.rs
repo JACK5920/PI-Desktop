@@ -26,7 +26,7 @@ fn v30_to_v31_side_chat_migration_preserves_existing_conversations() {
     }
 
     let db = Database::open(&path).unwrap();
-    assert_eq!(schema_version(db.conn()), 31);
+    assert_eq!(schema_version(db.conn()), SCHEMA_VERSION);
     let row: (Option<String>, Option<String>, Option<String>, bool) = db
         .conn()
         .query_row(
@@ -39,6 +39,282 @@ fn v30_to_v31_side_chat_migration_preserves_existing_conversations() {
         .unwrap();
     assert_eq!(row, (None, None, None, false));
     assert!(migration_backup_path(&path, 30).exists());
+}
+
+fn insert_migration_goal(db: &Database) {
+    db.conn()
+        .execute(
+            "INSERT INTO sessions (id, created_at, updated_at)
+         VALUES ('goal-session', 1, 1)",
+            [],
+        )
+        .unwrap();
+    db.conn().execute(
+        "INSERT INTO plan_approvals (
+           request_id, session_id, turn_id, tool_call_id, kind, plan_json,
+           status, created_at, updated_at
+         ) VALUES ('goal-proposal', 'goal-session', 'turn-1', 'call-1', 'goal', '{}', 'approved', 1, 1)",
+        [],
+    ).unwrap();
+    db.conn()
+        .execute(
+            "INSERT INTO goal_lifecycles (
+           proposal_id, session_id, status, created_at, updated_at
+         ) VALUES ('goal-proposal', 'goal-session', 'paused', 1, 1)",
+            [],
+        )
+        .unwrap();
+}
+
+/// A few historical v29 files carry the version marker but are missing the
+/// Goal lifecycle tables. Opening such a database must reconstruct the
+/// derived lifecycle rows without dropping messages or approval records.
+#[test]
+fn v29_database_missing_goal_lifecycle_tables_repairs_without_losing_data() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("pi.sqlite");
+    let session_id = {
+        let db = Database::open(&path).unwrap();
+        let session = crate::sessions::create_session(
+            &db,
+            Some("kept v29 session".into()),
+            Some("agent".into()),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO messages (id, session_id, seq, role, text, created_at)
+                 VALUES ('kept-message', ?1, 1, 'assistant', 'kept transcript body', 2)",
+                params![session.id],
+            )
+            .unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO plan_approvals (
+                   request_id, session_id, turn_id, tool_call_id, kind, plan_json,
+                   status, created_at, updated_at, execution_id, execution_state
+                 ) VALUES (
+                   'kept-goal', ?1, 'turn-1', 'call-1', 'goal', '{}',
+                   'approved', 1, 3, 'kept-goal-run', 'completed'
+                 )",
+                params![session.id],
+            )
+            .unwrap();
+        db.conn()
+            .execute_batch(
+                "DROP TABLE goal_runs;
+                 DROP TABLE goal_lifecycles;
+                 PRAGMA user_version = 29;",
+            )
+            .unwrap();
+        session.id
+    };
+
+    let db = Database::open(&path).unwrap();
+
+    assert_eq!(schema_version(db.conn()), SCHEMA_VERSION);
+    assert!(migration_backup_path(&path, 29).exists());
+    let transcript: String = db
+        .conn()
+        .query_row(
+            "SELECT text FROM messages WHERE id = 'kept-message' AND session_id = ?1",
+            params![session_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(transcript, "kept transcript body");
+    let approval: (String, String, String) = db
+        .conn()
+        .query_row(
+            "SELECT status, execution_id, execution_state
+             FROM plan_approvals WHERE request_id = 'kept-goal'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        approval,
+        (
+            "approved".into(),
+            "kept-goal-run".into(),
+            "completed".into()
+        )
+    );
+    let lifecycle: (String, Option<String>) = db
+        .conn()
+        .query_row(
+            "SELECT status, current_execution_id
+             FROM goal_lifecycles WHERE proposal_id = 'kept-goal'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        lifecycle,
+        ("interrupted".into(), Some("kept-goal-run".into()))
+    );
+    let goal_run: String = db
+        .conn()
+        .query_row(
+            "SELECT status FROM goal_runs WHERE execution_id = 'kept-goal-run'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(goal_run, "completed");
+}
+
+#[test]
+fn v29_database_missing_goal_lifecycles_table_repairs_with_existing_goal_runs_table() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("pi.sqlite");
+    let session_id = {
+        let db = Database::open(&path).unwrap();
+        let session = crate::sessions::create_session(
+            &db,
+            Some("kept v29 session".into()),
+            Some("agent".into()),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO messages (id, session_id, seq, role, text, created_at)
+                 VALUES ('kept-message', ?1, 1, 'assistant', 'kept transcript body', 2)",
+                params![session.id],
+            )
+            .unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO plan_approvals (
+                   request_id, session_id, turn_id, tool_call_id, kind, plan_json,
+                   status, created_at, updated_at, execution_id, execution_state
+                 ) VALUES (
+                   'kept-goal', ?1, 'turn-1', 'call-1', 'goal', '{}',
+                   'approved', 1, 3, 'kept-goal-run', 'running'
+                 )",
+                params![session.id],
+            )
+            .unwrap();
+        // This matches the reported legacy schema: goal_runs exists, but the
+        // table referenced by startup maintenance is missing.
+        db.conn()
+            .execute_batch("DROP TABLE goal_lifecycles; PRAGMA user_version = 29;")
+            .unwrap();
+        session.id
+    };
+
+    let db = Database::open(&path).unwrap();
+
+    assert_eq!(schema_version(db.conn()), SCHEMA_VERSION);
+    assert!(table_exists(db.conn(), "goal_lifecycles"));
+    assert!(table_exists(db.conn(), "goal_runs"));
+    let transcript: String = db
+        .conn()
+        .query_row(
+            "SELECT text FROM messages WHERE id = 'kept-message' AND session_id = ?1",
+            params![session_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(transcript, "kept transcript body");
+    let recovered: (String, String, String) = db
+        .conn()
+        .query_row(
+            "SELECT lifecycle.status, run.status, approval.execution_state
+             FROM goal_lifecycles lifecycle
+             JOIN goal_runs run ON run.execution_id = lifecycle.current_execution_id
+             JOIN plan_approvals approval ON approval.request_id = lifecycle.proposal_id
+             WHERE lifecycle.proposal_id = 'kept-goal'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    // Opening an interrupted Goal is intentionally conservative: migration
+    // restores the derived rows, then boot maintenance marks stale work as
+    // interrupted rather than silently replaying it.
+    assert_eq!(
+        recovered,
+        (
+            "interrupted".into(),
+            "interrupted".into(),
+            "interrupted".into()
+        )
+    );
+    assert_readable_migration_backup(&path, 29);
+}
+
+#[test]
+fn v31_to_v32_goal_objective_migration_preserves_existing_goal_state() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("pi.sqlite");
+    {
+        let db = Database::open(&path).unwrap();
+        insert_migration_goal(&db);
+        db.conn()
+            .execute_batch(
+                "ALTER TABLE goal_lifecycles DROP COLUMN objective_revision;
+             ALTER TABLE goal_lifecycles DROP COLUMN objective_markdown;
+             ALTER TABLE goal_lifecycles DROP COLUMN objective_title;",
+            )
+            .unwrap();
+        db.conn().pragma_update(None, "user_version", 31).unwrap();
+    }
+
+    let db = Database::open(&path).unwrap();
+    assert_eq!(schema_version(db.conn()), SCHEMA_VERSION);
+    let migrated: (String, String, i64, String) = db
+        .conn()
+        .query_row(
+            "SELECT objective_title, objective_markdown, objective_revision, status
+         FROM goal_lifecycles WHERE proposal_id = 'goal-proposal'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .unwrap();
+    assert_eq!(migrated, (String::new(), String::new(), 1, "paused".into()));
+    assert_readable_migration_backup(&path, 31);
+}
+
+#[test]
+fn v31_to_v32_migration_keeps_preexisting_goal_objective_values() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("pi.sqlite");
+    {
+        let db = Database::open(&path).unwrap();
+        insert_migration_goal(&db);
+        db.conn()
+            .execute(
+                "UPDATE goal_lifecycles
+             SET objective_title = 'Keep this title',
+                 objective_markdown = 'Keep this objective', objective_revision = 7
+             WHERE proposal_id = 'goal-proposal'",
+                [],
+            )
+            .unwrap();
+        db.conn().pragma_update(None, "user_version", 31).unwrap();
+    }
+
+    let db = Database::open(&path).unwrap();
+    assert_eq!(schema_version(db.conn()), SCHEMA_VERSION);
+    let objective: (String, String, i64) = db
+        .conn()
+        .query_row(
+            "SELECT objective_title, objective_markdown, objective_revision
+         FROM goal_lifecycles WHERE proposal_id = 'goal-proposal'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        objective,
+        ("Keep this title".into(), "Keep this objective".into(), 7)
+    );
 }
 
 #[test]
@@ -117,6 +393,15 @@ fn table_exists(conn: &Connection, name: &str) -> bool {
         |r| r.get::<_, i64>(0),
     )
     .map(|n| n > 0)
+    .unwrap_or(false)
+}
+
+fn column_exists(conn: &Connection, table: &str, column: &str) -> bool {
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info(?1) WHERE name = ?2)",
+        params![table, column],
+        |row| row.get(0),
+    )
     .unwrap_or(false)
 }
 
@@ -659,11 +944,75 @@ fn v20_database_migrates_the_session_checklist_with_a_backup() {
     );
 }
 
+#[test]
+fn v33_to_v34_agent_engine_migration_keeps_existing_conversations_on_the_default() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("pi.sqlite");
+    {
+        let db = Database::open(&path).unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO sessions (id, title, mode, created_at, updated_at)
+                 VALUES ('legacy-chat', 'Legacy chat', 'agent', 1, 1)",
+                [],
+            )
+            .unwrap();
+        db.conn()
+            .execute_batch("ALTER TABLE sessions DROP COLUMN agent_engine;")
+            .unwrap();
+        db.conn().pragma_update(None, "user_version", 33).unwrap();
+    }
+
+    let db = Database::open(&path).unwrap();
+    assert_eq!(schema_version(db.conn()), SCHEMA_VERSION);
+    // NULL is the deliberate "follow the app-wide default" value, so an
+    // upgrade cannot silently move a running conversation onto another engine.
+    let pinned: Option<String> = db
+        .conn()
+        .query_row(
+            "SELECT agent_engine FROM sessions WHERE id = 'legacy-chat'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(pinned, None);
+    assert_readable_migration_backup(&path, 33);
+}
+
+#[test]
+fn v33_to_v34_migration_tolerates_a_column_that_already_exists() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("pi.sqlite");
+    {
+        // Fresh DDL already carries the column; a replayed migration must skip
+        // the ALTER instead of failing on a duplicate column.
+        let db = Database::open(&path).unwrap();
+        db.conn().pragma_update(None, "user_version", 33).unwrap();
+    }
+
+    let db = Database::open(&path).unwrap();
+    assert_eq!(schema_version(db.conn()), SCHEMA_VERSION);
+}
+
+#[test]
+fn agent_engine_rejects_values_outside_the_registry() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("pi.sqlite");
+    let db = Database::open(&path).unwrap();
+    assert!(db
+        .conn()
+        .execute(
+            "INSERT INTO sessions (id, title, mode, agent_engine, created_at, updated_at)
+             VALUES ('bad-engine', 'x', 'agent', 'claude', 1, 1)",
+            [],
+        )
+        .is_err());
+}
+
 fn schema_version(conn: &Connection) -> i64 {
     conn.query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap()
 }
-
 fn insert_raw_app_settings(db: &Database, raw: &str) {
     db.conn()
         .execute(
@@ -715,6 +1064,16 @@ fn fresh_open_creates_latest_schema() {
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
     assert_eq!(version, SCHEMA_VERSION);
+    for column in [
+        "objective_title",
+        "objective_markdown",
+        "objective_revision",
+    ] {
+        assert!(
+            column_exists(db.conn(), "goal_lifecycles", column),
+            "missing {column}"
+        );
+    }
     for table in [
         "kv",
         "projects",

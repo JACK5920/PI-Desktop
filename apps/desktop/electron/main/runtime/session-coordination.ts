@@ -72,6 +72,8 @@ export function createSessionCoordination({
    * the frozen record already owns the turn.
    */
   const pendingAbortReasons = new Map<string, TurnEndReason>();
+  /** Manual context compaction occupies the runtime without opening a turn. */
+  const manualCompactions = new Set<string>();
   /** Turn identities remain until a transcript rewrite fences their late events. */
   const startedTurnsBySession = new Map<string, Set<string>>();
   const invalidatedTranscriptTurns = new Map<string, Set<string>>();
@@ -313,12 +315,23 @@ export function createSessionCoordination({
   function isSessionBusy(sessionId: string): boolean {
     const id = sessionId.trim();
     if (!id) return false;
+    if (manualCompactions.has(id)) return true;
     if (activeTurns.has(id)) return true;
     const prefix = id + ":";
     for (const key of turnFinalizations.keys()) {
       if (key.startsWith(prefix)) return true;
     }
     return false;
+  }
+
+  function beginManualCompaction(sessionId: string): void {
+    const id = sessionId.trim();
+    if (id) manualCompactions.add(id);
+  }
+
+  function endManualCompaction(sessionId: string): void {
+    const id = sessionId.trim();
+    if (id) manualCompactions.delete(id);
   }
 
   /**
@@ -363,6 +376,8 @@ export function createSessionCoordination({
     activeTurnUsages,
     turnFinalizations,
     pendingAbortReasons,
+    beginManualCompaction,
+    endManualCompaction,
     acquireSessionOperation,
     recordTurnStart,
     beginTranscriptRewrite,

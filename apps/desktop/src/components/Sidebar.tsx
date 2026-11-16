@@ -2605,6 +2605,13 @@ export function Sidebar({
       </div>
 
       <div className="sidebar-body no-drag">
+        <div
+          className="sidebar-body-scroll"
+          onScroll={() => {
+            // Only the list area scrolls; the footer stays put.
+            if (sessionMenu || projectMenu || sectionMenu || sortOpen) closeMenus(false);
+          }}
+        >
 
         {pinnedSessions.length > 0 ? (
           <section
@@ -2617,7 +2624,7 @@ export function Sidebar({
                 {t("nav.pinnedSessions")}
               </span>
             </div>
-            <div className="sidebar-session-group-body pinned" onScroll={() => closeMenus(false)}>
+            <div className="sidebar-session-group-body pinned">
               {renderSessionRows(pinnedSessions, { global: true })}
             </div>
           </section>
@@ -2684,9 +2691,6 @@ export function Sidebar({
           </div>
           <div
             className="sidebar-session-group-body standalone"
-            onScroll={() => {
-              if (sessionMenu || projectMenu || sectionMenu || sortOpen) closeMenus(false);
-            }}
             onContextMenu={(event) => {
               if ((event.target as Element).closest?.("[data-sidebar-session-row]")) return;
               event.preventDefault();
@@ -2728,10 +2732,7 @@ export function Sidebar({
         </div>
 
         <div
-          className={`sidebar-session-groups min-h-0 flex-1 overflow-auto px-0.5 ${projectsDropActive ? "is-drop-target" : ""}`}
-          onScroll={() => {
-            if (sessionMenu || projectMenu || sectionMenu || sortOpen) closeMenus(false);
-          }}
+          className={`sidebar-session-groups ${projectsDropActive ? "is-drop-target" : ""}`}
           onContextMenu={(event) => {
             if (
               (event.target as Element).closest?.(
@@ -2769,6 +2770,7 @@ export function Sidebar({
         </div>
 
         <PluginNavigationSections />
+        </div>
 
         <div className="sidebar-footer no-drag">
           <div className="footer-actions">

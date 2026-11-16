@@ -487,7 +487,9 @@
   right: auto;
   bottom: auto;
   z-index: 60;
-  min-width: 172px;
+  /* Content-sized like the transcript menus: no floor, so short labels do not
+     sit beside an empty gutter. */
+  width: max-content;
   max-height: min(360px, calc(100vh - 16px));
   overflow-y: auto;
   padding: 5px;
@@ -502,7 +504,6 @@
   top: auto;
   right: auto;
   z-index: 60; /* z-command-palette: body-level overlays above pane stacking */
-  min-width: 184px;
   width: max-content;
   max-width: calc(100vw - 16px);
 }
@@ -511,7 +512,6 @@
   position: fixed;
   z-index: 61;
   width: max-content;
-  min-width: 184px;
   max-width: calc(100vw - 16px);
   max-height: min(360px, calc(100vh - 16px));
   overflow-y: auto;

@@ -355,6 +355,7 @@ fn parse_message(
         status: None,
         model_id,
         provider_id,
+        engine_origin: None,
         usage: None,
         response_duration_ms: None,
         response_output_tokens: None,

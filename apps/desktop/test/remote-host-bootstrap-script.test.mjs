@@ -12,6 +12,9 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const here = dirname(fileURLToPath(import.meta.url));
 register(pathToFileURL(join(here, "helpers/ts-import-hooks.mjs")));
 const hasPosixShell = spawnSync("sh", ["-c", "exit 0"], { stdio: "ignore" }).status === 0;
+const shellExecutable = process.platform === "win32"
+  ? execFileSync("where.exe", ["sh"], { encoding: "utf8" }).trim().split(/\r?\n/)[0]
+  : "sh";
 const shellTest = hasPosixShell ? test : test.skip;
 
 const { buildBootstrapScript, parseBootstrapOutput, shellQuote } = await import(
@@ -25,6 +28,12 @@ const ARTIFACT_URL = `https://github.com/vastsa/PI-Desktop/releases/download/v${
 const DIGEST = "0123456789abcdef".repeat(4);
 /** The sandbox the script's `HOME`/`PATH` point at, outside the real user's. */
 const WORK_SUBDIR = ".pi-desktop/pi-host/.bootstrap";
+
+/** Translate a Windows path when it is passed as a value consumed inside Git Bash. */
+function toShellPath(value) {
+  const normalized = value.replaceAll("\\", "/");
+  return normalized.replace(/^([A-Za-z]):\//, (_match, drive) => `/${drive.toLowerCase()}/`);
+}
 
 /** Inputs every scenario starts from; callers override the digest or version. */
 function scriptInput(overrides = {}) {
@@ -86,7 +95,7 @@ async function prepareSandbox(root, { readyVersion = VERSION } = {}) {
       "",
     ].join("\n"),
   );
-  await writeFile(join(bin, "sha256sum"), `#!/bin/sh\nexec "${process.execPath}" "${sha256Helper}" "$@"\n`, {
+  await writeFile(join(bin, "sha256sum"), `#!/bin/sh\nexec "${toShellPath(process.execPath)}" "${toShellPath(sha256Helper)}" "$@"\n`, {
     mode: 0o755,
   });
 
@@ -95,6 +104,7 @@ async function prepareSandbox(root, { readyVersion = VERSION } = {}) {
     [
       "#!/bin/sh",
       "# pretend the artifact URL served the tarball this test prepared",
+      'printf "fake curl\\n" >> "$PI_HOST_TEST_CURL_LOG"',
       'out=""',
       'while [ "$#" -gt 0 ]; do',
       '  case "$1" in',
@@ -136,21 +146,38 @@ async function prepareSandbox(root, { readyVersion = VERSION } = {}) {
     { mode: 0o755 },
   );
 
+  const curlLog = join(root, "fake-curl.log");
+
   return {
     digest,
     home,
     tarball,
     env: {
       ...process.env,
-      HOME: home,
-      PATH: `${bin}:${process.env.PATH ?? ""}`,
-      PI_HOST_TEST_TARBALL: tarball,
+      HOME: toShellPath(home),
+      // Git Bash prepends /mingw64/bin ahead of an inherited PATH, so merely
+      // prepending the fixture directory in the Windows environment does not
+      // shadow its real curl. runScript explicitly puts this POSIX path first
+      // inside the shell before sourcing the generated script.
+      PI_HOST_TEST_TARBALL: toShellPath(tarball),
+      PI_HOST_TEST_CURL_LOG: toShellPath(curlLog),
+      PI_HOST_TEST_BIN: toShellPath(bin),
     },
+    curlLog,
   };
 }
 
 function runScript(scriptPath, env) {
-  return execFileSync("sh", [scriptPath], {
+  // Source in the same shell after moving the fixture tools ahead of Git
+  // Bash's built-in /mingw64/bin entries. A child `sh script` would prepend
+  // those entries again and could invoke the real curl, making tests depend
+  // on (or accidentally contact) GitHub.
+  return execFileSync(shellExecutable, [
+    "-c",
+    'PATH="$PI_HOST_TEST_BIN:$PATH"; export PATH; . "$1"',
+    "pi-host-bootstrap-test",
+    toShellPath(scriptPath),
+  ], {
     encoding: "utf8",
     timeout: 120_000,
     stdio: ["ignore", "pipe", "pipe"],
@@ -255,6 +282,7 @@ shellTest("the generated script installs, starts, and prints the ready/pairing l
     await writeFile(scriptPath, buildBootstrapScript(scriptInput({ expectedSha256: sandbox.digest })));
 
     const stdout = runScript(scriptPath, sandbox.env);
+    assert.equal(await readFile(sandbox.curlLog, "utf8"), "fake curl\n", "must use fixture curl, never the network");
     const parsed = parseBootstrapOutput(stdout);
     assert.equal(parsed.failure, null);
     assert.deepEqual(parsed.ready, {
@@ -290,6 +318,7 @@ shellTest("a checksum mismatch fails the script before anything is installed", a
       failure = error;
     }
     assert.ok(failure, "the script must exit non-zero");
+    assert.equal(await readFile(sandbox.curlLog, "utf8"), "fake curl\n", "must use fixture curl, never the network");
     assert.notEqual(failure.status, 0);
     assert.match(String(failure.stderr), /PI_HOST_BOOTSTRAP_FAILED checksum-mismatch/);
     // The typed line is on stdout too, which is how the desktop reports the step.

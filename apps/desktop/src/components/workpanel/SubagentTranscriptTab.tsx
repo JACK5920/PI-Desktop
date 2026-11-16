@@ -1,7 +1,7 @@
 import { toolResultPayload } from "../../lib/tool-presentation";
 import { SubagentStopButton } from "../../features/chat/transcript/SubagentStopButton";
 import { collectDelegationStatuses, subagentOutcome } from "../../lib/subagent-topology";
-import { Fragment, useLayoutEffect, useMemo } from "react";
+import { useLayoutEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "../../stores/app-store";
 import { useFollowScroll } from "../../hooks/use-follow-scroll";
@@ -12,17 +12,8 @@ import { Textarea, TooltipButton } from "../ui";
 import { DisclosureAnchorContext } from "../../lib/disclosure-anchor-context";
 import { TranscriptDisclosureProvider } from "../../features/chat/transcript/disclosure";
 import { buildSubagentTranscript } from "../../lib/subagent-transcript";
-import { reviewChangeFromMessage } from "../../lib/workspace-review";
-import {
-  AssistantErrorMessage,
-  ThinkingRow,
-} from "../../features/chat/transcript/shared";
-import {
-  ReviewChangeCard,
-} from "../ReviewChangeCard";
-import { ToolRow } from "../../features/chat/transcript/ToolRow";
-import { Markdown } from "../Markdown";
 import { delegateModelId, delegateThinkingLevel } from "../../features/chat/transcript/model";
+import { SubagentTranscriptContent } from "./SubagentTranscriptContent";
 
 /**
  * The work-panel tab showing one delegation as a conversation (issue #917).
@@ -138,64 +129,12 @@ function SubagentTranscriptSurface({ delegationId }: { delegationId: string }) {
           aria-label={t("panel.subagent")}
           tabIndex={0}
         >
-          <div ref={contentRef} className="subagent-transcript-list">
-            {transcriptResult ? (
-              transcriptResult.turns.map((turn, turnIndex) => (
-                <Fragment key={`turn-${turnIndex}`}>
-                  <div className="message-row user">
-                    <div className="message-col">
-                      <div className="message-bubble">
-                        <div className="message-user-text selectable">
-                          {turn.task || t("panel.subagentTaskEmpty")}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  {turn.rows.map((row) =>
-                    row.kind === "tool" ? (
-                      reviewChangeFromMessage(row.message) ? (
-                        <ReviewChangeCard
-                          key={row.message.id}
-                          message={row.message}
-                          asToolRow
-                        />
-                      ) : (
-                        <ToolRow key={row.message.id} message={row.message} />
-                      )
-                    ) : row.kind === "thinking" ? (
-                      <ThinkingRow
-                        key={`thinking-${row.message.id}`}
-                        message={row.message}
-                        streaming={isRunning && row.message.status === "streaming"}
-                      />
-                    ) : (
-                      <div
-                        className="message-row assistant"
-                        data-message-id={row.message.id}
-                        key={`answer-${row.message.id}`}
-                      >
-                        <div className="message-col">
-                          <div className="message-bubble">
-                            {row.message.content ? (
-                              <div className="prose-chat selectable">
-                                <Markdown source={row.message.content} />
-                              </div>
-                            ) : null}
-                            {row.message.error ? (
-                              <AssistantErrorMessage message={row.message} />
-                            ) : null}
-                          </div>
-                        </div>
-                      </div>
-                    ),
-                  )}
-                </Fragment>
-              ))
-            ) : (
-              <div className="subagent-transcript-empty" role="status">
-                {t("panel.subagentEmpty")}
-              </div>
-            )}
+          <div ref={contentRef}>
+            <SubagentTranscriptContent
+              turns={transcriptResult?.turns ?? []}
+              emptyLabel={t("panel.subagentEmpty")}
+              isRunning={isRunning}
+            />
           </div>
         </div>
         {showJump ? (

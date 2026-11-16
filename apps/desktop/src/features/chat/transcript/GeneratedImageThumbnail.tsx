@@ -16,6 +16,7 @@ export function GeneratedImageThumbnail({ image, selected, onSelect, className }
     <TooltipButton
       type="button"
       className={className}
+      data-file-ref={image.path}
       tooltip={t("settings.generatedImage", { index: image.index + 1 })}
       aria-current={selected ? "true" : undefined}
       onClick={onSelect}

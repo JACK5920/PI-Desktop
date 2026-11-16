@@ -25,7 +25,7 @@ import {
   subagentTabDisplayLabels,
   toolWorkPanelTab,
 } from "../../lib/work-panel-tabs";
-import type { PluginViewMeta } from "@pi-desktop/shared";
+import type { PluginSummary, PluginViewMeta } from "@pi-desktop/shared";
 import { api } from "../../lib/api";
 import { pluginViewIcon, pluginViewInitial } from "../../lib/plugin-view-icons";
 import { useAppStore } from "../../stores/app-store";
@@ -39,6 +39,7 @@ import {
 import { TooltipButton } from "../ui";
 import type { IconProps } from "../icons";
 import {
+  IconArrowUpRight,
   IconBot,
   IconBranch,
   IconChat,
@@ -52,11 +53,13 @@ import {
   IconPullRequest,
 } from "../icons";
 import { ReviewTab } from "./ReviewTab";
+import { ArtifactsTab } from "./ArtifactsTab";
 import { BranchReviewTab } from "./BranchReviewTab";
 import { GitHubPrReviewTab } from "./GitHubPrReviewTab";
 import { FilesTab } from "./FilesTab";
 import { PluginViewTab } from "./PluginViewTab";
 import { SubagentTranscriptTab } from "./SubagentTranscriptTab";
+import { OmpSubagentBatchTab } from "./OmpSubagentBatchTab";
 import { SideChatTab } from "./SideChatTab";
 import {
   MAIN_PANE_MIN_WIDTH,
@@ -72,11 +75,13 @@ import {
 const TAB_ICONS = {
   new: IconPlus,
   review: IconDiff,
+  artifacts: IconFileText,
   "branch-review": IconBranch,
   "github-pr-review": IconPullRequest,
   file: IconFileText,
   plugin: IconPlug,
   subagent: IconBot,
+  "omp-subagent-batch": IconBot,
   "side-chat": IconChat,
 } as const;
 
@@ -116,6 +121,12 @@ type WorkPanelTool = {
   initial?: string;
   description?: string;
   shortcut?: string;
+  /**
+   * Plugin-backed rows only: the owning plugin ships a standalone panel
+   * (`ui.panel`) and is enabled, so the row can offer "open in its own
+   * window" beside the tab action.
+   */
+  openWindowPluginId?: string;
 };
 
 function tabLabel(
@@ -132,6 +143,7 @@ function tabLabel(
   }
   if (tab.kind === "new") return t("panel.new.title");
   if (tab.kind === "subagent") return tab.label ?? t("panel.tabs.subagent");
+  if (tab.kind === "omp-subagent-batch") return tab.label ?? t("settings.omp.subagentManager");
   if (tab.kind === "side-chat") return t("panel.tabs.sideChat");
   if (tab.kind === "branch-review") return t("panel.tabs.branchReview");
   if (tab.kind === "github-pr-review") return t("panel.tabs.githubPrReview");
@@ -143,8 +155,9 @@ function tabLabel(
 function workPanelTools(
   t: (key: string) => string,
   pluginViews: PluginViewMeta[],
+  plugins: PluginSummary[],
 ): WorkPanelTool[] {
-  // Review and Branch Review are host-owned tools. Files, Browser, and every
+  // Review, Artifacts, and Branch Review are host-owned tools. Files, Browser, and every
   // future extension surface remain plugin-contributed and data-driven.
   return [
     {
@@ -152,6 +165,12 @@ function workPanelTools(
       tab: toolWorkPanelTab("review"),
       label: t("panel.tabs.review"),
       icon: IconDiff,
+    },
+    {
+      id: "artifacts",
+      tab: toolWorkPanelTab("artifacts"),
+      label: t("panel.tabs.artifacts"),
+      icon: IconFileText,
     },
     {
       id: "branch-review",
@@ -167,6 +186,11 @@ function workPanelTools(
     },
     ...pluginViews.map((view) => {
       const Icon = pluginViewIcon(view.icon);
+      // Only a plugin that declares `ui.panel` has a standalone window to open;
+      // offering the shortcut on every view would produce a dead button for
+      // view-only plugins such as the file manager.
+      const owner = plugins.find((plugin) => plugin.id === view.pluginId);
+      const openable = owner?.enabled && owner.ui?.panel ? view.pluginId : undefined;
       return {
         id: view.ref,
         tab: pluginWorkPanelTab(view.pluginId, view.viewId),
@@ -174,6 +198,7 @@ function workPanelTools(
         icon: Icon,
         ...(Icon ? {} : { initial: pluginViewInitial(view.title) }),
         description: view.pluginName,
+        ...(openable ? { openWindowPluginId: openable } : {}),
       };
     }),
   ];
@@ -247,6 +272,7 @@ function LocalWorkPanel({
   const activeTabId = useAppStore((s) => s.activeWorkPanelTabId);
   const activeSessionId = useAppStore((s) => s.activeSessionId);
   const pluginViews = useAppStore((s) => s.pluginViews);
+  const plugins = useAppStore((s) => s.plugins);
   const width = useAppStore((s) => s.workPanelWidth);
   const yieldedWidth = useAppStore((s) => s.workPanelYieldedWidth);
   const activateTab = useAppStore((s) => s.activateWorkPanelTab);
@@ -259,7 +285,7 @@ function LocalWorkPanel({
   const replaceWorkPanelTab = useAppStore((s) => s.replaceWorkPanelTab);
   const setWidth = useAppStore((s) => s.setWorkPanelWidth);
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? null;
-  const tools = workPanelTools(t, pluginViews);
+  const tools = workPanelTools(t, pluginViews, plugins);
   const tabSignature = JSON.stringify(
     tabs.map(({ id, kind, resource, location }) => [id, kind, resource, location]),
   );
@@ -1132,6 +1158,17 @@ function LocalWorkPanel({
               <SubagentTranscriptTab delegationId={activeTab.resource ?? ""} />
             </div>
           )}
+          {activeTab?.kind === "omp-subagent-batch" && activeTab.resource ? (
+            <div
+              key={activeTab.id}
+              id={`work-panel-surface-${activeTab.id}`}
+              className="work-panel-tabpane"
+              role="tabpanel"
+              aria-labelledby={`work-panel-tab-${activeTab.id}`}
+            >
+              <OmpSubagentBatchTab toolCallId={activeTab.resource} selectedAgentId={activeTab.agentId} />
+            </div>
+          ) : null}
           {activeTab?.kind === "review" && (
             <div
               id={`work-panel-surface-${activeTab.id}`}
@@ -1140,6 +1177,16 @@ function LocalWorkPanel({
               aria-labelledby={`work-panel-tab-${activeTab.id}`}
             >
               <ReviewTab />
+            </div>
+          )}
+          {activeTab?.kind === "artifacts" && (
+            <div
+              id={`work-panel-surface-${activeTab.id}`}
+              className="work-panel-tabpane"
+              role="tabpanel"
+              aria-labelledby={`work-panel-tab-${activeTab.id}`}
+            >
+              <ArtifactsTab />
             </div>
           )}
           {activeTab?.kind === "branch-review" && (
@@ -1217,24 +1264,47 @@ function LocalWorkPanel({
                   aria-label={t("panel.toolsAndPanels")}
                 >
                   {tools.map((item) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      className="work-panel-launcher-row"
-                      data-work-panel-launcher-item={item.id}
-                      onClick={() =>
-                        selectTool(
-                          item,
-                          activeTab?.kind === "new" ? activeTab.id : undefined,
-                        )
-                      }
-                    >
-                      <span className="work-panel-launcher-icon" aria-hidden>
-                        <ToolIcon item={item} />
-                      </span>
-                      <span className="work-panel-launcher-label">{item.label}</span>
-                      {item.shortcut ? <kbd>{item.shortcut}</kbd> : null}
-                    </button>
+                    <div className="work-panel-launcher-item" key={item.id}>
+                      <button
+                        type="button"
+                        className="work-panel-launcher-row"
+                        data-work-panel-launcher-item={item.id}
+                        data-has-window-action={item.openWindowPluginId ? "" : undefined}
+                        onClick={() =>
+                          selectTool(
+                            item,
+                            activeTab?.kind === "new" ? activeTab.id : undefined,
+                          )
+                        }
+                      >
+                        <span className="work-panel-launcher-icon" aria-hidden>
+                          <ToolIcon item={item} />
+                        </span>
+                        <span className="work-panel-launcher-label">{item.label}</span>
+                        {item.shortcut ? <kbd>{item.shortcut}</kbd> : null}
+                      </button>
+                      {/*
+                        A second affordance on the same row, revealed on hover:
+                        open the plugin's own panel instead of a docked tab.
+                        Rendered as a sibling because a button cannot nest one.
+                      */}
+                      {item.openWindowPluginId ? (
+                        <button
+                          type="button"
+                          className="work-panel-launcher-window"
+                          title={t("panel.pluginView.openWindow")}
+                          aria-label={`${item.label} — ${t("panel.pluginView.openWindow")}`}
+                          data-work-panel-launcher-window={item.openWindowPluginId}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            const pluginId = item.openWindowPluginId;
+                            if (pluginId) void api.openPluginPanel(pluginId);
+                          }}
+                        >
+                          <IconArrowUpRight size={14} aria-hidden />
+                        </button>
+                      ) : null}
+                    </div>
                   ))}
                 </div>
               </div>

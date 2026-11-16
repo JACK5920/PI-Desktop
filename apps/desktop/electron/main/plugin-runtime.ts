@@ -258,7 +258,7 @@ export type PluginPanelRequest = {
   locale?: string;
   theme?: "light" | "dark";
   /**
-   * `"panel"` (default) keeps the 46px host drag band and its capsule.
+   * `"panel"` (default) keeps the 26px host drag band and its capsule.
    * `"widget"` is the transparent floating placement: no band, no capsule, a
    * whole-window drag map, and a host context menu instead of the capsule.
    */

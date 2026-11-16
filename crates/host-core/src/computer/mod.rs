@@ -309,7 +309,10 @@ impl ActionKind {
     /// node-budget cut -- a composer that was cut away leaves the caller with
     /// nothing it can type into.
     pub fn writes_content(self) -> bool {
-        matches!(self, ActionKind::SetValue | ActionKind::TypeText | ActionKind::PressKeys)
+        matches!(
+            self,
+            ActionKind::SetValue | ActionKind::TypeText | ActionKind::PressKeys
+        )
     }
 
     /// Whether the action can be dispatched at a window element.

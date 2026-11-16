@@ -24,6 +24,7 @@ import {
   type LineCache,
 } from "../../lib/shiki";
 import {
+  IconArrowDown,
   IconChevronLeft,
   IconChevronRight,
   IconExternal,
@@ -172,6 +173,23 @@ export function FilesTab() {
   const [fileError, setFileError] = useState(false);
   const viewerBodyRef = useRef<HTMLDivElement>(null);
   const fileGeneration = useRef(0);
+  const [showJump, setShowJump] = useState(false);
+
+  // Same bottom-jump affordance as the chat transcript: it appears only once
+  // the reader has scrolled away from the end of the file.
+  useEffect(() => {
+    const el = viewerBodyRef.current;
+    if (!el) return;
+    const update = () => setShowJump(el.scrollHeight - el.scrollTop - el.clientHeight > 80);
+    update();
+    el.addEventListener("scroll", update, { passive: true });
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
+    observer?.observe(el);
+    return () => {
+      el.removeEventListener("scroll", update);
+      observer?.disconnect();
+    };
+  }, [selected, file]);
 
   // Workspace switches reset all browsing state. Guarded so it only fires on
   // an actual root change: an unconditional [root] effect also runs on the
@@ -424,6 +442,20 @@ export function FilesTab() {
             </WorkTabEmpty>
           )}
         </div>
+        {showJump ? (
+          <TooltipButton
+            type="button"
+            className="jump-latest-btn file-viewer-jump"
+            tooltip={t("chat.scrollToBottom")}
+            ariaLabel={t("chat.scrollToBottom")}
+            onClick={() => {
+              const el = viewerBodyRef.current;
+              el?.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+            }}
+          >
+            <IconArrowDown size={14} />
+          </TooltipButton>
+        ) : null}
       </div>
     );
   }

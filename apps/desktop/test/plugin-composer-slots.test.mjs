@@ -22,7 +22,7 @@ const HOST_LEFT = [
   "settings.mode: settings.modeAgent",
   "chat.permissionMode",
 ];
-const HOST_RIGHT = ["context", "chat.model: Model. chat.reasoningLevel: Off", "chat.send"];
+const HOST_RIGHT = ["context", "settings.omp.engine: settings.omp.enginePi", "chat.model: Model. chat.reasoningLevel: Off", "chat.send"];
 
 async function composer(t, toolbarProps = {}) {
   const ssr = await slotSsr(t);

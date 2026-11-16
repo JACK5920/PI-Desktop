@@ -10079,28 +10079,34 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
 - **Milestone**: M5
 - **Status**: Unit-covered (`svg-attachments.test.mjs`); Desktop E2E Draft
 
-#### E2E-102d: Non-vision and oversized images use the path fallback
+#### E2E-102d: Vision images are resized only in the model-facing request
 
 - **Preconditions**: One known non-vision model and one known vision-capable
-  model; an Agent session; a normal PNG and a deterministic image just above
-  the 10 MB inline bound.
+  model; an Agent session; a normal PNG, a valid image above the 2000 px model
+  resize edge but below the 10 MB inline bound, and an image above the 10 MB
+  inline bound.
 - **Steps**:
   1. Select the non-vision model, paste the normal PNG, and inspect Composer's
      removable image chip.
   2. Send the prompt and inspect the sidecar/provider request.
-  3. Select the vision model, paste the oversized image, and send it.
-  4. Retry each turn after disposing/recreating the runtime.
+  3. Select the vision model, paste the large-dimension image, send it, and
+     inspect the final request payload and content-addressed original.
+  4. Restart the runtime, send a follow-up that reuses the historical image,
+     and inspect the adapted request.
+  5. Send the image above the 10 MB app bound, then retry after runtime
+     recreation.
 - **Expected**:
   - Composer shows the pasted image as a removable chip without a separate
-    vision-status explanation. Both cases show a safe `@path` fallback and no
-    image block/base64 payload.
-  - The non-vision request references the session scratch file; the oversized
-    vision request references a safe path while the image remains available to
-    the normal file tools.
-  - Retries and runtime recreation use the content-addressed image ref and a
-    session `replayed/` path where needed; no duplicate binary blobs are made.
-  - The transcript still stores attachment metadata/ref and the UI does not
-    claim that the image was sent visually.
+    vision-status explanation. Non-vision and above-10-MB images use a safe
+    `@path` fallback and no image block/base64 payload.
+  - The vision request carries a resized image no larger than 2000 px on either
+    edge and 4.5 MiB encoded, preceded by a note with original dimensions and
+    the coordinate scale.
+  - The content-addressed blob and restored transcript retain the original
+    image bytes; resizing changes only the model-facing copy.
+  - Restored history obeys the existing 30 MB aggregate raw-byte budget and
+    adapts large images again after runtime recreation without creating a
+    second stored image blob.
 - **Specs linked**: `03-runtime/01-ipc-protocol.md` §5.1,
   `03-runtime/03-tools-and-permissions.md` §4b,
   `03-runtime/02-agent-runtime.md` §5c,
@@ -20483,3 +20489,16 @@ permission-request UI below has isolated fixture automation.
 - **Path:** Open the Composer mode menu from Agent, Plan, and Goal. Select each built-in Goal template; verify the session is staged in Goal mode and an editable scaffold is inserted at the caret. Repeat with existing text on both sides of the caret and with file attachments in the draft. Edit the scaffold, then submit through a deterministic Goal-mode provider fixture that returns `SubmitGoal`; resolve the resulting proposal through the existing approval surface.
 - **Expected:** Selecting a template preserves pre-existing draft text and attachments, does not create a proposal or lifecycle row by itself, and does not overwrite the immutable approval snapshot. Sending in Goal mode creates only the normal `SubmitGoal` proposal and uses the existing approval and Host-owned lifecycle. Rejection returns to editable Goal planning as before.
 - **Coverage:** `goal-templates.test.mjs`, `composer-mode-menu.test.mjs`, i18n catalog parity, Goal proposal/approval tests, and desktop typecheck. No live provider or new persistence source is used.
+
+### E2E-OMP-stream-persistence-restart-and-busy-admission
+
+- **Preconditions:** Isolated OMP runtime with a fake RPC client, temporary profile/session directory and stub Host persistence; no user profile or real provider credentials.
+- **Path:** Stream assistant start/update/end events, complete or abort the RPC turn, then construct a fresh runtime over the same profile and submit a continuation. Separately simulate stale renderer state where Host rejects `session.beginTurn` with `AGENT_BUSY` while the prompt has not yet been appended.
+- **Expected:** OMP events update the renderer and use the same Host transcript/checkpoint/turn-settlement path as PI. Final/interrupted OMP session pointers are atomically saved under the managed profile and are resumed after restart. Shutdown attempts OMP abort even if the PI sidecar is unavailable, drains bounded persistence work, then awaits OMP process stop. A busy admission is converted to one exact queued follow-up; no second user row is persisted, and rejection still restores the composer draft.
+- **Coverage:** `apps/desktop/electron/main/omp/agent-runtime.test.ts`, `apps/desktop/electron/main/runtime/event-persistence.test.ts`, `apps/desktop/test/composer-send-state.test.mjs`, and desktop typecheck. The optional real-binary/local-model test is separate and must be explicitly enabled.
+
+### E2E-OMP-open-managed-engine-folder
+
+- **Path:** In Settings → Agent engines → Engine management, choose **Open engine folder** with and without an installed OMP version.
+- **Expected:** The app opens the managed `oh-my-pi/versions` directory in the system file manager, creating the empty versions directory when needed. The action does not expose the adjacent OMP profile/authentication directory and renderer IPC accepts no caller-provided path; open errors are surfaced in the settings panel.
+- **Coverage:** `apps/desktop/test/omp-engine-settings.test.mjs`, the managed-engine versions-directory test, and desktop typecheck.

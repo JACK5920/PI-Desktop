@@ -101,6 +101,26 @@
   pointer-events: none;
 }
 
+.omp-engine-notice {
+  position: relative;
+  z-index: 3;
+  margin: 6px auto 0;
+  max-width: min(760px, calc(100% - 32px));
+  padding: 6px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--surface-1) 92%, transparent);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  text-align: center;
+}
+.omp-engine-notice button {
+  margin-left: 8px;
+  color: var(--text-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 /* A cold switch keeps the current pane fully legible: only the progress track
  * marks the wait, and the composer is what goes inert, so a prompt cannot be
  * sent to the session being left. */

@@ -67,8 +67,10 @@ test("empty home keeps the primary task surface focused", () => {
   assert.ok(onboardingAt < composerAt, "onboarding must precede composer in markup");
   assert.match(
     emptyBlock,
-    /<div className="home-scroll">[\s\S]*?<\/div>\s*<div className="home-composer-wrap">/,
+    /<div className="home-scroll">[\s\S]*?<\/div>[\s\S]*?home-composer-wrap/,
   );
+  assert.match(emptyBlock, /nativeOmpSelected && isRemoteSession\(activeSession\)/);
+  assert.match(emptyBlock, /<OmpRemoteModeNotice \/>/);
   assert.doesNotMatch(emptyBlock, /empty-hero-copy/);
   assert.doesNotMatch(
     emptyBlock,

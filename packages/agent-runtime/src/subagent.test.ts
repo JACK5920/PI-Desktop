@@ -234,7 +234,7 @@ describe("SubagentRun event forwarding", () => {
       "models.stream(omitThinkingModel, requestContext, retryOptions)",
     );
   });
-  it("retains completed same-id rounds in a resumed subagent request", () => {
+  it("retains completed same-id rounds in a resumed subagent request", async () => {
     const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     try {
       const { run } = createRun({
@@ -267,7 +267,7 @@ describe("SubagentRun event forwarding", () => {
           },
         ] as unknown as NonNullable<SubagentRunOptions["initialMessages"]>,
       });
-      const outgoing = run.agent.convertToLlm(run.agent.state.messages) as Message[];
+      const outgoing = (await run.agent.convertToLlm(run.agent.state.messages)) as Message[];
       const toolCalls = outgoing.flatMap((message) =>
         message.role === "assistant"
           ? message.content.filter((block) => block.type === "toolCall")

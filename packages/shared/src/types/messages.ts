@@ -86,6 +86,11 @@ export type MessageAttachment = {
   data?: string;
 };
 
+/** Bounded inline rich-content blocks emitted by native engines such as OMP. */
+export type InlineMessageContentBlock =
+  | { type: "text"; text: string }
+  | { type: "image"; dataUrl: string; mimeType: string };
+
 /** Whether an attachment is a renderer-resolvable file or image reference. */
 export function isRenderableAttachment(
   attachment: MessageAttachment,
@@ -104,6 +109,8 @@ export type ToolTokenUsage = {
 export type UiMessage = {
   id: string;
   role: UiMessageRole;
+  /** Runtime that emitted a tool row; used to route native engine details correctly. */
+  engineOrigin?: "pi" | "omp";
   content: string;
   /** Internal model instructions/tool declarations; never a visible chat row. */
   modelSystem?: {
@@ -120,6 +127,10 @@ export type UiMessage = {
   voiceOrigin?: VoiceOrigin;
   /** Files or images associated with a user turn, kept separate from text. */
   attachments?: MessageAttachment[];
+  /** Bounded native-engine image blocks retained for legacy renderers. */
+  inlineImages?: Array<{ dataUrl: string; mimeType: string }>;
+  /** Ordered native rich content; images stay between the text blocks that surrounded them. */
+  inlineContent?: InlineMessageContentBlock[];
   /** Accepted input to an existing turn; Stop must preserve it after reload. */
   steering?: boolean;
   /** Model reasoning kept separate from the answer text. */

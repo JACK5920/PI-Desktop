@@ -64,6 +64,7 @@ import { createComputerUseWidget } from "./computer-use/widget-window";
 import { createComputerCursorOverlay } from "./computer-use/cursor-overlay";
 import { getActiveRemoteHostsBoot } from "./bootstrap/remote-hosts";
 import { installLiveMicrophonePermissionHandlers } from "./live-voice/microphone-permissions";
+import { OmpMicrophoneLeaseRegistry } from "./omp/microphone-lease";
 import { MainProcessState } from "./bootstrap/main-state";
 import { registerApplicationActivation } from "./bootstrap/app-activation";
 import { createHostRuntime } from "./runtime/host";
@@ -667,6 +668,8 @@ const sessionCoordination = createSessionCoordination({
 const {
   activeTurnUsages,
   acquireSessionOperation,
+  beginManualCompaction,
+  endManualCompaction,
   addActiveTurnUsage,
   activeToolCallKey,
   planSubmissionTurnKey,
@@ -769,7 +772,7 @@ const eventPersistence = createEventPersistence({
   finishApprovedExecution,
   emitAgentEvent: (envelope) => emitAgentEvent(envelope),
 });
-const { persistAgentEvent } = eventPersistence;
+const { persistAgentEvent, publishAgentEvent } = eventPersistence;
 const computerCursorOverlay = createComputerCursorOverlay();
 
 const sidecarRuntime = createSidecarRuntime({
@@ -857,6 +860,7 @@ const microphoneLeases = new MicrophoneLeaseRegistry(() => {
   const phase = voiceServiceReference?.getState().phase;
   return phase === "preparing" || phase === "starting" || phase === "listening" || phase === "transcribing" || phase === "cancelling";
 });
+const ompMicrophoneLeases = new OmpMicrophoneLeaseRegistry((token) => microphoneLeases.acquire("live", token));
 const voiceService = createVoiceService(
   dataDir + "/voice-models",
   getMainWindow,
@@ -918,6 +922,8 @@ const localApps: LocalAppCatalog = {
   diagnostics: () => localAppsCatalog?.diagnostics() ?? [],
 };
 
+let ompRpcRuntimeForShutdown: { stopAll: () => Promise<void> } | undefined;
+
 function registerIpc() {
   return registerIpcHandlers({
     restartForStorage: () => {
@@ -962,6 +968,8 @@ function registerIpc() {
     sessionCapabilityContext,
     enrichSession,
     acquireSessionOperation,
+    beginManualCompaction,
+    endManualCompaction,
     beginTranscriptRewrite: eventPersistence.beginTranscriptRewrite,
     forgetTranscriptRewriteHistory: sessionCoordination.forgetTranscriptRewriteHistory,
     recordTurnStart,
@@ -1019,6 +1027,9 @@ function registerIpc() {
     dispatchApprovedPlan,
     dispatchExecutionForProposal,
     emitAgentEvent,
+    publishAgentEvent,
+    onOmpRpcRuntimeCreated: (runtime) => { ompRpcRuntimeForShutdown = runtime; },
+    ompMicrophoneLeases,
     userMcp,
     mcpOAuth,
     refreshUserMcp,
@@ -1069,6 +1080,7 @@ app.on("browser-window-created", (_event, window) => {
       void liveCallService.endForWebContents(contentsId, "renderer-gone", true);
     });
     window.webContents.once("destroyed", () => {
+      ompMicrophoneLeases.releaseForWebContents(contentsId);
       void liveCallService.endForWebContents(contentsId, "renderer-gone", true);
     });
   });
@@ -1077,7 +1089,7 @@ void app.whenReady().then(() => {
   installLiveMicrophonePermissionHandlers({
     targetSession: session.defaultSession,
     getMainWindow,
-    hasReservation: (owner) => liveCallService.hasMicrophoneReservation(owner),
+    hasReservation: (owner) => liveCallService.hasMicrophoneReservation(owner) || ompMicrophoneLeases.hasReservation(owner),
   });
   powerMonitor.on("suspend", () => void liveCallService.endForLifecycle("app-suspended"));
   powerMonitor.on("lock-screen", () => void liveCallService.endForLifecycle("app-suspended"));
@@ -1085,6 +1097,7 @@ void app.whenReady().then(() => {
 
 // The widget is chrome for a call this window owns; it must never outlive the app.
 app.once("will-quit", () => liveVoiceWidget.close());
+app.once("will-quit", () => ompMicrophoneLeases.releaseAll());
 app.once("will-quit", () => computerUseWidget.close());
 app.once("will-quit", () => computerCursorOverlay.close());
 
@@ -1131,6 +1144,8 @@ registerShutdownHandlers({
   state: shutdownState,
   getHost,
   getSidecar,
+  getOmpRpcRuntime: () => ompRpcRuntimeForShutdown,
+  lockAbortReason,
   getMcpControl: () => mainState.mcpControl,
   activeTurns,
   persistenceOutbox,

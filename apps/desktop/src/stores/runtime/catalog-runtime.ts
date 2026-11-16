@@ -1,3 +1,9 @@
+import {
+  canRetryProviderModels,
+  nextProviderModelRetryState,
+  type ProviderModelRetryState,
+} from "./provider-model-retry";
+
 export type CatalogRuntime = {
   beginProviderRefresh: () => number;
   providerGeneration: () => number;
@@ -13,6 +19,9 @@ export type CatalogRuntime = {
   setNotificationClearedAt: (timestamp: number) => void;
   refreshedProviderModels: Set<string>;
   providerModelLoads: Map<string, Promise<void>>;
+  canRetryProviderModels: (providerId: string, now?: number) => boolean;
+  markProviderModelFailure: (providerId: string, now?: number) => void;
+  markProviderModelSuccess: (providerId: string) => void;
   getPluginRefresh: () => Promise<void> | null;
   setPluginRefresh: (request: Promise<void> | null) => void;
 };
@@ -26,6 +35,7 @@ export function createCatalogRuntime(): CatalogRuntime {
   let pluginRefreshInFlight: Promise<void> | null = null;
   const refreshedProviderModels = new Set<string>();
   const providerModelLoads = new Map<string, Promise<void>>();
+  const providerModelFailures = new Map<string, ProviderModelRetryState>();
   const notificationReadIds = new Set<string>();
 
   const rememberNotificationRead = (id: string): void => {
@@ -46,6 +56,9 @@ export function createCatalogRuntime(): CatalogRuntime {
     beginProviderRefresh: () => {
       providerModelsGeneration += 1;
       refreshedProviderModels.clear();
+      // A provider refresh can reflect changed credentials or endpoint settings;
+      // let the next model-menu open validate the newly saved configuration.
+      providerModelFailures.clear();
       return providerModelsGeneration;
     },
     providerGeneration: () => providerModelsGeneration,
@@ -68,6 +81,17 @@ export function createCatalogRuntime(): CatalogRuntime {
     },
     refreshedProviderModels,
     providerModelLoads,
+    canRetryProviderModels: (providerId, now) =>
+      canRetryProviderModels(providerModelFailures.get(providerId), now),
+    markProviderModelFailure: (providerId, now) => {
+      providerModelFailures.set(
+        providerId,
+        nextProviderModelRetryState(providerModelFailures.get(providerId), now),
+      );
+    },
+    markProviderModelSuccess: (providerId) => {
+      providerModelFailures.delete(providerId);
+    },
     getPluginRefresh: () => pluginRefreshInFlight,
     setPluginRefresh: (request) => {
       pluginRefreshInFlight = request;

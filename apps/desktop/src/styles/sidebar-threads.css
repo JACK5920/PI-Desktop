@@ -120,20 +120,20 @@
 .sidebar-session-groups {
   display: flex;
   min-height: 0;
-  /* Basis 0, not auto: with a content-derived basis the scroller's resolved
-     height is re-solved from its own content, so collapsing the first project
-     nudges the whole list up a few pixels before it settles back. */
-  flex: 1 1 0;
+  /* Content height only: the sidebar body owns scrolling now, so this list must
+     not claim the remaining viewport and create a second scroll surface. */
+  flex: 0 0 auto;
   flex-direction: column;
   /* Baseline of the group ladder: adjacent rows and group headers sit 1px
      apart. The extra air around an expanded group belongs to the group itself
      (see `.sidebar-session-group-body.project`), so this gap stays uniform and
      a collapsed group cannot fork the spacing on its neighbour's state. */
   gap: 1px;
-  overflow-x: hidden;
-  overflow-y: auto;
-  overscroll-behavior-y: contain;
-  padding-top: 2px;
+  /* No inner scroller: the rail scrolls as a whole so every section stays
+     reachable with one gesture. */
+  overflow: visible;
+  /* Matches the 2px ridge the list used to get from utility classes. */
+  padding: 2px 2px 0;
 }
 
 .sidebar-session-group {
@@ -258,18 +258,16 @@
 /* Nested session rows read as children through the indent alone; the tree
    rail is gone (D297). */
 .sidebar-session-group-body.project {
-  /* A one-row grid: the fold is a real fraction of the measured content, and
-     `opacity` stays 1 — the rows are clipped, never faded. */
-  display: grid;
-  grid-template-rows: 1fr;
+  /* Plain block flow. A fractional grid row re-solves its height against the
+     measured content on every layout pass, and inside the new rail scroller a
+     long list kept re-laying-out frame after frame, which read as flicker. */
+  display: block;
   margin-left: 13px;
   padding-left: 9px;
-  transition: grid-template-rows var(--motion-duration-normal) var(--motion-ease-out);
 }
 
 .sidebar-session-group-body.project.collapsed {
-  grid-template-rows: 0fr;
-  pointer-events: none;
+  display: none;
 }
 
 /* The `0fr` row closes only if the clip can shrink below its content. */
@@ -313,13 +311,10 @@
 }
 
 .sidebar-session-group-body.standalone {
-  /* Five compact 28px rows plus the four 1px gaps between them, and the 2px
-     label inset, before the list starts scrolling internally. */
-  max-height: 146px;
+  /* Height follows the rows; the sidebar body scrolls them together with the
+     project list instead of clipping to five rows here. */
   min-height: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-  overscroll-behavior-y: contain;
+  overflow: visible;
   /* 2px below the section label, matching every label-to-content pair. */
   padding: 2px 2px 0;
 }
@@ -342,12 +337,8 @@
 }
 
 .sidebar-session-group-body.pinned {
-  /* Eight compact 28px rows plus their seven 1px gaps, and the 2px label
-     inset. */
-  max-height: min(233px, 30vh);
-  overflow-x: hidden;
-  overflow-y: auto;
-  overscroll-behavior-y: contain;
+  /* Same rule as the temporary list: no local cap, the rail scrolls. */
+  overflow: visible;
   /* 2px below the section label, matching every label-to-content pair. */
   padding: 2px 2px 0;
 }
@@ -430,6 +421,9 @@
   flex: 0 0 auto;
   border-radius: var(--radius-round);
   background: var(--ds-warning);
+  /* Scale/opacity loop: keep it on its own layer so the rail around it is not
+     repainted on every frame, which used to read as flicker when fullscreen. */
+  will-change: transform, opacity;
   animation: project-run-breathe 1.6s ease-in-out infinite;
 }
 
@@ -478,6 +472,9 @@
     var(--ds-warning) 60%,
     transparent 100%
   );
+  /* Without its own layer the travelling highlight repaints the whole rail on
+     every frame, which is far more visible once the window is fullscreen. */
+  will-change: transform;
   animation: project-run-comet 2.2s cubic-bezier(0.45, 0, 0.55, 1) infinite;
 }
 

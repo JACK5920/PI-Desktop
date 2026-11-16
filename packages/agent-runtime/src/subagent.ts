@@ -64,7 +64,7 @@ import type { RuntimeProviderConfig } from "./provider-binding.js";
 import { clampThinkingLevel } from "./thinking-level.js";
 import { subagentModelBinding, type SubagentProviderRetryState } from "./subagent-model-binding.js";
 import { contextBudgetFor } from "./context-budget.js";
-import { convertToLlm } from "./pi-runtime-messages.js";
+import { convertToLlmForProvider } from "./pi-runtime-messages.js";
 import {
   delegateRetentionMode,
   delegateSummaryModels,
@@ -296,8 +296,8 @@ export class SubagentRun {
       identity: DESKTOP_AGENT_IDENTITY,
       streamFn: binding.streamFn,
       getApiKey: binding.getApiKey,
-      convertToLlm: (messages) =>
-        convertToLlm(this.dedupeToolCalls(messages)),
+      convertToLlm: async (messages) =>
+        convertToLlmForProvider(this.dedupeToolCalls(messages)),
       // The same turn-boundary context protection the session has (ADR 0299):
       // re-estimate at each boundary, compact before the next request, degrade
       // before failing. The budget derives from this run's resolved model.

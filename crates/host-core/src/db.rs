@@ -7,7 +7,7 @@ pub(crate) use serde_json::Value;
 pub(crate) use std::path::{Path, PathBuf};
 
 /// Current SQLite schema version.
-pub const SCHEMA_VERSION: i64 = 31;
+pub const SCHEMA_VERSION: i64 = 34;
 
 /// Absolute approval deadline for a newly submitted Plan or Goal proposal.
 pub const PLAN_APPROVAL_TIMEOUT_MS: i64 = 30 * 60 * 1000;
@@ -28,7 +28,7 @@ mod session_fast_mode_migration;
 mod session_title_source_migration;
 mod tool_image_storage_migration;
 mod worktree_migration;
-pub(crate) use goal_lifecycle_migration::migrate_v27_to_v28;
+pub(crate) use goal_lifecycle_migration::{ensure_goal_lifecycle_schema_tx, migrate_v27_to_v28};
 pub(crate) use migrations::{
     archive_legacy_db, create_migration_backup, migrate_and_validate_top_level_mode,
     migrate_app_settings, migrate_v10_to_v15, migrate_v11_to_v15, migrate_v12_to_v15,

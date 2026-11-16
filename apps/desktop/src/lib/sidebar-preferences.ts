@@ -43,9 +43,22 @@ export type SidebarPreferences = {
 
 export const SIDEBAR_PREFERENCES_KEY = "pi.desktop.sidebarPreferences";
 export const SIDEBAR_WIDTH_KEY = "pi.desktop.sidebarWidth";
+/** Which conversation the window was showing, so launch can reopen that one. */
+export const LAST_OPENED_SESSION_KEY = "pi.desktop.lastOpenedSession";
 export const SIDEBAR_WIDTH_MIN = 240;
 export const SIDEBAR_WIDTH_DEFAULT = 275;
 export const SIDEBAR_WIDTH_MAX = 520;
+
+/** Conversation the window was last showing; launch reopens it verbatim. */
+export function readLastOpenedSessionId(): string | undefined {
+  const value = read(LAST_OPENED_SESSION_KEY);
+  return typeof value === "string" && value ? value : undefined;
+}
+
+export function rememberLastOpenedSession(id: string | undefined): void {
+  if (!id) return;
+  write(LAST_OPENED_SESSION_KEY, id);
+}
 
 export function clampSidebarWidth(value: number, max = SIDEBAR_WIDTH_MAX): number {
   if (!Number.isFinite(value)) return SIDEBAR_WIDTH_DEFAULT;

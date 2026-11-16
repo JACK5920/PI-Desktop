@@ -7,6 +7,7 @@ import {
   isHistoryRevealPosition,
   isHistoryPrefetchPosition,
   isRecentScrollGesture,
+  isUpwardScrollIntent,
   reduceTranscriptScroll,
   transcriptHasLayout,
 } from "../src/lib/transcript-scroll.ts";
@@ -29,6 +30,15 @@ test("the first small upward scroll releases transcript follow", () => {
   assert.equal(result.releasedFollow, true);
   assert.equal(result.pinned, false);
   assert.equal(result.showJump, true);
+});
+
+test("an upward gesture retires follow before its native scroll event can race a queued frame", () => {
+  assert.equal(isUpwardScrollIntent("wheel", { deltaY: -1, deltaX: 0 }), true);
+  assert.equal(isUpwardScrollIntent("wheel", { deltaY: -1, deltaX: -8 }), false);
+  assert.equal(isUpwardScrollIntent("wheel", { deltaY: 1, deltaX: 0 }), false);
+  assert.equal(isUpwardScrollIntent("keydown", { key: "PageUp" }), true);
+  assert.equal(isUpwardScrollIntent("keydown", { key: "ArrowDown" }), false);
+  assert.equal(isUpwardScrollIntent("wheel", { deltaY: -1, nestedOwner: true }), false);
 });
 
 test("layout clamping at the exact bottom preserves transcript follow", () => {

@@ -631,8 +631,6 @@ fn inspect_with_rebind(
     })
 }
 
-
-
 /// Bind a window if one was named, then inspect whatever is bound.
 ///
 /// A failed inspection leaves the grant describing the window it already had:
@@ -768,8 +766,6 @@ fn bound_nodes(nodes: Vec<Node>) -> Vec<Node> {
     if nodes.len() <= MAX_NODES {
         return truncate_labels(nodes);
     }
-
-
 
     // Ranked by how much a node must survive the cut.
     //
@@ -1251,9 +1247,7 @@ mod tests {
         assert!(composer.actions.contains(&ActionKind::SetValue));
         // Its parent has to be in the tree as well, and the parent index has
         // to point at it after the remap.
-        let parent = composer
-            .parent
-            .expect("a kept node keeps its parent");
+        let parent = composer.parent.expect("a kept node keeps its parent");
         assert_eq!(kept[parent].uid, "group");
         assert_eq!(kept[kept[parent].parent.unwrap()].uid, "root");
     }

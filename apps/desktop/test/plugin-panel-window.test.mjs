@@ -35,14 +35,28 @@ test("plugin panels match the cross-platform main-window chrome contract", () =>
   );
   assert.match(hostSource, /win\.setMenu\(null\)/);
   assert.match(hostSource, /pi-plugin-panel-development=1/);
-  assert.match(chromeSource, /PLUGIN_PANEL_TITLEBAR_HEIGHT = 46/);
+  assert.match(chromeSource, /PLUGIN_PANEL_TITLEBAR_HEIGHT = 26/);
   assert.match(preloadSource, /-webkit-app-region: drag/);
   assert.match(preloadSource, /className = "capsule"/);
-  assert.match(preloadSource, /top: 9px/);
-  assert.match(preloadSource, /right: 8px/);
-  assert.match(preloadSource, /width: 96px/);
-  assert.match(preloadSource, /height: 28px/);
+  assert.match(preloadSource, /top: 2px/);
+  assert.match(preloadSource, /right: 6px/);
+  assert.match(preloadSource, /width: 120px/);
+  assert.match(
+    preloadSource,
+    /height: \$\{PLUGIN_PANEL_TITLEBAR_HEIGHT - 4\}px/,
+  );
   assert.match(preloadSource, /border-radius: 999px/);
+  // The band fills itself with the page's sampled surface. Without this a
+  // plugin palette that differs from the app theme leaves the native window
+  // background exposed as a strip above the page.
+  assert.match(
+    preloadSource,
+    /background: var\(--pi-plugin-panel-page-background, transparent\)/,
+  );
+  assert.match(
+    preloadSource,
+    /:host\(\[data-chrome-mode="paint-through"\]\) \{\s*background: transparent;/,
+  );
   assert.match(preloadSource, /controls\.append\(minimize, maximize, close\)/);
   const capsuleBlock = preloadSource.slice(
     preloadSource.indexOf("    .capsule {"),
@@ -102,7 +116,7 @@ test("plugin panel close does not read destroyed webContents", () => {
   assert.match(hostSource, /if \(!win\.isDestroyed\(\)\) \{\s*win\.destroy\(\);\s*\}/);
 });
 
-test("plugin content is offset below the strict 46px host drag band", () => {
+test("plugin content is offset below the strict 26px host drag band", () => {
   assert.match(preloadSource, /getComputedStyle\(body\)\.paddingTop/);
   assert.match(preloadSource, /padding-top/);
   assert.match(preloadSource, /PLUGIN_PANEL_CHROME_META_NAME/);
@@ -112,11 +126,11 @@ test("plugin content is offset below the strict 46px host drag band", () => {
   assert.match(preloadSource, /--pi-plugin-titlebar-height/);
   assert.match(preloadSource, /isDevelopmentPanel/);
   assert.match(preloadSource, /safe-area-hint/);
-  assert.match(preloadSource, /顶部 46px 为拖拽区/);
+  assert.match(preloadSource, /顶部 26px 为拖拽区/);
   assert.match(preloadSource, /外掛面板視窗控制項/);
-  assert.match(preloadSource, /頂部 46px 為拖曳區/);
+  assert.match(preloadSource, /頂部 26px 為拖曳區/);
   assert.match(preloadSource, /플러그인 패널 창 컨트롤/);
-  assert.match(preloadSource, /상단 46px는 드래그 전용/);
+  assert.match(preloadSource, /상단 26px는 드래그 전용/);
   assert.match(preloadSource, /locale\.startsWith\("ko"\)/);
   assert.match(preloadSource, /locale\.startsWith\("tr"\)/);
   assert.match(preloadSource, /locale\.startsWith\("de"\)/);
@@ -124,7 +138,7 @@ test("plugin content is offset below the strict 46px host drag band", () => {
   assert.match(preloadSource, /locale\.startsWith\("fr"\)/);
   assert.match(preloadSource, /locale\.startsWith\("pt"\)/);
   assert.match(preloadSource, /Controles de janela do painel do plugin/);
-  assert.match(preloadSource, /os 46px superiores são apenas para arrastar/);
+  assert.match(preloadSource, /os 26px superiores são apenas para arrastar/);
   assert.match(preloadSource, /locale === "zh-tw"/);
   assert.match(preloadSource, /locale === "zh-hant"/);
   assert.match(preloadSource, /--pi-plugin-panel-theme=/);
@@ -172,8 +186,8 @@ test("checked-in plugin panels follow the host chrome contract", () => {
   assert.equal(bundledPanelSources.length, 2);
   for (const panelSource of [examplePanelSource, ...bundledPanelSources]) {
     assert.match(panelSource, /meta name="pi-plugin-chrome" content="v2"/);
-    assert.match(panelSource, /PI-Desktop reserves exactly a transparent 46px drag band/);
-    assert.match(panelSource, /var\(--pi-plugin-titlebar-height, 46px\)/);
+    assert.match(panelSource, /PI-Desktop reserves exactly a transparent 26px drag band/);
+    assert.match(panelSource, /var\(--pi-plugin-titlebar-height, 26px\)/);
     assert.doesNotMatch(panelSource, /top:\s*0/);
   }
 });
@@ -198,7 +212,7 @@ test("floating widgets are transparent, chromeless, and still dismissible", () =
   assert.match(hostSource, /\.\.\.\(widget \? \[PLUGIN_PANEL_WIDGET_ARGUMENT\] : \[\]\),/);
 
   // The preload owns the placement: titlebar height 0, no capsule, and a drag
-  // map over the whole window instead of the 46px band.
+  // map over the whole window instead of the 26px band.
   assert.match(preloadSource, /function isWidgetPanel\(\): boolean/);
   assert.match(
     preloadSource,

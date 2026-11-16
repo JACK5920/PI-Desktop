@@ -3,12 +3,15 @@ import {
   type Mode,
   type PermissionMode,
   type PluginComposerTransformMeta,
+  type ProviderPublic,
   type SessionThinkingLevel,
   type ShortcutPlatform,
 } from "@pi-desktop/shared";
 import type { TFunction } from "i18next";
-import type { Dispatch, SetStateAction } from "react";
+import { useState, type Dispatch, type SetStateAction } from "react";
 import { ContextUsageInspector } from "../../../components/ContextUsageInspector";
+import { OmpNativeControls } from "../../../components/OmpNativeControls";
+import { AnchoredMenu } from "../../../components/settings/AnchoredMenu";
 import {
   IconArrowUp,
   IconPause,
@@ -20,9 +23,12 @@ import {
 } from "../../../components/icons";
 import { TooltipButton } from "../../../components/ui";
 import { type AppState, useAppStore } from "../../../stores/app-store";
+import { agentEngineForState } from "../../../lib/session-agent-engine";
 import { LiveVoiceControls } from "../../voice/live/LiveVoiceControls";
 import { ComposerControlSlots } from "./ComposerControlSlots";
 import { ComposerModelPicker } from "./ComposerModelPicker";
+import { ComposerEnginePicker } from "./ComposerEnginePicker";
+import { ComposerOmpModelPicker } from "./ComposerOmpModelPicker";
 import { ComposerModePicker } from "./ComposerModePicker";
 import { ComposerPermissionPicker } from "./ComposerPermissionPicker";
 import type { GoalTemplate } from "./goal-templates.mjs";
@@ -44,6 +50,7 @@ export type ComposerToolbarProps = {
   permissionOpen: boolean;
   setPermissionOpen: Dispatch<SetStateAction<boolean>>;
   controlsBlocked: boolean;
+  engineSwitchBlocked?: boolean;
   localToolsAllowed?: boolean;
   attachmentsAllowed?: boolean;
   stopAllowed?: boolean;
@@ -54,6 +61,9 @@ export type ComposerToolbarProps = {
   onSelectGoalTemplate: (template: GoalTemplate) => void | Promise<void>;
   modelMenu: ModelMenuController;
   modelLabel: string;
+  engineIssueMessage?: string | null;
+  selectedProvider?: ProviderPublic;
+  onEngineIssueChange: (issue: string | null) => void;
   thinkingLabel: string;
   /** The selected model asks for OpenAI's priority tier (ADR 0334). */
   modelFastMode?: boolean;
@@ -68,12 +78,14 @@ export type ComposerToolbarProps = {
   undoComposerTransform: () => void;
   runActive: boolean;
   hasDraftContent: boolean;
+  steeringAllowed?: boolean;
+  nativeSession?: boolean;
   abort: AppState["abort"];
   taskPaused?: boolean;
   pausePending?: boolean;
   pauseTask?: () => Promise<void>;
   resumeTask?: () => Promise<void>;
-  submit: () => Promise<void>;
+  submit: (steering?: boolean) => Promise<void>;
   workSessionId?: string;
   workSessionLabel?: string;
 };
@@ -92,6 +104,7 @@ export function ComposerToolbar({
   permissionOpen,
   setPermissionOpen,
   controlsBlocked,
+  engineSwitchBlocked = controlsBlocked,
   localToolsAllowed = true,
   attachmentsAllowed = true,
   stopAllowed = true,
@@ -102,6 +115,9 @@ export function ComposerToolbar({
   onSelectGoalTemplate,
   modelMenu,
   modelLabel,
+  engineIssueMessage = null,
+  selectedProvider,
+  onEngineIssueChange,
   thinkingLabel,
   modelFastMode = false,
   contextUsage,
@@ -115,6 +131,8 @@ export function ComposerToolbar({
   undoComposerTransform,
   runActive,
   hasDraftContent,
+  steeringAllowed = true,
+  nativeSession = false,
   abort,
   taskPaused = false,
   pausePending = false,
@@ -124,8 +142,25 @@ export function ComposerToolbar({
   workSessionId,
   workSessionLabel,
 }: ComposerToolbarProps) {
+  const [sendOptionsOpen, setSendOptionsOpen] = useState(false);
+  const [engineOpen, setEngineOpen] = useState(false);
+  // The open conversation may pin its own engine; the app-wide setting only
+  // decides what a brand-new conversation starts on.
+  const selectedEngine = useAppStore(agentEngineForState);
+  const activeSessionId = useAppStore((state) => state.activeSessionId);
   const platform = (window.piDesktop?.platform ?? "darwin") as ShortcutPlatform;
   const steeringShortcut = keybindingDisplayParts("Alt+Enter", platform).join("+");
+  // OMP exposes native steer/follow-up delivery through RPC, so it gets the
+  // same accessible choice menu without borrowing PI's host-side queue.
+  const sendOptionsAvailable = runActive && hasDraftContent && (!nativeSession || selectedEngine === "omp");
+  const openSendOptions = () => {
+    if (!sendOptionsAvailable) return;
+    modelMenu.setOpen(false);
+    setEngineOpen(false);
+    setModeOpen(false);
+    setPermissionOpen(false);
+    setSendOptionsOpen(true);
+  };
   return (
     <div className="composer-toolbar">
       <div className="composer-left">
@@ -144,8 +179,9 @@ export function ComposerToolbar({
             <IconPlus size={15} aria-hidden="true" />
           </TooltipButton>
         </div>
-        {localToolsAllowed ? <LiveVoiceControls t={t} workSessionId={workSessionId} /> : null}
-        <ComposerModePicker
+        {localToolsAllowed && selectedEngine !== "omp" ? <LiveVoiceControls t={t} workSessionId={workSessionId} /> : null}
+        {localToolsAllowed && selectedEngine === "omp" ? <OmpNativeControls sessionId={activeSessionId ?? null} t={t} /> : null}
+        {selectedEngine !== "omp" ? <ComposerModePicker
           t={t}
           mode={mode}
           planningLive={planningLive}
@@ -154,6 +190,7 @@ export function ComposerToolbar({
           controlsBlocked={controlsBlocked}
           onCloseOtherMenus={() => {
             modelMenu.setOpen(false);
+            setEngineOpen(false);
             setPermissionOpen(false);
           }}
           onSelect={async (next) => {
@@ -171,13 +208,14 @@ export function ComposerToolbar({
             }
           }}
           onSelectGoalTemplate={onSelectGoalTemplate}
-        />
-        <ComposerPermissionPicker t={t} mode={mode}
+        /> : null}
+        {selectedEngine !== "omp" ? <ComposerPermissionPicker t={t} mode={mode}
           composerPermissionMode={composerPermissionMode}
           permissionOpen={permissionOpen} setPermissionOpen={setPermissionOpen}
           controlsBlocked={controlsBlocked}
           onCloseOtherMenus={() => {
             modelMenu.setOpen(false);
+            setEngineOpen(false);
             setModeOpen(false);
           }}
           onSelect={async (candidate) => {
@@ -194,26 +232,57 @@ export function ComposerToolbar({
                     variant: "error",
                   });
                 }
-          }} />
+          }} /> : null}
         {localToolsAllowed ? <ComposerControlSlots side="left" /> : null}
       </div>
 
       <div className="composer-right">
         {localToolsAllowed ? <ComposerControlSlots side="right" /> : null}
-        {contextUsage ? <ContextUsageInspector {...contextUsage} /> : null}
-        <ComposerModelPicker
+        {contextUsage && selectedEngine !== "omp" ? <ContextUsageInspector {...contextUsage} /> : null}
+        <ComposerEnginePicker
           t={t}
-          controller={modelMenu}
-          modelLabel={modelLabel}
-          thinkingLabel={thinkingLabel}
-          fastMode={modelFastMode}
-          thinkingLevel={thinkingLevel}
-          selectedProviderId={providerId}
-          selectedModelId={modelId}
-          controlsBlocked={controlsBlocked}
-          onCloseOtherMenus={() => setPermissionOpen(false)}
-          onOpenModelSettings={() => useAppStore.getState().setSettingsTab("agent")}
+          controlsBlocked={engineSwitchBlocked}
+          open={engineOpen}
+          setOpen={setEngineOpen}
+          onCloseOtherMenus={() => {
+            modelMenu.setOpen(false);
+            setModeOpen(false);
+            setPermissionOpen(false);
+          }}
+          onIssueChange={onEngineIssueChange}
         />
+        {selectedEngine === "omp" ? (
+          <ComposerOmpModelPicker
+            t={t}
+            // A running OMP turn must not lock the picker: choosing a model is
+            // a next-turn setting, and a disabled chip reads as a dead button.
+            controlsBlocked={controlsBlocked && !runActive}
+            onCloseOtherMenus={() => {
+              modelMenu.setOpen(false);
+              setPermissionOpen(false);
+              setEngineOpen(false);
+              setModeOpen(false);
+            }}
+          />
+        ) : (
+          <ComposerModelPicker
+            t={t}
+            controller={modelMenu}
+            modelLabel={modelLabel}
+            thinkingLabel={thinkingLabel}
+            fastMode={modelFastMode}
+            thinkingLevel={thinkingLevel}
+            selectedProviderId={providerId}
+            selectedModelId={modelId}
+            controlsBlocked={controlsBlocked}
+            onOpenModelSettings={() => useAppStore.getState().setSettingsTab("agent")}
+            onCloseOtherMenus={() => {
+              setPermissionOpen(false);
+              setEngineOpen(false);
+              setModeOpen(false);
+            }}
+          />
+        )}
         {composerTransforms.map((transform) => {
           const key = `${transform.pluginId}/${transform.id}`;
           const isActive = activeTransformKey === key;
@@ -297,26 +366,99 @@ export function ComposerToolbar({
             <IconPlay size={14} />
           </TooltipButton>
         ) : (
-          <TooltipButton
-            type="button"
-            className="send-btn"
-            ariaLabel={modelReady ? t("chat.send") : t("settings.addProvider")}
-            tooltip={
-              runActive
-                ? t("chat.sendWhileRunning", { shortcut: steeringShortcut })
-                : modelReady
-                  ? t("chat.send")
-                  : t("settings.addProvider")
-            }
-            disabled={
-              !hasDraftContent ||
-              sendBlocked ||
-              (!modelReady && !value.trim().startsWith("/"))
-            }
-            onClick={() => void submit()}
+          <AnchoredMenu
+            className="composer-send-options"
+            open={sendOptionsOpen && sendOptionsAvailable}
+            onClose={() => setSendOptionsOpen(false)}
+            menuClassName="composer-send-options-menu"
+            label={t("chat.sendOptions")}
+            role="menu"
+            align="end"
+            side="top"
+            onMenuKeyDown={(event) => {
+              const items = Array.from(
+                event.currentTarget.querySelectorAll<HTMLButtonElement>(
+                  '[role="menuitem"]:not(:disabled)',
+                ),
+              );
+              if (items.length === 0) return;
+              const activeIndex = items.indexOf(document.activeElement as HTMLButtonElement);
+              const nextIndex =
+                event.key === "ArrowDown"
+                  ? (activeIndex + 1 + items.length) % items.length
+                  : event.key === "ArrowUp"
+                    ? (activeIndex - 1 + items.length) % items.length
+                    : event.key === "Home"
+                      ? 0
+                      : event.key === "End"
+                        ? items.length - 1
+                        : -1;
+              if (nextIndex < 0) return;
+              event.preventDefault();
+              items[nextIndex]?.focus();
+            }}
+            trigger={(ref) => (
+              <TooltipButton
+                ref={ref}
+                type="button"
+                className="send-btn"
+                ariaLabel={modelReady ? t("chat.send") : t("settings.addProvider")}
+                aria-haspopup={sendOptionsAvailable ? "menu" : undefined}
+                aria-expanded={sendOptionsAvailable ? sendOptionsOpen : undefined}
+                tooltip={
+                  engineIssueMessage ?? (runActive
+                    ? t("chat.sendWhileRunning", { shortcut: steeringShortcut })
+                    : modelReady
+                      ? t("chat.send")
+                      : t("settings.addProvider"))
+                }
+                disabled={
+                  !hasDraftContent ||
+                  sendBlocked ||
+                  (!modelReady && !value.trim().startsWith("/"))
+                }
+                onClick={() => void submit()}
+                onContextMenu={(event) => {
+                  if (!sendOptionsAvailable) return;
+                  event.preventDefault();
+                  openSendOptions();
+                }}
+                onKeyDown={(event) => {
+                  if (!sendOptionsAvailable || !(event.key === "ContextMenu" || (event.shiftKey && event.key === "F10"))) return;
+                  event.preventDefault();
+                  openSendOptions();
+                }}
+              >
+                <IconArrowUp size={15} />
+              </TooltipButton>
+            )}
           >
-            <IconArrowUp size={15} />
-          </TooltipButton>
+            <button
+              type="button"
+              role="menuitem"
+              className="composer-plus-item"
+              disabled={!steeringAllowed || sendBlocked}
+              onClick={() => {
+                setSendOptionsOpen(false);
+                void submit(true);
+              }}
+            >
+              <span className="flex-1 text-left">{t("chat.steerCurrentRun")}</span>
+              <span className="composer-menu-shortcut">{steeringShortcut}</span>
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="composer-plus-item"
+              disabled={sendBlocked}
+              onClick={() => {
+                setSendOptionsOpen(false);
+                void submit();
+              }}
+            >
+              <span className="flex-1 text-left">{t("chat.queueAsFollowUp")}</span>
+            </button>
+          </AnchoredMenu>
         )}
       </div>
     </div>

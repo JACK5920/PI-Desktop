@@ -31,6 +31,7 @@ import type { StoreAccess } from "../slices/types";
 export const SESSION_TRANSCRIPT_CACHE_LIMIT = 20;
 export const SESSION_TRANSCRIPT_PAGE_SIZE = 100;
 export const SESSION_TRANSCRIPT_CONTENT_LIMIT = 64 * 1024;
+export const PENDING_PROMPT_ATTEMPT_LIMIT = 100;
 
 export type SubmittedComposerDraft = {
   messageCountBeforeSend: number;
@@ -43,7 +44,9 @@ export type SessionConfiguration = Pick<
   SessionSummary,
   "mode" | "providerId" | "modelId" | "thinkingLevel"
 > &
-  Partial<Pick<SessionSummary, "permissionMode" | "fastMode">>;
+  Partial<
+    Pick<SessionSummary, "permissionMode" | "fastMode" | "agentEngine">
+  >;
 
 export type SessionSelection = { id: string; intent: number };
 
@@ -53,6 +56,8 @@ export type SessionRuntime = {
   readonly liveSessionTranscripts: Set<string>;
   readonly sessionHistoryCache: Map<string, SessionHistoryWindow>;
   readonly submittedComposerDrafts: Map<string, SubmittedComposerDraft>;
+  readonly pendingPromptAttempts: Map<string, Map<string, UiMessage>>;
+  readonly promptSubmissionStates: Map<string, Map<string, "sending" | "accepted">>;
   readonly pendingSessionConfigurations: Map<string, SessionConfiguration>;
   readonly sessionConfigurationFlushes: Map<string, Promise<void>>;
   beginNavigationIntent: () => number;
@@ -84,6 +89,13 @@ export type SessionRuntime = {
   loadFullSessionMessages: (id: string, cache?: boolean) => Promise<UiMessage[] | null>;
   insertOptimisticUserMessage: (sessionId: string, message: UiMessage) => void;
   retractOptimisticUserMessage: (sessionId: string, message: UiMessage) => void;
+  markPendingPromptFailed: (sessionId: string, message: UiMessage) => void;
+  clearPendingPromptAttempt: (sessionId: string, messageId: string) => void;
+  patchSessionMessage: (sessionId: string, messageId: string, patch: Partial<UiMessage>) => void;
+  beginPromptSubmission: (sessionId: string, messageId: string) => void;
+  acceptPromptSubmission: (sessionId: string, messageId: string) => void;
+  promptSubmissionWasAccepted: (sessionId: string, messageId: string) => boolean;
+  clearPromptSubmission: (sessionId: string, messageId: string) => void;
   cacheBackgroundTranscriptEvent: (envelope: AgentEventEnvelope) => void;
   mergeSessionConfiguration: (
     current: SessionConfiguration | undefined,
@@ -104,6 +116,7 @@ export type SessionRuntime = {
       parentToolCallId?: string;
       nestedParentToolCallId?: string;
       agentName?: string;
+      engineOrigin?: "pi" | "omp";
     },
   ) => void;
   getToolStart: (toolCallId: string) => {
@@ -113,6 +126,7 @@ export type SessionRuntime = {
     parentToolCallId?: string;
     nestedParentToolCallId?: string;
     agentName?: string;
+    engineOrigin?: "pi" | "omp";
   } | undefined;
   removeToolStart: (toolCallId: string) => void;
   nextPlanSyncGeneration: (sessionId: string) => number;
@@ -128,9 +142,16 @@ export function createSessionRuntime({ get, set }: StoreAccess): SessionRuntime 
 
   const pendingNewSessionRequests = new Map<string, Promise<string | null>>();
   const sessionTranscriptCache = new Map<string, UiMessage[]>();
+  // Monotonic per-session projection revision. A session-detail request may be
+  // in flight while an edit, stream event, or terminal update changes the
+  // renderer-owned transcript. The response is only a valid cache candidate
+  // when this revision is unchanged from request start.
+  const sessionTranscriptRevisions = new Map<string, number>();
   const liveSessionTranscripts = new Set<string>();
   const sessionHistoryCache = new Map<string, SessionHistoryWindow>();
   const submittedComposerDrafts = new Map<string, SubmittedComposerDraft>();
+  const pendingPromptAttempts = new Map<string, Map<string, UiMessage>>();
+  const promptSubmissionStates = new Map<string, Map<string, "sending" | "accepted">>();
   const pendingSessionConfigurations = new Map<string, SessionConfiguration>();
   const sessionConfigurationFlushes = new Map<string, Promise<void>>();
   const sessionDetailLoads = new Map<string, ReturnType<typeof api.getSession>>();
@@ -160,15 +181,31 @@ export function createSessionRuntime({ get, set }: StoreAccess): SessionRuntime 
     messages: UiMessage[],
     window?: SessionHistoryWindow,
   ): void {
-    const normalized = dedupeSessionMessages(messages);
+    let normalized = dedupeSessionMessages(messages);
+    const attempts = pendingPromptAttempts.get(id);
+    if (attempts) {
+      for (const [messageId, attempt] of attempts) {
+        const current = normalized.find((message) => message.id === messageId && message.role === "user");
+        if (current) {
+          // A durable row with the same stable ID is authoritative even if a
+          // stale renderer projection still carries the local error marker.
+          attempts.delete(messageId);
+          continue;
+        }
+        normalized = upsertLiveSessionMessage(normalized, attempt);
+      }
+      if (attempts.size === 0) pendingPromptAttempts.delete(id);
+    }
     sessionTranscriptCache.delete(id);
     sessionTranscriptCache.set(id, normalized);
+    sessionTranscriptRevisions.set(id, (sessionTranscriptRevisions.get(id) ?? 0) + 1);
     publishSideChatTranscript(id, normalized);
     if (window) sessionHistoryCache.set(id, window);
     while (sessionTranscriptCache.size > SESSION_TRANSCRIPT_CACHE_LIMIT) {
       const oldestId = sessionTranscriptCache.keys().next().value;
       if (typeof oldestId !== "string") break;
       sessionTranscriptCache.delete(oldestId);
+      sessionTranscriptRevisions.delete(oldestId);
       sessionHistoryCache.delete(oldestId);
       liveSessionTranscripts.delete(oldestId);
     }
@@ -184,23 +221,34 @@ export function createSessionRuntime({ get, set }: StoreAccess): SessionRuntime 
   ) {
     const active = sessionDetailLoads.get(id);
     if (active && options?.messageBefore === undefined) return active;
+    const transcriptRevisionAtStart = sessionTranscriptRevisions.get(id) ?? 0;
     const request = api.getSession(id, options).then((detail) => {
-      if (detail.session && options?.messageBefore === undefined) {
+      const loadedSession = detail.session;
+      if (loadedSession && options?.messageBefore === undefined) {
         const state = get();
         const liveMessages =
           sessionTranscriptCache.get(id) ?? state.retainedTranscripts[id];
+        const projectionChangedDuringRead =
+          (sessionTranscriptRevisions.get(id) ?? 0) !== transcriptRevisionAtStart;
         const messages =
-          (liveSessionTranscripts.has(id) || state.runningSessions[id]) &&
+          (liveSessionTranscripts.has(id) || state.runningSessions[id] || projectionChangedDuringRead) &&
           liveMessages
-            ? mergeLiveSessionMessages(detail.session.messages ?? [], liveMessages)
-            : detail.session.messages ?? [];
+            ? preferNewerProjectionMessages(
+                loadedSession.messages ?? [],
+                liveMessages,
+              )
+            : loadedSession.messages ?? [];
+        // Consumers such as selectSession use the returned detail as well as
+        // the cache. Return the reconciled row there too, otherwise the cache
+        // is correct but the stale promise result can still overwrite it.
+        detail = { ...detail, session: { ...loadedSession, messages } };
         // Never cache a suspiciously empty window (issue #795): hover prefetch
         // would then re-serve that emptiness on every later open, and the
         // session could not recover without a restart.
-        if (messages.length > 0 || !sessionReadLooksEmpty(detail.session)) {
+        if (messages.length > 0 || !sessionReadLooksEmpty(loadedSession)) {
           cacheSessionTranscript(id, messages, {
-            messageStart: detail.session.messageStart ?? 0,
-            hasMoreBefore: detail.session.hasMoreBefore === true,
+            messageStart: loadedSession.messageStart ?? 0,
+            hasMoreBefore: loadedSession.hasMoreBefore === true,
             contentLimited: options?.contentLimit !== undefined,
           });
         }
@@ -218,6 +266,22 @@ export function createSessionRuntime({ get, set }: StoreAccess): SessionRuntime 
     };
     void request.then(clear, clear);
     return request;
+  }
+
+  function preferNewerProjectionMessages(
+    durableMessages: UiMessage[],
+    newerProjection: UiMessage[],
+  ): UiMessage[] {
+    const merged = mergeLiveSessionMessages(durableMessages, newerProjection);
+    const newerById = new Map(newerProjection.map((message) => [message.id, message]));
+    let changed = false;
+    const preferred = merged.map((message) => {
+      const newer = newerById.get(message.id);
+      if (!newer || newer === message) return message;
+      changed = true;
+      return newer;
+    });
+    return changed ? preferred : merged;
   }
 
   /** Every canonical writer (streaming, edits, retries) shares this cache boundary. */
@@ -275,6 +339,90 @@ export function createSessionRuntime({ get, set }: StoreAccess): SessionRuntime 
       const next = removeLiveSessionMessage(cached, message.id);
       sessionTranscriptCache.set(sessionId, next);
       publishSideChatTranscript(sessionId, next);
+    }
+  }
+
+  function patchSessionMessage(sessionId: string, messageId: string, patch: Partial<UiMessage>): void {
+    const state = get();
+    if (state.activeSessionId === sessionId) {
+      set((current) => {
+        const message = current.messages.find((row) => row.id === messageId);
+        if (!message) return {};
+        return { messages: upsertLiveSessionMessage(current.messages, { ...message, ...patch }) };
+      });
+    } else {
+      const cached = sessionTranscriptCache.get(sessionId);
+      const message = cached?.find((row) => row.id === messageId);
+      if (cached && message) cacheSessionTranscript(sessionId, upsertLiveSessionMessage(cached, { ...message, ...patch }));
+    }
+    const attempt = pendingPromptAttempts.get(sessionId)?.get(messageId);
+    if (attempt) pendingPromptAttempts.get(sessionId)?.set(messageId, { ...attempt, ...patch });
+  }
+
+  function markPendingPromptFailed(sessionId: string, message: UiMessage): void {
+    const attempt: UiMessage = { ...message, status: "error" };
+    let attempts = pendingPromptAttempts.get(sessionId);
+    if (!attempts) {
+      attempts = new Map();
+      pendingPromptAttempts.set(sessionId, attempts);
+    }
+    attempts.delete(attempt.id);
+    attempts.set(attempt.id, attempt);
+    while ([...pendingPromptAttempts.values()].reduce((total, entries) => total + entries.size, 0) > PENDING_PROMPT_ATTEMPT_LIMIT) {
+      const oldestSessionEntry = pendingPromptAttempts.entries().next().value;
+      if (!oldestSessionEntry) break;
+      const [oldestSessionId, oldestAttempts] = oldestSessionEntry;
+      const oldestMessageId = oldestAttempts?.keys().next().value;
+      if (typeof oldestSessionId !== "string" || typeof oldestMessageId !== "string") break;
+      oldestAttempts.delete(oldestMessageId);
+      if (oldestAttempts.size === 0) pendingPromptAttempts.delete(oldestSessionId);
+    }
+    patchSessionMessage(sessionId, message.id, { ...attempt, status: "error" });
+    if (get().activeSessionId === sessionId) {
+      const current = get().messages.find((row) => row.id === message.id);
+      if (!current) set((state) => ({ messages: upsertLiveSessionMessage(state.messages, attempt) }));
+    } else {
+      const cached = sessionTranscriptCache.get(sessionId) ?? [];
+      if (!cached.some((row) => row.id === message.id)) cacheSessionTranscript(sessionId, [...cached, attempt]);
+    }
+  }
+
+  function clearPendingPromptAttempt(sessionId: string, messageId: string): void {
+    const attempts = pendingPromptAttempts.get(sessionId);
+    attempts?.delete(messageId);
+    if (attempts?.size === 0) pendingPromptAttempts.delete(sessionId);
+  }
+
+  function setPromptSubmissionState(sessionId: string, messageId: string, status: "sending" | "accepted"): void {
+    let submissions = promptSubmissionStates.get(sessionId);
+    if (!submissions) {
+      submissions = new Map();
+      promptSubmissionStates.set(sessionId, submissions);
+    }
+    submissions.delete(messageId);
+    submissions.set(messageId, status);
+    while ([...promptSubmissionStates.values()].reduce((total, entries) => total + entries.size, 0) > PENDING_PROMPT_ATTEMPT_LIMIT) {
+      const oldestSessionEntry = promptSubmissionStates.entries().next().value;
+      if (!oldestSessionEntry) break;
+      const [oldestSessionId, oldestSubmissions] = oldestSessionEntry;
+      const oldestMessageId = oldestSubmissions.keys().next().value;
+      if (typeof oldestMessageId !== "string") break;
+      oldestSubmissions.delete(oldestMessageId);
+      if (oldestSubmissions.size === 0) promptSubmissionStates.delete(oldestSessionId);
+    }
+  }
+
+  function clearPromptSubmission(sessionId: string, messageId: string): void {
+    const submissions = promptSubmissionStates.get(sessionId);
+    submissions?.delete(messageId);
+    if (submissions?.size === 0) promptSubmissionStates.delete(sessionId);
+  }
+
+  function acceptPromptSubmission(sessionId: string, messageId: string): void {
+    // Confirmation can arrive after the prompt promise already resolved. Do
+    // not recreate a completed submission entry in that late-event case.
+    if (promptSubmissionStates.get(sessionId)?.get(messageId) === "sending") {
+      setPromptSubmissionState(sessionId, messageId, "accepted");
     }
   }
 
@@ -416,6 +564,8 @@ export function createSessionRuntime({ get, set }: StoreAccess): SessionRuntime 
     sessionHistoryCache,
     syncTranscriptProjection,
     submittedComposerDrafts,
+    pendingPromptAttempts,
+    promptSubmissionStates,
     pendingSessionConfigurations,
     sessionConfigurationFlushes,
     beginNavigationIntent: () => navigationIntents.begin(),
@@ -448,6 +598,13 @@ export function createSessionRuntime({ get, set }: StoreAccess): SessionRuntime 
     loadFullSessionMessages,
     insertOptimisticUserMessage,
     retractOptimisticUserMessage,
+    markPendingPromptFailed,
+    clearPendingPromptAttempt,
+    patchSessionMessage,
+    beginPromptSubmission: (sessionId, messageId) => setPromptSubmissionState(sessionId, messageId, "sending"),
+    acceptPromptSubmission,
+    promptSubmissionWasAccepted: (sessionId, messageId) => promptSubmissionStates.get(sessionId)?.get(messageId) === "accepted",
+    clearPromptSubmission,
     cacheBackgroundTranscriptEvent,
     mergeSessionConfiguration: (current, next) => {
       if (!current) return next;

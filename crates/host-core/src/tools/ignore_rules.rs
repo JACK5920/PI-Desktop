@@ -29,7 +29,7 @@ const SENSITIVE_SUFFIXES: &[&str] = &[".pem", ".key", ".p12", ".pfx"];
 /// therefore stay readable (`.env.example`, `.env.sample`, `.env.template`).
 const ENV_TEMPLATE_SUFFIXES: &[&str] = &[".example", ".sample", ".template"];
 
-/// Directory names hidden from unscoped walks (spec 15 §4, plus `.git`).
+/// Directory names hidden from unscoped walks (spec 15 §4, plus VCS metadata).
 pub const DEFAULT_IGNORE_DIRS: &[&str] = &[
     "node_modules",
     "dist",
@@ -46,6 +46,9 @@ pub const DEFAULT_IGNORE_DIRS: &[&str] = &[
     ".next",
     ".cache",
     ".git",
+    ".svn",
+    ".hg",
+    ".jj",
 ];
 
 /// File names hidden from unscoped walks (spec 15 §4).

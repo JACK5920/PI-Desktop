@@ -170,7 +170,7 @@ import {
   estimateContextTokens,
   estimateTokens,
 } from "./pi-runtime-estimates.js";
-import { convertToLlm } from "./pi-runtime-messages.js";
+import { convertToLlmForProvider } from "./pi-runtime-messages.js";
 import type {
   CompactionEntry,
   CompactionPreparation,
@@ -2347,7 +2347,8 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
           });
         });
         return alignRetainedReasoningIdentity(
-          convertToLlm(this.dropDuplicateToolCalls(messages)), this.reasoningReplayIdentity(),
+          await convertToLlmForProvider(this.dropDuplicateToolCalls(messages)),
+          this.reasoningReplayIdentity(),
         );
       },
       prepareRequest: ({ context }) => this.prepareToolDeclarations(context),
@@ -4271,6 +4272,18 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
 
   private declaredTools(): AgentTool[] {
     return this.declarationPolicy?.tools ?? this.activeTools();
+  }
+
+  /** Tool declarations for an external runtime that executes through Host RPC. */
+  getHostToolDefinitions(): Array<{ name: string; label: string; description: string; parameters: unknown }> {
+    return this.declaredTools().map((tool) => ({
+      name: tool.name,
+      label: tool.label ?? tool.name,
+      description: tool.description,
+      // TypeBox schemas are JSON-serializable. Round-trip here so custom
+      // symbol metadata and executable callbacks never cross the sidecar IPC.
+      parameters: JSON.parse(JSON.stringify(tool.parameters)),
+    }));
   }
 
   private isPlanSafePluginTool(name: string): boolean {

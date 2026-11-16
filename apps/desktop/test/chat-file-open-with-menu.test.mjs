@@ -217,14 +217,16 @@ test("the HTML menu exposes three open destinations as one submenu", () => {
   openFileMenu({}, { path: "src/dir/a.html" });
   const menu = calls.menus[0].items;
   assert.deepEqual(menu.map((item) => item.id), [
+    "open-with-system-default",
     "open-with",
     "reveal-in-folder",
     "copy-full-path",
     "copy-relative-path",
   ]);
-  assert.equal(menu[0].label, "chat.openWith:");
+  assert.equal(menu[0].label, "chat.openWithDefaultApplication:");
+  assert.equal(menu[1].label, "chat.openWith:");
   assert.deepEqual(
-    menu[0].submenu.map((item) => [item.id, item.label]),
+    menu[1].submenu.map((item) => [item.id, item.label]),
     [
       ["open-with-file-manager", "chat.openWithFileManager:"],
       ["open-with-built-in-browser", "chat.openWithBuiltInBrowser:"],
@@ -243,6 +245,7 @@ test("non-HTML references keep copy actions without an open-with submenu", () =>
   renderToStaticMarkup(React.createElement(Harness));
   openFileMenu({}, { path: "src/dir/a.ts" });
   assert.deepEqual(calls.menus[0].items.map((item) => item.id), [
+    "open-with-system-default",
     "reveal-in-folder",
     "copy-full-path",
     "copy-relative-path",

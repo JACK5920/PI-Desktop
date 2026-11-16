@@ -792,6 +792,33 @@ fn thinking_level_param(params: &Value) -> Result<Option<String>, JsonRpcError> 
     Ok(Some(level.to_string()))
 }
 
+/// Parse the optional per-conversation Agent engine. Missing/null keeps the
+/// stored pin (or the app-wide default for a session that never pinned one);
+/// anything outside the registry is rejected at the RPC boundary.
+fn agent_engine_param(params: &Value) -> Result<Option<String>, JsonRpcError> {
+    let Some(value) = params.get("agentEngine") else {
+        return Ok(None);
+    };
+    if value.is_null() {
+        return Ok(None);
+    }
+    let Some(engine) = value.as_str() else {
+        return Err(rpc_err(
+            1002,
+            "agentEngine must be a string",
+            "INVALID_PARAMS",
+        ));
+    };
+    if engine != "pi" && engine != "omp" {
+        return Err(rpc_err(
+            1002,
+            "agentEngine must be pi or omp",
+            "INVALID_PARAMS",
+        ));
+    }
+    Ok(Some(engine.to_string()))
+}
+
 /// Parse the optional parent session used for permission inheritance. The
 /// caller supplies an existing session id, never an arbitrary permission mode;
 /// the host resolves the persisted mode while holding its state lock.
@@ -2809,6 +2836,7 @@ async fn handle_request(
                     thinking_level,
                     permission_mode,
                     fast_mode,
+                    agent_engine: agent_engine_param(&params)?,
                 },
             )
             .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?;
@@ -3006,6 +3034,7 @@ async fn handle_request(
                 .ok_or_else(|| rpc_err(1002, "mode required", "INVALID_PARAMS"))?;
             let thinking_level = thinking_level_param(&params)?;
             let fast_mode = fast_mode_param(&params)?;
+            let agent_engine = agent_engine_param(&params)?;
             let st = state.lock().await;
             let session = sessions::configure_session_with_fast_mode(
                 &st.db,
@@ -3016,6 +3045,7 @@ async fn handle_request(
                 thinking_level.as_deref(),
                 params.get("permissionMode").and_then(|v| v.as_str()),
                 fast_mode,
+                agent_engine.as_deref(),
             )
             .map_err(|e| {
                 let message = e.to_string();
@@ -3880,11 +3910,22 @@ async fn handle_request(
 
         "artifacts.list" => {
             let session_id = params.get("sessionId").and_then(|v| v.as_str());
+            let turn_id = params.get("turnId").and_then(|v| v.as_str());
             let limit = params.get("limit").and_then(|v| v.as_i64()).unwrap_or(200);
+            let offset = params
+                .get("offset")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0)
+                .max(0);
             let st = state.lock().await;
-            let artifacts = artifacts::list(&st.db, session_id, limit)
+            let total = artifacts::count(&st.db, session_id, turn_id)
                 .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?;
-            Ok(json!({ "artifacts": artifacts }))
+            let artifacts = artifacts::list_page(&st.db, session_id, turn_id, limit, offset)
+                .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?;
+            let has_more = (offset as usize).saturating_add(artifacts.len()) < total;
+            Ok(
+                json!({ "artifacts": artifacts, "total": total, "hasMore": has_more, "offset": offset }),
+            )
         }
 
         "plans.pending" => {
@@ -5074,6 +5115,9 @@ async fn handle_request(
                     });
                 }
 
+                let workspace_before = if p.tool_name == "Bash" && remote_workspace.is_none() {
+                    ws_path.as_deref().and_then(|root| artifacts::snapshot_workspace(root).ok())
+                } else { None };
                 let mut result = if p.tool_name == "TodoWrite" {
                     // The checklist body owns its own trusted-transport checks,
                     // the atomic write, and the after-commit notification.
@@ -5131,6 +5175,21 @@ async fn handle_request(
                     }
                 };
                 result.tool_call_id = p.tool_call_id.clone();
+
+                // Bash is intentionally classified as observed workspace
+                // activity, not as a direct model write: a command may invoke
+                // scripts or tools whose actual author cannot be inferred.
+                if let (Some(before), Some(root)) = (workspace_before.as_ref(), ws_path.as_deref()) {
+                    if let Ok(after) = artifacts::snapshot_workspace(root) {
+                        let st = state.lock().await;
+                        if let Err(error) = artifacts::record_workspace_diff(
+                            &st.db, &p.session_id, p.turn_id.as_deref(), &p.tool_call_id,
+                            before, &after,
+                        ) {
+                            tracing::warn!(session_id = %p.session_id, error = %error, "artifact workspace diff recording failed");
+                        }
+                    }
+                }
 
                 if let Some(pending) = pending_review {
                     if result.ok {
@@ -5194,13 +5253,12 @@ async fn handle_request(
                         } else {
                             "edit"
                         };
-                        let _ = artifacts::record(
-                            &st.db,
-                            &p.session_id,
-                            &abs,
-                            op,
-                            p.turn_id.as_deref(),
-                        );
+                        if let Err(error) = artifacts::record_observed(
+                            &st.db, &p.session_id, p.turn_id.as_deref(), Some(&p.tool_call_id),
+                            Path::new(&abs), op, "host_tool", "confirmed", None,
+                        ) {
+                            tracing::warn!(session_id = %p.session_id, error = %error, "artifact direct write recording failed");
+                        }
                     }
                 }
                 // `overhead_ms` is the host's own share outside approval and the

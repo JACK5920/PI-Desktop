@@ -9,6 +9,10 @@ const providerModelsSource = await readFile(
   new URL("../src/components/settings/useProviderModels.ts", import.meta.url),
   "utf8",
 );
+const catalogSliceSource = await readFile(
+  new URL("../src/stores/slices/catalog-slice.ts", import.meta.url),
+  "utf8",
+);
 
 test("saved provider discovery persists models in the host catalog", () => {
   assert.match(mainSource, /req\.source === "cache"/);
@@ -38,6 +42,10 @@ test("renderer hydrates cached models before refreshing the provider", () => {
   assert.match(storeSource, /refreshedProviderModels/);
   assert.match(storeSource, /providerModelsGeneration/);
   assert.match(storeSource, /Keep the cached catalog/);
+  assert.match(catalogSliceSource, /canRetryProviderModels\(providerId\)/);
+  assert.match(catalogSliceSource, /refreshed\.error\?\.trim\(\)/);
+  assert.match(catalogSliceSource, /markProviderModelFailure\(providerId\)/);
+  assert.match(catalogSliceSource, /markProviderModelSuccess\(providerId\)/);
 });
 
 test("the setup form keeps cached models visible while revalidating", () => {

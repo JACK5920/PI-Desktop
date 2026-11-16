@@ -498,6 +498,18 @@
   cursor: text;
 }
 
+.composer-omp-word-suggestion {
+  position: absolute;
+  z-index: 1;
+  max-width: calc(100% - 12px);
+  overflow: hidden;
+  color: var(--ds-text-secondary);
+  opacity: 0.58;
+  pointer-events: none;
+  white-space: pre;
+  user-select: none;
+}
+
 /* Atomic inline attachment chip inside the editable draft. */
 .composer-chip {
   display: inline-flex;

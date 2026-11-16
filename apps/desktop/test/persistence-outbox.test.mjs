@@ -11,7 +11,7 @@ const silent = () => undefined;
 
 test("session delete drops the outbox for that session (D318)", async () => {
   const main = await readMainSource();
-  assert.match(main, /await persistenceOutbox\.dropSession\(id\)/);
+  assert.match(main, /await persistenceOutbox\.dropSession\(sessionId\)/);
 });
 
 test("handshake drains the outbox before the renderer can hydrate (D327)", async () => {

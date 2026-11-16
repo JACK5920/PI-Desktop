@@ -119,13 +119,12 @@ test("text file chips expand into editable draft text", () => {
   );
 });
 
-test("unanswered stop restores compact references instead of serialized paths", () => {
-  assert.match(composer, /setValue\(prefilled\.text\)/);
-  assert.match(composer, /composerPrefill\.fileReferences\.map/);
-  assert.match(composer, /composerPrefill\.sessionId !== activeSessionId/);
-  assert.match(
-    composer,
-    /createFileReferenceFromSnapshot\(fileReference,\s*composerPrefill\.sessionId\)/,
-  );
-  assert.doesNotMatch(composer, /setValue\(composerPrefill\);/);
+test("unanswered stop restores compact references instead of serialized paths", async () => {
+  const draft = await read("../src/features/chat/composer/hooks/useComposerDraft.ts");
+  const submit = await read("../src/features/chat/composer/hooks/submit-with-latest-draft-restore.mjs");
+  assert.match(submit, /if \(!accepted && latestSubmissions\.get\(draftKey\) === token\) restoreDraft\(\)/);
+  assert.match(draft, /const restoredReferences = snapshot\.fileReferences\.map\(\(fileReference\) =>\s*createFileReferenceFromSnapshot\(fileReference, sessionId\)/);
+  assert.match(draft, /const restored = attachImageTokens\(snapshot\.text, restoredReferences, nextChipToken\)/);
+  assert.match(draft, /setValue\(restored\.text\)/);
+  assert.match(draft, /\.\.\.restored\.references/);
 });

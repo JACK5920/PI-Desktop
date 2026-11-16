@@ -7,12 +7,14 @@ import { DisclosureScope, disclosureKey } from "./disclosure";
 import { ProcessActivityGroup } from "./ProcessActivityGroup";
 import {
   memo,
+  useCallback,
   useContext,
   useEffect,
   useId,
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 import { useTranslation } from "react-i18next";
 import type {
@@ -57,6 +59,10 @@ import { TranscriptSearchContext } from "../../../lib/transcript-search-context"
 import { useAppStore } from "../../../stores/app-store";
 import { resolveShowThinking } from "../../../lib/thinking-visibility";
 import { resolveTranscriptDisplayMode } from "../../../lib/transcript-display-mode";
+import { getOmpSubagentRoster, isOmpTaskBatch, subscribeOmpSubagentRoster, summarizeOmpBatchRoster } from "../../../components/omp-subagent-roster.mjs";
+import { useOmpSubagentRosterPolling } from "../../../components/omp-subagent-roster-polling";
+
+const EMPTY_OMP_ROSTER: readonly Record<string, unknown>[] = [];
 
 type Translate = (key: string, options?: Record<string, unknown>) => string;
 
@@ -205,7 +211,16 @@ export const ActivityGroup = memo(function ActivityGroup({
   turnDelegationStatuses,
   turnDelegationTimings,
 }: ActivityGroupProps) {
+  const hasOmpBatch = items.some((item) => item.kind === "tool" && isOmpTaskBatch(item.message.engineOrigin, item.message.toolName, item.message.toolArgs));
   const showThinking = useAppStore((state) => resolveShowThinking(state.settings));
+  const activeSessionId = useAppStore((state) => state.activeSessionId);
+  const subscribeOmpRoster = useCallback((listener: () => void) => activeSessionId
+    ? hasOmpBatch ? subscribeOmpSubagentRoster(activeSessionId, listener) : () => undefined
+    : () => undefined, [activeSessionId, hasOmpBatch]);
+  const getOmpRosterSnapshot = useCallback(() => activeSessionId
+    ? hasOmpBatch ? getOmpSubagentRoster(activeSessionId) : EMPTY_OMP_ROSTER
+    : EMPTY_OMP_ROSTER, [activeSessionId, hasOmpBatch]);
+  const ompRoster = useSyncExternalStore(subscribeOmpRoster, getOmpRosterSnapshot, getOmpRosterSnapshot);
   const hideThinking = !showThinking;
   const displayMode = useAppStore((state) => resolveTranscriptDisplayMode(state.settings));
   const { t } = useTranslation();
@@ -231,10 +246,28 @@ export const ActivityGroup = memo(function ActivityGroup({
   // cross-part view we need.
   const delegationStatuses = useMemo(() => turnDelegationStatuses ?? collectDelegationStatuses(delegationItems), [turnDelegationStatuses, delegationItems]);
   const delegationTimings = useMemo(() => turnDelegationTimings ?? collectDelegationTimings(delegationItems), [turnDelegationTimings, delegationItems]);
-  const subagentSummary = useMemo(() => summarizeSubagentActivity(
-    delegateItems,
-    delegationStatuses,
-  ), [delegateItems, delegationStatuses]);
+  const ompBatchToolCallIds = useMemo(() => delegateItems.filter(({ message }) =>
+    isOmpTaskBatch(message.engineOrigin, message.toolName, message.toolArgs),
+  ).map(({ message }) => message.toolCallId || message.id), [delegateItems]);
+  // A closed subagent pane must not freeze these cards on their last event
+  // frame; the shared poller keeps the roster (and each finished agent's
+  // terminal status) current while an OMP Task batch is on screen.
+  useOmpSubagentRosterPolling(hasOmpBatch ? activeSessionId : null);
+  const ompRosterSummary = useMemo(() => summarizeOmpBatchRoster([...ompRoster], ompBatchToolCallIds), [ompRoster, ompBatchToolCallIds]);
+  const subagentSummary = useMemo(() => {
+    const piItems = delegateItems.filter(({ message }) =>
+      !isOmpTaskBatch(message.engineOrigin, message.toolName, message.toolArgs),
+    );
+    const piSummary = summarizeSubagentActivity(piItems, delegationStatuses);
+    const ompTotal = ompRosterSummary.total || ompBatchToolCallIds.length;
+    const ompRunning = ompRosterSummary.total ? ompRosterSummary.running : (isActive ? ompBatchToolCallIds.length : 0);
+    return {
+      ...piSummary,
+      total: piSummary.total + ompTotal,
+      running: piSummary.running + ompRunning,
+      finished: piSummary.finished + (ompRosterSummary.total ? ompRosterSummary.finished : 0),
+    };
+  }, [delegateItems, delegationStatuses, ompBatchToolCallIds, ompRosterSummary, isActive]);
   // Parent tools after a Task fan-out live in a later activity part (D319), so
   // this card is not the turn's live tail while its delegates are still running.
   const topologyLive = hasSubagentTopology && subagentSummary.running > 0;

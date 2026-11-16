@@ -291,6 +291,13 @@ export const AssistantTurn = memo(function AssistantTurn({
   const canMutateHistory = canEditMessages && historyActionsAllowed;
   const summary = getAssistantTurnSummary(entry);
   const { actionMessage, metaMessage, latestUsageMessage, usage, responseDurationMs, responseOutputTokens } = summary;
+  // New replies carry their own provenance; rows written before the engine was
+  // recorded fall back to the pinned session engine, the best evidence they have.
+  const engine =
+    metaMessage?.engineOrigin ??
+    (session?.agentEngine === "pi" || session?.agentEngine === "omp"
+      ? session.agentEngine
+      : undefined);
   const modelSource = metaMessage?.modelId ? metaMessage : latestUsageMessage;
   const modelId = modelSource?.modelId;
   const responseModelId = modelSource?.responseModelId;
@@ -440,6 +447,7 @@ export const AssistantTurn = memo(function AssistantTurn({
         {slotReply ? <TurnChangesCard tools={tools} /> : null}
         {!isActive && metaMessage ? (
           <MessageMeta
+            engine={engine}
             modelId={modelId}
             responseModelId={responseModelId}
             usage={usage}

@@ -107,7 +107,7 @@ try {
   for (const stage of ["scanning", "copying", "verifying", "relocating", "complete"]) assert(stages.includes(stage), stage);
   assert.deepEqual(await fingerprint(source.data), beforeData, "old data profile stays byte-identical");
   assert.deepEqual(await fingerprint(source.browser), beforeBrowser, "old browser profile stays byte-identical");
-  const movedPasted = join(next.data, "scratch", session.id, "pasted/input.txt");
+  const movedPasted = join(next.data, "scratch", session.id, "pasted", "input.txt");
   assert.equal(await readFile(movedPasted, "utf8"), "preserved user document");
   if (process.platform !== "win32") {
     assert.equal(await readlink(join(next.data, "scratch", session.id, "absolute-link")), movedPasted);
@@ -121,15 +121,16 @@ try {
   const { entries } = await destinationHost.call("session.queueList", { sessionId: session.id });
   assert.equal(entries[0].attachments[0].ref, movedPasted);
   const { session: rebound } = await destinationHost.call("session.get", { id: projectSession.id });
-  assert.equal(rebound.projectPath, join(next.data, "projects/local-project"));
-  const { memory } = await destinationHost.call("project.memory.get", { path: join(next.data, "projects/local-project") });
+  const canonicalProjectPath = join(next.data, "projects", "local-project").replaceAll("\\", "/");
+  assert.equal(rebound.projectPath, canonicalProjectPath);
+  const { memory } = await destinationHost.call("project.memory.get", { path: join(next.data, "projects", "local-project") });
   assert.equal(memory.content, "Durable project memory");
   const settings = await destinationHost.call("settings.get");
   assert.equal(settings.language, "zh-CN"); assert.equal(settings.theme, "light"); assert.equal(settings.enterToSend, false);
   const { value: credential } = await destinationHost.call("secrets.getForRuntime", { secretRef: "secret:e2e-storage-fixture" });
   assert.equal(credential, "temporary-fixture-credential");
   const { plugins } = await destinationHost.call("plugins.list");
-  assert.equal(plugins.find((plugin) => plugin.id === "storage-e2e").path, join(next.data, "plugins/installed/storage-e2e"));
+  assert.equal(plugins.find((plugin) => plugin.id === "storage-e2e").path, join(next.data, "plugins", "installed", "storage-e2e"));
   await closeGracefully(destinationHost);
   const critical = ["pi.sqlite", "sessions", "secrets", "scratch", "attachments", "plugins/data", "logs"];
   const preserved = await Promise.all(critical.map((name) => fingerprint(join(next.data, name))));

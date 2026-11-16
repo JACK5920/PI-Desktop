@@ -55,7 +55,7 @@ describe("hydrateAttachmentHistory", () => {
     });
   });
 
-  it("does not let a pixel-limit rejection consume the history byte budget", async () => {
+  it("budgets large-dimension images by bytes and keeps the newest attachment", async () => {
     await withTempDir(async (tmp) => {
       const olderBytes = Buffer.from("fake-png-bytes");
       const olderPath = resolve(tmp, "older.png");
@@ -91,17 +91,17 @@ describe("hydrateAttachmentHistory", () => {
       const hydrated = await hydrateAttachmentHistory(history, {
         projectPath: tmp,
         supportsVision: true,
-        // Fits either image alone, not both. The newer one is over 8000 px.
+        // Fits either image alone, not both. The newer one is chosen first.
         maxInlinedImageBytes: 40,
       });
 
-      expect(hydrated[1]?.attachments?.[0]?.data).toBeUndefined();
-      expect(hydrated[1]?.content).toContain("page.png");
-      expect(hydrated[0]?.attachments?.[0]?.data).toBe(olderBytes.toString("base64"));
+      expect(hydrated[1]?.attachments?.[0]?.data).toBe(header.toString("base64"));
+      expect(hydrated[0]?.attachments?.[0]?.data).toBeUndefined();
+      expect(hydrated[0]?.content).toContain("older.png");
     });
   });
 
-  it("keeps the path fallback for an image past the pixel limit (#1913)", async () => {
+  it("hydrates an image past the pixel limit for provider-boundary adaptation (#1913)", async () => {
     await withTempDir(async (tmp) => {
       const imgPath = resolve(tmp, "page.png");
       const header = Buffer.alloc(33);
@@ -121,11 +121,8 @@ describe("hydrateAttachmentHistory", () => {
         supportsVision: true,
       });
 
-      expect(hydrated[0]?.attachments?.[0]?.data).toBeUndefined();
-      // realpath may return Windows' short 8.3 alias even though imgPath was
-      // constructed with the long profile path. Compare against the same
-      // canonical spelling used by hydrateAttachmentHistory.
-      expect(hydrated[0]?.content).toContain(await realpath(imgPath));
+      expect(hydrated[0]?.attachments?.[0]?.data).toBe(header.toString("base64"));
+      expect(hydrated[0]?.content).not.toContain(await realpath(imgPath));
     });
   });
 

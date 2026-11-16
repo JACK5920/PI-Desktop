@@ -25,7 +25,7 @@ function parseArgs(argv) {
 }
 
 const root = parseArgs(process.argv.slice(2));
-const targetVersion = "1.5.0";
+const targetVersion = "1.5.2";
 const entries = [
   {
     name: "@earendil-works/pi-agent-core",
@@ -37,13 +37,13 @@ const entries = [
     name: "@earendil-works/pi-ai",
     patch: `patches/@earendil-works__pi-ai@${targetVersion}.patch`,
     packagePath: "packages/agent-runtime/node_modules/@earendil-works/pi-ai",
-    markers: ["hostedSearch", "withLocalRequestErrors", "AnthropicOAuthTokenError", "Retry-After"],
+    markers: ["hostedSearch", "withLocalRequestErrors", "AnthropicOAuthTokenError", "Retry-After", "connection.?closed", "additionalProperties", "schemas without a type are unsupported"],
   },
   {
     name: "@earendil-works/pi-coding-agent",
     patch: `patches/@earendil-works__pi-coding-agent@${targetVersion}.patch`,
     packagePath: "packages/agent-runtime/node_modules/@earendil-works/pi-coding-agent",
-    markers: ["hostedSearchReplayProjection", "estimateProjectedContextTokens"],
+    markers: ["hostedSearchReplayProjection", "estimateProjectedContextTokens", "const snapshotText = this.getSnapshotText()"],
   },
 ];
 const workspace = readFileSync(join(root, "pnpm-workspace.yaml"), "utf8");
@@ -101,8 +101,8 @@ for (const declarationPath of [
   "dist/utils/local-request-error.d.ts",
   "dist/utils/local-request-stream.d.ts",
 ]) {
-  if (!piAiPatch.includes(`diff --git a/${declarationPath} `)) {
-    throw new Error(`Pi AI patch is missing the audited declaration file ${declarationPath}`);
+  if (!existsSync(join(root, entries[1].packagePath, declarationPath))) {
+    throw new Error(`Installed Pi AI package is missing the audited declaration file ${declarationPath}`);
   }
 }
 
@@ -111,4 +111,4 @@ if (!codingAgentPatch.includes("+export declare function estimateProjectedContex
   throw new Error("Pi coding-agent runtime estimator declaration is missing from its patch");
 }
 
-process.stdout.write(`All three Pi ${targetVersion} patches are mapped, locked, installed, and contain the audited contracts.\n`);
+process.stdout.write(`All three local Pi ${targetVersion} patches are mapped, locked, installed, and contain the audited contracts.\n`);

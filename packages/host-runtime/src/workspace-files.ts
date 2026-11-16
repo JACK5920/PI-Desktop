@@ -129,6 +129,15 @@ async function realRootOrNull(root: string): Promise<string | null> {
 }
 
 /**
+ * Containment options for paths the user picked themselves.
+ *
+ * A click on a path in the transcript is the user's decision, so an absolute
+ * path that really exists should open wherever it lives; only shorthand and
+ * relative references stay confined to the workspace and known stores.
+ */
+export type OpenablePathOptions = { allowAnyAbsolute?: boolean };
+
+/**
  * Same containment as `resolveOpenablePath`, then `realpath` so a symlink
  * inside an allowed root cannot be used to read a file outside it.
  *
@@ -143,7 +152,18 @@ export async function resolveRealOpenablePath(
   path: string,
   workspaceRoot: string | null | undefined,
   extraRoots: readonly string[] = [],
+  options: OpenablePathOptions = {},
 ): Promise<string | null> {
+  // A user-clicked absolute file is openable as-is; it still has to exist and
+  // be a regular file, so a stale link cannot escape into a directory read.
+  if (options.allowAnyAbsolute && isAbsolute(path)) {
+    try {
+      const targetReal = await realpath(resolve(path));
+      return (await stat(targetReal)).isFile() ? targetReal : null;
+    } catch {
+      return null;
+    }
+  }
   const extra = extraRoots.filter(
     (root) => typeof root === "string" && root.trim(),
   );
@@ -366,8 +386,9 @@ export async function readOpenableFile(
   workspaceRoot: string | null | undefined,
   extraRoots: readonly string[],
   mimeType?: string,
+  options: OpenablePathOptions = {},
 ): Promise<FsReadResult> {
-  const target = await resolveRealOpenablePath(path, workspaceRoot, extraRoots);
+  const target = await resolveRealOpenablePath(path, workspaceRoot, extraRoots, options);
   if (!target) throw new Error("path outside allowed roots");
   const info = await stat(target);
   if (!info.isFile()) throw new Error("not a file");
@@ -384,8 +405,9 @@ export async function readOpenableImage(
   workspaceRoot: string | null | undefined,
   extraRoots: readonly string[],
   mimeType?: string,
+  options: OpenablePathOptions = {},
 ): Promise<FsImageDataUrlResult> {
-  const target = await resolveRealOpenablePath(path, workspaceRoot, extraRoots);
+  const target = await resolveRealOpenablePath(path, workspaceRoot, extraRoots, options);
   if (!target) {
     return { kind: "missing", errorCode: "PATH_OUTSIDE_ALLOWED_ROOT" };
   }

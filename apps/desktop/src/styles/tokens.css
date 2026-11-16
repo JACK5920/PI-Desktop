@@ -90,6 +90,7 @@
   */
   --ds-text-secondary: color-mix(in oklab, var(--gray-0) 70%, transparent);
   --ds-text-muted: color-mix(in oklab, var(--gray-0) 52%, transparent);
+  --ds-text-tertiary: color-mix(in oklab, var(--gray-0) 46%, transparent);
   --ds-text-faint: color-mix(in oklab, var(--gray-0) 38%, transparent);
   --ds-border-default: color-mix(in oklab, var(--gray-0) 8%, transparent);
   --ds-border-subtle: color-mix(in oklab, var(--gray-0) 5%, transparent);
@@ -256,6 +257,7 @@
   --ds-text-primary: #1a1c1f;
   --ds-text-secondary: color-mix(in oklab, #1a1c1f 74%, transparent);
   --ds-text-muted: #5d5d5d;
+  --ds-text-tertiary: #767676;
   --ds-text-faint: #afafaf;
   --ds-border-default: color-mix(in oklab, #1a1c1f 8%, transparent);
   --ds-border-subtle: color-mix(in oklab, #1a1c1f 5%, transparent);
@@ -405,4 +407,19 @@
   --tracking-tight: -0.02em;
   --tracking-normal: 0em;
   --tracking-wide: 0.02em;
+}
+
+/*
+  Legacy OMP surfaces referenced non-existent tokens (`--surface-1`,
+  `--text-muted`, `--border-subtle`…), so dialogs and menus silently rendered
+  transparent. Alias them to the design system instead of touching every rule.
+*/
+:root {
+  --surface-1: var(--ds-raised);
+  --surface-2: var(--ds-tile);
+  --border-subtle: var(--ds-border-subtle);
+  --text-primary: var(--ds-text-primary);
+  --text-secondary: var(--ds-text-secondary);
+  --text-muted: var(--ds-text-tertiary);
+  --accent: var(--ds-accent);
 }

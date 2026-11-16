@@ -23,6 +23,10 @@ const runtimeSrc = readFileSync(
   join(desktopRoot, "electron/main/plugin-runtime.ts"),
   "utf8",
 );
+const uiIpcSrc = readFileSync(
+  join(desktopRoot, "electron/main/ipc/plugin-ui-ipc.ts"),
+  "utf8",
+);
 
 function forkPluginProcess({ entry }) {
   const child = fork(entry, [], { stdio: ["ignore", "pipe", "pipe", "ipc"] });
@@ -293,4 +297,28 @@ test("a malformed allowlist fails closed", () => {
   // validateManifest rejects it at install, so this path only runs if the
   // manifest changed underneath us -- it must mean "no egress", not "all".
   assert.match(runtimeSrc, /return parsed\.ok \? \(parsed\.domains \?\? \[\]\) : \[\]/);
+});
+
+test("opening a panel from the shell UI carries the same egress grant", () => {
+  // Both ways to open a panel must answer to one decision. The `ui.openPanel`
+  // API is covered above; this is the shell's own button, which used to build
+  // the request without the manifest allowlist. The resulting session filtered
+  // against an empty list, so a panel whose whole job is a local service had
+  // every request cancelled -- a blank page with no visible cause.
+  const block = uiIpcSrc.match(/await pluginPanels\.open\(\{[\s\S]*?\n      \}\);/);
+  assert.ok(block, "pluginOpenPanel must call pluginPanels.open");
+  assert.match(block[0], /netDomains/);
+  assert.match(block[0], /netAnyHost: loaded\.permissions\.has\("net\.anyHost"\)/);
+  assert.match(block[0], /allowMicrophone: loaded\.permissions\.has\("ui\.microphone"\)/);
+});
+
+test("the panel host forwards net.anyHost to the session filter", () => {
+  // The docked view host was already passing it; the panel host dropped it, so
+  // a plugin granted `net.anyHost` still ran a panel session with
+  // `anyHost: false`. Two paths, one grant -- neither may narrow it silently.
+  const block = panelHostSrc.match(/private applyEgressPolicy\([\s\S]*?\n  \}/);
+  assert.ok(block, "PluginPanelHost must apply an egress policy");
+  assert.match(block[0], /netDomains: request\.netDomains/);
+  assert.match(block[0], /netAnyHost: request\.netAnyHost/);
+  assert.match(block[0], /allowMicrophone: request\.allowMicrophone/);
 });

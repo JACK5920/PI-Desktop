@@ -324,7 +324,7 @@ describe("withSessionAffinityOptions", () => {
     expect(result.onPayload).toEqual(expect.any(Function));
   });
 
-  it("adds a stable hyphenated affinity header to custom Responses options", () => {
+  it("adds native and proxy-safe affinity headers to custom Responses options", () => {
     const options: SimpleStreamOptions = {
       temperature: 0,
       sessionId: "session-7",
@@ -338,6 +338,8 @@ describe("withSessionAffinityOptions", () => {
     expect(result).not.toBe(options);
     expect(result.headers).toEqual({
       "X-Gateway": "keep",
+      session_id: "session-7",
+      "x-client-request-id": "session-7",
       "x-session-affinity": "session-7",
     });
     expect(result.temperature).toBe(0);

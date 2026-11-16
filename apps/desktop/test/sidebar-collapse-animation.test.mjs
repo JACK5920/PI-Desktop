@@ -210,14 +210,14 @@ function rule(selector) {
   return block.replace(/\/\*[\s\S]*?\*\//g, "");
 }
 
-test("a project group folds as one grid row instead of a max-height wipe", () => {
+test("a project group folds by display instead of a measured grid row", () => {
   const projectRule = rule(String.raw`\.sidebar-session-group-body\.project`);
-  assert.match(projectRule, /display:\s*grid/);
-  assert.match(projectRule, /grid-template-rows:\s*1fr/);
-  assert.match(
-    projectRule,
-    /transition:\s*grid-template-rows var\(--motion-duration-normal\) var\(--motion-ease-out\)/,
-  );
+  // A fractional grid row re-solves against measured content on every layout
+  // pass; inside the rail scroller a long list kept re-laying-out frame after
+  // frame, which read as continuous flicker.
+  assert.match(projectRule, /display:\s*block/);
+  assert.doesNotMatch(projectRule, /grid-template-rows/);
+  assert.doesNotMatch(projectRule, /transition/);
   // A height clamp and an opacity transition are the two ways this fold can be
   // staged apart from the row the rows are laid out in.
   assert.doesNotMatch(projectRule, /max-height/);
@@ -227,9 +227,8 @@ test("a project group folds as one grid row instead of a max-height wipe", () =>
   const collapsedRule = rule(
     String.raw`\.sidebar-session-group-body\.project\.collapsed`,
   );
-  assert.match(collapsedRule, /grid-template-rows:\s*0fr/);
-  assert.match(collapsedRule, /pointer-events:\s*none/);
-  // The rows leave by being clipped, so nothing fades and nothing keeps a
+  assert.match(collapsedRule, /display:\s*none/);
+  // The rows leave the flow entirely, so nothing fades and nothing keeps a
   // height of its own.
   assert.doesNotMatch(collapsedRule, /opacity/);
   assert.doesNotMatch(collapsedRule, /max-height/);
@@ -286,10 +285,10 @@ test("the project body renders the grid, clip, and list layers", () => {
   );
 });
 
-test("reduced motion keeps the fold's endpoints and drops its travel", () => {
-  assert.match(
+test("the fold commits by display switch, so reduced motion has nothing to drop", () => {
+  assert.doesNotMatch(
     globalStyles,
-    /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.sidebar-session-group-body\.project\s*\{\s*transition-duration:\s*0\.01ms !important;/,
+    /\.sidebar-session-group-body\.project\s*\{[^}]*transition:/,
   );
 });
 

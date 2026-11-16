@@ -109,6 +109,10 @@ const shared = load(new URL("../src/features/chat/transcript/shared.tsx", import
   "../../../lib/disclosure-anchor-context": { useDisclosureAnchorNotifier: () => {} },
   "../../../lib/turn-process": { isThinkingActive: () => false },
   "../../../lib/thinking-visibility": { resolveShowThinking: () => true },
+  "../../../lib/transcript-display-mode": {
+    resolveTranscriptDisplayMode: () => "collapsed",
+    shouldAutoOpenThinking: () => false,
+  },
   "../../../lib/transcript-search-context": { TranscriptSearchContext: React.createContext(null) },
   "../../../lib/assistant-turns": { messageThinking: () => "" },
   "../../../lib/use-referenced-image-data-url": { useReferencedImageDataUrl: () => undefined },

@@ -50,6 +50,10 @@ import { ProjectsPage } from "../../pages/ProjectsPage";
 import { AgentSkillsPage } from "../../components/settings/AgentSkillsPage";
 import { AgentMcpPage } from "../../components/settings/AgentMcpPage";
 import { AgentSubagentsPage } from "../../components/settings/AgentSubagentsPage";
+import { OmpEngineManager } from "../../components/settings/OmpEngineManager";
+import { PiEngineManager } from "../../components/settings/PiEngineManager";
+import { OmpProviderManager } from "../../components/settings/OmpProviderManager";
+import { OmpProfileSettings } from "../../components/settings/OmpProfileSettings";
 import { RemoteHostsPage } from "../../components/settings/RemoteHostsPage";
 import { VoiceSettingsSection } from "./voice/VoiceSettingsSection";
 import { GoalBudgetDefaultsCard } from "./GoalBudgetDefaultsCard";
@@ -108,6 +112,7 @@ export function SettingsPage() {
   );
 
   const [query, setQuery] = useState("");
+  const [agentSettingsSection, setAgentSettingsSection] = useState<"engine" | "providers" | "customApi" | "profile" | "piRuntime">("engine");
   const [recoveringSettings, setRecoveringSettings] = useState(!settings);
   const [settingsRecoveryFailed, setSettingsRecoveryFailed] = useState(false);
   const [extensions, setExtensions] = useState<PluginScenicThemesDestinationMeta[]>([]);
@@ -242,6 +247,7 @@ export function SettingsPage() {
       shortcuts: <IconKeyboard size={14} />,
       instructions: <IconFileText size={14} />,
       agent: <IconBot size={14} />,
+      agentEngines: <IconBot size={14} />,
       skills: <IconBookOpen size={14} />,
       mcp: <IconServer size={14} />,
       subagents: <IconBot size={14} />,
@@ -289,7 +295,7 @@ export function SettingsPage() {
 
   const activeNavItem = navItems.find((item) => item.id === tab);
   const activeTitleKey = activeNavItem?.titleKey ?? "settings.title";
-  const tabNeedsSettings = ["general", "ai", "computerUse", "shortcuts", "agent"].includes(tab);
+  const tabNeedsSettings = ["general", "ai", "computerUse", "shortcuts", "agent", "agentEngines"].includes(tab);
 
   return (
     <div className="settings-shell settings-shell-full">
@@ -671,7 +677,38 @@ export function SettingsPage() {
             </div>
           )}
 
-          {tab === "agent" && <ModelConfigPage />}
+          {tab === "agent" && settings && (
+            <div className="settings-stack">
+              <ModelConfigPage />
+            </div>
+          )}
+
+          {tab === "agentEngines" && settings && (
+            <div className="settings-stack settings-agent-settings">
+              <p className="settings-row-detail settings-agent-settings-intro">{t("settings.agentEngines.description")}</p>
+              <SegmentedControl
+                className="settings-agent-settings-tabs"
+                value={agentSettingsSection}
+                onChange={setAgentSettingsSection}
+                label={t("settings.agentEngines.title")}
+                role="tablist"
+                options={[
+                  { value: "engine", label: t("settings.agentEngines.managerTitle"), controls: "agent-settings-panel-engine" },
+                  { value: "providers", label: t("settings.omp.providersTitle"), controls: "agent-settings-panel-providers" },
+                  { value: "customApi", label: t("settings.omp.customModelTitle"), controls: "agent-settings-panel-custom-api" },
+                  { value: "profile", label: t("settings.omp.profileTitle"), controls: "agent-settings-panel-profile" },
+                  { value: "piRuntime", label: t("settings.piEngine.title"), controls: "agent-settings-panel-piRuntime" },
+                ]}
+              />
+              <div className="settings-agent-settings-panel" role="tabpanel" id={`agent-settings-panel-${agentSettingsSection}`}>
+                {agentSettingsSection === "engine" && <OmpEngineManager section="engine" settings={settings} />}
+                {agentSettingsSection === "providers" && <OmpProviderManager />}
+                {agentSettingsSection === "customApi" && <OmpEngineManager section="customApi" settings={settings} />}
+                {agentSettingsSection === "profile" && <OmpProfileSettings />}
+                {agentSettingsSection === "piRuntime" && <PiEngineManager />}
+              </div>
+            </div>
+          )}
 
           {tab === "skills" && <AgentSkillsPage />}
 

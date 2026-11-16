@@ -5,11 +5,9 @@ import { copyFile, mkdir, open, realpath, stat } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
 import {
   formatFileInsert,
-  imageExceedsInlineDimensions,
   isSvgAttachment,
   MAX_INLINE_IMAGE_BYTES,
   MAX_INLINED_IMAGE_HISTORY_BYTES,
-  probeImageDimensions,
   SVG_MIME_TYPE,
   type MessageAttachment,
   type UiMessage,
@@ -180,9 +178,10 @@ export async function hydrateAttachmentHistory(
   );
 
   // Newest transcript first, then newest attachment within a message. Charge
-  // the byte budget only after the pixel probe accepts the file. A tall
-  // screenshot keeps the path fallback (#1913) and must not starve an older
-  // image that still fits. Images past the remaining budget are not read.
+  // the byte budget after the file passes the session-root and per-image
+  // checks. Tall screenshots are resized at the provider boundary so the
+  // stored original remains available without bypassing this memory budget.
+  // Images past the remaining budget are not read.
   let remainingBytes = maxInlinedImageBytes;
   const inlineCandidates: ResolvedAttachment[] = [];
   for (let messageIndex = resolvedHistory.length - 1; messageIndex >= 0; messageIndex--) {
@@ -200,7 +199,6 @@ export async function hydrateAttachmentHistory(
     try {
       const bytes = await readFileAtRecordedSize(item.canonicalPath!, item.size);
       if (!bytes) continue;
-      if (imageExceedsInlineDimensions(probeImageDimensions(bytes))) continue;
       remainingBytes -= item.size;
       item.attachment = {
         ...item.attachment,

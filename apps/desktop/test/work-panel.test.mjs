@@ -316,7 +316,9 @@ test("work panel header exposes a scrollable tab strip and direct new-page actio
   assert.match(panelSource, /aria-controls=\{`work-panel-surface-\$\{tab\.id\}`\}/);
   assert.match(panelSource, /className="work-panel-tab-close"/);
   assert.match(panelSource, /event\.button !== 1/);
-  assert.match(panelSource, /workPanelTools\(t, pluginViews\)/);
+  // The list is still generated from live plugin views; `plugins` is only
+  // consulted to learn which owners actually ship a standalone panel.
+  assert.match(panelSource, /workPanelTools\(t, pluginViews, plugins\)/);
   assert.match(panelSource, /toolWorkPanelTab\("review"\)/);
   assert.match(panelSource, /pluginViews\.map\(\(view\) =>/);
   assert.doesNotMatch(panelSource, /HEADER_TOOLS|headerToolTab|HeaderToolKind/);
