@@ -20,6 +20,7 @@ import {
 } from "../../lib/session-fork";
 import { EMPTY_SESSION_WINDOW } from "../../lib/session-create";
 import { inheritedSessionModelBinding } from "../../lib/session-model";
+import { resolveNewSessionAgentEngine } from "../../lib/session-agent-engine";
 import {
   clearSessionPanes,
   retainSessionPane,
@@ -311,12 +312,17 @@ export function createSessionCoordination({
           defaultProvider?.supportedThinkingLevels,
         );
     const previousSessionId = state.activeSessionId;
+    // A brand-new conversation starts on the engine the user last picked; the
+    // chat being left is only a fallback for installs that never picked one.
+    const inheritedEngine =
+      draftConfig?.agentEngine ?? resolveNewSessionAgentEngine(state);
     revealEmptyCreatingSession(active);
     let created: Awaited<ReturnType<typeof api.createSession>>;
     try {
       created = await api.createSession({
         title: untitledTaskTitle(),
         mode: draftConfig?.mode ?? normalizeMode(settings?.defaultMode),
+        agentEngine: inheritedEngine,
         thinkingLevel: draftConfig?.thinkingLevel ?? defaultThinkingLevel,
         permissionMode: draftConfig?.permissionMode,
         ...(draftConfig?.fastMode ? { fastMode: true } : {}),

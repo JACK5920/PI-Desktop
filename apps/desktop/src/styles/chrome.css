@@ -1314,7 +1314,24 @@
   flex: 1 1 auto;
   flex-direction: column;
   padding: 0 8px 6px;
+  /* The footer is a sibling of the scroller, so it stays pinned at the rail's
+     bottom while the list area scrolls on its own. */
   overflow: hidden;
+}
+
+.sidebar-body-scroll {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  /* One scroll surface for every list section. Reserving the gutter keeps the
+     content width constant; anchoring is off so growth cannot move the user. */
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  overflow-anchor: none;
+  overscroll-behavior-y: contain;
 }
 
 .brand {

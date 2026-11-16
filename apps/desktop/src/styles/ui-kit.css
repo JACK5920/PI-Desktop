@@ -258,7 +258,8 @@
   top: 0;
   left: 0;
   z-index: 60; /* body-level menu layer, above pane stacking */
-  min-width: 184px;
+  /* No floor: the longest row sets the width, so short menus do not carry a
+     slab of empty surface beside their labels. */
   width: max-content;
   max-width: calc(100vw - 16px);
   max-height: calc(100vh - 16px);

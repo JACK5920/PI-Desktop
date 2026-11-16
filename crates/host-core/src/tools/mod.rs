@@ -1942,7 +1942,13 @@ fn tool_edit(
 }
 
 fn build_glob_set(pattern: &str) -> Result<globset::GlobSet, (String, String)> {
-    let glob = globset::GlobBuilder::new(pattern)
+    // Models and users commonly prefix workspace-relative patterns with `./`
+    // (for example `./src/*.ts`). Walk results are already relative paths
+    // without that prefix, so normalize only redundant leading `./` segments.
+    // Keep absolute paths, `../`, separators elsewhere, and all other glob
+    // semantics untouched.
+    let normalized = pattern.trim_start_matches("./");
+    let glob = globset::GlobBuilder::new(normalized)
         .literal_separator(true)
         .build()
         .map_err(|e| ("INVALID_ARGUMENT".into(), e.to_string()))?;
@@ -4867,6 +4873,114 @@ mod tests {
             .as_str()
             .unwrap_or_default()
             .contains("not a directory"));
+    }
+
+    #[tokio::test]
+    async fn glob_normalizes_redundant_leading_current_directory_segments() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        std::fs::write(dir.path().join("src/app.ts"), "export {}\n").unwrap();
+        std::fs::write(dir.path().join("src/readme.md"), "docs\n").unwrap();
+        std::fs::write(dir.path().join("package.json"), "{}\n").unwrap();
+        std::fs::write(dir.path().join("src/package.json"), "{}\n").unwrap();
+
+        for pattern in ["./src/*.ts", "./src/**/*.ts", "././src/*.ts"] {
+            let result = execute_tool(
+                Some(dir.path()),
+                None,
+                "Glob",
+                &serde_json::json!({ "pattern": pattern }),
+                5_000,
+            )
+            .await;
+            assert!(result.ok, "glob {pattern:?} failed: {:?}", result.content);
+            assert_eq!(result.content["count"].as_u64(), Some(1));
+            assert_eq!(result.content["matches"][0].as_str(), Some("src/app.ts"));
+        }
+
+        let basename_pattern = execute_tool(
+            Some(dir.path()),
+            None,
+            "Glob",
+            &serde_json::json!({ "pattern": "./*.json" }),
+            5_000,
+        )
+        .await;
+        assert!(
+            basename_pattern.ok,
+            "glob failed: {:?}",
+            basename_pattern.content
+        );
+        let mut matches: Vec<&str> = basename_pattern.content["matches"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|value| value.as_str().unwrap())
+            .collect();
+        matches.sort_unstable();
+        assert_eq!(matches, vec!["package.json", "src/package.json"]);
+    }
+
+    #[tokio::test]
+    async fn search_skips_nested_vcs_metadata_but_allows_an_explicit_vcs_root() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("ordinary.txt"), "needle\n").unwrap();
+        std::fs::create_dir_all(dir.path().join(".github/workflows")).unwrap();
+        std::fs::write(dir.path().join(".github/workflows/ci.yml"), "needle\n").unwrap();
+        for vcs in [".git", ".svn", ".hg", ".jj"] {
+            let nested = dir.path().join(vcs).join("metadata.txt");
+            std::fs::create_dir_all(nested.parent().unwrap()).unwrap();
+            std::fs::write(nested, "needle\n").unwrap();
+        }
+
+        let globbed = execute_tool(
+            Some(dir.path()),
+            None,
+            "Glob",
+            &serde_json::json!({ "pattern": "*.txt" }),
+            5_000,
+        )
+        .await;
+        assert!(globbed.ok, "glob failed: {:?}", globbed.content);
+        assert_eq!(
+            globbed.content["matches"],
+            serde_json::json!(["ordinary.txt"])
+        );
+
+        let searched = execute_tool(
+            Some(dir.path()),
+            None,
+            "Grep",
+            &serde_json::json!({ "pattern": "needle" }),
+            5_000,
+        )
+        .await;
+        assert!(searched.ok, "grep failed: {:?}", searched.content);
+        let paths: Vec<&str> = searched.content["matches"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|match_| match_["path"].as_str().unwrap())
+            .collect();
+        assert_eq!(paths, vec![".github/workflows/ci.yml", "ordinary.txt"]);
+
+        let explicit = execute_tool(
+            Some(dir.path()),
+            None,
+            "Glob",
+            &serde_json::json!({ "pattern": "*.txt", "path": ".git" }),
+            5_000,
+        )
+        .await;
+        assert!(
+            explicit.ok,
+            "explicit VCS root failed: {:?}",
+            explicit.content
+        );
+        assert_eq!(
+            explicit.content["matches"],
+            serde_json::json!([".git/metadata.txt"])
+        );
     }
 
     #[test]

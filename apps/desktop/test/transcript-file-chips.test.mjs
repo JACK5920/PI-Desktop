@@ -91,7 +91,7 @@ test("a file chip is routed by where the reference resolved, never optimisticall
   // Only the explicit default-browser destination may request the OS handoff;
   // an ordinary transcript click keeps its resolved in-app destination.
   const defaultBrowserIndex = hook.indexOf(
-    'if (destination === "default-browser")',
+    'if (destination === "default-browser" || destination === "default-application")',
   );
   const defaultBrowserBranch = hook.slice(
     defaultBrowserIndex,

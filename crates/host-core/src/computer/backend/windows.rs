@@ -354,6 +354,12 @@ impl WindowsDesktop {
         }
         let fingerprint = node_fingerprint(index, role_id, name.as_deref(), rect);
         Ok(Node {
+            // The native backend's uid is already content-derived
+            // (`index + role + name + bounds`), so it is stable across
+            // observations and doubles as the identity. Keeping them equal here
+            // means the comparison logic works on either backend without a
+            // second notion of "same element".
+            identity: Some(fingerprint.clone()),
             uid: fingerprint,
             role,
             label: if (password && !allow_sensitive_input) || !belongs_to_target {
@@ -518,6 +524,15 @@ impl WindowsDesktop {
 }
 
 impl Desktop for WindowsDesktop {
+    fn self_pids(&self) -> Vec<i32> {
+        // This backend used the trait default, which on Windows answers "this
+        // process alone" — so `block_self_target` never matched the Electron
+        // parent that spawned host-core, and PI-Desktop's own window was
+        // targetable whenever this backend was the active one. Same walk as the
+        // cua backend, now shared.
+        super::self_pid_chain(4)
+    }
+
     fn capabilities(&self) -> Capabilities {
         Capabilities {
             platform: "win32".into(),
@@ -609,6 +624,7 @@ impl Desktop for WindowsDesktop {
             nodes.push(self.node_for(&element, index, target, bounds, allow_sensitive_input)?);
         }
         Ok(RawInspection {
+            total_nodes: count,
             nodes,
             truncated: count > limit,
             fidelity: Fidelity::Partial,

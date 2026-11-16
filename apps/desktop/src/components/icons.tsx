@@ -67,6 +67,7 @@ import {
   Maximize2,
   Minimize2,
   PawPrint,
+  Pause,
   PhoneOff,
   PencilLine,
   Pin,
@@ -150,6 +151,7 @@ function icon(Lucide: LucideIcon) {
 export const IconPlus = icon(Plus);
 export const IconPower = icon(Power);
 export const IconPlay = icon(Play);
+export const IconPause = icon(Pause);
 export const IconBookOpen = icon(BookOpen);
 /** Paste-from-clipboard actions (MCP config import). */
 export const IconClipboard = icon(ClipboardPaste);

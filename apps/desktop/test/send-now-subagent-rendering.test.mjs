@@ -52,7 +52,7 @@ test("a steering response keeps the earlier delegation card live until parent se
     assert.equal(collectLiveDelegationEntries(beforeReply.slice(0, -1), beforeReply.at(-1), true).has("task"), true);
     const nextUser = { kind: "message", message: message("next", "user", "Next task.") };
     assert.equal(collectLiveDelegationEntries(entries, nextUser, true).has("task"), false);
-    assert.equal(collectLiveDelegationEntries(entries, { kind: "message", message: message("system", "system", "Restart") }, true).has("task"), false);
+    assert.equal(collectLiveDelegationEntries(entries, { kind: "message", message: message("system", "system", "Restart") }, true).has("task"), true);
     const compaction = { kind: "compaction", mark: { id: "checkpoint" } };
     assert.equal(collectLiveDelegationEntries([...history, compaction], entries.at(-1), true).has("task"), true);
     const completedTask = { ...task, toolResult: { details: { delegationId: "delegate", status: "completed" } } };

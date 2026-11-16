@@ -1,4 +1,13 @@
-export const PLUGIN_PANEL_TITLEBAR_HEIGHT = 46;
+/**
+ * Height of the host drag band above a plugin panel's own window.
+ *
+ * Kept deliberately slim: the band is pure window chrome — it carries the
+ * capsule and the drag surface, nothing else — so every pixel it takes is
+ * stolen from the plugin's content. 26px matches the compact titlebar of a
+ * native Win11 window and still leaves room for a 22px capsule plus its
+ * 2px top inset.
+ */
+export const PLUGIN_PANEL_TITLEBAR_HEIGHT = 26;
 
 /**
  * Opt-in marker for plugin pages that use the host-published titlebar CSS
@@ -44,7 +53,7 @@ export const PLUGIN_PANEL_LOCALE_ARGUMENT_PREFIX = "--pi-plugin-panel-locale=";
  * living in its own window.
  *
  * An embedded view has no window to minimize, maximize, or drag, so the preload
- * skips the control capsule and the 46px safe area entirely and reports a
+ * skips the control capsule and the 26px safe area entirely and reports a
  * titlebar height of 0. `window.pluginBridge` is identical either way, so the
  * same HTML entry works in both placements (ADR 0092 §2 addendum).
  */
@@ -52,7 +61,7 @@ export const PLUGIN_PANEL_EMBEDDED_ARGUMENT = "--pi-plugin-panel-embedded=1";
 
 /**
  * Marks a plugin surface as a floating widget: a transparent, frameless window
- * with no 46px titlebar band and no host control capsule. The preload publishes
+ * with no 26px titlebar band and no host control capsule. The preload publishes
  * a titlebar height of 0, installs a drag map over the whole window, and routes
  * right-click to the host's widget menu. `window.pluginBridge` is identical to
  * a panel, so one HTML entry can serve both placements.

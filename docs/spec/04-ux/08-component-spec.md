@@ -1933,8 +1933,9 @@ Single message render — either user (plaintext) or assistant (markdown streami
   Double-click resets to 760px. Arrow keys step the width; Home restores the
   default; End fills the pane.
 
-- User: right-aligned, theme-neutral soft plate (`color-mix` on primary ink,
-  never a fixed accent tint), borderless, `radius-lg-plus` with a tighter
+- User: right-aligned, theme-aware blue accent plate (`color-mix` on
+  `--ds-accent` and `--ds-bg-hover`) with primary foreground text, borderless,
+  `radius-lg-plus` with a tighter
   bottom-right corner, capped at `min(82%, 600px)` so short prompts read as
   chat turns rather than full-width blocks. The plate shrinks to the
   prompt's max-content rather than stretching to that ceiling; inline file
@@ -3161,7 +3162,7 @@ reasoning-level control.
 ```text
 +----------------------------------------------------------+
 | [Agent/Plan/Goal] [permission mode]     | [ring %] [model · reasoning ▾] |
-| queued messages (optional; one row per item) | [⏹ Stop / → Send] (one submit slot) |
+| queued messages (optional; one row per item) | [Ⅱ Pause] [⏹ Stop] / [▶ Resume] / [→ Send] |
 | textarea (auto-growing, 1 line → max 7)                         |
 | placeholder: welcome → command/file hint → keyboard hint        |
 | (advances only on page/session changes; native value stays accessible) |
@@ -3204,6 +3205,11 @@ reasoning-level control.
   The permission menu stays 120px wide; its Chinese Composer short label for
   Accept edits is `允许编辑` / `允許編輯` so the option remains single-line
   beside its selection indicator.
+- While a local Agent turn is running, the Composer exposes separate blue Pause
+  and neutral Stop controls; Pause becomes durable only after the current turn
+  and tool batch reach `agent_end`. A safely paused idle session shows Resume
+  and Stop. Resume is a new user turn, not replay of the prior provider/tool
+  request. When draft text exists, Pause remains available beside normal Send.
 - The right toolbar owns the remaining-capacity context inspector (when the
   newest assistant turn has usage) immediately left of one combined model ×
   reasoning-level chip. Explicitly installed plugins may add user-invoked
@@ -4814,3 +4820,9 @@ Input, selection, submission and dismissal semantics remain unchanged.
 Project-delete descriptions and plugin dialog headings/outcomes also wrap long
 project or plugin names instead of overflowing their existing widths. Project
 instructions, memory and OAuth dialogs retain their existing bounded layouts.
+
+
+Transcript file-reference menus offer **Show in folder** in local-files sessions after the same exact-reference resolution used by open/copy actions. Unresolved references do nothing; remote sessions never expose local reveal. Turn usage shows a reported or estimated cost only when usage metadata has a known cost. The context inspector reads the complete Host session ledger, labels estimates and lower bounds when requests are unpriced, and never guesses unknown prices. Native Pi sessions have no Desktop ledger total.
+
+
+After compaction, context capacity follows the checkpoint's recorded provider/model; a legacy checkpoint uses the currently selected exact model. If neither resolves, the fallback window is explicitly labeled estimated. Historical request usage and its original model remain unchanged. System notices do not settle live delegation cards; ordinary new user messages still end the visible running-delegation window. Screenshot-only clipboard images attach without waiting for native directory probing, while disk-file and folder paste retain their native resolution behavior. The Pi model chip may show the provider-reported served model when it differs from the requested route, with both values available in its accessible label.

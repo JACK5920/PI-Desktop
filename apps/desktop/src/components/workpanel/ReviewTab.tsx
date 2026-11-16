@@ -22,6 +22,7 @@ type AppliedFocus = {
 export function ReviewTab() {
   const { t } = useTranslation();
   const messages = useAppStore((state) => state.messages);
+  const sessionId = useAppStore((state) => state.activeSessionId);
   const entries = useMemo(() => reviewChangesFromMessages(messages), [messages]);
   const summary = useMemo(() => summarizeReviewChanges(entries), [entries]);
   const focusRequest = useReviewFocusRequest();
@@ -75,6 +76,8 @@ export function ReviewTab() {
             key={entry.change.snapshotId}
             message={entry.message}
             compact
+            allowLineFeedback
+            sessionId={sessionId ?? undefined}
             openRequest={
               focus?.expand && focus.snapshotIds.has(entry.change.snapshotId)
                 ? focus.seq

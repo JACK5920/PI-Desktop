@@ -17,6 +17,7 @@ const {
   isToolWorkPanelTab,
   normalizeWorkPanelFilePath,
   newWorkPanelTab,
+  ompSubagentBatchWorkPanelTab,
   openWorkPanelTabState,
   pluginWorkPanelTab,
   preferredFileWorkPanelTab,
@@ -347,6 +348,19 @@ test("subagent tabs key by delegation and carry the captured agent name", () => 
   assert.equal(tab.label, "explorer");
   const unnamed = subagentWorkPanelTab("del-2");
   assert.equal(unnamed.label, undefined);
+});
+
+test("OMP subagent batch tabs use their native tool-call resource and survive sanitization", () => {
+  const tab = ompSubagentBatchWorkPanelTab("omp-batch-15");
+  assert.equal(tab.id, "omp-subagent-batch:omp-batch-15");
+  assert.equal(tab.kind, "omp-subagent-batch");
+  assert.equal(tab.resource, "omp-batch-15");
+  assert.equal(isKnownWorkPanelTab(tab), true);
+  assert.deepEqual(sanitizeWorkPanelTabsState({ tabs: [tab], activeTabId: tab.id }), { tabs: [tab], activeTabId: tab.id });
+  const child = ompSubagentBatchWorkPanelTab("omp-batch-15", "agent-15", "Demo15");
+  assert.equal(child.id, "omp-subagent-batch:omp-batch-15:agent-15");
+  assert.equal(child.agentId, "agent-15");
+  assert.equal(child.label, "Demo15");
 });
 
 test("subagent tabs reopen in place and close like any resource tab", () => {

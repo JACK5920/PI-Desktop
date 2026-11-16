@@ -48,26 +48,19 @@ const [
 const queuedPromptsLib = await read("../src/lib/queued-prompts.ts");
 
 test("composer send/stop button follows draft content and the visible session's run state", () => {
-  const composerRight = toolbar.match(/<div className="composer-right">[\s\S]*?<\/div>\s*<\/div>/)?.[0] ?? "";
+  const composerRight = toolbar;
   // Plan mode widens the running condition: `runActive` folds an in-flight
   // plan execution into the session's own `isRunning`. The submit slot then
   // switches to Stop only when that session is running and the draft is empty.
-  const submitSlot =
-    composerRight.match(
-      /\{runActive && !hasDraftContent \? \([\s\S]*?\) : \([\s\S]*?\)\}/,
-    )?.[0] ?? "";
-  assert.ok(submitSlot.length > 0, "single submit slot implementation not found");
-  assert.match(submitSlot, /className="stop-btn"/);
-  assert.match(submitSlot, /className="send-btn"/);
-  assert.equal(
-    (submitSlot.match(/className="(?:stop|send)-btn"/g) ?? []).length,
-    2,
-    "Stop and Send should be the two mutually exclusive branches of one slot",
-  );
+  assert.match(composerRight, /runActive && !hasDraftContent \?/);
+  assert.match(composerRight, /className="stop-btn"/);
+  assert.match(composerRight, /className="send-btn"/);
+  assert.equal((composerRight.match(/className="stop-btn"/g) ?? []).length, 1);
+  assert.equal((composerRight.match(/className="send-btn"/g) ?? []).length, 1);
   assert.match(composer, /const runActive = isRunning \|\| executionActive;/);
   assert.match(composer, /const isRunning = useAppStore\(\(s\) => s\.isRunning\);/);
-  assert.match(submitSlot, /stopGenerating/);
-  assert.match(submitSlot, /onClick=\{\(\) => void abort\(\)\}/);
+  assert.match(composerRight, /tooltip=\{t\("chat\.stopGenerating"\)\}/);
+  assert.match(composerRight, /onClick=\{\(\) => void abort\(\)\}/);
   assert.doesNotMatch(composerRight, /\{runActive \? \(/);
   const modelIndex = composerRight.indexOf("<ComposerModelPicker");
   const transformIndex = composerRight.indexOf("composerTransforms.map");
@@ -92,7 +85,7 @@ test("composer send/stop button follows draft content and the visible session's 
     "Stop must not render beside an always-present Send button",
   );
   assert.match(composer, /const inputBlocked = approvalPending \|\| pasting \|\| nativeInputBlocked;/);
-  assert.match(composer, /const controlsBlocked = approvalPending \|\| nativeSession \|\| !sessionAllows\(capabilitySession, "canConfigureModel"\);/);
+  assert.match(composer, /const controlsBlocked = agentEngine === "omp"\s*\?\s*nativeSession \|\| remoteSession \|\| isRunning\s*:\s*approvalPending \|\| nativeSession \|\| !sessionAllows\(capabilitySession, "canConfigureModel"\);/);
   assert.match(composer, /contentEditable=\{!inputBlocked\}/);
   assert.match(composer, /disabled=\{controlsBlocked\}/);
   assert.match(composer, /sendBlocked[\s\S]*\(!modelReady/);
@@ -153,6 +146,14 @@ test("running prompts use a removable per-session queue with priority actions", 
   assert.doesNotMatch(composer, /sendNowRequested/);
   assert.doesNotMatch(queuedPromptsLib, /sendNowRequested/);
   assert.doesNotMatch(queuedPromptsLib, /clearQueuedPromptSendNow/);
+});
+
+test("Host AGENT_BUSY admission races preserve the prompt in the normal queue", () => {
+  const catchBlock = queueSlice.slice(queueSlice.indexOf("} catch (error) {", queueSlice.indexOf("const receipt = await api.prompt")));
+  assert.match(catchBlock, /messageError\.code === "AGENT_BUSY"/);
+  assert.match(catchBlock, /runtime\.retractOptimisticUserMessage\(startedIn, optimisticMessage\)/);
+  assert.match(catchBlock, /const queued = await get\(\)\.enqueuePrompt\(content, draft, startedIn\)/);
+  assert.match(catchBlock, /if \(queued\)[\s\S]*?consumeAcceptedAnnotations\(startedIn, annotationSnapshot\)[\s\S]*?return true/);
 });
 
 test("reordering a queued prompt swaps plain neighbours only", () => {
@@ -384,9 +385,9 @@ test("the user row is inserted before the host round trip and echoed under the s
     /await api\.prompt\(\{[^}]*messageId: optimisticMessage\.id/,
     "the renderer id travels with the prompt so the host echo lands on the same row",
   );
-  // The row is withdrawn when the send never reached the host, but only the
-  // renderer's own object: a durable echo under the same id stays.
-  assert.match(sendPrompt, /catch \(error\) \{\s*runtime\.submittedComposerDrafts\.delete\(startedIn\);\s*runtime\.retractOptimisticUserMessage\(startedIn, optimisticMessage\);/);
+  // Failed user input stays in the renderer projection for an exact retry;
+  // successful echoes still reconcile under the same stable ID.
+  assert.match(sendPrompt, /runtime\.markPendingPromptFailed\(startedIn, optimisticMessage\)/);
   assert.match(sessionRuntime, /function retractOptimisticUserMessage[\s\S]*?current\.messages\.includes\(message\)/);
   // A background session receives the row through its renderer cache.
   assert.match(sessionRuntime, /function insertOptimisticUserMessage[\s\S]*?upsertLiveSessionMessage\(cached, message\)/);

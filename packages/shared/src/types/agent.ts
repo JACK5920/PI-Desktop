@@ -80,6 +80,8 @@ export type AgentSteerRequest = Pick<
   "sessionId" | "content" | "attachments" | "messageId" | "voiceOrigin"
 > & {
   expectedTurnId: string;
+  /** OMP-native mid-turn delivery behavior. PI sessions keep the existing steer contract. */
+  streamingBehavior?: "steer" | "followUp";
 };
 
 export type AgentPromptResponse = {
@@ -289,7 +291,7 @@ export type AgentEvent =
     }
   | { type: "message_end"; message: UiMessage; precedingAssistant?: UiMessage; replacesMessageId?: string }
   | { type: "user_message_persisted"; optimisticMessageId: string; message: UiMessage }
-  | { type: "tool_start"; toolCallId: string; toolName: string; args: unknown }
+  | { type: "tool_start"; toolCallId: string; toolName: string; args: unknown; engineOrigin?: "pi" | "omp" }
   | { type: "tool_update"; toolCallId: string; partialResult?: unknown }
   | {
       type: "tool_end";

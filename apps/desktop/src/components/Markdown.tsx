@@ -15,6 +15,7 @@ import {
   useSyncExternalStore,
   type CSSProperties,
   type ComponentProps,
+  type MouseEvent as ReactMouseEvent,
   type RefObject,
   type ReactNode,
 } from "react";
@@ -243,7 +244,11 @@ export function HighlightedCode({
   );
 }
 
-function CodeBlock({ code, lang, ...position }: { code: string; lang: string } & SourcePositionProps) {
+function CodeBlock({ code, lang, onContextMenu, ...position }: {
+  code: string;
+  lang: string;
+  onContextMenu?: ComponentProps<"pre">["onContextMenu"];
+} & SourcePositionProps) {
   const { t } = useTranslation();
   const { copied, copy } = useCopy();
   return (
@@ -259,7 +264,7 @@ function CodeBlock({ code, lang, ...position }: { code: string; lang: string } &
           {copied ? <IconCheck size={13} /> : <IconCopy size={13} />}
         </TooltipButton>
       </div>
-      <pre>
+      <pre onContextMenu={onContextMenu}>
         <code>
           <HighlightedCode code={code} lang={lang} />
         </code>
@@ -477,12 +482,88 @@ function extractCode(children: ReactNode): { code: string; lang: string } | null
   return { code: code.replace(/\n$/, ""), lang };
 }
 
+/**
+ * Find the file token under the caret in a fenced code block. Paths with
+ * spaces remain usable when quoted, and adjacent whitespace-delimited tokens
+ * are combined only when the normal chat-link resolver recognizes the whole
+ * candidate as a file. This intentionally does not turn arbitrary code text
+ * into an open action.
+ */
+function fileReferenceAtTextOffset(
+  source: string,
+  offset: number,
+  root?: string | null,
+  baseDir?: string | null,
+): string | null {
+  if (!Number.isFinite(offset) || source.length === 0) return null;
+  const boundedOffset = Math.max(0, Math.min(source.length - 1, Math.floor(offset)));
+  const lineStart = source.lastIndexOf("\n", boundedOffset - 1) + 1;
+  const nextLineBreak = source.indexOf("\n", boundedOffset);
+  const lineEnd = nextLineBreak === -1 ? source.length : nextLineBreak;
+  const line = source.slice(lineStart, lineEnd);
+  if (!line || line.length > 4096) return null;
+  const lineOffset = boundedOffset - lineStart;
+  const tokens = [...line.matchAll(/"[^"\\n]*"|'[^'\\n]*'|`[^`\\n]*`|[^\\s"'`]+/gu)]
+    .map((match) => ({
+      text: match[0],
+      start: match.index ?? 0,
+      end: (match.index ?? 0) + match[0].length,
+    }));
+  const hit = tokens.findIndex((token) => lineOffset >= token.start && lineOffset < token.end);
+  if (hit < 0) return null;
+
+  let bestPath: string | null = null;
+  for (let start = hit; start >= 0; start -= 1) {
+    for (let end = hit; end < tokens.length; end += 1) {
+      const raw = line.slice(tokens[start].start, tokens[end].end);
+      const candidate = raw
+        .trim()
+        .replace(/^[\\s`"'(<[{]+/u, "")
+        .replace(/[\\s`"')>},;!?]+$/u, "");
+      if (!candidate || candidate.length > 512) continue;
+      const target = resolvePreviewTarget(candidate, root, baseDir);
+      if (target?.kind !== "file") continue;
+      if (!bestPath || target.path.length > bestPath.length) bestPath = target.path;
+    }
+  }
+  return bestPath;
+}
+
+function textOffsetAtPoint(
+  element: HTMLElement,
+  event: ReactMouseEvent<HTMLElement>,
+): number | null {
+  const documentWithCaret = document as Document & {
+    caretRangeFromPoint?: (x: number, y: number) => Range | null;
+  };
+  const pointRange = documentWithCaret.caretRangeFromPoint?.(event.clientX, event.clientY);
+  const selection = window.getSelection();
+  const selectionRange = selection?.rangeCount ? selection.getRangeAt(0) : null;
+  const range = pointRange && element.contains(pointRange.startContainer)
+    ? pointRange
+    : selectionRange && element.contains(selectionRange.startContainer)
+      ? selectionRange
+      : null;
+  if (!range) return null;
+  try {
+    const prefix = document.createRange();
+    prefix.selectNodeContents(element);
+    prefix.setEnd(range.startContainer, range.startOffset);
+    return prefix.toString().length;
+  } catch {
+    return null;
+  }
+}
+
 function PreBlock({
   node: _node,
   children,
   ...rest
 }: ComponentProps<"pre"> & SourcePositionProps & { node?: unknown }) {
   const { closedFence, renderDiagrams } = useContext(MarkdownBlockContext);
+  const baseDir = useContext(MarkdownBaseDirContext);
+  const openFileMenu = useContext(MarkdownFileMenuContext);
+  const workspaceRoot = useAppStore((state) => state.workspace?.path);
   const info = extractCode(children);
   // Hooks stay unconditional: the fence language and closed-ness can flip
   // between streaming renders, so the lookup must run on every render.
@@ -491,6 +572,13 @@ function PreBlock({
     closedFence ? blockRendererCandidate(info?.lang ?? "") : undefined,
   );
   if (!info) return <pre {...rest}>{children}</pre>;
+  const onContextMenu: ComponentProps<"pre">["onContextMenu"] = (event) => {
+    if (!openFileMenu) return;
+    const offset = textOffsetAtPoint(event.currentTarget, event);
+    if (offset === null) return;
+    const path = fileReferenceAtTextOffset(info.code, offset, workspaceRoot, baseDir);
+    if (path) openFileMenu(event, { path, baseDir });
+  };
   if (
     renderDiagrams &&
     closedFence &&
@@ -507,12 +595,12 @@ function PreBlock({
         source={info.code}
         sourcePosition={sourcePositionProps(rest)}
         fallback={
-          <CodeBlock code={info.code} lang={info.lang} {...sourcePositionProps(rest)} />
+          <CodeBlock code={info.code} lang={info.lang} onContextMenu={onContextMenu} {...sourcePositionProps(rest)} />
         }
       />
     );
   }
-  return <CodeBlock code={info.code} lang={info.lang} {...sourcePositionProps(rest)} />;
+  return <CodeBlock code={info.code} lang={info.lang} onContextMenu={onContextMenu} {...sourcePositionProps(rest)} />;
 }
 
 /** Preview-in-panel tooltip for file and URL chat references. */

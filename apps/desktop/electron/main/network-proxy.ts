@@ -11,6 +11,7 @@ import { app, net, session, type Session } from "electron";
 import {
   applyProxyEnvAssignments,
   chromiumProxyConfig,
+  effectiveProxyBypass,
   normalizeNetworkProxy,
   parseProxyUrl,
   proxyEnvAssignments,
@@ -81,8 +82,11 @@ export async function applyNetworkProxy(
       : settings,
   );
   applied = next;
-  if (next.mode === "system") restoreProxyEnv(originalEnv, process.env);
-  else applyProxyEnvAssignments(proxyEnvAssignments(next), process.env);
+  // Custom is the only mode that owns the process env. Switching to system or
+  // direct must clear what a previous custom setting injected, otherwise the
+  // engine keeps using a proxy the user just turned off.
+  if (next.mode === "custom") applyProxyEnvAssignments(proxyEnvAssignments(next), process.env);
+  else restoreProxyEnv(originalEnv, process.env);
   if (next.mode === "custom") {
     process.env.PI_DESKTOP_PROXY_JSON = JSON.stringify(next);
   } else {
@@ -250,6 +254,62 @@ export async function testNetworkProxy(
   } finally {
     await relay?.close();
   }
+}
+
+/**
+ * Child engines (OMP, sidecars) never see Chromium's proxy settings; they only
+ * read environment variables. Without this, the browser can finish an OAuth
+ * login while the engine's token exchange leaves from the real region and is
+ * rejected as `unsupported_country_region_territory`.
+ */
+// Providers that are reachable directly from mainland China. Listing them in
+// NO_PROXY keeps domestic models fast even if the user's proxy runs in
+// "global" mode; the proxy client usually routes these directly anyway.
+const DIRECT_PROVIDER_HOSTS = [
+  "localhost",
+  "127.0.0.1",
+  "::1",
+  "bigmodel.cn",
+  "kimi.com",
+  "moonshot.cn",
+  "deepseek.com",
+  "aliyuncs.com",
+  "volces.com",
+  "baidubce.com",
+  "siliconflow.cn",
+  "minimax.chat",
+  "xfyun.cn",
+];
+
+export async function applyProxyToChildEnv(env: NodeJS.ProcessEnv): Promise<void> {
+  // "直连" means the user's own network stack is in charge (Clash/v2ray TUN,
+  // system VPN, or env vars they configured themselves). Do not add anything:
+  // a second proxy layer here breaks TUN routing and their bypass rules.
+  if (applied.mode === "direct") return;
+  const existing = ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy"].some((name) => Boolean(env[name]));
+  if (!existing && applied.mode === "system") {
+    try {
+      const relay = await ensureSystemProxyRelay();
+      env.HTTP_PROXY = relay;
+      env.HTTPS_PROXY = relay;
+      env.ALL_PROXY = relay;
+    } catch {
+      // A proxy that cannot be resolved must not block the engine from starting.
+      return;
+    }
+  }
+  // Merge instead of overwrite: respect a NO_PROXY the user already set, then
+  // append the configured bypass list, local endpoints and domestic providers
+  // so they never detour abroad.
+  const current = String(env.NO_PROXY ?? env.no_proxy ?? "")
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  const bypass = effectiveProxyBypass(applied)
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  env.NO_PROXY = [...new Set([...current, ...bypass, ...DIRECT_PROVIDER_HOSTS])].join(",");
 }
 
 export function assertCustomProxyUrl(url: string): string {

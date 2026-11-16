@@ -136,6 +136,8 @@ const OUTPUT_TOKEN_CEILING_PATTERNS = [
   /max_(?:completion_|output_)?tokens is too large:[\s\S]{0,240}?at most (\d[\d,]*) completion tokens/i,
   /max_tokens:\s*\d[\d,]*\s*>\s*(\d[\d,]*)\s*,\s*which is the maximum allowed number of\s+output tokens/i,
   /max_tokens[\s\S]{0,180}?expected a value <=\s*(\d[\d,]*)/i,
+  /\bmax[_ ](?:completion[_ ]|output[_ ])?tokens?\s+(?:must be less than or equal to|must not exceed|should not exceed|should be|cannot be|can be at most|no more than|not exceed|<=)\s*(\d[\d,]*)\b/i,
+  /\bmodel\s*\[[^\]]{1,120}\]\s+does not support max tokens\s*>\s*(\d[\d,]*)\b/i,
 ];
 
 /** The completion cap named in `message`, when it is one of the shapes above. */

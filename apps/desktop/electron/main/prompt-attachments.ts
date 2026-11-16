@@ -22,10 +22,8 @@ import {
   ErrorCodes,
   formatFileInsert,
   formatPromptPathText,
-  imageExceedsInlineDimensions,
   isSvgAttachment,
   locateInlinePromptPaths,
-  probeImageDimensions,
   SVG_MIME_TYPE,
   MAX_INLINE_IMAGE_BYTES,
   type AgentPromptAttachment,
@@ -276,11 +274,10 @@ export async function preparePromptAttachments(
     const read = supportsVision && size <= MAX_INLINE_IMAGE_BYTES
       ? await readFile(source.absolute)
       : undefined;
-    // A provider rejects an image past its pixel limit even when the bytes are
-    // small; it takes the `@path` fallback instead of poisoning history (#1913).
-    const bytes = read && !imageExceedsInlineDimensions(probeImageDimensions(read))
-      ? read
-      : undefined;
+    // Keep the content-addressed original transiently available to the agent
+    // runtime. It adapts oversized dimensions on the final provider view while
+    // durable transcript rows continue to store only refs and metadata.
+    const bytes = read;
     const inline = bytes !== undefined;
     const ref =
       source.root === "attachment" && attachment.path.trim().startsWith("attachments/")

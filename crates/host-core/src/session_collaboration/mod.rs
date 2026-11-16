@@ -167,6 +167,10 @@ fn spawn(db: &Database, input: &Value) -> Result<Value> {
             project_path: parent.summary.project_path,
             thinking_level: Some(parent.summary.thinking_level),
             permission_mode: Some(parent.summary.permission_mode),
+            // A delegated worker must speak the same engine as the chat that
+            // spawned it; following the app-wide default could route the child
+            // to a runtime the parent cannot steer.
+            agent_engine: parent.summary.agent_engine.clone(),
             // Delegated workers keep the default tier (ADR 0334).
             fast_mode: false,
         },

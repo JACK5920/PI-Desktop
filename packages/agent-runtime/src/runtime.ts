@@ -1,10 +1,10 @@
-import {
-  MAX_MUTATION_RECOVERY_FAILURES, BASH_PATCH_FAILURE_KEY,
+import { MAX_MUTATION_RECOVERY_FAILURES, BASH_PATCH_FAILURE_KEY,
   RECOVERABLE_MUTATION_ERROR_CODES, mutationFailureKey, isPatchCommand,
   mutationTerminationAdvice, mutationTerminationMessage,
 } from "./mutation-recovery.js";
 import { DESKTOP_AGENT_IDENTITY } from "./agent-identity.js";
 import { resolveMcpToolSelection } from "./mcp-tool-selection.js";
+import { concreteResponseModel } from "./response-model.js";
 import { BatchPlanner, withBatchTurn } from "./batch-planner.js";
 import { TOOL_EXECUTION_SPECS, resolveBatchExecutionMode, toolExecutionMode, withDynamicTaskExecutionMode } from "./tool-execution-policy.js";
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -50,7 +50,6 @@ import {
   getCurrentTools,
   getToolStateChanges,
   toToolDeclaration,
-  Type,
   type Api,
   type AssistantMessage,
   type ImageContent,
@@ -59,8 +58,8 @@ import {
   type SimpleStreamOptions,
   type ToolResultMessage,
   type Usage,
-  type UserMessage,
-} from "@earendil-works/pi-ai";
+  type UserMessage } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import {
   DEFAULT_COMMAND_TIMEOUT_MS,
   OAUTH_AUTH_KIND,
@@ -171,7 +170,7 @@ import {
   estimateContextTokens,
   estimateTokens,
 } from "./pi-runtime-estimates.js";
-import { convertToLlm } from "./pi-runtime-messages.js";
+import { convertToLlmForProvider } from "./pi-runtime-messages.js";
 import type {
   CompactionEntry,
   CompactionPreparation,
@@ -2348,7 +2347,8 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
           });
         });
         return alignRetainedReasoningIdentity(
-          convertToLlm(this.dropDuplicateToolCalls(messages)), this.reasoningReplayIdentity(),
+          await convertToLlmForProvider(this.dropDuplicateToolCalls(messages)),
+          this.reasoningReplayIdentity(),
         );
       },
       prepareRequest: ({ context }) => this.prepareToolDeclarations(context),
@@ -2995,6 +2995,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
       getThinkingLevel: () => agentThinkingLevel(runtime.thinkingLevel),
       setThinkingLevel: (level) => {
         runtime.thinkingLevel = clampThinkingLevel(runtime.provider, level as ThinkingLevel);
+        runtime.agent.state.thinkingLevel = agentThinkingLevel(runtime.thinkingLevel);
       },
       isIdle: () => !runtime.agent.state.isStreaming,
       abort: () => {
@@ -4271,6 +4272,18 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
 
   private declaredTools(): AgentTool[] {
     return this.declarationPolicy?.tools ?? this.activeTools();
+  }
+
+  /** Tool declarations for an external runtime that executes through Host RPC. */
+  getHostToolDefinitions(): Array<{ name: string; label: string; description: string; parameters: unknown }> {
+    return this.declaredTools().map((tool) => ({
+      name: tool.name,
+      label: tool.label ?? tool.name,
+      description: tool.description,
+      // TypeBox schemas are JSON-serializable. Round-trip here so custom
+      // symbol metadata and executable callbacks never cross the sidecar IPC.
+      parameters: JSON.parse(JSON.stringify(tool.parameters)),
+    }));
   }
 
   private isPlanSafePluginTool(name: string): boolean {
@@ -8906,6 +8919,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
                 : "complete",
             modelId: this.provider.modelId,
             providerId: this.provider.id,
+            responseModelId: concreteResponseModel(event.message, this.provider.modelId),
             ...(usage ? { usage } : {}),
             ...(responseDurationMs !== undefined ? { responseDurationMs } : {}),
             ...(streamMs !== undefined ? { modelStreamDurationMs } : {}),
@@ -8928,6 +8942,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
                 ),
           };
           if (!this.currentAssistant.providerReplay) delete this.currentAssistant.providerReplay;
+          if (!this.currentAssistant.responseModelId) delete this.currentAssistant.responseModelId;
           this.emit({ type: "message_end", message: this.currentAssistant });
           this.activeProviderRetryAttempt = 0;
           this.streamStartedAt = undefined;

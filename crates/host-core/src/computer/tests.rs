@@ -255,6 +255,7 @@ fn rect(x: f64, y: f64, width: f64, height: f64) -> Rect {
 fn node(uid: &str, role: &str, actions: Vec<ActionKind>) -> Node {
     Node {
         uid: uid.into(),
+        identity: Some(uid.into()),
         role: role.into(),
         label: Some("Save".into()),
         has_value: false,
@@ -1491,6 +1492,7 @@ impl Desktop for FakeDesktop {
                 node("0.1", "AXButton", vec![ActionKind::Click]),
                 node("0.2", "AXTextField", vec![ActionKind::SetValue]),
             ],
+            total_nodes: 2,
             truncated: false,
             fidelity: Fidelity::Full,
         })

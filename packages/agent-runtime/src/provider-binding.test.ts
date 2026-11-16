@@ -1356,6 +1356,57 @@ describe("GitHub Copilot transport identity", () => {
     });
   });
 
+  it("enables Copilot reasoning effort only when the model catalog advertises an effort ladder", async () => {
+    const makeProvider = (reasoningOptions: ModelConfig["reasoningOptions"]): RuntimeProviderConfig => ({
+      ...provider,
+      apiStyle: "chat_completions",
+      modelId: "gpt-5.3-copilot",
+      supportsReasoning: true,
+      supportedThinkingLevels: ["off", "low", "medium", "high"],
+      modelConfig: {
+        source: "models.dev",
+        name: "Copilot GPT-5.3",
+        baseUrl: provider.baseUrl ?? "https://api.githubcopilot.com",
+        reasoning: true,
+        reasoningOptions,
+        input: ["text"],
+        contextWindow: 128_000,
+        maxTokens: 16_000,
+      },
+    });
+    const captureRequest = async (target: RuntimeProviderConfig) => {
+      let requestBody: Record<string, unknown> | undefined;
+      const fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return new Response(JSON.stringify({ error: { message: "fixture" } }), {
+          status: 400,
+          headers: { "content-type": "application/json" },
+        });
+      });
+      const model = buildProviderModel(target);
+      await createProviderModels(target, model).streamSimple(
+        model,
+        {
+          systemPrompt: "system",
+          messages: [{ role: "user", content: "hello", timestamp: 1 }],
+          tools: [],
+        },
+        { fetch, maxRetries: 0, reasoning: "high" },
+      ).result();
+      return { model, requestBody };
+    };
+
+    const effortModel = await captureRequest(makeProvider([
+      { type: "effort", values: ["low", "medium", "high"] },
+    ]));
+    expect(effortModel.model.compat).toMatchObject({ supportsReasoningEffort: true });
+    expect(effortModel.requestBody?.reasoning_effort).toBe("high");
+
+    const standardModel = await captureRequest(makeProvider([]));
+    expect(standardModel.model.compat).toMatchObject({ supportsReasoningEffort: false });
+    expect(standardModel.requestBody?.reasoning_effort).toBeUndefined();
+  });
+
   it("derives dynamic headers from the current request context", () => {
     expect(
       copilotRequestHeaders(provider, {

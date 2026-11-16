@@ -31,6 +31,7 @@ import {
   sessionMatchesProject,
 } from "../../lib/sidebar-session-groups";
 import {
+  rememberLastOpenedSession,
   sessionIsArchived,
   sessionIsPinned,
   type SessionMeta,
@@ -41,6 +42,7 @@ import { dropAskDraft } from "../../lib/pending-asks";
 import { isRemoteSession, safeSessionSummary, sessionAllows } from "../../lib/remote-session-safety";
 import { createRefreshCoordinator } from "../../lib/refresh-coordinator";
 import { openRemoteProjectSession, remoteProjectForSession } from "../../lib/remote-project-session";
+import { resolveAgentEngine } from "../../lib/session-agent-engine";
 import {
   applyOptimisticSessionConfiguration,
 } from "../../lib/session-thinking";
@@ -165,11 +167,13 @@ export function createSessionSlice({
   | "refreshPlanCheckpoints"
   | "prefetchSession"
   | "selectSession"
+  | "syncNativeSessionTranscript"
   | "newSession"
   | "forkSession"
   | "forkAssistantMessage"
   | "forkAssistantMessageInSession"
   | "configureActiveSession"
+  | "setAgentEngine"
   | "abortSession"
 > {
   const pendingInteractiveRestoreGenerations = new Map<string, number>();
@@ -397,6 +401,27 @@ export function createSessionSlice({
       });
     },
 
+    syncNativeSessionTranscript: (sessionId, messages) => {
+      const window = { messageStart: 0, hasMoreBefore: false };
+      runtime.cacheSessionTranscript(sessionId, messages, window);
+      set((state) => {
+        const transcriptViews = { ...state.transcriptViews };
+        const sessionOutcomes = { ...state.sessionOutcomes };
+        const latestTurnResults = { ...state.latestTurnResults };
+        delete transcriptViews[sessionId];
+        delete sessionOutcomes[sessionId];
+        delete latestTurnResults[sessionId];
+        return {
+          retainedTranscripts: { ...state.retainedTranscripts, [sessionId]: messages },
+          sessionHistory: { ...state.sessionHistory, [sessionId]: window },
+          transcriptViews,
+          sessionOutcomes,
+          latestTurnResults,
+          ...(state.activeSessionId === sessionId ? { messages } : {}),
+        };
+      });
+    },
+
     selectSession: async (id, opts) => {
       const intent = opts?.navigationIntent ?? runtime.beginNavigationIntent();
       const selection = runtime.beginSessionSelection(id, intent);
@@ -423,6 +448,8 @@ export function createSessionSlice({
           },
       ) => {
         const record = opts?.record !== false;
+        // Launch reopens this exact conversation instead of the newest one.
+        rememberLastOpenedSession(id);
         const commit = (state: AppState) => ({
           ...(state.activeSessionId === id ? {} : switchWorkPanelSession(state, id)),
           ...retainSessionPane(state, id, messages),
@@ -852,6 +879,8 @@ export function createSessionSlice({
         set((state) => ({
           draftConfiguration: {
             mode: config.mode,
+            agentEngine:
+              config.agentEngine ?? state.draftConfiguration?.agentEngine,
             thinkingLevel: config.thinkingLevel,
             providerId:
               config.providerId ?? state.draftConfiguration?.providerId,
@@ -908,18 +937,78 @@ export function createSessionSlice({
       }));
     },
 
+    setAgentEngine: async (engine) => {
+      const state = get();
+      const sessionId = state.activeSessionId;
+      const session = sessionId
+        ? state.sessions.find((candidate) => candidate.id === sessionId)
+        : undefined;
+      const previousEngine = session?.agentEngine;
+
+      // Paint immediately and keyed by the captured session id: the reply can
+      // land after the user has already switched to another conversation, and
+      // the visible one must never be mistaken for the target.
+      if (session) {
+        set((current) => ({
+          sessions: current.sessions.map((candidate) =>
+            candidate.id === session.id
+              ? { ...candidate, agentEngine: engine }
+              : candidate,
+          ),
+        }));
+      } else {
+        set((current) => ({
+          draftConfiguration: {
+            ...current.draftConfiguration,
+            agentEngine: engine,
+          },
+        }));
+      }
+
+      try {
+        if (session && previousEngine !== engine) {
+          // Targeted by id, not "active session": only this conversation moves.
+          await api.configureSession(session.id, {
+            mode: session.mode,
+            agentEngine: engine,
+          });
+        }
+      } catch (error) {
+        if (session) {
+          set((current) => ({
+            sessions: current.sessions.map((candidate) => {
+              if (candidate.id !== session.id) return candidate;
+              if (previousEngine) return { ...candidate, agentEngine: previousEngine };
+              // The row was unpinned before this attempt; drop the optimistic pin.
+              const restored = { ...candidate };
+              delete restored.agentEngine;
+              return restored;
+            }),
+          }));
+        }
+        throw error;
+      }
+
+      // Remembered as the default for chats started later only. The
+      // install-level `agentEngine` stays untouched, so older unpinned chats
+      // keep the engine they were already using.
+      const latest = get().settings;
+      if (latest && latest.defaultAgentEngine !== engine) {
+        const nextSettings = { ...latest, defaultAgentEngine: engine };
+        await api.setSettings(nextSettings);
+        set({ settings: nextSettings });
+      }
+    },
+
     /** Abort one session's running turn, whether or not it is the visible one. */
     abortSession: async (sessionId) => {
       if (!sessionId) return;
-      try {
-        await api.abort(sessionId);
-      } finally {
-        set((state) => ({
-          isRunning:
-            state.activeSessionId === sessionId ? false : state.isRunning,
-          runningSessions: { ...state.runningSessions, [sessionId]: false },
-        }));
-      }
+      await api.abort(sessionId);
+      set((state) => ({
+        isRunning:
+          state.activeSessionId === sessionId ? false : state.isRunning,
+        runningSessions: { ...state.runningSessions, [sessionId]: false },
+      }));
     },
   };
 }

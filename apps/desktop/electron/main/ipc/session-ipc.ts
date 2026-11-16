@@ -390,6 +390,19 @@ export function registerSessionIpc({
     }
     return readSessionCollaboration(host, sidecar, sessionId);
   });
+  handle(IPC.invoke.sessionUsageCost, async (input?: { sessionId?: unknown }) => {
+    const sessionId = typeof input?.sessionId === "string" ? input.sessionId.trim() : "";
+    if (!sessionId || sessionId.length > 256) {
+      throw Object.assign(new Error("sessionId must be a non-empty string of at most 256 characters"), {
+        errorCode: ErrorCodes.INVALID_ARGUMENT,
+      });
+    }
+    if (sessionId.startsWith("native-pi:")) {
+      return { sessionId, turnCount: 0, requestCount: 0, providers: [] };
+    }
+    if (!host) throw new Error("host unavailable");
+    return host.call("session.usageCost", { sessionId });
+  });
   handle(IPC.invoke.sessionOpen, async (rawSessionId: string) => {
     if (!host) throw new Error("host unavailable");
     const sessionId = String(rawSessionId ?? "").trim();
@@ -413,26 +426,46 @@ export function registerSessionIpc({
     return { ...result, session: enrichSession(result.session, providers, defaults) };
   });
   handle(IPC.invoke.sessionDelete, async (id: string) => {
-    if (id.startsWith("native-pi:")) {
+    const sessionId = String(id ?? "").trim();
+    if (sessionId.startsWith("native-pi:")) {
       throw Object.assign(new Error("Native Pi sessions cannot be deleted from PI-Desktop"), {
         errorCode: ErrorCodes.INVALID_ARGUMENT,
       });
     }
     if (!host) throw new Error("host unavailable");
-    const res = await host.call("session.delete", { id });
-    await persistenceOutbox.dropSession(id);
-    forgetTranscriptRewriteHistory(id);
+    if (!sessionId) {
+      throw Object.assign(new Error("session id required"), {
+        errorCode: ErrorCodes.INVALID_ARGUMENT,
+      });
+    }
+    // Prompt admission and deletion share the same per-session operation gate.
+    // Checking only in the renderer leaves a race where a prompt starts after
+    // the UI check but before Host removes the transcript.
+    const releaseSessionOperation = await acquireSessionOperation(sessionId);
+    let res: unknown;
+    try {
+      if (activeTurns.has(sessionId)) {
+        throw Object.assign(new Error("Cannot delete a session with an active turn"), {
+          errorCode: ErrorCodes.AGENT_BUSY,
+        });
+      }
+      res = await host.call("session.delete", { id: sessionId });
+    } finally {
+      releaseSessionOperation();
+    }
+    await persistenceOutbox.dropSession(sessionId);
+    forgetTranscriptRewriteHistory(sessionId);
     // Drop the session's pi-agent so a later session with the same id (or a
     // stale runtime) can't answer with this session's context.
     if (sidecar) {
-      sidecar.clearProjectInstructionRoot(id);
-      sidecar.clearVendorAuthBindings(id);
+      sidecar.clearProjectInstructionRoot(sessionId);
+      sidecar.clearVendorAuthBindings(sessionId);
       await sidecar
-        .call("agent.disposeSession", { sessionId: id })
+        .call("agent.disposeSession", { sessionId })
         .catch(() => undefined);
     }
-    sessionProjects.delete(id);
-    logger.app("session", "info", "session deleted", { sessionId: id });
+    sessionProjects.delete(sessionId);
+    logger.app("session", "info", "session deleted", { sessionId });
     return res;
   });
   handle(IPC.invoke.sessionRename, async (id: string, title: string) => {
@@ -678,6 +711,8 @@ export function registerSessionIpc({
         thinkingLevel?: SessionThinkingLevel;
         permissionMode?: "inherit" | "ask" | "accept-edits" | "auto";
         fastMode?: boolean;
+        /** Per-conversation engine pin; absent leaves the stored value alone. */
+        agentEngine?: "pi" | "omp";
       },
     ) => {
       rejectNativeMutation(id, "configuration");

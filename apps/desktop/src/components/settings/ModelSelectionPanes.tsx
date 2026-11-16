@@ -206,6 +206,13 @@ export function applyVisibleModelSelection(
   return additions.length === 0 ? current : [...current, ...additions];
 }
 
+export type ModelAdvancedSection =
+  | "thinkingProtocol"
+  | "documents"
+  | "subagents"
+  | "nativeWebSearch"
+  | "fastMode";
+
 export type ModelSelectionPanesProps = {
   imageModelIds?: string[];
   onImageModelChange?: (id: string, selected: boolean) => void;
@@ -233,6 +240,11 @@ export type ModelSelectionPanesProps = {
   customModelInputRef?: Ref<HTMLInputElement>;
   /** The chosen list is exactly what the recommendation picked. */
   autoPicked?: boolean;
+  /**
+   * Advanced controls the caller's storage cannot honor. Hiding them keeps the
+   * pane from promising a setting that would be silently dropped on save.
+   */
+  hiddenAdvanced?: readonly ModelAdvancedSection[];
 };
 
 /**
@@ -252,9 +264,11 @@ export function ModelSelectionPanes({
   onImageModelChange,
   customModelInputRef,
   autoPicked = false,
+  hiddenAdvanced,
 }: ModelSelectionPanesProps) {
   const { t } = useTranslation();
   const { rows, models, publishedLevelsById, setModels } = selection;
+  const hide = (section: ModelAdvancedSection) => hiddenAdvanced?.includes(section) === true;
   const [modelQuery, setModelQuery] = useState("");
   const [chosenQuery, setChosenQuery] = useState("");
   const [customModelId, setCustomModelId] = useState("");
@@ -853,33 +867,35 @@ export function ModelSelectionPanes({
                           ) : null}
                         </span>
                         <div className="provider-chosen-thinking-controls">
-                          <div className="provider-chosen-thinking-protocol">
-                            <span className="provider-chosen-thinking-label">
-                              {t("settings.thinkingProtocol")}
-                            </span>
-                            <SettingsMenuSelect
-                              className="provider-chosen-thinking-select"
-                              label={t("settings.thinkingProtocol")}
-                              value={
-                                binding.thinkingProtocol ?? info?.thinkingProtocol ?? "legacy"
-                              }
-                              onChange={(id) =>
-                                updateBinding(binding.id, {
-                                  thinkingProtocol: id as ThinkingProtocol,
-                                })
-                              }
-                              options={[
-                                {
-                                  id: "legacy",
-                                  label: t("settings.thinkingProtocolLegacy"),
-                                },
-                                {
-                                  id: "adaptive",
-                                  label: t("settings.thinkingProtocolAdaptive"),
-                                },
-                              ]}
-                            />
-                          </div>
+                          {!hide("thinkingProtocol") ? (
+                            <div className="provider-chosen-thinking-protocol">
+                              <span className="provider-chosen-thinking-label">
+                                {t("settings.thinkingProtocol")}
+                              </span>
+                              <SettingsMenuSelect
+                                className="provider-chosen-thinking-select"
+                                label={t("settings.thinkingProtocol")}
+                                value={
+                                  binding.thinkingProtocol ?? info?.thinkingProtocol ?? "legacy"
+                                }
+                                onChange={(id) =>
+                                  updateBinding(binding.id, {
+                                    thinkingProtocol: id as ThinkingProtocol,
+                                  })
+                                }
+                                options={[
+                                  {
+                                    id: "legacy",
+                                    label: t("settings.thinkingProtocolLegacy"),
+                                  },
+                                  {
+                                    id: "adaptive",
+                                    label: t("settings.thinkingProtocolAdaptive"),
+                                  },
+                                ]}
+                              />
+                            </div>
+                          ) : null}
                           {bindingDefaultThinkingMenuLevels(enabledLevels).length > 1 ? (
                             <div className="provider-chosen-thinking-default">
                               <span className="provider-chosen-thinking-label">
@@ -965,14 +981,16 @@ export function ModelSelectionPanes({
                             updateBinding(binding.id, { supportsImages: next })
                           }
                         />
-                        <CapabilityToggle
-                          label={t("settings.documentInput")}
-                          published={publishedDocuments}
-                          value={binding.supportsDocuments}
-                          onChange={(next) =>
-                            updateBinding(binding.id, { supportsDocuments: next })
-                          }
-                        />
+                        {!hide("documents") ? (
+                          <CapabilityToggle
+                            label={t("settings.documentInput")}
+                            published={publishedDocuments}
+                            value={binding.supportsDocuments}
+                            onChange={(next) =>
+                              updateBinding(binding.id, { supportsDocuments: next })
+                            }
+                          />
+                        ) : null}
                         {onImageModelChange ? (
                           <label className="provider-chosen-capability">
                             <input
@@ -997,80 +1015,86 @@ export function ModelSelectionPanes({
                             </span>
                           </label>
                         ) : null}
-                        <span className="provider-chosen-delegation">
-                          <label className="provider-chosen-capability">
-                            <input
-                              type="checkbox"
-                              checked={binding.availableForSubagents ?? false}
-                              onChange={(event) =>
-                                updateBinding(binding.id, {
-                                  availableForSubagents:
-                                    event.target.checked || undefined,
-                                })
-                              }
-                            />
-                            <span>{t("settings.availableForSubagents")}</span>
-                          </label>
-                          <Tooltip
-                            className="provider-chosen-delegation-help"
-                            label={t("settings.availableForSubagentsHint")}
-                            ariaLabel={t("settings.availableForSubagentsHint")}
-                          >
-                            <IconHelp size={13} />
-                          </Tooltip>
-                        </span>
-                        <span className="provider-chosen-delegation">
-                          <label className="provider-chosen-capability">
-                            <input
-                              type="checkbox"
-                              checked={binding.nativeWebSearch === true}
-                              disabled={!nativeWebSearchWireCapable}
-                              onChange={(event) =>
-                                updateBinding(binding.id, {
-                                  nativeWebSearch: event.target.checked || undefined,
-                                })
-                              }
-                            />
-                            <span>{t("settings.nativeWebSearch")}</span>
-                          </label>
-                          <Tooltip
-                            className="provider-chosen-delegation-help"
-                            label={t(
-                              nativeWebSearchWireCapable
-                                ? "settings.nativeWebSearchHint"
-                                : "settings.nativeWebSearchUnsupported",
-                            )}
-                            ariaLabel={t(
-                              nativeWebSearchWireCapable
-                                ? "settings.nativeWebSearchHint"
-                                : "settings.nativeWebSearchUnsupported",
-                            )}
-                          >
-                            <IconHelp size={13} />
-                          </Tooltip>
-                        </span>
-                        <span className="provider-chosen-delegation">
-                          <label className="provider-chosen-capability">
-                            <input
-                              type="checkbox"
-                              checked={binding.fastModeAllowed === true}
-                              disabled={!fastModeBilling}
-                              onChange={(event) =>
-                                updateBinding(binding.id, {
-                                  fastModeAllowed: event.target.checked || undefined,
-                                })
-                              }
-                            />
-                            <span>{t("settings.fastModeAllowed")}</span>
-                          </label>
-                          <Tooltip
-                            className="provider-chosen-delegation-help"
-                            label={t(fastModeHint)}
-                            ariaLabel={t(fastModeHint)}
-                          >
-                            <IconHelp size={13} />
-                          </Tooltip>
-                        </span>
+                        {!hide("subagents") ? (
+                          <span className="provider-chosen-delegation">
+                            <label className="provider-chosen-capability">
+                              <input
+                                type="checkbox"
+                                checked={binding.availableForSubagents ?? false}
+                                onChange={(event) =>
+                                  updateBinding(binding.id, {
+                                    availableForSubagents:
+                                      event.target.checked || undefined,
+                                  })
+                                }
+                              />
+                              <span>{t("settings.availableForSubagents")}</span>
+                            </label>
+                            <Tooltip
+                              className="provider-chosen-delegation-help"
+                              label={t("settings.availableForSubagentsHint")}
+                              ariaLabel={t("settings.availableForSubagentsHint")}
+                            >
+                              <IconHelp size={13} />
+                            </Tooltip>
+                          </span>
+                        ) : null}
+                        {!hide("nativeWebSearch") ? (
+                          <span className="provider-chosen-delegation">
+                            <label className="provider-chosen-capability">
+                              <input
+                                type="checkbox"
+                                checked={binding.nativeWebSearch === true}
+                                disabled={!nativeWebSearchWireCapable}
+                                onChange={(event) =>
+                                  updateBinding(binding.id, {
+                                    nativeWebSearch: event.target.checked || undefined,
+                                  })
+                                }
+                              />
+                              <span>{t("settings.nativeWebSearch")}</span>
+                            </label>
+                            <Tooltip
+                              className="provider-chosen-delegation-help"
+                              label={t(
+                                nativeWebSearchWireCapable
+                                  ? "settings.nativeWebSearchHint"
+                                  : "settings.nativeWebSearchUnsupported",
+                              )}
+                              ariaLabel={t(
+                                nativeWebSearchWireCapable
+                                  ? "settings.nativeWebSearchHint"
+                                  : "settings.nativeWebSearchUnsupported",
+                              )}
+                            >
+                              <IconHelp size={13} />
+                            </Tooltip>
+                          </span>
+                        ) : null}
+                        {!hide("fastMode") ? (
+                          <span className="provider-chosen-delegation">
+                            <label className="provider-chosen-capability">
+                              <input
+                                type="checkbox"
+                                checked={binding.fastModeAllowed === true}
+                                disabled={!fastModeBilling}
+                                onChange={(event) =>
+                                  updateBinding(binding.id, {
+                                    fastModeAllowed: event.target.checked || undefined,
+                                  })
+                                }
+                              />
+                              <span>{t("settings.fastModeAllowed")}</span>
+                            </label>
+                            <Tooltip
+                              className="provider-chosen-delegation-help"
+                              label={t(fastModeHint)}
+                              ariaLabel={t(fastModeHint)}
+                            >
+                              <IconHelp size={13} />
+                            </Tooltip>
+                          </span>
+                        ) : null}
                       </div>
                     </div>
                   </div>

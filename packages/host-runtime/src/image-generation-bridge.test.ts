@@ -152,3 +152,32 @@ it("tools.abort reaches the in-flight request and still forwards host cancellati
   expect((await pending).ok).toBe(false);
   expect(calls).toEqual(["tools.execute", "tools.abort"]);
 });
+
+it("lets an external agent runtime re-enter the same authorized local-tool runner", async () => {
+  const { sidecar, calls } = harness();
+  const computer = vi.fn(async () => ({ ok: true, content: "computer action completed" }));
+  sidecar.setLocalTool("Computer", computer);
+
+  expect(sidecar.supportsLocalTool("Computer")).toBe(true);
+  expect(sidecar.supportsLocalTool("NotRegistered")).toBe(false);
+  await expect(sidecar.executeHostTool({
+    sessionId: "s", turnId: "turn-1", toolCallId: "external-1", toolName: "Computer",
+    args: { action: "observe" }, mode: "agent",
+  })).resolves.toMatchObject({ ok: true, content: "computer action completed" });
+  await expect(sidecar.executeHostTool({
+    sessionId: "s", turnId: "turn-2", toolCallId: "external-2", toolName: "Computer",
+    args: { action: "observe" }, mode: "plan",
+  })).resolves.toMatchObject({ ok: false, errorCode: "TOOL_DISABLED_IN_PLAN" });
+  expect(computer).toHaveBeenCalledTimes(1);
+  expect(calls).toEqual(["tools.execute"]);
+});
+
+it("keeps host-native external tool calls on the same Host execution path", async () => {
+  const { sidecar, calls } = harness();
+  const result = await sidecar.executeHostTool({
+    sessionId: "s", turnId: "turn-1", toolCallId: "external-plugin-1", toolName: "plugin_demo_action",
+    args: { value: "ok" }, mode: "agent", declaredRisk: "low",
+  });
+  expect(result).toMatchObject({ ok: true, content: { authorized: true } });
+  expect(calls).toEqual(["tools.execute"]);
+});

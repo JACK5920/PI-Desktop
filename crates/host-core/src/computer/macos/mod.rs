@@ -310,6 +310,7 @@ impl MacDesktop {
         let index = nodes.len();
         nodes.push(Node {
             uid: make_uid(path, &role, label.as_deref()),
+            identity: Some(make_identity(path, &role)),
             role,
             label,
             has_value,
@@ -658,6 +659,7 @@ impl Desktop for MacDesktop {
         let mut path = Vec::new();
         let truncated = self.walk(window.as_ref(), &mut path, None, &mut nodes, max_nodes);
         Ok(RawInspection {
+            total_nodes: nodes.len(),
             nodes,
             truncated,
             fidelity: Fidelity::Full,
@@ -735,6 +737,23 @@ impl Desktop for MacDesktop {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn node_identity_is_stable_across_label_changes() {
+        assert_eq!(make_identity(&[0, 3, 2], "AXButton"), "AXButton#0.3.2");
+        assert_eq!(
+            make_identity(&[0, 3, 2], "AXButton"),
+            make_identity(&[0, 3, 2], "AXButton")
+        );
+        assert_ne!(
+            make_identity(&[0, 3, 2], "AXButton"),
+            make_identity(&[0, 3, 2], "AXTextField")
+        );
+        assert_ne!(
+            make_identity(&[0, 3, 2], "AXButton"),
+            make_identity(&[0, 3, 3], "AXButton")
+        );
+    }
 
     #[test]
     fn a_uid_round_trips_its_path_and_identity() {

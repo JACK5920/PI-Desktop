@@ -15,8 +15,11 @@ import { ConversationWidthHandles } from "./ConversationWidthHandles";
 import { useAppStore } from "../stores/app-store";
 import { headPermission } from "../lib/pending-permissions";
 import { headAsk } from "../lib/pending-asks";
+import { api } from "../lib/api";
+import { OmpRpcInteraction } from "./OmpRpcInteraction";
 
 import { isRemoteSession } from "../lib/remote-session-safety";
+import { agentEngineForState } from "../lib/session-agent-engine";
 const StableComposer = memo(Composer);
 
 function i18nHasError(t: (key: string) => string, code: string) {
@@ -29,6 +32,16 @@ function projectName(path?: string | null, name?: string | null) {
   if (!path) return null;
   const parts = path.split(/[/\\]/).filter(Boolean);
   return parts[parts.length - 1] || path;
+}
+
+function OmpRemoteModeNotice() {
+  const { t } = useTranslation();
+  const switchToPi = async () => {
+    // Switching here is a per-conversation action: it must not drag other
+    // chats (or the stored default) off the engine they use.
+    await useAppStore.getState().setAgentEngine("pi");
+  };
+  return <div className="omp-engine-notice" role="status"><span>{t("settings.omp.remoteUnsupported")}</span><button type="button" onClick={() => void switchToPi()}>{t("settings.omp.enginePi")}</button></div>;
 }
 
 /**
@@ -62,6 +75,7 @@ export const ChatSurface = memo(function ChatSurface({
   const error = useAppStore((state) => state.error);
   const errorCode = useAppStore((state) => state.errorCode);
   const errorRetriable = useAppStore((state) => state.errorRetriable);
+  const nativeOmpSelected = useAppStore(agentEngineForState) === "omp";
   const [hiddenVendorModelKey, setHiddenVendorModelKey] = useState<string | null>(
     null,
   );
@@ -194,9 +208,9 @@ export const ChatSurface = memo(function ChatSurface({
               {!isRemoteSession(activeSession) ? <OnboardingChecklist /> : null}
             </div>
           </div>
-          <div className="home-composer-wrap">
-            <StableComposer variant="home" />
-          </div>
+          {nativeOmpSelected && isRemoteSession(activeSession)
+            ? <OmpRemoteModeNotice />
+            : <div className="home-composer-wrap"><StableComposer variant="home" /></div>}
         </div>
       ) : (
         <>
@@ -209,7 +223,8 @@ export const ChatSurface = memo(function ChatSurface({
               />
             ))}
           </div>
-          <StableComposer variant="docked" />
+          {nativeOmpSelected && isRemoteSession(activeSession) ? <OmpRemoteModeNotice /> : null}
+          {(!nativeOmpSelected || !isRemoteSession(activeSession)) ? <StableComposer variant="docked" /> : null}
         </>
       )}
 
@@ -271,6 +286,7 @@ export const ChatSurface = memo(function ChatSurface({
           </div>
         </div>
       ) : null}
+      {nativeOmpSelected && activeSessionId && !isRemoteSession(activeSession) ? <OmpRpcInteraction sessionId={activeSessionId} /> : null}
     </div>
   );
 });

@@ -1,15 +1,18 @@
 import { isRemoteSession, sessionAllows } from "../lib/remote-session-safety";
 import { inheritedSessionModelBinding } from "../lib/session-model";
 import {
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
+  type MouseEvent as ReactMouseEvent,
 } from "react";
 import { useTranslation } from "react-i18next";
 import type {
   Mode,
+  NativeMenuAction,
   PermissionMode,
 } from "@pi-desktop/shared";
 import {
@@ -20,16 +23,29 @@ import {
   normalizeLargePasteThreshold,
 } from "@pi-desktop/shared";
 import { useAppStore } from "../stores/app-store";
+import { api } from "../lib/api";
+import {
+  PAUSED_TASK_CONTINUATION_PROMPT,
+  cancelTaskPauseRequest,
+  requestTaskPause,
+  withoutPausedTask,
+} from "../lib/paused-task-recovery";
 import { latestTurnContextInspector } from "../lib/latest-turn-context";
 import { isActivePlanExecution } from "../lib/plan-mode-state";
 import { headAsk, queuedAskCount } from "../lib/pending-asks";
 import type { QueuedPrompt } from "../lib/queued-prompts";
 import { composerModelDisplayName, sameComposerModelId } from "../lib/composer-models";
 import { sessionFastModeActive } from "../lib/fast-mode-command";
+import { agentEngineForState } from "../lib/session-agent-engine";
 import {
   resolveComposerThinkingProvider,
 } from "../lib/session-thinking";
 import { ComposerAutocomplete } from "./ComposerAutocomplete";
+import {
+  ContextMenu,
+  useContextMenu,
+  type ContextMenuItem,
+} from "./ContextMenu";
 import { AskToolCard } from "./AskToolCard";
 import { PlanApprovalBar } from "./PlanApprovalBar";
 import { GoalLifecycleBar } from "./GoalLifecycleBar";
@@ -58,6 +74,7 @@ import { ComposerInput } from "../features/chat/composer/ComposerInput";
 import { useComposerModelMenu } from "../features/chat/composer/hooks/useComposerModelMenu";
 import { useVoiceInput } from "../features/voice/useVoiceInput";
 import { ComposerToolbar } from "../features/chat/composer/ComposerToolbar";
+import { insertGoalTemplate, type GoalTemplate } from "../features/chat/composer/goal-templates.mjs";
 import { ComposerStatus } from "../features/chat/composer/ComposerStatus";
 import { ComposerAnnotationAttachments } from "../features/chat/composer/ComposerAnnotationAttachments";
 
@@ -85,11 +102,31 @@ export function Composer({
   const editQueuedPrompt = useAppStore((s) => s.editQueuedPrompt);
   const sendQueuedNow = useAppStore((s) => s.sendQueuedNow);
   const abort = useAppStore((s) => s.abort);
+  const [pausePending, setPausePending] = useState(false);
   const isRunning = useAppStore((s) => s.isRunning);
+  useEffect(() => {
+    if (!isRunning) setPausePending(false);
+  }, [isRunning]);
   const planningState = useAppStore((s) =>
     s.activeSessionId ? s.planningStates[s.activeSessionId] : undefined,
   );
   const settings = useAppStore((s) => s.settings);
+  const [agentEngineIssueState, setAgentEngineIssueState] = useState(() => {
+    const engine = agentEngineForState(useAppStore.getState());
+    return { engine, issue: engine === "omp" ? t("settings.omp.engineChecking") : null as string | null };
+  });
+  // The open conversation owns its engine; only chats without a pin (and the
+  // new-task draft) follow the app-wide default.
+  const agentEngine = useAppStore(agentEngineForState);
+  const agentEngineIssueMessage = agentEngine === "omp"
+    ? agentEngineIssueState.engine === "omp"
+      ? agentEngineIssueState.issue
+      : t("settings.omp.engineChecking")
+    : null;
+  const handleAgentEngineIssueChange = useCallback((issue: string | null) => {
+    const engine = agentEngineForState(useAppStore.getState());
+    setAgentEngineIssueState({ engine, issue });
+  }, []);
   const plugins = useAppStore((s) => s.plugins);
   const imageGenerationCandidates = useMemo(
     () => imageGenerationBindings(settings?.imageGenerationModels, settings?.imageGeneration),
@@ -97,10 +134,67 @@ export function Composer({
   );
   const sessions = useAppStore((s) => s.sessions);
   const activeSessionId = useAppStore((s) => s.activeSessionId);
+  const activeGoalLifecycle = useAppStore((s) =>
+    s.activeSessionId ? s.goalLifecycles[s.activeSessionId] : undefined,
+  );
   const activeSessionSummary = sessions.find(
     (session) => session.id === activeSessionId,
   );
   const capabilitySession = activeSessionSummary ?? (activeSessionId?.startsWith("remote:") ? { id: activeSessionId } : undefined);
+  const goalManagedTask = activeGoalLifecycle?.status === "active" || activeGoalLifecycle?.status === "paused";
+  const pauseSupported = !!activeSessionId && !goalManagedTask && sessionAllows(capabilitySession, "canStop") && !isRemoteSession(capabilitySession) && activeSessionSummary?.source !== "pi-native";
+  const taskPaused = !!activeSessionId && !goalManagedTask && (settings?.pausedTaskSessionIds ?? []).includes(activeSessionId);
+  const pauseTask = async () => {
+    if (!activeSessionId || pausePending || !sessionAllows(capabilitySession, "canStop") || isRemoteSession(capabilitySession) || activeSessionSummary?.source === "pi-native") return;
+    requestTaskPause(activeSessionId);
+    setPausePending(true);
+    try {
+      const result = await api.stop(activeSessionId);
+      if (!result?.requested) {
+        cancelTaskPauseRequest(activeSessionId);
+        setPausePending(false);
+        showToast(t("chat.pauseGeneratingFailed"), { variant: "warning" });
+      }
+    } catch {
+      cancelTaskPauseRequest(activeSessionId);
+      setPausePending(false);
+      showToast(t("chat.pauseGeneratingFailed"), { variant: "error" });
+    }
+  };
+  const stopTask = async () => {
+    if (activeSessionId) {
+      cancelTaskPauseRequest(activeSessionId);
+      const currentSettings = useAppStore.getState().settings;
+      if (currentSettings?.pausedTaskSessionIds?.includes(activeSessionId)) {
+        const next = withoutPausedTask(currentSettings, activeSessionId);
+        useAppStore.setState({ settings: next });
+        try {
+          await api.setSettings(next);
+        } catch {
+          showToast(t("chat.pauseGeneratingFailed"), { variant: "error" });
+        }
+      }
+    }
+    await abort();
+  };
+  const resumeTask = async () => {
+    if (!activeSessionId || !taskPaused) return;
+    const currentSettings = useAppStore.getState().settings;
+    if (!currentSettings) return;
+    const next = withoutPausedTask(currentSettings, activeSessionId);
+    await api.setSettings(next);
+    useAppStore.setState({ settings: next });
+    const accepted = await sendPrompt(PAUSED_TASK_CONTINUATION_PROMPT, undefined, activeSessionId);
+    if (!accepted) {
+      const latest = useAppStore.getState().settings ?? next;
+      const restored = {
+        ...latest,
+        pausedTaskSessionIds: [...new Set([...(latest.pausedTaskSessionIds ?? []), activeSessionId])],
+      };
+      await api.setSettings(restored);
+      useAppStore.setState({ settings: restored });
+    }
+  };
   const composerTransforms = useMemo(
     () =>
       (sessionAllows(capabilitySession, "canUseLocalTools") ? plugins : [])
@@ -109,13 +203,17 @@ export function Composer({
     [plugins, activeSessionSummary, activeSessionId],
   );
   const remoteSession = isRemoteSession(capabilitySession);
-  const localToolsAllowed = sessionAllows(capabilitySession, "canUseLocalTools");
-  const attachmentsAllowed = sessionAllows(capabilitySession, "canAttach");
-  const promptAllowed = sessionAllows(capabilitySession, "canPrompt");
+  const localToolsAllowed = agentEngine !== "omp" && sessionAllows(capabilitySession, "canUseLocalTools");
+  const attachmentsAllowed = agentEngine === "omp"
+    ? !remoteSession && activeSessionSummary?.source !== "pi-native"
+    : sessionAllows(capabilitySession, "canAttach");
+  const promptAllowed = agentEngine === "omp"
+    ? !remoteSession && activeSessionSummary?.source !== "pi-native"
+    : sessionAllows(capabilitySession, "canPrompt");
   const nativeSession = activeSessionSummary?.source === "pi-native";
   const nativeReadOnly =
     nativeSession && activeSessionSummary.capabilities?.canPrompt !== true;
-  const nativeInputBlocked = nativeReadOnly || !promptAllowed || ((nativeSession || remoteSession) && isRunning);
+  const nativeInputBlocked = nativeReadOnly || (agentEngine !== "omp" && !promptAllowed) || ((nativeSession || remoteSession) && isRunning);
   const localWorkspacePath = useAppStore((s) => s.workspace?.path ?? "");
   const workspacePath = remoteSession ? "" : localWorkspacePath;
   const providers = useAppStore((s) => s.providers);
@@ -124,17 +222,7 @@ export function Composer({
   const sessionCompactions = useAppStore((s) =>
     s.activeSessionId ? s.sessionCompactions[s.activeSessionId] : undefined,
   );
-  // One inspector in the composer toolbar, always the newest turn with usage.
-  const composerContextUsage = useMemo(
-    () =>
-      latestTurnContextInspector(
-        liveMessages,
-        providerModels,
-        providers,
-        sessionCompactions,
-      ),
-    [liveMessages, providerModels, providers, sessionCompactions],
-  );
+  const recentModels = useAppStore((s) => s.recentModels);
   const configureActiveSession = useAppStore((s) => s.configureActiveSession);
   const showToast = useAppStore((s) => s.showToast);
   const composerPrefill = useAppStore((s) => s.composerPrefill);
@@ -217,7 +305,7 @@ export function Composer({
     draft,
   });
 
-  const approvalPending = planCheckpoint?.status === "pending";
+  const approvalPending = agentEngine !== "omp" && planCheckpoint?.status === "pending";
   const largePasteThreshold = normalizeLargePasteThreshold(
     settings?.largePasteThreshold,
   );
@@ -254,8 +342,104 @@ export function Composer({
   const executionActive = isActivePlanExecution(planCheckpoint);
   const runActive = isRunning || executionActive;
   const inputBlocked = approvalPending || pasting || nativeInputBlocked;
-  const controlsBlocked = approvalPending || nativeSession || !sessionAllows(capabilitySession, "canConfigureModel");
-  const sendBlocked = approvalPending || pasting || nativeInputBlocked;
+  const controlsBlocked = agentEngine === "omp"
+    ? nativeSession || remoteSession || isRunning
+    : approvalPending || nativeSession || !sessionAllows(capabilitySession, "canConfigureModel");
+  const { contextMenu: composerMenu, openContextMenu: openComposerMenu, closeContextMenu: closeComposerMenu } = useContextMenu();
+  // The menu drives Chromium's own edit commands, and focusing a menu item
+  // collapses the live Range. Keep the caret the user right-clicked with so
+  // the command lands where the pointer was, not at the start of the draft.
+  const composerCaretRef = useRef<{ range: Range | null }>({ range: null });
+
+  const caretFromContextMenu = (event: ReactMouseEvent<HTMLDivElement>): Range | null => {
+    const editor = event.currentTarget;
+    const live = window.getSelection();
+    if (live && live.rangeCount > 0) {
+      const current = live.getRangeAt(0);
+      if (editor.contains(current.commonAncestorContainer)) return current.cloneRange();
+    }
+    // A right-click away from the selection still needs an anchor for paste.
+    const atPoint =
+      typeof document.caretRangeFromPoint === "function"
+        ? document.caretRangeFromPoint(event.clientX, event.clientY)
+        : null;
+    return atPoint && editor.contains(atPoint.startContainer) ? atPoint : null;
+  };
+
+  const restoreComposerCaret = (): HTMLDivElement | null => {
+    const editor = ref.current;
+    if (!editor) return null;
+    editor.focus();
+    const range = composerCaretRef.current.range;
+    if (range && range.startContainer.isConnected) {
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+    }
+    return editor;
+  };
+
+  /** Native commands act on the focused editable, so focus it first. */
+  const runComposerEditAction = (action: NativeMenuAction) => {
+    // One frame later: ContextMenu closes and refocuses in its own effect, and
+    // the command must target the editor rather than the menu it came from.
+    requestAnimationFrame(() => {
+      if (!restoreComposerCaret()) return;
+      void api.nativeMenuAction(action);
+    });
+  };
+
+  /**
+   * `nativeMenuAction("selectAll")` selects the whole document in a
+   * contenteditable frame, which would arm a stray keystroke to wipe the app.
+   * Select the draft's contents instead.
+   */
+  const selectComposerContents = () => {
+    requestAnimationFrame(() => {
+      const editor = restoreComposerCaret();
+      if (!editor) return;
+      const range = document.createRange();
+      range.selectNodeContents(editor);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+    });
+  };
+
+  const openComposerContextMenu = (event: ReactMouseEvent<HTMLDivElement>) => {
+    const range = caretFromContextMenu(event);
+    composerCaretRef.current.range = range;
+    const hasSelection = Boolean(range && !range.collapsed);
+    const chip =
+      event.target instanceof Element
+        ? event.target.closest<HTMLElement>(".composer-chip")
+        : null;
+    if (chip) {
+      const token = chip.dataset.token ?? "";
+      openComposerMenu(event, {
+        label: t("chat.composerMenu.label"),
+        items: [
+          {
+            id: "remove-reference",
+            label: t("chat.composerMenu.removeReference"),
+            danger: true,
+            disabled: inputBlocked || !token,
+            onSelect: () => draft.removeChipByTokenRef.current(token),
+          },
+        ],
+      });
+      return;
+    }
+    const items: ContextMenuItem[] = [
+      { id: "undo", label: t("chat.composerMenu.undo"), disabled: inputBlocked, onSelect: () => runComposerEditAction("undo") },
+      { id: "redo", label: t("chat.composerMenu.redo"), disabled: inputBlocked, onSelect: () => runComposerEditAction("redo") },
+      { id: "cut", label: t("chat.composerMenu.cut"), separatorBefore: true, disabled: inputBlocked || !hasSelection, onSelect: () => runComposerEditAction("cut") },
+      { id: "copy", label: t("chat.composerMenu.copy"), disabled: !hasSelection, onSelect: () => runComposerEditAction("copy") },
+      { id: "paste", label: t("chat.composerMenu.paste"), disabled: inputBlocked, onSelect: () => runComposerEditAction("paste") },
+      { id: "select-all", label: t("chat.composerMenu.selectAll"), separatorBefore: true, onSelect: selectComposerContents },
+    ];
+    openComposerMenu(event, { label: t("chat.composerMenu.label"), items });
+  };
   // Edit returns one queued row to the composer. The row is removed and its
   // captured draft becomes the input, so the input must be empty first: the
   // live read is the only current source (the draft cache is not per keystroke).
@@ -350,13 +534,23 @@ export function Composer({
       : sessionPermissionMode;
   const composerPermissionMode: Exclude<PermissionMode, "inherit"> =
     mode === "goal" ? "auto" : effectivePermissionMode;
-  const recentModels = useAppStore((s) => s.recentModels);
   const selectedModel = remoteSession ? { providerId: activeSession?.providerId, modelId: activeSession?.modelId } : inheritedSessionModelBinding({
     draft: activeSession ?? draftConfiguration,
     settings,
     providers,
     recentModels,
   });
+  // One inspector in the composer toolbar, always the newest turn with usage.
+  const composerContextUsage = useMemo(
+    () => latestTurnContextInspector(
+      liveMessages,
+      providerModels,
+      providers,
+      sessionCompactions,
+      selectedModel,
+    ),
+    [liveMessages, providerModels, providers, sessionCompactions, selectedModel.providerId, selectedModel.modelId],
+  );
   const provider = providers.find(candidate => candidate.id === selectedModel.providerId);
   const modelId = selectedModel.modelId;
   const selectedModelCatalog = provider ? providerModels[provider.id] : undefined;
@@ -413,7 +607,9 @@ export function Composer({
     thinkingLevel,
     controlsBlocked,
   });
-  const modelReady = remoteSession
+  const modelReady = agentEngine === "omp"
+    ? !remoteSession && !nativeSession
+    : remoteSession
     ? promptAllowed
     : activeSessionSummary?.managedByPlugin
     ? true
@@ -424,6 +620,7 @@ export function Composer({
       !!modelId &&
       !isImageGenerationModel(imageGenerationCandidates, provider.id, modelId) &&
       (provider.hasSecret || provider.authKind === "none");
+  const sendBlocked = (agentEngine !== "omp" && approvalPending) || pasting || nativeInputBlocked || agentEngineIssueMessage !== null;
   const enterToSend = settings?.enterToSend ?? true;
   const hasDraftContent = Boolean(value.trim() || activeFileReferences.length);
 
@@ -454,8 +651,8 @@ export function Composer({
     modelReady,
     invalidateComposerTransforms,
     sendBlocked,
-    localCommandsAllowed: localToolsAllowed,
-    steeringAllowed: sessionAllows(capabilitySession, "canSteer"),
+    localCommandsAllowed: agentEngine !== "omp" && localToolsAllowed,
+    steeringAllowed: agentEngine === "omp" || sessionAllows(capabilitySession, "canSteer"),
     pasting,
     activeFileReferences,
     t,
@@ -480,6 +677,32 @@ export function Composer({
   const submitFromComposer = (steering?: boolean) => {
     inputHistory.exitBrowsing();
     return submit(steering);
+  };
+
+  const selectGoalTemplate = async (template: GoalTemplate) => {
+    try {
+      await configureActiveSession({
+        mode: "goal",
+        providerId: provider?.id,
+        modelId,
+        thinkingLevel,
+      });
+      const inserted = insertGoalTemplate(
+        draft.readLiveDraft(),
+        draft.cursor,
+        t(template.promptKey),
+      );
+      draft.applyEditorDraft(
+        inserted.text,
+        draft.activeFileReferences,
+        inserted.caret,
+      );
+      invalidateComposerTransforms();
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), {
+        variant: "error",
+      });
+    }
   };
 
   // Keep the legacy listener for already-started or IPC-owned Dictation, but
@@ -607,9 +830,11 @@ export function Composer({
             pasting={pasting}
             enterToSend={enterToSend}
             runActive={runActive}
+            ompPredictionSessionId={agentEngine === "omp" && !remoteSession ? activeSessionId : null}
             composerAc={completions.ac}
             suggestion={suggestion}
             onPaste={pasteClipboardFiles}
+            onContextMenu={openComposerContextMenu}
             onAcceptCompletion={completions.acceptCompletion}
             onSubmit={(steering) => void submitFromComposer(steering)}
             onInsertNewline={insertNewlineInEditor}
@@ -631,6 +856,7 @@ export function Composer({
               persistDraft();
             }}
           />
+          <ContextMenu state={composerMenu} onClose={closeComposerMenu} />
           <ComposerToolbar
             t={t}
             mode={mode}
@@ -644,15 +870,20 @@ export function Composer({
             permissionOpen={permissionOpen}
             setPermissionOpen={setPermissionOpen}
             controlsBlocked={controlsBlocked}
+            engineSwitchBlocked={controlsBlocked || isRunning}
             localToolsAllowed={localToolsAllowed}
             attachmentsAllowed={attachmentsAllowed}
-            stopAllowed={sessionAllows(capabilitySession, "canStop")}
+            stopAllowed={agentEngine === "omp" ? !remoteSession && !nativeSession : sessionAllows(capabilitySession, "canStop")}
             pasting={pasting}
             pickAndAttach={pickAndAttach}
             configureActiveSession={configureActiveSession}
             showToast={showToast}
+            onSelectGoalTemplate={selectGoalTemplate}
             modelMenu={modelMenu}
             modelLabel={modelLabel}
+            engineIssueMessage={agentEngineIssueMessage}
+            selectedProvider={provider}
+            onEngineIssueChange={handleAgentEngineIssueChange}
             thinkingLabel={thinkingLabel}
             modelFastMode={sessionFastModeActive(provider, modelId, activeSession ?? draftConfiguration)}
             contextUsage={composerContextUsage ?? null}
@@ -666,7 +897,13 @@ export function Composer({
             undoComposerTransform={composerTransformController.undoLast}
             runActive={runActive}
             hasDraftContent={hasDraftContent}
-            abort={abort}
+            steeringAllowed={agentEngine === "omp" || sessionAllows(capabilitySession, "canSteer")}
+            nativeSession={nativeSession || agentEngine === "omp"}
+            abort={stopTask}
+            taskPaused={taskPaused}
+            pausePending={pausePending}
+            pauseTask={pauseSupported ? pauseTask : undefined}
+            resumeTask={resumeTask}
             submit={submitFromComposer}
             workSessionId={activeSessionId ?? undefined}
             workSessionLabel={activeSessionSummary?.title}

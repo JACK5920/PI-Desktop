@@ -11,16 +11,16 @@ const here = dirname(fileURLToPath(import.meta.url));
 const patchDependencyCheck = join(here, "check-pi-dependencies.mjs");
 const patchCheck = join(here, "check-pi-patches.mjs");
 
-const TARGET = "1.4.0";
+const TARGET = "1.5.2";
 const PATCHED = [
   {
     name: "@earendil-works/pi-agent-core",
     markers: ["hosted_search_update", "localRequestErrorDetails"],
-    extra: "",
+    extra: "case hosted_search_update:",
   },
   {
     name: "@earendil-works/pi-ai",
-    markers: ["hostedSearch", "withLocalRequestErrors", "AnthropicOAuthTokenError", "Retry-After"],
+    markers: ["hostedSearch", "withLocalRequestErrors", "AnthropicOAuthTokenError", "Retry-After", "connection.?closed", "additionalProperties", "schemas without a type are unsupported"],
     extra: [
       '+{"openai-completions":{"chat:deepseek-flash":{"baseUrl":"https://api.deepseek.com","compat":{"supportsMidConvoSystemMessages":true}}}}',
       "diff --git a/dist/index.d.ts b/dist/index.d.ts",
@@ -34,7 +34,7 @@ const PATCHED = [
   },
   {
     name: "@earendil-works/pi-coding-agent",
-    markers: ["hostedSearchReplayProjection", "estimateProjectedContextTokens"],
+    markers: ["hostedSearchReplayProjection", "estimateProjectedContextTokens", "const snapshotText = this.getSnapshotText()"],
     extra: "+export declare function estimateProjectedContextTokens(",
   },
 ];
@@ -44,6 +44,7 @@ const RELEASE_AGE_EXCLUDE = [
   "pi-codemode",
   "pi-coding-agent",
   "pi-mcp",
+  "pi-schema",
   "pi-telemetry",
   "pi-tui",
 ].map((name) => `@earendil-works/${name}@${TARGET}`);
@@ -110,7 +111,7 @@ function workspace({
     dir,
     "packages/agent-runtime/package.json",
     JSON.stringify({
-      dependencies: Object.fromEntries([...PATCHED.map((e) => e.name), "@earendil-works/pi-mcp"].map((n) => [n, TARGET])),
+      dependencies: Object.fromEntries(PATCHED.map((e) => [e.name, TARGET])),
     }),
   );
   write(
@@ -138,11 +139,27 @@ function workspace({
 
   const link = (from, to) => {
     mkdirSync(dirname(from), { recursive: true });
-    symlinkSync(relative(dirname(from), to), from, "dir");
+    // Directory symlinks require Developer Mode/elevation on Windows. A
+    // junction keeps the fixture equivalent without changing host settings.
+    symlinkSync(process.platform === "win32" ? to : relative(dirname(from), to), from,
+      process.platform === "win32" ? "junction" : "dir");
   };
   for (const name of PATCHED.map((entry) => entry.name)) {
     const entryDir = join(dir, storeEntryDir(name, storeHash, shorten), "node_modules", name);
     write(dir, relative(dir, join(entryDir, "package.json")), JSON.stringify({ name, version: TARGET }));
+    if (name === "@earendil-works/pi-ai") {
+      for (const declaration of [
+        "dist/index.d.ts",
+        "dist/types.d.ts",
+        "dist/providers/compat-schema.d.ts",
+        "dist/utils/estimate.d.ts",
+        "dist/utils/hosted-search.d.ts",
+        "dist/utils/local-request-error.d.ts",
+        "dist/utils/local-request-stream.d.ts",
+      ]) {
+        write(dir, relative(dir, join(entryDir, declaration)), "// fixture declaration");
+      }
+    }
     link(join(dir, "packages/agent-runtime/node_modules", name), entryDir);
   }
   for (const [scope, name] of [

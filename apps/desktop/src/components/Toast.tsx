@@ -190,10 +190,16 @@ function useToastViewportBounds(
 type ToastHostProps = {
   /** Optional viewport region whose top center owns the toast stack. */
   anchorElement?: HTMLElement | null;
+  /**
+   * Settings draws its page title in the top safe area, so a top-centered
+   * toast there covers the heading. Those surfaces dock the stack at the
+   * bottom instead.
+   */
+  placement?: "top" | "bottom";
 };
 
 /** Global toast stack — mount once per shell, above dialogs (z-toast). */
-export function ToastHost({ anchorElement }: ToastHostProps = {}) {
+export function ToastHost({ anchorElement, placement = "top" }: ToastHostProps = {}) {
   const toasts = useAppStore((s) => s.toasts);
   const visibleToastIds = useRef<Set<number>>(new Set());
   const host = useToastHost();
@@ -220,7 +226,7 @@ export function ToastHost({ anchorElement }: ToastHostProps = {}) {
   // nothing rather than mounting the stack inside the shell it must outrank.
   if (!host) return null;
   return createPortal(
-    <div className="toast-viewport" aria-live="polite" style={viewportStyle}>
+    <div className={`toast-viewport${placement === "bottom" ? " toast-viewport-bottom" : ""}`} aria-live="polite" style={viewportStyle}>
       {toasts.map((item) => (
         <ToastCard key={item.id} item={item} />
       ))}

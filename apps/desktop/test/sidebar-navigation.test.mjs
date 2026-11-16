@@ -128,9 +128,13 @@ test("sidebar shows a bounded standalone session list before retained projects",
   );
   assert.match(
     globalStyles,
-    // `[^}]*`, not `[\s\S]*?`: the assertion must read this block, not a
-    // `max-height` in some later partial of the concatenated stylesheet.
-    /\.sidebar-session-group-body\.standalone\s*\{[^}]*max-height:\s*146px;[^}]*overflow-x:\s*hidden;[^}]*overflow-y:\s*auto;/,
+    // The temporary list no longer caps itself; the rail's scroller owns the
+    // viewport so every section is reachable with one gesture.
+    /\.sidebar-session-group-body\.standalone\s*\{[^}]*overflow:\s*visible;/,
+  );
+  assert.doesNotMatch(
+    globalStyles,
+    /\.sidebar-session-group-body\.standalone\s*\{[^}]*max-height/,
   );
   assert.doesNotMatch(sidebarSource, /data-sidebar-project-group="temporary"/);
 });
@@ -254,6 +258,11 @@ test("portaled sort menu does not stretch to the viewport edge", () => {
   assert.match(floatingPopoverRule, /right:\s*auto;/);
   assert.match(globalStyles, /\.sidebar-floating-menu\s*\{[^}]*width:\s*max-content;/s);
   assert.match(globalStyles, /\.sidebar-floating-menu\s*\{[^}]*max-width:\s*calc\(100vw - 16px\);/s);
+  // Row menus, popovers and submenus are content-sized; a floor would show as
+  // an empty gutter beside short labels (the transcript menus lost theirs too).
+  for (const rule of [basePopoverRule, globalStyles.match(/\.sidebar-floating-menu\s*\{[^}]*\}/s)?.[0] ?? "", globalStyles.match(/\.sidebar-submenu\s*\{[^}]*\}/s)?.[0] ?? ""]) {
+    assert.doesNotMatch(rule, /min-width/);
+  }
 });
 
 test("sessions toolbar puts sorting before new-session creation", () => {

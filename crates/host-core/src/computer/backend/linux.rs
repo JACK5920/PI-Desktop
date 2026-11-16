@@ -278,6 +278,7 @@ async fn inspect_atspi(
         let index = nodes.len();
         nodes.push(Node {
             uid: format!("{bus}|{path}"),
+            identity: Some(format!("{bus}|{path}")),
             role: role.name().to_string(),
             label: if is_password && !allow_sensitive_input {
                 None
@@ -305,6 +306,7 @@ async fn inspect_atspi(
     }
 
     Ok(RawInspection {
+        total_nodes: nodes.len(),
         nodes,
         truncated: truncated || !pending.is_empty(),
         fidelity: Fidelity::Partial,

@@ -36,6 +36,13 @@
   --accent-900: #303030;
 
   --ds-bg-primary: var(--gray-900);
+  /* Codex-style user turn plate, sampled from the supplied reference. */
+  --ds-user-bubble-bg: #173e76;
+  --ds-user-bubble-fg: #f7f9ff;
+  --ds-user-bubble-border: color-mix(in oklab, #8cb8ff 16%, transparent);
+  --ds-composer-primary-bg: #2c67c5;
+  --ds-composer-primary-hover: #3976d2;
+  --ds-composer-primary-fg: #ffffff;
   --ds-settings-rail-bg: var(--ds-bg-under);
   --ds-bg-sidebar: var(--ds-settings-rail-bg, var(--ds-bg-under));
   /*
@@ -83,6 +90,7 @@
   */
   --ds-text-secondary: color-mix(in oklab, var(--gray-0) 70%, transparent);
   --ds-text-muted: color-mix(in oklab, var(--gray-0) 52%, transparent);
+  --ds-text-tertiary: color-mix(in oklab, var(--gray-0) 46%, transparent);
   --ds-text-faint: color-mix(in oklab, var(--gray-0) 38%, transparent);
   --ds-border-default: color-mix(in oklab, var(--gray-0) 8%, transparent);
   --ds-border-subtle: color-mix(in oklab, var(--gray-0) 5%, transparent);
@@ -222,6 +230,12 @@
   color-scheme: light;
   /* Codex electron-light */
   --ds-bg-primary: #ffffff;
+  --ds-user-bubble-bg: #dceaff;
+  --ds-user-bubble-fg: #14233a;
+  --ds-user-bubble-border: color-mix(in oklab, #245da6 18%, transparent);
+  --ds-composer-primary-bg: #2c67c5;
+  --ds-composer-primary-hover: #3976d2;
+  --ds-composer-primary-fg: #ffffff;
   --ds-settings-rail-bg: #f3f3f3;
   --ds-bg-sidebar: var(--ds-settings-rail-bg, #f3f3f3);
   --ds-bg-secondary: #f9f9f9;
@@ -243,6 +257,7 @@
   --ds-text-primary: #1a1c1f;
   --ds-text-secondary: color-mix(in oklab, #1a1c1f 74%, transparent);
   --ds-text-muted: #5d5d5d;
+  --ds-text-tertiary: #767676;
   --ds-text-faint: #afafaf;
   --ds-border-default: color-mix(in oklab, #1a1c1f 8%, transparent);
   --ds-border-subtle: color-mix(in oklab, #1a1c1f 5%, transparent);
@@ -392,4 +407,19 @@
   --tracking-tight: -0.02em;
   --tracking-normal: 0em;
   --tracking-wide: 0.02em;
+}
+
+/*
+  Legacy OMP surfaces referenced non-existent tokens (`--surface-1`,
+  `--text-muted`, `--border-subtle`…), so dialogs and menus silently rendered
+  transparent. Alias them to the design system instead of touching every rule.
+*/
+:root {
+  --surface-1: var(--ds-raised);
+  --surface-2: var(--ds-tile);
+  --border-subtle: var(--ds-border-subtle);
+  --text-primary: var(--ds-text-primary);
+  --text-secondary: var(--ds-text-secondary);
+  --text-muted: var(--ds-text-tertiary);
+  --accent: var(--ds-accent);
 }

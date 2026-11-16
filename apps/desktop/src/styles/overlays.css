@@ -198,6 +198,16 @@
 }
 
 /*
+  Settings titles sit in the top safe area, so a top-centered toast covers the
+  page heading. Dock the stack above the bottom edge there instead.
+*/
+.toast-viewport-bottom {
+  top: auto;
+  bottom: 20px;
+  flex-direction: column;
+}
+
+/*
   Persistent update notices live in the main pane's top safe area. Keeping
   them opposite the bottom composer prevents multi-line drafts and update
   actions from competing for the same screen space.

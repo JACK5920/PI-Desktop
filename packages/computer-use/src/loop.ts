@@ -59,6 +59,25 @@ export type ComputerLoopInput = {
 const MAX_INVALID_ANSWERS = 2;
 /** Consecutive identical refusals before the loop stops trying. */
 const MAX_REPEATED_REFUSALS = 2;
+/**
+ * Consecutive skipped duplicate writes before the loop gives up.
+ *
+ * A skipped write is a write the model already dispatched, so repeating it
+ * cannot change the window. The model is told the write already happened,
+ * and a model that asks again anyway is not going to be answered by a third
+ * identical request. Two is enough: the first skip tells the model, the
+ * second confirms it did not take the hint.
+ */
+const MAX_REPEATED_SKIPS = 2;
+/**
+ * Longest refusal explanation kept for the model.
+ *
+ * The host's message is diagnostic text and is already free of screen
+ * content, but it can be long: a driver failure names the window, the
+ * accelerator it looked for and how many elements it scanned. A model does
+ * not need all of that, and the history it reads is rebuilt on every step.
+ */
+const MAX_REFUSAL_REASON_CHARS = 400;
 
 /**
  * Outcomes that end the run whatever step produced them: the grant itself is
@@ -92,6 +111,31 @@ function errorCode(error: unknown): string {
     if (typeof code === "string" && code.startsWith("COMPUTER_")) return code;
   }
   return "COMPUTER_ACTION_REJECTED";
+}
+
+/**
+ * The host's own explanation of a refusal.
+ *
+ * The refusal code says that something was denied; only the message says
+ * what. A rejected chord and a target that cannot receive one both answer
+ * `COMPUTER_ACTION_REJECTED`, and a model that cannot tell them apart
+ * retries spellings of the same action until the step limit.
+ *
+ * The host's message is diagnostic text by contract: it names keys, control
+ * types and counts, and carries no window text, typed value or pixels. It is
+ * bounded here anyway, because a driver that fails in an unexpected way can
+ * put anything into an error string, and this text is about to be handed to
+ * a model as a step record.
+ */
+function refusalReason(error: unknown): string | undefined {
+  if (!error || typeof error !== "object") return undefined;
+  const message = (error as { message?: unknown }).message;
+  if (typeof message !== "string") return undefined;
+  const text = message.trim();
+  if (!text) return undefined;
+  return text.length > MAX_REFUSAL_REASON_CHARS
+    ? `${text.slice(0, MAX_REFUSAL_REASON_CHARS - 1)}…`
+    : text;
 }
 
 /** Retry only a named target that the host says is temporarily unavailable. */
@@ -197,19 +241,33 @@ function observationSignature(observation: Observation): string {
     truncated: observation.inspection.truncated,
     secureInput: observation.inspection.secureInput,
     nodes: observation.inspection.nodes.map((node) => ({
-      uid: node.uid,
+      // `identity`, never `uid`. The cua backend re-mints uid from a fresh
+      // snapshot on every read, so including it made both observations differ
+      // every time — `observed-no-change` could never be reached and the loop
+      // lost its only signal that an action did nothing.
+      identity: node.identity ?? node.uid,
       role: node.role,
       label: node.label,
       hasValue: node.hasValue,
       enabled: node.enabled,
       focused: node.focused,
-      bounds: node.bounds,
-      parent: node.parent,
+      // `bounds` and `parent` are omitted on purpose: the cua backend reports
+      // bounds as absent, and `parent` is an array index that shifts whenever a
+      // node is inserted, which would report "changed" for an unrelated edit.
       actions: node.actions,
     })),
   });
 }
 
+/**
+ * What must still match for a cited element to count as "the same element,
+ * unchanged".
+ *
+ * Deliberately value-free and index-free: `bounds` is absent on the cua backend
+ * and `parent` is an array index that shifts when any node is inserted, so
+ * including either would fail the check for reasons unrelated to the cited
+ * element.
+ */
 function nodeSignature(node: ComputerInspection["nodes"][number]): string {
   return JSON.stringify({
     role: node.role,
@@ -217,10 +275,74 @@ function nodeSignature(node: ComputerInspection["nodes"][number]): string {
     hasValue: node.hasValue,
     enabled: node.enabled,
     focused: node.focused,
-    bounds: node.bounds,
-    parent: node.parent,
     actions: node.actions,
   });
+}
+
+/**
+ * The current CUA identity fallback is a role/ordinal path. When two siblings
+ * expose the same accessibility shape, that path cannot prove which physical
+ * control survived an insertion or reorder. Refuse completion evidence for
+ * that ambiguous case rather than treating an indistinguishable sibling as the
+ * cited element.
+ */
+function hasAmbiguousIdentity(
+  node: ComputerInspection["nodes"][number],
+  nodes: readonly ComputerInspection["nodes"][number][],
+): boolean {
+  if (!node.identity) return false;
+  const separator = node.identity.lastIndexOf("/");
+  const parentPath = separator < 0 ? "" : node.identity.slice(0, separator);
+  return nodes.some((candidate) => {
+    if (candidate.identity === node.identity || candidate.role !== node.role || !candidate.identity) return false;
+    const candidateSeparator = candidate.identity.lastIndexOf("/");
+    const candidateParent = candidateSeparator < 0 ? "" : candidate.identity.slice(0, candidateSeparator);
+    return (
+      candidateParent === parentPath &&
+      nodeSignature(candidate) === nodeSignature(node)
+    );
+  });
+}
+
+/**
+ * The verification recorded on the most recent action the agent actually
+ * dispatched, ignoring reads.
+ *
+ * `unverified-by-design` keys off this: only an `observed-no-change` read-back
+ * proves the tree really did stay still, which is the one situation where
+ * "UIA cannot express this" is a fact rather than an excuse.
+ */
+function lastDispatchedVerification(
+  steps: readonly ComputerStepRecord[],
+): ComputerUseVerification | undefined {
+  for (let i = steps.length - 1; i >= 0; i -= 1) {
+    const step = steps[i];
+    if (step.action === "observe" || step.action === "switch") continue;
+    if (step.action === "done" || step.action === "ask") continue;
+    return step.verification;
+  }
+  return undefined;
+}
+
+/**
+ * The kind of the most recent action the agent actually dispatched.
+ *
+ * It matters for the completion gate: a write's result is the content of a
+ * field, and the accessibility tree never publishes a field's content. So
+ * after a write there is nothing in the tree that can support the result,
+ * and an empty evidence list is the only honest answer -- not a sign that the
+ * model forgot to cite.
+ */
+function lastDispatchedActionKind(
+  steps: readonly ComputerStepRecord[],
+): ComputerStepRecord["action"] | undefined {
+  for (let i = steps.length - 1; i >= 0; i -= 1) {
+    const step = steps[i];
+    if (step.action === "observe" || step.action === "switch") continue;
+    if (step.action === "done" || step.action === "ask") continue;
+    return step.action;
+  }
+  return undefined;
 }
 
 function validateCompletionEvidence(
@@ -239,14 +361,147 @@ function validateCompletionEvidence(
     decisionObservation.inspection.secureInput !== currentObservation.inspection.secureInput ||
     JSON.stringify(decisionObservation.inspection.bounds) !== JSON.stringify(currentObservation.inspection.bounds)
   ) return false;
-  const decisionNodes = new Map(decisionObservation.inspection.nodes.map((node) => [node.uid, node]));
-  const currentNodes = new Map(currentObservation.inspection.nodes.map((node) => [node.uid, node]));
+  // The model cites `uid` because that is what it was shown, but a uid only
+  // means anything within one observation: the cua backend re-mints every uid
+  // from a fresh snapshot on each read. So the lookup is two-step — resolve the
+  // cited uid in the observation the model decided from, then follow that
+  // node's identity into the current one.
+  //
+  // Before this, both maps were keyed by uid and their key sets never
+  // intersected, so this function returned false unconditionally: `done` could
+  // not succeed on the cua backend at all.
+  const decisionByUid = new Map(decisionObservation.inspection.nodes.map((node) => [node.uid, node]));
+  const currentByIdentity = new Map(
+    currentObservation.inspection.nodes.map((node) => [node.identity ?? node.uid, node]),
+  );
   return evidence.every((uid) => {
-    const before = decisionNodes.get(uid);
-    const current = currentNodes.get(uid);
-    return before !== undefined && current !== undefined && nodeSignature(before) === nodeSignature(current);
+    const before = decisionByUid.get(uid);
+    if (before === undefined) return false;
+    if (
+      hasAmbiguousIdentity(before, decisionObservation.inspection.nodes) ||
+      hasAmbiguousIdentity(before, currentObservation.inspection.nodes)
+    ) return false;
+    const current = currentByIdentity.get(before.identity ?? before.uid);
+    return current !== undefined && nodeSignature(before) === nodeSignature(current);
   });
 }
+
+/**
+ * The identities of the nodes whose accessibility shape differs between two
+ * observations.
+ *
+ * `observationSignature` answers "did anything change at all". This answers
+ * "what changed", which is the difference between two cases that look alike
+ * from the outside:
+ *
+ *  - a click on a button whose own label changes -- the change is in the
+ *    element the model acted on, so the element is the evidence;
+ *  - a write into a text field -- the field itself reports the same thing it
+ *    always reports (`has-value`, no content), and only an adjacent node
+ *    changes (a character count). The field's content is not published, so
+ *    there is nothing in the tree that supports the result.
+ */
+function changedNodeIdentities(before: Observation, after: Observation): Set<string> {
+  const changed = new Set<string>();
+  const afterByIdentity = new Map(
+    after.inspection.nodes.map((node) => [node.identity ?? node.uid, node]),
+  );
+  for (const node of before.inspection.nodes) {
+    const identity = node.identity ?? node.uid;
+    const current = afterByIdentity.get(identity);
+    if (!current || nodeSignature(node) !== nodeSignature(current)) {
+      changed.add(identity);
+    }
+  }
+  return changed;
+}
+
+/**
+ * True when the tree changed somewhere the model cannot cite.
+ *
+ * The change has to exist -- otherwise the result may be real but the window
+ * did not move at all -- and the element the last action acted on must NOT be
+ * among the changed ones. When the acted-on element is the one that changed,
+ * its new state is the evidence and the model has to cite it; when the change
+ * is somewhere else, the acted-on element reports exactly what it always
+ * reports and the result is not expressible in the tree.
+ */
+function changedWhereResultIsNotExpressible(
+  before: Observation,
+  after: Observation,
+  actedIdentity: string | undefined,
+): boolean {
+  if (!actedIdentity) return false;
+  const changed = changedNodeIdentities(before, after);
+  if (changed.size === 0) return false;
+  return !changed.has(actedIdentity);
+}
+
+/**
+ * True when the model cited the element the last action consumed.
+ *
+ * A menu item disappears the moment it is clicked — that is what closing a
+ * menu means. The model then cites a uid that no longer resolves, and the
+ * completion evidence check refuses a click that plainly landed.
+ *
+ * The bar stays strict: the citation must name the element the last
+ * dispatched action acted on, that element must have been present in the
+ * observation the model decided from, and it must be gone now. A model
+ * cannot reach this by citing something it never saw.
+ */
+function citedElementConsumed(
+  evidence: readonly string[],
+  decisionObservation: Observation,
+  currentObservation: Observation,
+  actedIdentity: string | undefined,
+): boolean {
+  if (evidence.length === 0 || !actedIdentity) return false;
+  const decisionByUid = new Map(decisionObservation.inspection.nodes.map((node) => [node.uid, node]));
+  const cited = evidence.map((uid) => decisionByUid.get(uid)).filter((node) => node !== undefined);
+  if (cited.length !== evidence.length) return false;
+  if (!cited.every((node) => (node.identity ?? node.uid) === actedIdentity)) return false;
+  const currentByIdentity = new Map(
+    currentObservation.inspection.nodes.map((node) => [node.identity ?? node.uid, node]),
+  );
+  return !currentByIdentity.has(actedIdentity);
+}
+
+
+/**
+ * Detect an action the model already dispatched against the same target.
+ *
+ * A value write is not observable in the tree the model sees: the element list
+ * renders `has-value`, never the value itself, so the model cannot tell "my
+ * write landed" from "my write never happened". A real run answered that by
+ * writing the same value into the same field thirteen times, each write
+ * re-minting the uid and making the tree look different again.
+ *
+ * The guard covers only writes, never clicks, keys or scrolls: repeating
+ * those can be exactly what the task needs.
+ *
+ * The key deliberately does not include the action kind. `set_value` and
+ * `type_text` put the same characters into the same field, so a model that
+ * alternates between them is still writing the same value over and over.
+ *
+ * Measured: a model asked to type one line into a document alternated
+ * `type_text` and `set_value` with the same text for eight steps, because
+ * the element list never shows the field's content -- the model could not
+ * tell a landed write from a lost one, and it kept looking for one.
+ *
+ * The price is that a task that genuinely means "write this text twice" is
+ * refused the second time. That is the right side to err on: the model
+ * cannot see the field's content, so it cannot tell the two cases apart
+ * either, and a repeated write is far more often a lost write than a
+ * deliberate repetition.
+ */
+function repeatedWriteKey(action: ComputerAction, node: ComputerInspection["nodes"][number] | undefined): string | undefined {
+  if (action.kind !== "set_value" && action.kind !== "type_text") return undefined;
+  if (!node) return undefined;
+  const identity = node.identity ?? node.uid;
+  const payload = action.text ?? "";
+  return JSON.stringify([identity, payload]);
+}
+
 
 export async function runComputerLoop(
   input: ComputerLoopInput,
@@ -263,14 +518,42 @@ export async function runComputerLoop(
   let lastRefusal: string | undefined;
   let repeatedRefusals = 0;
   let index = 0;
+  // Writes already dispatched, keyed by target identity + action + payload.
+  // A write the model cannot see succeed is the one it will happily repeat.
+  const dispatchedWrites = new Set<string>();
+  // Consecutive duplicate writes that were skipped, and the payload of the
+  // last one. A skipped write did not change the window, so repeating it is
+  // no progress; the payload is remembered so that a model which moves on to
+  // a different write starts the count afresh.
+  let repeatedSkips = 0;
+  let lastSkippedKey: string | undefined;
+  // Whether the host confirmed the most recent content write by reading the
+  // field back, and which step that confirmation belongs to. `undefined` means
+  // the backend could not tell.
+  //
+  // The confirmation is bound to its step. A run-scoped flag would carry an
+  // old verdict forward: a confirmed write followed by a click that did
+  // nothing would still let the model close with an empty evidence list and
+  // be told the result was confirmed.
+  let writeConfirmed: { step: number } | undefined;
 
   const record = (step: ComputerStepRecord) => {
     steps.push(step);
     deps.onStep?.(step);
   };
+  // Identity of the element the last dispatched action acted on. A menu item
+  // disappears the moment it is clicked, so the model ends up citing a uid
+  // that no longer resolves; this is what lets the loop recognise that case
+  // instead of refusing a click that plainly landed.
+  let lastActedIdentity: string | undefined;
   const updateStepVerification = (stepIndex: number, action: ComputerStepRecord["action"], verification: ComputerUseVerification) => {
     for (let i = steps.length - 1; i >= 0; i -= 1) {
       if (steps[i].index === stepIndex && steps[i].action === action) {
+        // A refused step has no read-back to report. The action never
+        // reached the application, so the tree that follows says nothing
+        // about it -- writing "observed-change" onto a refusal would claim
+        // the application reacted to something it never received.
+        if (!steps[i].ok) return;
         steps[i] = { ...steps[i], verification };
         deps.onStep?.(steps[i]);
         return;
@@ -324,7 +607,10 @@ export async function runComputerLoop(
           action: "done",
           ok: false,
           errorCode: "COMPUTER_ACTION_REJECTED",
-          target: parsed.reason,
+          // The shape travels with the refusal so a later diagnosis can tell a
+          // typo in `kind` from a wholly different schema. It is keys and types
+          // only — the model's prose never reaches this record.
+          target: parsed.shape ? `${parsed.reason} (${parsed.shape})` : parsed.reason,
           verification: "refused",
         });
         if (invalidAnswers >= MAX_INVALID_ANSWERS) {
@@ -359,6 +645,130 @@ export async function runComputerLoop(
             outcome: "done",
             verification: "model-confirmed",
             summary: `${summarize("done", steps, answer.summary)} Completion cites ${answer.evidence.length} element(s) from the latest accessibility observation; this is model-confirmed UIA evidence, not independent semantic proof.`,
+            steps,
+          };
+        }
+
+        // A result UIA cannot express — a text selection, a scroll position,
+        // keyboard focus, the content of a text field — leaves nothing the
+        // model can cite: the element list shows that the field holds a
+        // value, never which value. Without this the model has two options,
+        // both bad: retry until the step limit, or cite an unrelated node and
+        // claim evidence it does not have.
+        //
+        // The bar is deliberately specific: the agent must cite nothing, must
+        // have actually dispatched something, and that action's read-back must
+        // be honest about what the tree did. That is a self-report, and it is
+        // labelled as one — never as verified.
+        //
+        // Both read-backs qualify. A tree that did not change is the case
+        // this was written for: the result is real but invisible. A tree that
+        // did change is the case measured on a text field: the write landed
+        // and the tree changed, but the changed thing is the field's content,
+        // which UIA does not publish -- so there is still nothing to cite,
+        // and refusing the completion would only make the model guess at a
+        // node it did not act on.
+        // The host confirmed the content write by reading the field back.
+        // That is a stronger fact than anything in the tree: the tree never
+        // publishes a field's content, so the model cannot cite it, and the
+        // write is nonetheless known to have landed exactly as asked.
+        // The confirmation only speaks for the step it belongs to, and only
+        // while that step is still the most recent dispatched action.
+        const lastStep = steps.length ? steps[steps.length - 1] : undefined;
+        const confirmationStillApplies =
+          writeConfirmed !== undefined &&
+          lastStep !== undefined &&
+          lastStep.index === writeConfirmed.step &&
+          lastStep.ok &&
+          (lastStep.action === "set_value" || lastStep.action === "type_text");
+        if (answer.evidence.length === 0 && confirmationStillApplies) {
+          record({
+            index,
+            action: "done",
+            ok: true,
+            verification: "model-confirmed",
+          });
+          deps.onActivity?.({
+            phase: "verifying",
+            stepIndex: index + 1,
+            verification: "model-confirmed",
+          });
+          return {
+            outcome: "done",
+            verification: "model-confirmed",
+            summary: `${summarize("done", steps, answer.summary)} The host read the field back and confirmed it holds exactly the text that was written; the field's content is not published in the element list, so there is no element to cite.`,
+            steps,
+          };
+        }
+
+        const lastVerification = lastDispatchedVerification(steps);
+        const lastKind = lastDispatchedActionKind(steps);
+        const wroteContent = lastKind === "set_value" || lastKind === "type_text";
+        const resultIsNotExpressible =
+          lastVerification === "observed-no-change" ||
+          (lastVerification === "observed-change" &&
+            (wroteContent ||
+              changedWhereResultIsNotExpressible(
+                decisionObservation,
+                observation,
+                lastActedIdentity,
+              )));
+        if (
+          answer.evidence.length === 0 &&
+          steps.some((step) => step.ok && step.action !== "observe" && step.action !== "switch") &&
+          resultIsNotExpressible
+        ) {
+          record({
+            index,
+            action: "done",
+            ok: false,
+            verification: "unverified-by-design",
+          });
+          deps.onActivity?.({
+            phase: "unverified",
+            stepIndex: index + 1,
+            verification: "unverified-by-design",
+          });
+          const changed = lastVerification === "observed-change";
+          return {
+            outcome: "unverified",
+            verification: "unverified-by-design",
+            summary: `${summarize("unverified", steps, answer.summary)} The action was dispatched and the accessibility tree ${
+              changed ? "changed, but not in a way that publishes the result" : "did not change"
+            }; this outcome is self-reported because UIA cannot express the result.`,
+            steps,
+          };
+        }
+
+        // The cited element is gone because the action consumed it. A menu
+        // item disappears the moment it is clicked — that is what closing a
+        // menu means — so the model cites a uid that can no longer resolve and
+        // the evidence check refuses a click that plainly landed.
+        //
+        // The bar stays as strict as the no-change case: the action must have
+        // been dispatched, and the cited elements must all have existed in
+        // the observation the model decided from and be absent now. A model
+        // cannot reach this by citing something it never saw.
+        if (
+          steps.some((step) => step.ok && step.action !== "observe" && step.action !== "switch" && step.action !== "done" && step.action !== "ask") &&
+          citedElementConsumed(answer.evidence, decisionObservation, observation, lastActedIdentity)
+        ) {
+          record({
+            index,
+            action: "done",
+            ok: false,
+            verification: "unverified-by-design",
+            evidenceCount: answer.evidence.length,
+          });
+          deps.onActivity?.({
+            phase: "unverified",
+            stepIndex: index + 1,
+            verification: "unverified-by-design",
+          });
+          return {
+            outcome: "unverified",
+            verification: "unverified-by-design",
+            summary: `${summarize("unverified", steps, answer.summary)} The action was dispatched and the element it acted on is gone from the accessibility tree, as a clicked menu item is; this outcome is self-reported because UIA cannot show the result.`,
             steps,
           };
         }
@@ -401,6 +811,30 @@ export async function runComputerLoop(
             throw Object.assign(new Error("switch target is not an exact id or displayed entry from the current observation"), {
               code: "COMPUTER_TARGET_UNAVAILABLE",
             });
+          }
+          // Switching to the window already in focus changes nothing, and it
+          // is not a failure: the model asked to be there and the host is
+          // there. Recorded as a refusal it told the model the switch had
+          // failed, and a model that could not find its window answered by
+          // switching again and again until the step limit ran out.
+          //
+          // It still counts as no progress. A model that keeps switching to
+          // the window it is already on is not going to get anywhere, and the
+          // run ends on the second one instead of burning every step.
+          if (targetId === observation.grant.targetId) {
+            record({ index, action: "switch", ok: true, target: label, verification: "observed" });
+            repeatedRefusals += 1;
+            lastRefusal = undefined;
+            if (repeatedRefusals >= MAX_REPEATED_REFUSALS) {
+              return {
+                outcome: "failed",
+                summary: summarize("failed", steps, undefined, "COMPUTER_TARGET_UNAVAILABLE"),
+                steps,
+                errorCode: "COMPUTER_TARGET_UNAVAILABLE",
+              };
+            }
+            index += 1;
+            continue;
           }
           deps.onActivity?.({ phase: "acting", stepIndex: index + 1, action: "switch", target: label });
           observation = await observeWithTargetRetry(deps, targetId);
@@ -470,6 +904,59 @@ export async function runComputerLoop(
 
       const target = describeTarget(validated.action, validated.node?.label);
       const bounds = validated.node?.bounds;
+      // A write the model already dispatched against this same element with
+      // this same payload is not dispatched twice. The tree it reads back
+      // never shows the value, so it would otherwise keep rewriting the same
+      // field until the step limit. The step is still recorded, and the
+      // history tells the model it already happened.
+      const writeKey = repeatedWriteKey(validated.action, validated.node);
+      if (writeKey && dispatchedWrites.has(writeKey)) {
+        record({
+          index,
+          action: validated.action.kind,
+          ok: true,
+          ...(target ? { target } : {}),
+          // The step is reported as skipped, not as dispatched. The element
+          // list never shows a field's content, so the model cannot tell a
+          // landed write from a lost one; if the history says "dispatched"
+          // for a write that was not sent, the model looks for the one that
+          // works and keeps going until the step limit.
+          verification: "skipped-duplicate",
+        });
+        // A skipped write is no progress, and repeating it is not going to
+        // become progress. The history does tell the model that the write
+        // already happened, and a model that keeps asking for the same text
+        // on the same element is not reading that: it asks again with the
+        // same payload, the write is skipped again, and every step of the
+        // budget is spent without the window changing at all.
+        //
+        // The count is per payload, so a model that moves on to a different
+        // write is not punished for the one it skipped.
+        // The count is per payload, so a model that moves on to a different
+        // write is not punished for the one it skipped.
+        repeatedSkips = lastSkippedKey === writeKey ? repeatedSkips + 1 : 1;
+        lastSkippedKey = writeKey;
+        if (repeatedSkips >= MAX_REPEATED_SKIPS) {
+          return {
+            outcome: "failed",
+            summary: summarize("failed", steps, undefined, "COMPUTER_ACTION_REJECTED"),
+            steps,
+            errorCode: "COMPUTER_ACTION_REJECTED",
+          };
+        }
+        index += 1;
+        // Re-read the window anyway. The model has to see the state the
+        // skipped write left behind, otherwise it has nothing to decide on
+        // and repeats the same request.
+        observation = await observeWithTargetRetry(deps, observation.grant.targetId);
+        continue;
+      }
+      // A write that went out clears the skip counter for the payload it
+      // replaced, so the model is not punished later for a write it has
+      // already moved past.
+      repeatedSkips = 0;
+      lastSkippedKey = undefined;
+
       deps.onActivity?.({
         phase: "acting",
         stepIndex: index + 1,
@@ -495,7 +982,14 @@ export async function runComputerLoop(
       }
 
       try {
-        await deps.act(validated.action, observation.inspection.revision);
+        const actResult = await deps.act(validated.action, observation.inspection.revision);
+        if (writeKey) dispatchedWrites.add(writeKey);
+        // The host can confirm a content write by reading the field back,
+        // because the tree the model reads never shows what a field holds.
+        // The verdict is what crosses the boundary -- never the content.
+        if (actResult.verified === true) writeConfirmed = { step: index };
+        if (actResult.verified === false) writeConfirmed = undefined;
+        if (validated.node) lastActedIdentity = validated.node.identity ?? validated.node.uid;
         const point = bounds
           ? { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 }
           : validated.action.point
@@ -528,12 +1022,18 @@ export async function runComputerLoop(
         lastRefusal = undefined;
       } catch (error) {
         const code = errorCode(error);
+        // The host's own explanation travels with the refusal. Without it the
+        // model sees the same bare code for a mistyped chord and for a target
+        // that cannot receive one, and answers both with another spelling of
+        // the same action.
+        const reason = refusalReason(error);
         record({
           index,
           action: validated.action.kind,
           ok: false,
           errorCode: code,
           ...(target ? { target } : {}),
+          ...(reason ? { reason } : {}),
           verification: "refused",
         });
         const terminal = TERMINAL_CODES[code];

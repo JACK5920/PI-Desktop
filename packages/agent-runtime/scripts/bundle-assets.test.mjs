@@ -28,15 +28,20 @@ function pngChunk(type, data) {
   return Buffer.concat([length, body, checksum]);
 }
 
-function onePixelPng() {
+function widePng() {
+  const width = 2400;
+  const height = 24;
   const header = Buffer.alloc(13);
-  header.writeUInt32BE(1, 0);
-  header.writeUInt32BE(1, 4);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
   header.set([8, 6, 0, 0, 0], 8);
+  const rowLength = width * 4 + 1;
+  const pixels = Buffer.alloc(rowLength * height, 0xff);
+  for (let row = 0; row < height; row += 1) pixels[row * rowLength] = 0;
   return Buffer.concat([
     Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
     pngChunk("IHDR", header),
-    pngChunk("IDAT", deflateSync(Buffer.from([0, 255, 0, 0, 255]))),
+    pngChunk("IDAT", deflateSync(pixels)),
     pngChunk("IEND", Buffer.alloc(0)),
   ]);
 }
@@ -55,7 +60,7 @@ it("bundles a runnable image-resize worker and its Photon WASM asset", async () 
     const worker = new Worker(workerPath);
     try {
       const responsePromise = once(worker, "message");
-      const inputBytes = new Uint8Array(onePixelPng());
+        const inputBytes = new Uint8Array(widePng());
       worker.postMessage(
         {
           inputBytes,
@@ -67,7 +72,14 @@ it("bundles a runnable image-resize worker and its Photon WASM asset", async () 
       const [response] = await responsePromise;
       expect(response).toMatchObject({
         type: "pi:image-resize-response",
-        result: { mimeType: "image/png", width: 1, height: 1, wasResized: false },
+        result: {
+          mimeType: "image/png",
+          originalWidth: 2400,
+          originalHeight: 24,
+          width: 2000,
+          height: 20,
+          wasResized: true,
+        },
       });
     } finally {
       await worker.terminate();

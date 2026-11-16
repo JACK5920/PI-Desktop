@@ -11,15 +11,23 @@ import {
   useEffect,
   useId,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 import { useTranslation } from "react-i18next";
 import type { UiMessage } from "@pi-desktop/shared";
+import { agentsForOmpToolCall, getOmpSubagentRoster, isOmpTaskBatch, subscribeOmpSubagentRoster } from "../../../components/omp-subagent-roster.mjs";
+import { useOmpSubagentRosterPolling } from "../../../components/omp-subagent-roster-polling";
+import { ompSubagentIdentity, ompSubagentLifecycleStatus, ompSubagentProgressSummary, ompSubagentStatusKey, ompSubagentTaskDetail, ompSubagentTaskSummary } from "../../../components/omp-subagent-timeline.mjs";
 import { useOpenPreviewTarget } from "../../../hooks/use-preview-target";
+
+const EMPTY_OMP_ROSTER: readonly Record<string, unknown>[] = [];
 import { useChatFileMenu } from "../../../hooks/use-chat-file-menu";
 import { ContextMenu } from "../../../components/ContextMenu";
 import { useFollowScroll } from "../../../hooks/use-follow-scroll";
+import { SubagentNodeCard } from "./SubagentNodeCard";
 import { getToolPreviewTarget } from "../../../lib/chat-links";
 import { disclosureKey } from "./disclosure";
 import {
@@ -58,10 +66,8 @@ import { ToolChips, ToolDetailBlocks } from "../../../components/ToolDetails";
 import {
   IconArrowDown,
   IconBot,
-  IconCheck,
   IconChevronRight,
   IconCircleAlert,
-  IconStop,
 } from "../../../components/icons";
 import { TooltipButton } from "../../../components/ui";
 import { DisclosureAnchorContext } from "../../../lib/disclosure-anchor-context";
@@ -185,6 +191,20 @@ function HostToolRow({
   const openTarget = useOpenPreviewTarget();
   const { fileMenu, openFileMenu, closeFileMenu } = useChatFileMenu();
   const openSubagentTab = useAppStore((s) => s.openSubagentTab);
+  const openOmpSubagentBatchTab = useAppStore((s) => s.openOmpSubagentBatchTab);
+  const activeSessionId = useAppStore((s) => s.activeSessionId);
+  const ompBatchCandidate = isOmpTaskBatch(message.engineOrigin, message.toolName, message.toolArgs);
+  const subscribeOmpRoster = useCallback((listener: () => void) => activeSessionId
+    ? ompBatchCandidate ? subscribeOmpSubagentRoster(activeSessionId, listener) : () => undefined
+    : () => undefined, [activeSessionId, ompBatchCandidate]);
+  const getOmpRosterSnapshot = useCallback(() => activeSessionId
+    ? ompBatchCandidate ? getOmpSubagentRoster(activeSessionId) : EMPTY_OMP_ROSTER
+    : EMPTY_OMP_ROSTER, [activeSessionId, ompBatchCandidate]);
+  const ompRoster = useSyncExternalStore(subscribeOmpRoster, getOmpRosterSnapshot, getOmpRosterSnapshot);
+  // The batch card is rendered by this row, not only by the work-panel tab, so
+  // the shared roster poller must stay alive from here too — otherwise a closed
+  // subagent pane freezes every agent's status until one is opened.
+  useOmpSubagentRosterPolling(ompBatchCandidate ? activeSessionId : null);
   const activeWorkPanelTabId = useAppStore((s) => s.activeWorkPanelTabId);
   const status = message.toolStatus;
   const action = getToolAction(message.toolName);
@@ -234,13 +254,44 @@ function HostToolRow({
   // the agent names it reports on replace the bare delegation ids it was
   // called with, and its badge rolls up their statuses (D268).
   const lifecycle = action === "delegate" ? lifecycleKindOf(message) : null;
+  const ompBatch = action === "delegate" && !lifecycle &&
+    isOmpTaskBatch(message.engineOrigin, message.toolName, message.toolArgs);
+  const ompBatchToolCallId = message.toolCallId || message.id;
+  const ompBatchRoster = useMemo(() => ompBatch
+    ? agentsForOmpToolCall([...ompRoster], ompBatchToolCallId)
+    : { agents: [], correlated: true }, [ompBatch, ompRoster, ompBatchToolCallId]);
+  const ompBatchAgents = ompBatchRoster.agents;
+  // Bucket by the strongest evidence per agent: a delivered `<task-result>`
+  // outranks the transcript, which outranks the last lifecycle snapshot.
+  const ompBatchOutcomes = ompBatchAgents.map((agent: any) => ompSubagentStatusKey(ompSubagentLifecycleStatus(agent)));
+  const ompBatchRunningCount = ompBatchAgents.filter((agent: any, index: number) =>
+    !ompBatchOutcomes[index] && agent.observedActive !== false && ["running", "pending", "started"].includes(String(agent.status ?? "").toLowerCase()),
+  ).length;
+  const ompBatchCompletedCount = ompBatchOutcomes.filter((key: string) => key === "completed").length;
+  const ompBatchAbortedCount = ompBatchOutcomes.filter((key: string) => ["aborted", "stopped", "timed_out"].includes(key)).length;
+  const ompBatchFailedCount = ompBatchOutcomes.filter((key: string) => ["failed", "denied"].includes(key)).length;
+  // An agent OMP dropped from its running-only roster without any terminal
+  // evidence is unconfirmed, not finished.
+  const ompBatchUnconfirmedCount = ompBatchAgents.length - ompBatchCompletedCount - ompBatchAbortedCount - ompBatchFailedCount - ompBatchRunningCount;
+  const ompBatchSettledCount = ompBatchCompletedCount + ompBatchAbortedCount + ompBatchFailedCount;
+  const ompBatchOutcomeSummary = [
+    ompBatchCompletedCount ? t("settings.omp.ompBatchCompleted", { n: ompBatchCompletedCount }) : "",
+    ompBatchAbortedCount ? t("settings.omp.ompBatchAborted", { n: ompBatchAbortedCount }) : "",
+    ompBatchFailedCount ? t("settings.omp.ompBatchFailed", { n: ompBatchFailedCount }) : "",
+    ompBatchUnconfirmedCount ? t("settings.omp.ompBatchUnconfirmed", { n: ompBatchUnconfirmedCount }) : "",
+  ].filter(Boolean).join(" · ");
+  const ompRequestedTaskCount = Array.isArray((message.toolArgs as Record<string, unknown> | null)?.tasks)
+    ? ((message.toolArgs as { tasks: unknown[] }).tasks.length)
+    : 0;
   const jobRow = lifecycle ? backgroundJobRowOf(message) : null;
   const roster = lifecycle ? delegationRoster(message) : [];
   const rosterSummary = lifecycle ? delegationRosterSummary(roster) : "";
   const rosterOutcome = lifecycle ? delegationRosterOutcome(roster) : null;
   const agentName =
     action === "delegate" && !lifecycle
-      ? delegateAgentName(message, delegate)
+      ? message.engineOrigin === "omp"
+        ? t("settings.omp.ompBatchTitle")
+        : delegateAgentName(message, delegate)
       : "";
   const modelId = variant === "topology" ? delegateModelId(message) : "";
   const thinkingLevel =
@@ -271,6 +322,23 @@ function HostToolRow({
   const blocks = variant !== "topology" && open && hasDetails ? presentation.current?.blocks : null;
   const outcome =
     variant === "topology" ? subagentOutcome(message, delegationStatuses) : null;
+  const displayOutcome = ompBatch
+    ? status === "error"
+      ? "failed"
+      : status === "denied"
+        ? "denied"
+        : ompBatchRunningCount > 0 || status === "running"
+      ? "running"
+      : ompBatchRoster.correlated && ompBatchAgents.length > 0 && ompBatchSettledCount + ompBatchRunningCount === ompBatchAgents.length
+        ? ompBatchCompletedCount === ompBatchAgents.length
+          ? "completed"
+          : ompBatchFailedCount > 0
+            ? "failed"
+            : ompBatchAbortedCount > 0
+              ? "aborted"
+              : undefined
+        : undefined
+    : outcome;
   // A bare `running` Task row (no delegation result yet) is still being
   // created: the delegate runtime is spawning and no structured snapshot
   // exists. Show it as starting rather than a generic running state.
@@ -291,14 +359,38 @@ function HostToolRow({
   // A lifecycle row never falls back to its arguments: while it is still
   // running it has no roster yet, and `delegationIds` would otherwise reach the
   // head as a JSON blob of UUIDs (D268).
-  const summary = jobRow
+  const summary = ompBatch
+    ? t("settings.omp.ompBatchSummary", {
+        requested: ompRequestedTaskCount,
+        observed: ompBatchAgents.length,
+        running: ompBatchRunningCount,
+      })
+    : jobRow
     ? [
         rosterSummary, jobRow.command,
         jobRow.count !== undefined && t("backgroundTasks.headerCount", { count: jobRow.count }),
         jobRow.state && t(`backgroundTasks.${jobRow.state}`),
       ].filter(Boolean).join(" · ")
     : lifecycle ? rosterSummary : argSummary;
-  const statusLabel = creating
+  const statusLabel = ompBatch
+    ? status === "error"
+      ? t("chat.toolFailed")
+      : status === "denied"
+        ? t("chat.toolDenied")
+        : ompBatchRunningCount > 0
+      ? ompBatchRoster.correlated
+        ? t("settings.omp.ompBatchRunning", { running: ompBatchRunningCount, total: ompBatchAgents.length })
+        : t("settings.omp.ompBatchUnlinkedRunning", { running: ompBatchRunningCount })
+      : status === "running"
+        ? t("settings.omp.ompBatchDispatching")
+        : ompBatchRoster.correlated && ompBatchAgents.length > 0
+          ? ompBatchOutcomeSummary || t("settings.omp.ompBatchDispatched")
+          : ompRequestedTaskCount > 0 && ompBatchAgents.length === 0
+            // The call finished without a single observed agent: the batch
+            // never started, which reads as success unless we say otherwise.
+            ? t("settings.omp.ompBatchNotStarted")
+            : t("settings.omp.ompBatchDispatched")
+    : creating
     ? t("chat.subagentCreating")
     : outcome
       ? t(`chat.subagentStatus.${outcome}`)
@@ -320,12 +412,14 @@ function HostToolRow({
       ? (delegationPayload as { delegationId?: unknown }).delegationId
       : undefined;
   const panelSelectionId =
-    typeof delegationId === "string" && delegationId
+    ompBatch
+      ? message.toolCallId || message.id
+      : typeof delegationId === "string" && delegationId
       ? delegationId
       : message.toolCallId || message.id;
   const panelOpen =
     variant === "topology" &&
-    activeWorkPanelTabId === `subagent:${panelSelectionId}`;
+    activeWorkPanelTabId === (ompBatch ? `omp-subagent-batch:${panelSelectionId}` : `subagent:${panelSelectionId}`);
   const renderedOpen = variant === "topology" ? panelOpen : open;
   const inlineOpen = variant !== "topology" && open;
   const delegationTiming =
@@ -351,7 +445,7 @@ function HostToolRow({
             nodeStartedAt,
         )
       : message.toolDurationMs;
-  const duration =
+  const duration = !ompBatch &&
     typeof durationMs === "number" && durationMs > 0
       ? formatToolDuration(durationMs / 1000)
       : "";
@@ -398,75 +492,70 @@ function HostToolRow({
     <div
       className={`tool-row ${variant === "topology" ? "subagent-topology-node" : ""} ${
         renderedOpen ? "open" : ""
-      } status-${run === "failed" ? "error" : status || "success"}${outcome ? ` outcome-${outcome.replaceAll("_", "-")}` : ""}${creating ? " outcome-creating" : ""}`}
+      } status-${run === "failed" ? "error" : status || "success"}${displayOutcome ? ` outcome-${displayOutcome.replaceAll("_", "-")}` : ""}${creating ? " outcome-creating" : ""}`}
       role={variant === "topology" ? "listitem" : "region"}
       data-message-id={message.id}
       aria-label={`${t("chat.toolCall")}: ${rawName}${agentName ? `, ${agentName}` : ""}${modelLabel ? `, ${modelLabel}` : ""}${statusLabel ? `, ${statusLabel}` : ""}`}
     >
       {variant === "topology" ? (
         <div className="subagent-topology-node-actions">
-        <button
-          className="subagent-topology-node-header"
-          aria-expanded={panelOpen}
-          aria-controls={panelOpen ? `work-panel-surface-subagent:${panelSelectionId}` : undefined}
+        <SubagentNodeCard
+          title={agentName || t("chat.subagentUnnamed")}
+          model={modelId || undefined}
+          thinking={thinkingLabel || undefined}
+          summary={summary}
+          steps={delegate?.items.length ? t("chat.processingSteps", { count: delegate.items.length }) : undefined}
+          status={displayOutcome ?? undefined}
+          statusLabel={statusLabel}
+          duration={duration}
+          expanded={panelOpen}
+          controlsId={`work-panel-surface-${ompBatch ? `omp-subagent-batch:${panelSelectionId}` : `subagent:${panelSelectionId}`}`}
           disabled={!hasDetails}
-          title={[agentName || rawName, modelLabel, summary].filter(Boolean).join(" · ")}
           onClick={() => {
             if (!hasDetails) return;
             onUserInteraction?.();
-            localToolsAllowed && openSubagentTab(panelSelectionId, agentName || undefined);
+            if (!localToolsAllowed) return;
+            if (ompBatch) openOmpSubagentBatchTab(message.toolCallId || message.id);
+            else openSubagentTab(panelSelectionId, agentName || undefined);
           }}
-        >
-          <span className="subagent-topology-avatar" aria-hidden>
-            <IconBot size={15} />
-            <span className="subagent-topology-status-icon">
-              {outcome === "completed" ? (
-                <IconCheck size={8} />
-              ) : outcome === "aborted" ? (
-                <IconStop size={7} />
-              ) : outcome === "running" ? (
-                <span />
-              ) : (
-                <IconCircleAlert size={8} />
-              )}
-            </span>
-          </span>
-          <span className="subagent-topology-node-copy">
-            <span className="subagent-topology-node-title-row">
-              <span className="subagent-topology-node-title">
-                {agentName || t("chat.subagentUnnamed")}
-              </span>
-              {modelLabel ? (
-                <span
-                  className="subagent-topology-node-model"
-                  title={modelLabel}
-                  aria-label={modelLabel}
-                >
-                  <span className="subagent-topology-node-model-name">{modelId}</span>
-                  {thinkingLabel ? <span className="subagent-topology-node-thinking"> {thinkingLabel}</span> : null}
-                </span>
-              ) : null}
-              <span className="subagent-topology-node-status">
-                {statusLabel}
-                {duration ? ` · ${duration}` : ""}
-              </span>
-            </span>
-            {summary ? (
-              <span className="subagent-topology-node-summary" title={summary}>
-                {summary}
-              </span>
-            ) : null}
-            {delegate?.items.length ? (
-              <span className="subagent-topology-node-steps">
-                {t("chat.processingSteps", { count: delegate.items.length })}
-              </span>
-            ) : null}
-          </span>
-          {outcome === "running" ? (
-            <span className="tool-spinner" aria-label={t("chat.running")} />
-          ) : null}
-        </button>
+        />
         {typeof delegationId === "string" && <SubagentStopButton delegationId={delegationId} running={outcome === "running" && !creating} name={agentName} />}
+        {ompBatch && ompBatchAgents.length ? <>
+          {!ompBatchRoster.correlated ? <small className="omp-native-agent-unlinked-note">{t("settings.omp.noCorrelatedSubagents")}</small> : null}
+          <div className="omp-batch-child-agents" role="list" aria-label={t("settings.omp.subagentManager")}>
+          {ompBatchAgents.map((agent: any, index: number) => {
+            const taskSummary = ompSubagentTaskSummary(agent);
+            const label = ompSubagentIdentity(agent, index, t("settings.omp.subagentNumber", { number: index + 1 }), ompBatchAgents);
+            const taskDetail = ompSubagentTaskDetail(agent);
+            const progress = ompSubagentProgressSummary(agent);
+            const rawStatus = ompSubagentLifecycleStatus(agent).toLowerCase();
+            const nodeStatus = agent.observedActive === false
+              ? ["completed", "complete", "failed", "error", "cancelled", "canceled", "stopped", "aborted", "timed_out"].includes(rawStatus)
+                ? rawStatus === "completed" || rawStatus === "complete" ? "completed" : rawStatus === "stopped" ? "stopped" : rawStatus === "aborted" || rawStatus === "cancelled" || rawStatus === "canceled" ? "aborted" : "failed"
+                : "unknown"
+              : ["running", "pending", "started"].includes(rawStatus) ? "running" : "unknown";
+            const statusKey = ompSubagentStatusKey(rawStatus);
+            const readableStatus = statusKey ? t(`chat.subagentStatus.${statusKey}`) : t("settings.omp.subagentStatusUnknown");
+            const nodeStatusLabel = agent.observedActive === false && (!statusKey || statusKey === "running")
+              ? t("settings.omp.subagentNoLongerRunning")
+              : readableStatus;
+            return <div role="listitem" key={agent.id} className="subagent-topology-node omp-batch-child-agent">
+              <SubagentNodeCard
+                title={label}
+                summary={taskSummary || undefined}
+                summaryDetail={taskDetail || undefined}
+                activity={progress || undefined}
+                status={nodeStatus as "running" | "completed" | "aborted" | "stopped" | "failed" | "unknown"}
+                statusLabel={nodeStatusLabel}
+                onClick={() => {
+                  onUserInteraction?.();
+                  if (localToolsAllowed) openOmpSubagentBatchTab(ompBatchToolCallId, String(agent.id), label);
+                }}
+              />
+            </div>;
+          })}
+          </div>
+        </> : null}
         </div>
       ) : (
         <div className={`tool-row-head${runHead ? " is-run" : ""}`}>

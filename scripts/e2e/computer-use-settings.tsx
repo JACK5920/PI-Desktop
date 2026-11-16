@@ -154,19 +154,47 @@ async function runSettingsProbe() {
   if (!requireElement<HTMLButtonElement>('button[aria-label="Dedicated model"]').textContent?.includes("Fixture Alias")) {
     throw new Error("Selected Computer Use model name does not match the Composer alias display");
   }
+  const findModelSourceButton = (label: string) => [...document.querySelectorAll<HTMLButtonElement>('.settings-segment[role="radiogroup"] button[role="radio"]')]
+    .find((button) => button.textContent?.includes(label));
+  const conversationModel = findModelSourceButton("Current conversation model");
+  if (!conversationModel) throw new Error("Computer Use model source switch is missing the current-conversation option");
+  conversationModel.click();
+  await waitUntil(() => writes.length === 3, "conversation model source save");
+  const conversationPatch = writes[2] as any;
+  if (conversationPatch?.computerUse?.modelSource !== "conversation") {
+    throw new Error("Current conversation model mode did not persist");
+  }
+  if (conversationPatch?.computerUse?.model?.modelId !== "fixture-model") {
+    throw new Error("Switching model source erased the stored dedicated model selection");
+  }
+  if (!document.body.textContent?.includes("Computer Use will follow the model selected for the current conversation.")) {
+    throw new Error("Conversation mode does not explain which model will drive Computer Use");
+  }
+  await waitUntil(() => findModelSourceButton("Dedicated model")?.disabled === false, "model source save completion");
+  const dedicatedModel = findModelSourceButton("Dedicated model");
+  if (!dedicatedModel) throw new Error("Computer Use model source switch is missing the dedicated option");
+  dedicatedModel.click();
+  await waitUntil(() => writes.length === 4, "dedicated model source restore");
+  if ((writes[3] as any)?.computerUse?.modelSource !== "dedicated") {
+    throw new Error("Switching back to the dedicated model did not persist");
+  }
+  await waitUntil(() => Boolean(document.querySelector('button[aria-label="Dedicated model"]')), "dedicated model picker restore");
+  if (!requireElement<HTMLButtonElement>('button[aria-label="Dedicated model"]').textContent?.includes("Fixture Alias")) {
+    throw new Error("Switching back to dedicated mode did not preserve the prior model selection");
+  }
   const actionBudget = requireElement<HTMLInputElement>('input[aria-label="Maximum actions"]');
   const idleMinutes = requireElement<HTMLInputElement>('input[aria-label="Idle expiry (minutes)"]');
   if (actionBudget.value !== "40" || idleMinutes.value !== "15") throw new Error("Computer Use limits do not show their documented defaults");
   setInputValue(actionBudget, "10000000");
   actionBudget.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
-  await waitUntil(() => writes.length === 3, "large Computer Use action budget save");
-  if ((writes[2] as any)?.computerUse?.actionBudget !== 10_000_000) {
+  await waitUntil(() => writes.length === 5, "large Computer Use action budget save");
+  if ((writes[4] as any)?.computerUse?.actionBudget !== 10_000_000) {
     throw new Error("Large Computer Use action budget was capped or not persisted");
   }
   setInputValue(idleMinutes, "1440");
   idleMinutes.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
-  await waitUntil(() => writes.length === 4, "long Computer Use idle expiry save");
-  if ((writes[3] as any)?.computerUse?.idleExpiryMs !== 24 * 60 * 60_000) {
+  await waitUntil(() => writes.length === 6, "long Computer Use idle expiry save");
+  if ((writes[5] as any)?.computerUse?.idleExpiryMs !== 24 * 60 * 60_000) {
     throw new Error("Long Computer Use idle expiry was capped or not persisted");
   }
   const restrictionLabels = [
@@ -182,20 +210,20 @@ async function runSettingsProbe() {
   const disableAll = requireElement<HTMLButtonElement>('[role="switch"][aria-label="Disable all application restrictions"]');
   await waitUntil(() => !disableAll.disabled, "restriction control availability");
   disableAll.click();
-  await waitUntil(() => writes.length === 5, "disable all restriction save");
-  const allPatch = writes[4] as any;
+  await waitUntil(() => writes.length === 7, "disable all restriction save");
+  const allPatch = writes[6] as any;
   if (allPatch?.computerUse?.restrictions?.disableAll !== true) throw new Error("Master restriction switch did not persist");
   if (!requireElement<HTMLButtonElement>('[role="switch"][aria-label="Block PI-Desktop windows"]').disabled) {
     throw new Error("Individual restriction switch stayed active under the master override");
   }
   await waitUntil(() => !disableAll.disabled, "restriction save completion");
   disableAll.click();
-  await waitUntil(() => writes.length === 6, "restore individual restriction mode");
+  await waitUntil(() => writes.length === 8, "restore individual restriction mode");
   const selfTarget = requireElement<HTMLButtonElement>('[role="switch"][aria-label="Block PI-Desktop windows"]');
   await waitUntil(() => !selfTarget.disabled, "individual restriction availability");
   selfTarget.click();
-  await waitUntil(() => writes.length === 7, "individual restriction save");
-  if ((writes[6] as any)?.computerUse?.restrictions?.blockSelfTarget !== false) {
+  await waitUntil(() => writes.length === 9, "individual restriction save");
+  if ((writes[8] as any)?.computerUse?.restrictions?.blockSelfTarget !== false) {
     throw new Error("Individual restriction switch did not persist its own value");
   }
   if (!document.body.textContent?.includes("windows · supported · bounded")) throw new Error("Platform capability diagnostics are not visible");

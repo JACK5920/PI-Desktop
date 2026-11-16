@@ -304,7 +304,8 @@
 
 .settings-content-inner {
   width: 100%;
-  margin: 0;
+  max-width: 1440px;
+  margin: 0 auto;
 }
 
 /* The renderer owns this sandboxed iframe. It stays in normal Settings flow,
@@ -350,18 +351,134 @@
 .computer-use-settings-restrictions {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 0.65rem;
+  align-items: stretch;
+  gap: 10px;
 }
 
 .computer-use-settings-restriction-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
   align-items: center;
-  gap: 0.55rem;
+  gap: 10px;
+  min-height: 32px;
+  color: var(--ds-text-primary);
+  line-height: var(--leading-body);
 }
 
 .computer-use-settings-restrictions .computer-use-settings-notice {
-  margin: 0 0 0.15rem;
+  margin: 0 0 4px 42px;
+}
+
+/* Computer Use contains several multi-control rows. Keep those controls in a
+   dedicated content column instead of letting the shared 240px field cap
+   collapse explanations and restriction labels into narrow vertical strips. */
+.computer-use-settings-page .settings-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 220px) minmax(0, 1fr);
+  align-items: center;
+  gap: 16px 24px;
+}
+
+.computer-use-settings-page .settings-row-copy {
+  min-width: 0;
+}
+
+.computer-use-settings-page .settings-row-control {
+  width: 100%;
+  max-width: none;
+  justify-content: flex-end;
+}
+
+.computer-use-settings-page .settings-row-control:has(> .computer-use-model-picker),
+.computer-use-settings-page .settings-row-control:has(> .computer-use-settings-restrictions),
+.computer-use-settings-page .settings-row-control:has(> .computer-use-settings-limits),
+.computer-use-settings-page .settings-row-control:has(> .computer-use-settings-status) {
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 10px;
+}
+
+.computer-use-settings-page .settings-row:has(.computer-use-model-picker),
+.computer-use-settings-page .settings-row:has(.computer-use-settings-restrictions),
+.computer-use-settings-page .settings-row:has(.computer-use-settings-limits),
+.computer-use-settings-page .settings-row:has(.computer-use-settings-status) {
+  align-items: start;
+}
+
+.computer-use-settings-page .computer-use-model-picker {
+  width: min(100%, 420px);
+}
+
+.computer-use-settings-page .computer-use-model-trigger {
+  width: 100%;
+  justify-content: space-between;
+}
+
+.computer-use-settings-page .computer-use-settings-notice {
+  max-width: 72ch;
+  margin: 0;
+  color: var(--ds-text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-body);
+  overflow-wrap: anywhere;
+}
+
+.computer-use-settings-page .computer-use-settings-limits {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 220px));
+  gap: 12px 16px;
+  width: 100%;
+}
+
+.computer-use-settings-page .computer-use-settings-limits > label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  color: var(--ds-text-secondary);
+  font-size: var(--text-sm);
+}
+
+.computer-use-settings-page .computer-use-settings-limits .field-input {
+  width: 100%;
+  min-width: 0;
+}
+
+.computer-use-settings-page .computer-use-settings-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  min-width: 0;
+  color: var(--ds-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 820px) {
+  .computer-use-settings-page .settings-row {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+    gap: 10px;
+  }
+
+  .computer-use-settings-page .settings-row-control {
+    justify-content: flex-start;
+  }
+
+  .computer-use-settings-page .settings-row-control:has(> .settings-toggle) {
+    justify-content: flex-end;
+  }
+
+  .computer-use-settings-page .computer-use-settings-limits {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .computer-use-settings-page .computer-use-settings-limits {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .settings-card-block {
@@ -1168,6 +1285,340 @@
   color: var(--ds-text-secondary);
   font-size: var(--text-sm);
   line-height: var(--leading-body);
+}
+
+.settings-agent-engine-choice,
+.settings-agent-engine-manager {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--ds-border-subtle);
+  border-radius: var(--radius-md-plus);
+  background: var(--ds-tile);
+}
+
+/* The custom-model form reads top-down: one full-width field per decision,
+ * paired fields only where the pair is genuinely related. Auto-placement in a
+ * fixed two-column grid made wide fields collapse into one column at some
+ * zoom levels, so the layout is explicit instead. */
+.settings-omp-custom-form { max-width: 920px; padding: 16px; border: 1px solid var(--ds-border-default); border-radius: var(--radius-md); background: var(--ds-raised); box-shadow: var(--ds-raised-shadow); }
+
+.settings-omp-custom-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+  max-width: 920px;
+}
+
+.settings-omp-custom-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 20px;
+  min-width: 0;
+}
+
+.settings-omp-custom-grid label {
+  display: grid;
+  align-content: start;
+  gap: 7px;
+  min-width: 0;
+  color: var(--ds-text-secondary);
+  font-size: var(--text-xs-plus);
+}
+
+.settings-omp-custom-grid label > span { line-height: 1.4; }
+
+.settings-omp-custom-grid input,
+.settings-omp-custom-grid select {
+  width: 100%;
+  min-width: 0;
+}
+
+.settings-omp-custom-inline { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.settings-omp-custom-inline > input { flex: 1 1 auto; }
+.settings-omp-custom-inline > button { flex: 0 0 auto; white-space: nowrap; }
+
+.settings-omp-custom-wide { max-width: 100%; }
+.settings-omp-custom-image { display: flex !important; align-items: center; justify-content: space-between; gap: 12px; }
+.settings-omp-custom-image input[type="checkbox"] { width: auto; }
+
+.settings-omp-custom-presets { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.settings-omp-custom-presets-label { color: var(--ds-text-secondary); font-size: var(--text-xs); }
+.settings-omp-custom-presets button {
+  padding: 3px 10px;
+  border: 1px solid var(--ds-border-subtle);
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--ds-text-secondary);
+  font: inherit;
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+  cursor: pointer;
+}
+.settings-omp-custom-presets button:hover { background: var(--ds-tile-hover); color: var(--ds-text-primary); }
+.settings-omp-custom-presets button.is-active { border-color: var(--ds-accent); color: var(--ds-accent); background: var(--ds-accent-soft, var(--ds-tile-hover)); }
+
+/* Saved custom endpoints are a list first, a form second: adding another
+ * model must never overwrite the entry already on screen. */
+.omp-custom-model-list { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; max-width: 920px; }
+.omp-custom-model-item { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; min-width: 0; padding: 12px 14px; border: 1px solid var(--ds-border-default); border-radius: var(--radius-md); background: var(--ds-raised); box-shadow: var(--ds-raised-shadow); }
+.omp-custom-model-item.is-editing { border-color: var(--ds-accent); }
+.omp-custom-model-copy { display: grid; flex: 1 1 220px; gap: 3px; min-width: 0; }
+.omp-custom-model-copy strong,
+.omp-custom-model-copy span,
+.omp-custom-model-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.omp-custom-model-copy span { color: var(--ds-text-secondary); font-size: var(--text-xs-plus); }
+.omp-custom-model-copy small { color: var(--ds-text-tertiary); font-size: var(--text-xs); }
+.omp-custom-model-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; }
+.settings-agent-engine-state.is-warning { color: var(--ds-warning, var(--ds-text-secondary)); }
+
+/* The settings panel paints its own gray surface and gives children no
+ * padding (other tabs pad their sections themselves). Without this the
+ * provider heading sat on the rounded corner and the search field touched the
+ * panel's right edge. */
+.settings-omp-provider-section { display: grid; gap: 12px; min-width: 0; padding: 8px 16px 16px; }
+
+/* Providers and models are two views, not one endless page: the model list
+ * used to sit below every provider and was a long scroll away. */
+.settings-omp-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 16px 0; }
+.settings-omp-tab-label { display: inline-flex; align-items: center; gap: 6px; }
+.settings-omp-tab-count { padding: 0 6px; border-radius: var(--radius-full); background: var(--ds-tile-hover); color: var(--ds-text-tertiary); font-size: var(--text-xs); line-height: var(--leading-compact); }
+/* Nested scroll boxes sliced rows in half at their bottom edge. Let the
+ * settings page own the scroll so every row stays whole. */
+.settings-omp-provider-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch; gap: 8px; padding: 0; }
+
+/* Rows are white raised cards, not another gray tile: on the gray settings
+ * panel the old fill made every provider look disabled. */
+.settings-omp-provider-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--ds-border-default);
+  border-radius: var(--radius-sm);
+  background: var(--ds-raised);
+  box-shadow: var(--ds-raised-shadow);
+  transition: border-color var(--motion-duration-fast) var(--motion-ease-out);
+}
+.settings-omp-provider-row:hover { border-color: var(--ds-border-strong); }
+.settings-omp-provider-row > .btn { flex: 0 0 auto; min-width: 60px; }
+
+.settings-omp-provider-avatar {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-xs);
+  background: var(--ds-tile-hover);
+  color: var(--ds-text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--font-weight-strong);
+}
+
+.settings-omp-provider-copy { display: grid; gap: 1px; flex: 1 1 140px; min-width: 0; }
+.settings-omp-provider-copy strong {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  color: var(--ds-text-primary);
+  font-size: var(--text-sm-plus);
+  font-weight: var(--font-weight-strong);
+  line-height: var(--leading-compact);
+}
+.settings-omp-provider-state { display: inline-flex; align-items: center; gap: 4px; color: var(--ds-text-tertiary); font-size: var(--text-xs); line-height: var(--leading-compact); }
+.settings-omp-provider-state::before { content: ""; flex: 0 0 auto; width: 5px; height: 5px; border-radius: var(--radius-full); background: var(--ds-text-faint); }
+.settings-omp-provider-state.is-on { color: var(--ds-text-secondary); }
+.settings-omp-provider-state.is-on::before { background: var(--ds-text-primary); }
+.settings-omp-provider-state.is-off { color: var(--ds-text-faint); }
+
+.settings-omp-provider-more { justify-self: start; }
+
+.settings-omp-account-list { display: grid; flex-basis: 100%; gap: 6px; padding-top: 8px; border-top: 1px solid var(--ds-border-subtle); }
+.settings-omp-account-list > div { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+.settings-omp-account-list > div > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.settings-omp-model-toolbar { flex: 1 1 auto; flex-wrap: nowrap; justify-content: flex-end; gap: 8px; min-width: 0; }
+.settings-omp-model-toolbar > .field-input { flex: 1 1 120px; width: auto; min-width: 110px; max-width: 220px; }
+
+/* Models are grouped by provider: the provider header is the only chrome a
+ * group needs, and each row stays a single compact line. */
+.settings-omp-model-groups { display: grid; gap: 10px; }
+.settings-omp-model-group { border: 1px solid var(--ds-border-default); border-radius: var(--radius-sm); background: var(--ds-raised); box-shadow: var(--ds-raised-shadow); overflow: hidden; }
+.settings-omp-model-group-head { display: flex; align-items: center; gap: 8px; padding: 3px 10px; border-bottom: 1px solid var(--ds-border-subtle); background: var(--ds-tile); }
+.settings-omp-model-group.is-collapsed .settings-omp-model-group-head { border-bottom-color: transparent; }
+.settings-omp-model-group-toggle { display: inline-flex; align-items: center; gap: 7px; min-width: 0; padding: 4px 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.settings-omp-model-group-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ds-text-primary); font-size: var(--text-xs-plus); font-weight: var(--font-weight-strong); }
+.settings-omp-chevron { flex: 0 0 auto; width: 0; height: 0; border-top: 4px solid transparent; border-bottom: 4px solid transparent; border-left: 5px solid var(--ds-text-tertiary); transition: transform var(--motion-duration-fast) var(--motion-ease-out); }
+.settings-omp-model-group-toggle[aria-expanded="true"] .settings-omp-chevron { transform: rotate(90deg); }
+.settings-omp-model-group-count { flex: 0 0 auto; color: var(--ds-text-tertiary); font-size: var(--text-xs); }
+.settings-omp-model-group-head > .btn { flex: 0 0 auto; margin-left: auto; }
+.settings-omp-model-row { display: flex; align-items: center; min-width: 0; padding-right: 6px; }
+.settings-omp-model-row + .settings-omp-model-row { border-top: 1px solid var(--ds-border-subtle); }
+.settings-omp-model-row:hover { background: var(--ds-tile); }
+.settings-omp-model-row-main { display: flex; align-items: center; gap: 8px; flex: 1 1 auto; min-width: 0; padding: 3px 4px 3px 10px; cursor: pointer; }
+.settings-omp-model-row input[type="checkbox"] { flex: 0 0 auto; accent-color: var(--ds-accent); }
+.settings-omp-model-name { flex: 0 1 auto; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ds-text-primary); font-size: var(--text-sm-plus); font-weight: var(--font-weight-strong); }
+.settings-omp-model-meta { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ds-text-tertiary); font-size: var(--text-xs); }
+/* Always visible but quiet: the per-model settings entry must be discoverable
+ * without hovering every row. */
+.settings-omp-model-configure { display: grid; place-items: center; flex: 0 0 auto; width: 22px; height: 22px; padding: 0; border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--ds-text-faint); transition: color var(--motion-duration-fast) var(--motion-ease-out), background var(--motion-duration-fast) var(--motion-ease-out); }
+.settings-omp-model-configure:hover,
+.settings-omp-model-configure:focus-visible { color: var(--ds-text-primary); background: var(--ds-tile-hover); }
+.settings-omp-model-configure.is-customized { color: var(--ds-text-primary); }
+
+.omp-model-settings-dialog { width: min(460px, calc(100vw - 48px)); }
+.omp-model-settings-body { display: grid; gap: 12px; margin: 4px 0 16px; }
+.omp-model-settings-field { display: grid; gap: 5px; min-width: 0; }
+.omp-model-settings-field > span { color: var(--ds-text-secondary); font-size: var(--text-xs-plus); font-weight: var(--font-weight-strong); }
+.omp-model-settings-field > small { color: var(--ds-text-tertiary); font-size: var(--text-xs); }
+.omp-model-settings-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.omp-model-settings-check { display: flex; align-items: center; gap: 8px; color: var(--ds-text-secondary); font-size: var(--text-sm); }
+.omp-model-settings-check input { accent-color: var(--ds-accent); }
+.omp-model-settings-note { margin: 0; padding: 8px 10px; border-radius: var(--radius-sm); background: var(--ds-tile); color: var(--ds-text-tertiary); font-size: var(--text-xs); line-height: var(--leading-compact); }
+.settings-error-text { margin: 0; color: var(--ds-error); font-size: var(--text-xs-plus); }
+/* Hidden models are dimmed instead of carrying a redundant status pill on
+ * every row; the checkbox already states the truth. */
+.settings-omp-model-row:not(.is-shown) .settings-omp-model-name { color: var(--ds-text-secondary); }
+.settings-omp-model-row:not(.is-shown) .settings-omp-model-meta { color: var(--ds-text-faint); }
+
+.settings-agent-settings { gap: 12px; }
+.settings-agent-settings-intro { max-width: 960px; }
+.settings-agent-settings-tabs { width: fit-content; max-width: 100%; }
+.settings-agent-settings-panel { min-width: 0; }
+
+@media (max-width: 720px) {
+  .settings-omp-custom-pair { grid-template-columns: minmax(0, 1fr); }
+  .settings-omp-provider-list { grid-template-columns: minmax(0, 1fr); }
+  .settings-omp-model-toolbar { flex-wrap: wrap; width: 100%; }
+}
+
+.settings-agent-engine-section-heading,
+.settings-agent-engine-option-top,
+.settings-agent-engine-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+/* Heading copy must shrink before the trailing search/action control, or a
+ * long description slides underneath it and reads as clipped text. */
+.settings-agent-engine-section-heading {
+  flex-wrap: wrap;
+}
+
+.settings-agent-engine-section-heading > div:not(.settings-agent-engine-actions) {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+/* The search field keeps a sane width instead of stretching to 100% and
+ * pushing the adjacent button onto its own line. */
+.settings-agent-engine-section-heading > .field-input {
+  flex: 0 1 300px;
+  width: 300px;
+  max-width: 100%;
+}
+
+.settings-agent-engine-actions > .field-input {
+  flex: 1 1 180px;
+  width: auto;
+  min-width: 0;
+}
+
+/* Action rows hold search fields plus buttons; wrapping keeps the controls
+ * from squeezing a neighbouring description. */
+/* On the gray panel the shared gray field fill reads as a void. Search fields
+ * in these headers sit on the raised surface instead so they read as inputs. */
+.settings-agent-engine-section-heading > .field-input,
+.settings-agent-engine-actions > .field-input {
+  background: var(--ds-raised);
+  box-shadow: inset 0 0 0 1px var(--ds-border-subtle);
+}
+
+.settings-agent-engine-section-heading > .field-input:focus,
+.settings-agent-engine-actions > .field-input:focus {
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--ds-accent) 22%, transparent);
+}
+
+.settings-agent-engine-actions {
+  flex-wrap: wrap;
+}
+
+.settings-agent-engine-cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.settings-agent-engine-option {
+  display: grid;
+  align-content: start;
+  gap: 9px;
+  min-width: 0;
+  min-height: 126px;
+  padding: 14px;
+  border-color: var(--ds-border-subtle);
+  text-align: left;
+  white-space: normal;
+}
+
+.settings-agent-engine-option.is-selected {
+  border-color: var(--ds-accent);
+  box-shadow: inset 0 0 0 1px var(--ds-accent);
+  background: var(--ds-surface-raised, var(--ds-tile));
+}
+.settings-agent-engine-option:focus-visible { outline: 2px solid var(--ds-accent); outline-offset: 2px; }
+
+.settings-agent-engine-option-top { width: 100%; }
+.settings-agent-engine-option-name { font-weight: var(--font-weight-semibold); color: var(--ds-text-primary); }
+.settings-agent-engine-option-indicator {
+  display: grid;
+  place-items: center;
+  width: 19px;
+  height: 19px;
+  flex: 0 0 auto;
+  border: 1px solid var(--ds-border-subtle);
+  border-radius: var(--radius-round);
+  color: var(--ds-accent-contrast, white);
+  font-size: var(--text-xs);
+}
+.settings-agent-engine-option-indicator.is-selected { border-color: var(--ds-accent); background: var(--ds-accent); }
+.settings-agent-engine-option-description,
+.settings-agent-engine-option-status { display: block; white-space: normal; }
+.settings-agent-engine-option-description { color: var(--ds-text-secondary); font-size: var(--text-sm); line-height: var(--leading-body); }
+.settings-agent-engine-option-status { color: var(--ds-text-tertiary, var(--ds-text-secondary)); font-size: var(--text-xs); }
+.settings-agent-engine-saving,
+.settings-agent-engine-state {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  border-radius: var(--radius-full);
+  background: var(--ds-raised, var(--ds-tile));
+  color: var(--ds-text-secondary);
+  font-size: var(--text-xs);
+}
+
+.settings-agent-engine-version-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.settings-pi-engine-release-notes { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 280px; overflow: auto; }
+.settings-agent-engine-version { display: grid; gap: 5px; min-width: 0; padding: 11px 13px; border-radius: var(--radius-sm); background: var(--ds-raised, var(--ds-tile)); }
+.settings-agent-engine-version-label { color: var(--ds-text-secondary); font-size: var(--text-xs); }
+.settings-agent-engine-version strong { overflow-wrap: anywhere; color: var(--ds-text-primary); font-size: var(--text-sm); font-weight: var(--font-weight-medium); }
+.settings-agent-engine-progress { display: grid; gap: 7px; }
+.settings-agent-engine-progress progress { width: 100%; accent-color: var(--ds-accent); }
+.settings-agent-engine-actions { justify-content: flex-start; flex-wrap: wrap; }
+.settings-agent-engine-actions-spacer { flex: 1 1 auto; }
+
+@media (max-width: 720px) {
+  .settings-agent-engine-cards,
+  .settings-agent-engine-version-grid { grid-template-columns: minmax(0, 1fr); }
+  .settings-agent-engine-option { min-height: 0; }
+  .settings-agent-engine-actions-spacer { display: none; }
 }
 
 .settings-row-control {

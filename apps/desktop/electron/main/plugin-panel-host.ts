@@ -33,7 +33,7 @@ export type PluginPanelOpenRequest = {
   height: number;
   htmlPath: string;
   /**
-   * `"panel"` (default) keeps the 46px host drag band and its three-control
+   * `"panel"` (default) keeps the 26px host drag band and its three-control
    * capsule. `"widget"` opens the same sandboxed page as a transparent floating
    * surface with neither, so a plugin can be a small orb the user keeps on
    * screen. The plugin surface itself is unchanged: same preload bridge, same
@@ -450,6 +450,7 @@ export class PluginPanelHost {
     applyPluginEgressPolicy(ses, {
       pluginId: request.pluginId,
       netDomains: request.netDomains,
+      netAnyHost: request.netAnyHost,
       allowMicrophone: request.allowMicrophone,
       onBlockedRequest: this.onBlockedRequest,
     });

@@ -32,7 +32,7 @@ function harness(overrides = {}) {
     retractPendingSessionPrompt: async (input) => { calls.push(["retract", input]); return { ok: true, retracted: true, removedCount: 1 }; },
     abort: async () => {}, ...overrides.api,
   };
-  const runtime = { loadFullSessionMessages: async () => previous, cacheSessionTranscript() {}, sessionTranscriptCache: new Map(), submittedComposerDrafts: new Map(), ...overrides.runtime };
+  const runtime = { loadFullSessionMessages: async () => previous, cacheSessionTranscript() {}, clearPendingPromptAttempt() {}, sessionTranscriptCache: new Map(), submittedComposerDrafts: new Map(), ...overrides.runtime };
   const { createTranscriptSlice } = load("../src/stores/slices/transcript-slice.ts", {
     i18next: { default: { t: (key) => key } }, "../../lib/api": { api },
     "../../lib/remote-session-safety": safety, "@pi-desktop/shared": {},
@@ -75,7 +75,7 @@ for (const outcome of ["success", "exception", "reply_started"]) {
 const { registerSessionIpc } = load("../electron/main/ipc/session-ipc.ts", {
   electron: { shell: {} }, "node:fs": fs, "node:path": path, "@pi-desktop/shared": { ErrorCodes, IPC }, "../importers": {}, "../services/session-collaboration": {}, "../bootstrap/remote-hosts.js": {}, "../services/session-search": {},
 });
-function ipcHarness(pending = false, result = { ok: true }, managedPluginId = null) {
+function ipcHarness(pending = false, result = { ok: true }, managedPluginId = null, activeTurns = new Map()) {
   const handlers = new Map(); const events = [];
   const host = { call: async (method, input) => {
     events.push([method, input]);
@@ -83,13 +83,20 @@ function ipcHarness(pending = false, result = { ok: true }, managedPluginId = nu
     return typeof result === "function" ? result(method) : result;
   } };
   registerSessionIpc({ registrar: { handle: (channel, handler) => handlers.set(channel, handler) }, getHost: () => host,
-    getSidecar: () => ({ clearProjectInstructionRoot() {}, clearVendorAuthBindings() {}, call: async () => { events.push(["dispose"]); } }), activeTurns: new Map(),
-    persistenceOutbox: { prepareSessionMutation: async (id) => { events.push(["strict-drain", id]); if (pending) throw new Error("pending write"); }, prepareSessionReplacement: async () => { events.push(["replacement-drain"]); } },
+    getSidecar: () => ({ clearProjectInstructionRoot() {}, clearVendorAuthBindings() {}, call: async () => { events.push(["dispose"]); } }), activeTurns,
+    persistenceOutbox: { prepareSessionMutation: async (id) => { events.push(["strict-drain", id]); if (pending) throw new Error("pending write"); }, prepareSessionReplacement: async () => { events.push(["replacement-drain"]); }, dropSession: async (id) => { events.push(["drop-session", id]); } },
     acquireSessionOperation: async () => { events.push(["lock"]); return () => events.push(["release"]); },
     beginTranscriptRewrite: () => { events.push(["fence"]); return { commit: () => events.push(["commit"]), rollback: () => events.push(["rollback"]) }; }, sessionProjects: new Map(), logger: {}, plugins: {},
+    forgetTranscriptRewriteHistory: (id) => events.push(["forget", id]),
   });
   return { events, invoke: (channel, input) => { assert.equal(typeof handlers.get(IPC.invoke[channel]), "function"); return handlers.get(IPC.invoke[channel])(input); } };
 }
+test("session delete is serialized and refuses a running session before the host mutation", async () => {
+  const activeTurns = new Map([["s", "turn-1"]]);
+  const h = ipcHarness(false, { ok: true }, null, activeTurns);
+  await assert.rejects(h.invoke("sessionDelete", "s"), { errorCode: ErrorCodes.AGENT_BUSY });
+  assert.deepEqual(h.events, [["lock"], ["release"]]);
+});
 for (const [channel, method, input] of [
   ["sessionDeleteMessage", "session.deleteMessage", { sessionId: "s", messageId: "u1" }],
   ["sessionRetractPendingPrompt", "session.retractPendingPrompt", { sessionId: "s", userMessageId: "u2", turnId: "turn" }],

@@ -6,6 +6,20 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { createServer } from "vite";
 import { IPC } from "@pi-desktop/shared";
 
+function promptRuntime() {
+  return {
+    submittedComposerDrafts: new Map(),
+    sessionTranscriptCache: new Map(),
+    insertOptimisticUserMessage() {},
+    retractOptimisticUserMessage() {},
+    beginPromptSubmission() {},
+    acceptPromptSubmission() {},
+    clearPromptSubmission() {},
+    promptSubmissionWasAccepted() { return false; },
+    markPendingPromptFailed() {},
+  };
+}
+
 test("sending the first prompt derives a replaceable title instead of renaming", async (t) => {
   const server = await createServer({
     root: fileURLToPath(new URL("..", import.meta.url)),
@@ -41,12 +55,7 @@ test("sending the first prompt derives a replaceable title instead of renaming",
         refreshed += 1;
       },
     };
-    const runtime = {
-      submittedComposerDrafts: new Map(),
-      sessionTranscriptCache: new Map(),
-      insertOptimisticUserMessage() {},
-      retractOptimisticUserMessage() {},
-    };
+    const runtime = promptRuntime();
     const slice = createQueueSlice({
       get: () => state,
       set: (update) => {
@@ -551,12 +560,7 @@ test("annotation-only submissions are rejected before queue or Host admission", 
       showToast() {},
       rememberModel() {},
     };
-    const runtime = {
-      submittedComposerDrafts: new Map(),
-      sessionTranscriptCache: new Map(),
-      insertOptimisticUserMessage() {},
-      retractOptimisticUserMessage() {},
-    };
+    const runtime = promptRuntime();
     const slice = createQueueSlice({
       get: () => state,
       set: (update) => { state = { ...state, ...(typeof update === "function" ? update(state) : update) }; },
@@ -626,12 +630,7 @@ test("managed admission stays accepted when transcript refresh fails", async (t)
         throw new Error("refresh unavailable");
       },
     };
-    const runtime = {
-      submittedComposerDrafts: new Map(),
-      sessionTranscriptCache: new Map(),
-      insertOptimisticUserMessage() {},
-      retractOptimisticUserMessage() {},
-    };
+    const runtime = promptRuntime();
     const slice = createQueueSlice({
       get: () => state,
       set: (update) => {
@@ -703,12 +702,7 @@ test("managed admission refresh never pulls the user back from another page", as
           const next = typeof update === "function" ? update(state) : update;
           state = { ...state, ...next };
         },
-        runtime: {
-          submittedComposerDrafts: new Map(),
-          sessionTranscriptCache: new Map(),
-          insertOptimisticUserMessage() {},
-          retractOptimisticUserMessage() {},
-        },
+        runtime: promptRuntime(),
         promptAttachmentsFromDraft: () => [],
         withoutRecordKey: (record, key) => {
           const next = { ...record };

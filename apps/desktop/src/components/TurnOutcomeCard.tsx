@@ -3,6 +3,11 @@ import type { UiMessage } from "@pi-desktop/shared";
 import type { AgentTurnResult } from "../stores/app-store";
 import { useAppStore } from "../stores/app-store";
 import { IconCircleAlert } from "./icons";
+import { IconFileText, IconMore } from "./icons";
+import { ContextMenu } from "./ContextMenu";
+import { useChatFileMenu } from "../hooks/use-chat-file-menu";
+import { selectTurnDeliverables } from "../lib/turn-artifact-presentation";
+import { toolWorkPanelTab } from "../lib/work-panel-tabs";
 
 type TurnOutcomeCardProps = {
   messages: UiMessage[];
@@ -26,12 +31,47 @@ export function TurnOutcomeCard({
 }: TurnOutcomeCardProps) {
   const { t } = useTranslation();
   const sendPrompt = useAppStore((state) => state.sendPrompt);
+  const openFile = useAppStore((state) => state.openFileInWorkPanel);
+  const openWorkPanelTab = useAppStore((state) => state.openWorkPanelTab);
+  const { fileMenu, openFileMenu, closeFileMenu } = useChatFileMenu();
 
-  if (!result || result.status === "completed") return null;
+  if (!result) return null;
+  const { artifacts, total: deliverableCount } = selectTurnDeliverables(result.artifacts ?? [], latestTurnMessages(messages));
+  const artifactCard = artifacts.length > 0 ? (
+    <section className="turn-artifacts-card" data-testid="turn-artifacts-card" aria-label={t("panel.artifacts.title")}>
+      <div className="turn-artifacts-heading">
+        <IconFileText size={16} aria-hidden />
+        <strong>{result.partial ? t("panel.artifacts.partialTitle") : t("panel.artifacts.turnTitle")}</strong>
+        <span>{t("panel.artifacts.count", { count: deliverableCount })}</span>
+        <button type="button" className="turn-artifacts-all" onClick={() => openWorkPanelTab(toolWorkPanelTab("artifacts"))}>
+          {t("panel.artifacts.viewAll")}
+        </button>
+      </div>
+      <div className="turn-artifacts-list">
+        {artifacts.slice(0, 6).map((artifact) => {
+          const name = artifact.path.replace(/\\/g, "/").split("/").filter(Boolean).at(-1) ?? artifact.path;
+          return (
+            <div className="turn-artifact-row" key={artifact.id} onContextMenu={(event) => openFileMenu(event, { path: artifact.path })}>
+              <button type="button" className="turn-artifact-open" disabled={!artifact.existsNow} onClick={() => openFile(artifact.path)} title={artifact.path}>
+                <strong>{name}</strong><span>{artifact.path}</span>
+              </button>
+              <span className="turn-artifact-evidence">{artifact.source === "workspace_diff" ? t("panel.artifacts.detected") : t("panel.artifacts.confirmed")}</span>
+              {artifact.existsNow ? (
+                <button type="button" className="turn-artifact-reveal" title={t("chat.openWith")} aria-label={t("chat.openWith")} onClick={(event) => openFileMenu(event, { path: artifact.path })}>
+                  <IconMore size={14} />
+                </button>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  ) : null;
+  if (result.status === "completed") return <>{artifactCard}<ContextMenu state={fileMenu} onClose={closeFileMenu} /></>;
 
   const tail = latestTurnMessages(messages);
   const hasInlineError = tail.some((message) => Boolean(message.error));
-  if (hasInlineError) return null;
+  if (hasInlineError) return <>{artifactCard}<ContextMenu state={fileMenu} onClose={closeFileMenu} /></>;
 
   const toolCount = tail.filter((message) => message.role === "tool").length;
   const hasVisibleTurn = tail.some(
@@ -41,9 +81,11 @@ export function TurnOutcomeCard({
       Boolean(message.error),
   );
 
-  if (!hasVisibleTurn) return null;
+  if (!hasVisibleTurn) return <>{artifactCard}<ContextMenu state={fileMenu} onClose={closeFileMenu} /></>;
 
   return (
+    <>
+    {artifactCard}
     <section
       className="turn-outcome-card failed"
       data-testid="turn-outcome-card"
@@ -77,5 +119,7 @@ export function TurnOutcomeCard({
         </button>
       </div>
     </section>
+    <ContextMenu state={fileMenu} onClose={closeFileMenu} />
+    </>
   );
 }

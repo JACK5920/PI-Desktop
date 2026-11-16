@@ -22,6 +22,13 @@ import {
   type ComputerTarget,
 } from "@pi-desktop/shared";
 
+/**
+ * How many consecutive dispatched-with-no-change actions before the model is
+ * told it is repeating itself. Two is enough evidence that the interface is not
+ * responding, and early enough that the hint still has steps left to act on.
+ */
+const STUCK_AFTER_NO_CHANGE = 2;
+
 export type Observation = {
   grant: ComputerGrantView;
   inspection: ComputerInspection;
@@ -62,15 +69,20 @@ export const COMPUTER_LOOP_SYSTEM_PROMPT = [
   '{"kind":"ask","question":"what you need from the user"}',
   "For `done`, return `kind`, `summary`, and `evidence`: one or more exact element UIDs copied from the latest observation that support the result. The loop checks every UID against that latest Host observation. Never cite an older observation, invent a UID, or claim completion without UIA evidence. If the interface has no relevant accessible evidence, use `ask` to explain that completion cannot be verified; a screenshot alone is not a structured verification.",
   "",
+  "One exception: some results are real but invisible to UIA — a text selection, a scroll position, keyboard focus, a key that changes nothing on screen. When the previous step was dispatched and its read-back said the accessibility tree did not change, you may close with `done`, an empty `evidence` array, and a `summary` that states plainly which part the accessibility tree cannot show. The loop reports that outcome as self-reported, never as verified. Do not use this to skip a result the tree can show, and do not invent a UID to dress it up as evidence.",
+  "",
   "Rules:",
   "- Address elements by `uid` from the element list. Use a point only when no element fits.",
   "- For `switch`, copy only the exact `window_id` value. The app label and title are display-only and must never be included in `window`.",
   "- Match the requested control by its observed role and label. Never substitute a neighboring field or click an unrelated element when the requested control is absent.",
+  "- Only use an action the element itself lists in its `actions=` field. A text field lists `set_value`/`type_text` and not `click`, so clicking it is refused; a button lists `click`/`invoke` and not `set_value`, so writing into it is refused. Read the `actions=` field before you choose the action.",
   "- One action per answer. Do not batch, and do not invent a uid.",
   "- `set_value` writes through an accessibility value pattern; `type_text` sends literal text to the focused target control and needs `text`; `press_keys` sends key chords and needs `keys`.",
   "- Use `select` only on the exact list item or combo box being changed. For a closed combo box, issue `select` directly on the combo box; do not click it open first. The host searches that element and its own descendants only; it never searches the whole window for a matching label.",
   "- `drag` needs `point` as its start and `to` as its destination, both relative to the current window; `hover` moves over the chosen element or point; `scroll` deltas are page-like UIA increments (maximum 100 increments per axis).",
   "- After every action, inspect the new observation. Treat a host dispatch as an attempt, not proof that the application changed; only say `done` when the resulting state is visible in the next observation and cite its exact current UIA UID in `evidence`.",
+  "- The element list never shows a text field's content -- only whether it holds a value. So a write you dispatched cannot be confirmed from the list, and a step marked `skipped` means the loop had already sent that exact write to that element and did not send it twice. Treat a skipped write as done: do not repeat it, do not switch to the other write action for the same text, and do not re-send the same text to the same field. If you still cannot tell whether the field holds the text, close with `done` and an empty `evidence` array and say in the summary that the field's content is not visible to the accessibility tree -- that outcome is accepted as a self-report, never as proof.",
+  "- Cite in `evidence` only elements whose current state supports the result, taken from the latest observation. If the result is the content of a text field, the field itself cannot support it, so cite the elements that did change, or cite nothing and let the summary say what the tree cannot show.",
   "- `switch` reads another window and costs a step but no budget. Every uid from the previous window stops working, so inspect what you switched to before acting on it.",
   "- A window marked refused can never be operated, and PI-Desktop's own windows are never a target. Do not retry one; it will not start working.",
   "- You cannot widen the scope, raise a budget, or disable a check. Asking for that fails the step.",
@@ -141,16 +153,57 @@ export function renderObservation(observation: Observation): string {
 
 export function renderHistory(steps: readonly ComputerStepRecord[]): string {
   if (steps.length === 0) return "No steps have run yet.";
-  return steps
+  const lines = steps
     .map((step) => {
       const target = step.target ? ` on ${step.target}` : "";
-      const verification = step.verification ? `; verification=${step.verification}` : "";
       const evidence = step.evidenceCount ? `; current UIA evidence=${step.evidenceCount} element(s)` : "";
+      // A skipped write is not a dispatched one, and the difference decides
+      // what the model does next. The element list never shows a field's
+      // content, so "dispatched" for a write that was never sent leaves the
+      // model looking for a write that worked.
+      if (step.verification === "skipped-duplicate") {
+        return `${step.index}. ${step.action}${target}: skipped (this exact write was already sent to this element)${evidence}`;
+      }
+      const verification = step.verification ? `; verification=${step.verification}` : "";
+      // The host's explanation of a refusal is the only thing that tells the
+      // model whether to change the action or to change its spelling. The
+      // code alone is the same for a chord the driver will not accept and for
+      // a target that cannot receive one at all.
+      const reason = step.reason ? `; reason: ${step.reason}` : "";
       return step.ok
         ? `${step.index}. ${step.action}${target}: dispatched${verification}${evidence}`
-        : `${step.index}. ${step.action}${target}: refused (${step.errorCode ?? "unknown"})${verification}`;
+        : `${step.index}. ${step.action}${target}: refused (${step.errorCode ?? "unknown"})${reason}${verification}`;
     })
     .join("\n");
+  const stuck = stuckHint(steps);
+  return stuck ? `${lines}\n\n${stuck}` : lines;
+}
+
+/**
+ * Tell the model when it is repeating itself against an interface that will
+ * never answer.
+ *
+ * A keystroke that changes nothing — a selection, a scroll at the end of a list,
+ * a key the target ignores — reads back as `observed-no-change` forever. Without
+ * a word at that point the model keeps trying variants until the step limit: a
+ * real run sent `ctrl+a` five times and also clicked a non-clickable field twice.
+ * Naming the situation is enough; the decision stays the model's.
+ */
+function stuckHint(steps: readonly ComputerStepRecord[]): string | undefined {
+  const dispatched = steps.filter(
+    (step) => step.ok && step.action !== "observe" && step.action !== "switch" && step.action !== "done" && step.action !== "ask",
+  );
+  if (dispatched.length < STUCK_AFTER_NO_CHANGE) return undefined;
+  const trailing = dispatched.slice(-STUCK_AFTER_NO_CHANGE);
+  if (!trailing.every((step) => step.verification === "observed-no-change")) return undefined;
+  return (
+    `The last ${STUCK_AFTER_NO_CHANGE} actions were dispatched and the accessibility tree ` +
+    "did not change after any of them. If the result you need is something UIA cannot " +
+    "express — a text selection, a scroll position, keyboard focus, a key the target " +
+    "ignores — close with `done`, an empty `evidence` array, and a summary that says " +
+    "plainly what cannot be shown. If instead you are unsure whether the target " +
+    "understood, use `ask`. Do not keep repeating the same action."
+  );
 }
 
 export function buildDecisionRequest(

@@ -91,7 +91,8 @@ export type ResolvedChatFileRef = {
 export type ChatFileOpenDestination =
   | "file-manager"
   | "built-in-browser"
-  | "default-browser";
+  | "default-browser"
+  | "default-application";
 
 export type ChatFileOpenOptions = {
   line?: number;
@@ -309,7 +310,7 @@ export function useOpenChatFileRef() {
           openUrl(resolved.absolutePath);
           return;
         }
-        if (destination === "default-browser") {
+        if (destination === "default-browser" || destination === "default-application") {
           if (current.workspace?.remote) {
             showToast(t("chat.defaultBrowserOpenFailed"), {
               variant: "error",
@@ -319,7 +320,7 @@ export function useOpenChatFileRef() {
           try {
             await api.fsOpen(resolved.absolutePath, mimeType, sessionId);
           } catch {
-            showToast(t("chat.defaultBrowserOpenFailed"), {
+            showToast(t(destination === "default-browser" ? "chat.defaultBrowserOpenFailed" : "chat.fileOpenFailed"), {
               variant: "error",
             });
           }
@@ -414,5 +415,29 @@ export function useCopyChatFileRef() {
       })();
     },
     [resolveRef, showToast, t],
+  );
+}
+
+/** Reveal the exact resolved transcript reference in the system file manager. */
+export function useRevealChatFileRef() {
+  const { t } = useTranslation();
+  const resolveRef = useResolveChatFileRef();
+  const paneSessionId = useSlotSessionId();
+  const sessionId = useAppStore((s) => paneSessionId || s.activeSessionId);
+  const showToast = useAppStore((s) => s.showToast);
+
+  return useCallback(
+    (path: string, baseDir?: string) => {
+      void (async () => {
+        const resolved = await resolveRef(path, baseDir);
+        if (!resolved) return;
+        try {
+          await api.fsReveal(resolved.absolutePath, sessionId ?? undefined);
+        } catch {
+          showToast(t("chat.fileRevealFailed"), { variant: "error" });
+        }
+      })();
+    },
+    [resolveRef, sessionId, showToast, t],
   );
 }

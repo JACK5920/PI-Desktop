@@ -17,7 +17,7 @@ pub use history_mutations::{
 };
 mod model_system;
 mod usage;
-pub use usage::record_usage;
+pub use usage::{record_usage, session_usage_cost};
 
 pub const MODES: [&str; 3] = ["plan", "goal", "agent"];
 
@@ -110,6 +110,16 @@ fn validate_thinking_level(level: &str) -> Result<()> {
     }
 }
 
+/// The engine id is a closed set shared with the desktop registry; anything
+/// else would make the conversation unroutable on its next turn.
+fn validate_agent_engine(engine: &str) -> Result<()> {
+    if engine == "pi" || engine == "omp" {
+        Ok(())
+    } else {
+        Err(anyhow!("agentEngine must be pi or omp"))
+    }
+}
+
 /// Wire format is unchanged from v1: RFC3339 timestamps, `projectPath`
 /// resolved from the projects table, flat tool fields on messages. Storage is
 /// schema v7 (D119): transcript content lives in per-session JSONL files and
@@ -128,6 +138,11 @@ pub struct SessionSummary {
     pub model_id: Option<String>,
     pub provider_id: Option<String>,
     pub mode: String,
+    /// Engine pinned to this conversation (`pi` / `omp`). Missing means the
+    /// conversation still follows the app-wide default, which is how every
+    /// pre-upgrade session behaves.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_engine: Option<String>,
     #[serde(default = "default_thinking_level")]
     pub thinking_level: String,
     #[serde(default = "default_permission_mode")]
@@ -243,6 +258,11 @@ pub struct UiMessage {
     pub model_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider_id: Option<String>,
+    /// Runtime that produced an assistant row (`pi` / `omp`). Rows written
+    /// before this existed stay `None`; the footer then falls back to the
+    /// session's pinned engine.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub engine_origin: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage: Option<MessageUsage>,
     /// Elapsed model streaming time for the response throughput statistic.
@@ -455,6 +475,9 @@ pub(crate) fn ui_to_record(message: &UiMessage) -> (MessageRecord, Option<String
     if let Some(provider_id) = &message.provider_id {
         meta_obj.insert("providerId".into(), json!(provider_id));
     }
+    if let Some(engine) = &message.engine_origin {
+        meta_obj.insert("engineOrigin".into(), json!(engine));
+    }
     if let Some(usage) = &message.usage {
         meta_obj.insert("usage".into(), json!(usage));
     }
@@ -613,6 +636,10 @@ pub(crate) fn record_to_ui(record: MessageRecord) -> UiMessage {
         .get("providerId")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
+    let engine_origin = meta
+        .get("engineOrigin")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
     let usage = meta.get("usage").and_then(|value| {
         let input_tokens = value.get("inputTokens").and_then(|v| v.as_i64())?;
         let output_tokens = value.get("outputTokens").and_then(|v| v.as_i64())?;
@@ -741,6 +768,7 @@ pub(crate) fn record_to_ui(record: MessageRecord) -> UiMessage {
             status,
             model_id,
             provider_id,
+            engine_origin,
             usage,
             response_duration_ms,
             response_output_tokens,
@@ -797,6 +825,7 @@ pub(crate) fn record_to_ui(record: MessageRecord) -> UiMessage {
             status,
             model_id,
             provider_id,
+            engine_origin,
             usage,
             response_duration_ms,
             response_output_tokens,
@@ -1358,7 +1387,7 @@ const SUMMARY_SELECT: &str =
             (SELECT oi.plugin_id FROM session_import_origins oi
              WHERE oi.session_id = s.id AND json_extract(oi.origin_json, '$.managed') = 1) AS managed_by_plugin,
             s.side_chat_parent_id, s.side_chat_source_message_id, s.side_chat_excerpt,
-            s.side_chat_promoted
+            s.side_chat_promoted, s.agent_engine
      FROM sessions s LEFT JOIN projects p ON p.id = s.project_id
      WHERE s.deleted_at IS NULL";
 
@@ -1379,6 +1408,7 @@ pub(crate) fn summary_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Sess
         // alias keeps this mapper independent of any one query's column order.
         scheduled_run: row.get("scheduled_run")?,
         fast_mode: row.get("fast_mode")?,
+        agent_engine: row.get("agent_engine")?,
         worktree: None,
         managed_by_plugin: row.get("managed_by_plugin")?,
         side_chat: match (
@@ -1452,6 +1482,9 @@ pub struct SessionCreateOptions {
     pub permission_mode: Option<String>,
     /// The `/fast` switch (ADR 0334); false keeps the default service tier.
     pub fast_mode: bool,
+    /// Engine pinned at creation so a later app-wide default switch cannot
+    /// silently move an existing conversation onto the other engine.
+    pub agent_engine: Option<String>,
 }
 
 pub fn create_session_with_thinking(
@@ -1474,6 +1507,7 @@ pub fn create_session_with_thinking(
             thinking_level,
             permission_mode: None,
             fast_mode: false,
+            agent_engine: None,
         },
     )
 }
@@ -1496,6 +1530,7 @@ pub fn create_session_with_options(
         thinking_level,
         permission_mode,
         fast_mode,
+        agent_engine,
     } = options;
     let now = now_ms();
     let id = Uuid::new_v4().to_string();
@@ -1506,6 +1541,9 @@ pub fn create_session_with_options(
         TITLE_SOURCE_MANUAL
     };
     let mode = normalize_mode(mode.as_deref());
+    if let Some(engine) = agent_engine.as_deref() {
+        validate_agent_engine(engine)?;
+    }
     let thinking_level = thinking_level.unwrap_or_else(default_thinking_level);
     validate_thinking_level(&thinking_level)?;
     let permission_mode = permission_mode.unwrap_or_else(default_permission_mode);
@@ -1525,8 +1563,9 @@ pub fn create_session_with_options(
         .prepare_cached(
             "INSERT INTO sessions (
                 id, title, project_id, provider_id, model_id, mode, thinking_level,
-                permission_mode, title_source, fast_mode, created_at, updated_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11)",
+                permission_mode, title_source, fast_mode, agent_engine,
+                created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12)",
         )?
         .execute(params![
             id,
@@ -1539,6 +1578,7 @@ pub fn create_session_with_options(
             permission_mode,
             title_source,
             fast_mode,
+            agent_engine,
             now
         ])?;
     Ok(SessionSummary {
@@ -1549,6 +1589,7 @@ pub fn create_session_with_options(
         model_id,
         provider_id,
         mode,
+        agent_engine,
         thinking_level,
         permission_mode,
         fast_mode,
@@ -1937,12 +1978,12 @@ fn fork_session_through_with_side_chat(
             .prepare_cached(
                 "INSERT INTO sessions (
                     id, title, project_id, provider_id, model_id, mode, thinking_level,
-                    permission_mode, fast_mode, source, pinned, last_seq,
+                    permission_mode, fast_mode, agent_engine, source, pinned, last_seq,
                     side_chat_parent_id, side_chat_source_message_id, side_chat_excerpt,
                     created_at, updated_at
                  )
                  SELECT ?1, ?2, project_id, provider_id, model_id, mode, thinking_level,
-                        permission_mode, fast_mode, NULL, 0, ?3, ?4, ?5, ?6, ?7, ?7
+                        permission_mode, fast_mode, agent_engine, NULL, 0, ?3, ?4, ?5, ?6, ?7, ?7
                  FROM sessions WHERE id = ?8",
             )?
             .execute(params![
@@ -1979,6 +2020,7 @@ fn fork_session_through_with_side_chat(
         model_id: source.summary.model_id,
         provider_id: source.summary.provider_id,
         mode: source.summary.mode,
+        agent_engine: source.summary.agent_engine.clone(),
         thinking_level: source.summary.thinking_level,
         permission_mode: source.summary.permission_mode,
         fast_mode: source.summary.fast_mode,
@@ -2055,11 +2097,12 @@ pub fn configure_session_with_thinking(
         thinking_level,
         permission_mode,
         None,
+        None,
     )
 }
 
 /// Full configurator. Every `None` preserves the persisted value, including
-/// the `/fast` switch (ADR 0334).
+/// the `/fast` switch (ADR 0334) and the pinned Agent engine.
 #[allow(clippy::too_many_arguments)]
 pub fn configure_session_with_fast_mode(
     db: &Database,
@@ -2070,6 +2113,7 @@ pub fn configure_session_with_fast_mode(
     thinking_level: Option<&str>,
     permission_mode: Option<&str>,
     fast_mode: Option<bool>,
+    agent_engine: Option<&str>,
 ) -> Result<Option<SessionSummary>> {
     if !(is_valid_mode(mode) || mode == "chat") {
         return Err(anyhow!("mode must be plan or agent"));
@@ -2080,6 +2124,9 @@ pub fn configure_session_with_fast_mode(
     }
     if let Some(mode) = permission_mode {
         validate_permission_mode(mode)?;
+    }
+    if let Some(engine) = agent_engine {
+        validate_agent_engine(engine)?;
     }
     crate::plans::gate_session_configure(
         db,
@@ -2098,7 +2145,8 @@ pub fn configure_session_with_fast_mode(
                  model_id = COALESCE(?4, model_id),
                  thinking_level = COALESCE(?5, thinking_level),
                  permission_mode = COALESCE(?6, permission_mode),
-                 fast_mode = COALESCE(?8, fast_mode), updated_at = ?7
+                 fast_mode = COALESCE(?8, fast_mode),
+                 agent_engine = COALESCE(?9, agent_engine), updated_at = ?7
              WHERE id = ?1",
         )?
         .execute(params![
@@ -2109,7 +2157,8 @@ pub fn configure_session_with_fast_mode(
             thinking_level,
             permission_mode,
             now_ms(),
-            fast_mode
+            fast_mode,
+            agent_engine
         ])?;
     if changed == 0 {
         return Ok(None);
@@ -3657,20 +3706,68 @@ pub fn save_active_branch_revision(
     db: &Database,
     session_id: &str,
 ) -> Result<Option<ActiveRevisionSave>> {
-    let Some(detail) = get_session(db, session_id)? else {
+    // Most completed turns have never been regenerated. Check the indexed
+    // revision table first so the common path does not materialize an entire
+    // potentially long transcript just to discover that there is no revision
+    // root to stamp.
+    let has_revisions: bool = db
+        .conn()
+        .prepare_cached(
+            "SELECT EXISTS(
+                SELECT 1 FROM message_revisions WHERE session_id = ?1
+             )",
+        )?
+        .query_row(params![session_id], |row| row.get(0))?;
+    if !has_revisions {
+        return Ok(None);
+    }
+
+    // Once a session does have regenerate history, scan backwards in bounded
+    // transcript windows for the newest live revision root. The stable family
+    // id can differ from the current prompt id after editing/regenerating, so
+    // the stamped transcript message—not just the revision table key—chooses
+    // the branch. The unchanged prefix is never materialized when the root is
+    // near the tail.
+    let branch = transcripts::layout::with_layout_recovery(db.data_dir(), session_id, |layout| {
+        const WINDOW: usize = 128;
+        let mut end = layout.message_count();
+        let mut tail = Vec::new();
+        while end > 0 {
+            let start = end.saturating_sub(WINDOW);
+            let read = transcripts::read_transcript_window_with_layout(
+                db.data_dir(),
+                session_id,
+                layout,
+                start,
+                Some(end - start),
+            )?;
+            let chunk = dedupe_records(read.messages)
+                .into_iter()
+                .map(record_to_ui)
+                .collect::<Vec<_>>();
+            if let Some(root_index) = chunk
+                .iter()
+                .rposition(|message| message.role == "user" && message.revision_count.is_some())
+            {
+                let mut branch = chunk[root_index..].to_vec();
+                branch.extend(tail);
+                return Ok(Some(branch));
+            }
+            let mut previous = chunk;
+            previous.extend(tail);
+            tail = previous;
+            end = start;
+        }
+        Ok(None)
+    })?;
+    let Some(mut messages) = branch.filter(|messages| !messages.is_empty()) else {
         return Ok(None);
     };
-    let mut messages = detail.messages;
-    let Some(root_index) = messages
-        .iter()
-        .rposition(|message| message.role == "user" && message.revision_count.is_some())
-    else {
-        return Ok(None);
-    };
-    let root_user_id = messages[root_index]
+    let root_user_id = messages[0]
         .revision_root_id
         .clone()
-        .unwrap_or_else(|| messages[root_index].id.clone());
+        .unwrap_or_else(|| messages[0].id.clone());
+    let root_index = 0;
 
     let existing = list_message_revisions(db, session_id, &root_user_id)?;
     let desired_active = messages[root_index].active_revision.unwrap_or(0);
@@ -4547,6 +4644,16 @@ mod tests {
         Database::open(&dir.join("test.sqlite")).unwrap()
     }
 
+    #[test]
+    fn engine_origin_survives_a_transcript_round_trip() {
+        let mut message = user_msg("engine-roundtrip", "hi", "2025-05-01T00:00:00Z");
+        message.role = "assistant".into();
+        message.engine_origin = Some("omp".into());
+        let (record, _) = ui_to_record(&message);
+        let restored = record_to_ui(record);
+        assert_eq!(restored.engine_origin.as_deref(), Some("omp"));
+    }
+
     fn user_msg(id: &str, content: &str, ts: &str) -> UiMessage {
         UiMessage {
             id: id.into(),
@@ -4563,6 +4670,7 @@ mod tests {
             status: None,
             model_id: None,
             provider_id: None,
+            engine_origin: None,
             usage: None,
             response_duration_ms: None,
             response_output_tokens: None,
@@ -5051,6 +5159,7 @@ mod tests {
                 None,
                 None,
                 enabled,
+                None,
             )
             .unwrap()
             .unwrap()
@@ -5396,6 +5505,7 @@ mod tests {
             // Ownership is derived from `task_runs`, so an import is never one.
             scheduled_run: false,
             fast_mode: false,
+            agent_engine: None,
             worktree: None,
             managed_by_plugin: None,
             side_chat: None,
@@ -5452,6 +5562,7 @@ mod tests {
             // Ownership is derived from `task_runs`, so an import is never one.
             scheduled_run: false,
             fast_mode: false,
+            agent_engine: None,
             worktree: None,
             managed_by_plugin: None,
             side_chat: None,
@@ -5547,6 +5658,7 @@ mod tests {
             status: Some("complete".into()),
             model_id: None,
             provider_id: None,
+            engine_origin: None,
             usage: None,
             response_duration_ms: None,
             response_output_tokens: None,
@@ -6343,6 +6455,7 @@ mod tests {
             status: Some("complete".into()),
             model_id: Some("model-1".into()),
             provider_id: Some("provider-1".into()),
+            engine_origin: None,
             usage: Some(MessageUsage {
                 input_tokens: 12,
                 output_tokens: 34,
@@ -6492,6 +6605,7 @@ mod tests {
             status: Some("complete".into()),
             model_id: Some("model-1".into()),
             provider_id: Some("provider-1".into()),
+            engine_origin: None,
             usage: None,
             response_duration_ms: None,
             response_output_tokens: None,
@@ -6637,6 +6751,7 @@ mod tests {
             // Ownership is derived from `task_runs`, so an import is never one.
             scheduled_run: false,
             fast_mode: false,
+            agent_engine: None,
             worktree: None,
             managed_by_plugin: None,
             side_chat: None,
@@ -7788,9 +7903,20 @@ mod tests {
             None,
         )
         .unwrap();
+        // The no-revision fast path must be provable without opening or
+        // parsing the transcript. If it falls back to get_session, this
+        // intentionally hidden temporary fixture makes the old O(history)
+        // read fail instead of producing a misleading timing-only test.
+        let transcript = db
+            .data_dir()
+            .join("sessions")
+            .join(format!("{}.jsonl", session.id));
+        let hidden_transcript = transcript.with_extension("jsonl.hidden");
+        std::fs::rename(&transcript, &hidden_transcript).unwrap();
         assert!(save_active_branch_revision(&db, &session.id)
             .unwrap()
             .is_none());
+        std::fs::rename(&hidden_transcript, &transcript).unwrap();
         assert!(list_message_revisions(&db, &session.id, "u1")
             .unwrap()
             .is_empty());
@@ -7879,6 +8005,10 @@ mod tests {
         root.revision_count = Some(1);
         root.active_revision = Some(1);
         append_message(&db, &session.id, &root, Some(&turn)).unwrap();
+        // A stamped revision root only exists after a regenerate has created a
+        // durable revision row. Seed that invariant before exercising the
+        // no-copy live-reference path.
+        save_message_revision(&db, &session.id, "u1", &[root.clone()], true).unwrap();
 
         // Ten finished turns, each appending a sizeable answer, each archived
         // exactly the way a real turn ends.
@@ -7972,6 +8102,14 @@ mod tests {
         let mut answer = user_msg("a1", "the answer", "2025-05-01T00:01:00Z");
         answer.role = "assistant".into();
         append_message(&db, &session.id, &answer, Some(&turn)).unwrap();
+        save_message_revision(
+            &db,
+            &session.id,
+            "u1",
+            &[root.clone(), answer.clone()],
+            true,
+        )
+        .unwrap();
         save_active_branch_revision(&db, &session.id)
             .unwrap()
             .unwrap();
@@ -8022,6 +8160,14 @@ mod tests {
         let mut first_answer = user_msg("a1", "first answer", "2025-05-01T00:00:01Z");
         first_answer.role = "assistant".into();
         append_message(&db, &session.id, &first_answer, Some(&turn)).unwrap();
+        save_message_revision(
+            &db,
+            &session.id,
+            "u1",
+            &[first.clone(), first_answer.clone()],
+            true,
+        )
+        .unwrap();
         save_active_branch_revision(&db, &session.id)
             .unwrap()
             .unwrap();
@@ -8033,6 +8179,14 @@ mod tests {
         let mut second_answer = user_msg("a2", "second answer", "2025-05-01T00:01:01Z");
         second_answer.role = "assistant".into();
         append_message(&db, &session.id, &second_answer, Some(&turn)).unwrap();
+        save_message_revision(
+            &db,
+            &session.id,
+            "u2",
+            &[second.clone(), second_answer.clone()],
+            true,
+        )
+        .unwrap();
         save_active_branch_revision(&db, &session.id)
             .unwrap()
             .unwrap();

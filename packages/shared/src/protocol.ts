@@ -5,6 +5,8 @@ export const SCHEMA_VERSION = 28 as const;
 export const APP_ID = "net.aiuo.pi-desktop";
 export const APP_NAME = "PI-Desktop";
 export const APP_VERSION = "0.21.0";
+/** Reserved RPC session for OMP provider management; never maps to a PI chat. */
+export const OMP_SETTINGS_RPC_SESSION_ID = "pi-desktop-omp-provider-settings";
 
 export const APP_MENU_COMMANDS = [
   "newTask",
@@ -161,6 +163,7 @@ export const IPC = {
     sessionSearchContext: "pi-desktop/session/searchContext",
     sessionGet: "pi-desktop/session/get",
     sessionCollaboration: "pi-desktop/session/collaboration",
+    sessionUsageCost: "pi-desktop/session/usage-cost",
     /** Validate and select a durable session from a reviewed host operation. */
     sessionOpen: "pi-desktop/session/open",
     sessionDelete: "pi-desktop/session/delete",
@@ -198,10 +201,42 @@ export const IPC = {
     projectOpenFolder: "pi-desktop/project/openFolder",
     settingsGet: "pi-desktop/settings/get",
     settingsSet: "pi-desktop/settings/set",
+    ompEngineStatus: "pi-desktop/omp/status",
+    ompEngineInstallOrUpdate: "pi-desktop/omp/installOrUpdate",
+    ompEngineCancel: "pi-desktop/omp/cancel",
+    ompEngineOpenReleases: "pi-desktop/omp/openReleases",
+    ompEngineOpenStorageFolder: "pi-desktop/omp/openStorageFolder",
+    ompEngineImportLocal: "pi-desktop/omp/importLocal",
+    ompEngineRollback: "pi-desktop/omp/rollback",
+    piEngineStatus: "pi-desktop/pi-engine/status",
+    piEngineInstallOrUpdate: "pi-desktop/pi-engine/installOrUpdate",
+    piEngineCancel: "pi-desktop/pi-engine/cancel",
+    piEngineOpenReleases: "pi-desktop/pi-engine/openReleases",
+    piEngineOpenDependencyRepository: "pi-desktop/pi-engine/openDependencyRepository",
+    piEngineRollback: "pi-desktop/pi-engine/rollback",
+    ompCustomModelGet: "pi-desktop/omp/customModel/get",
+    ompCustomModelSave: "pi-desktop/omp/customModel/save",
+    ompCustomModelDelete: "pi-desktop/omp/customModel/delete",
+    ompCustomModelProbe: "pi-desktop/omp/customModel/probe",
+    ompSelectedModelGet: "pi-desktop/omp/selectedModel/get",
+    ompModelVisibilityGet: "pi-desktop/omp/models/visibility/get",
+    ompModelVisibilitySet: "pi-desktop/omp/models/visibility/set",
+    ompModelOverrideGet: "pi-desktop/omp/models/override/get",
+    ompModelOverrideSet: "pi-desktop/omp/models/override/set",
+    ompProfileSettingsGet: "pi-desktop/omp/profile/settings/get",
+    ompProfileSettingsSet: "pi-desktop/omp/profile/settings/set",
+    ompManagementStop: "pi-desktop/omp/management/stop",
+    ompRpcAttach: "pi-desktop/omp/rpc/attach",
+    ompRpcCommand: "pi-desktop/omp/rpc/command",
+    ompRpcForkSession: "pi-desktop/omp/rpc/forkSession",
+    ompRpcUiResponse: "pi-desktop/omp/rpc/uiResponse",
+    ompMicrophoneAcquire: "pi-desktop/omp/microphone/acquire",
+    ompMicrophoneRelease: "pi-desktop/omp/microphone/release",
     configSyncGetState: "pi-desktop/configSync/getState",
     backgroundTasksList: "pi-desktop/backgroundTasks/list",
     backgroundTasksOutput: "pi-desktop/backgroundTasks/output",
     backgroundTasksStop: "pi-desktop/backgroundTasks/stop",
+    artifactList: "pi-desktop/artifacts/list",
     configSyncConfigure: "pi-desktop/configSync/configure",
     configSyncTest: "pi-desktop/configSync/test",
     configSyncSyncNow: "pi-desktop/configSync/syncNow",
@@ -485,6 +520,12 @@ export const IPC = {
   },
   event: {
     pluginChanged: "pi-desktop/event/pluginChanged",
+    /** Byte-level progress while downloading/verifying the optional OMP runtime. */
+    ompEngineProgress: "pi-desktop/omp/event/progress",
+    /** Download/verification progress for the managed PI sidecar bundle. */
+    piEngineProgress: "pi-desktop/pi-engine/event/progress",
+    /** OMP RPC-UI frames, scoped to the originating PI session. */
+    ompRpcEvent: "pi-desktop/omp/rpc/event",
     /** Progress of an install or update, while it is still running. */
     pluginInstallProgress: "pi-desktop/plugin/event/installProgress",
     /** Host-originated app settings mutation (e.g. plugin `app.setTheme`). */

@@ -44,6 +44,18 @@ test("Computer Use settings expose explicit enablement, a dedicated model, bound
   assert.doesNotMatch(section, /computer\.grantCreate|computerGrantRevoke/);
 });
 
+test("Computer Use settings give dense controls a wide responsive content column", () => {
+  const section = read("features/settings/ComputerUseSettings.tsx");
+  const styles = read("styles/settings.css");
+
+  assert.match(section, /className="computer-use-settings-page"/);
+  assert.match(styles, /\.computer-use-settings-page \.settings-row\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*minmax\(180px,\s*220px\)\s+minmax\(0,\s*1fr\);/s);
+  assert.match(styles, /\.computer-use-settings-page \.settings-row-control\s*\{[^}]*max-width:\s*none;/s);
+  assert.match(styles, /\.computer-use-settings-page \.computer-use-settings-notice\s*\{[^}]*max-width:\s*72ch;/s);
+  assert.match(styles, /@media \(max-width:\s*820px\)\s*\{[\s\S]*?\.computer-use-settings-page \.settings-row\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);/s);
+  assert.match(styles, /@media \(max-width:\s*520px\)\s*\{[\s\S]*?\.computer-use-settings-page \.computer-use-settings-limits\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);/s);
+});
+
 test("Computer Use status control listens to host grant state and stops only its owner", () => {
   const indicator = read("features/computer-use/ComputerUseWidget.tsx");
   const widgetWindow = read("../electron/main/computer-use/widget-window.ts");

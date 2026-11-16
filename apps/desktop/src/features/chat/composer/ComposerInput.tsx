@@ -1,14 +1,17 @@
-import { useLayoutEffect } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { installComposerDeletionGuard } from "./native-deletion";
 import type {
   ClipboardEvent,
   Dispatch,
   FormEvent,
   KeyboardEvent as ReactKeyboardEvent,
+  MouseEvent as ReactMouseEvent,
   RefObject,
   SetStateAction,
 } from "react";
 import { editorSelectionRange, readEditorValue } from "./editor";
+import { api } from "../../../lib/api";
+import { useAppStore } from "../../../stores/app-store";
 import { ComposerImagePreview } from "./ComposerImagePreview";
 import { ComposerImageHover } from "./ComposerImageHoverPreview";
 import { DirectoryReferenceCard } from "../DirectoryReferenceCard";
@@ -30,6 +33,7 @@ export type ComposerInputProps = {
   pasting: boolean;
   enterToSend: boolean;
   runActive: boolean;
+  ompPredictionSessionId?: string | null;
   composerAc: CompletionController;
   /**
    * The plugin suggestion on screen, if any (ADR 0333). It is drawn in the
@@ -38,6 +42,8 @@ export type ComposerInputProps = {
    */
   suggestion?: ComposerSuggestionView | null;
   onPaste: (event: ClipboardEvent<HTMLDivElement>) => void;
+  /** Right-click on the editable or one of its chips; the caller owns the menu. */
+  onContextMenu?: (event: ReactMouseEvent<HTMLDivElement>) => void;
   onAcceptCompletion: (index: number) => void;
   onSubmit: (steering?: boolean) => void;
   onInsertNewline: () => void;
@@ -70,9 +76,11 @@ export function ComposerInput({
   pasting,
   enterToSend,
   runActive,
+  ompPredictionSessionId = null,
   composerAc,
   suggestion = null,
   onPaste,
+  onContextMenu,
   onAcceptCompletion,
   onSubmit,
   onInsertNewline,
@@ -84,6 +92,55 @@ export function ComposerInput({
   onFocus,
   onBlur,
 }: ComposerInputProps) {
+  const [wordSuggestion, setWordSuggestion] = useState<{ text: string; left: number; top: number } | null>(null);
+  const [predictionInput, setPredictionInput] = useState<{ text: string; cursor: number; composing: boolean } | null>(null);
+  const predictionSequence = useRef(0);
+  const shownPrediction = useRef<{ text: string; cursor: number; suggestion: string; sessionId: string } | null>(null);
+  const stageRef = useRef<HTMLDivElement | null>(null);
+  const sendPredictionFeedback = (accepted: boolean) => {
+    const shown = shownPrediction.current;
+    if (!shown) return;
+    shownPrediction.current = null;
+    void api.ompRpcCommand({ sessionId: shown.sessionId, command: "predict_word_feedback", fields: { text: shown.text, cursor: shown.cursor, suggestion: shown.suggestion, accepted } }).catch(() => undefined);
+  };
+  useEffect(() => {
+    const request = predictionInput;
+    const sessionId = ompPredictionSessionId;
+    const sequence = ++predictionSequence.current;
+    if (!sessionId || !request || request.composing || inputBlocked || !request.text || request.cursor !== request.text.length) {
+      setWordSuggestion(null);
+      return;
+    }
+    const lineStart = request.text.lastIndexOf("\n", Math.max(0, request.cursor - 1)) + 1;
+    const currentLine = request.text.slice(lineStart, request.cursor);
+    if (!/\p{L}[\p{L}\p{N}'’_-]*$/u.test(currentLine) || currentLine.startsWith("/") || /[\\/]/.test(currentLine)) {
+      setWordSuggestion(null);
+      return;
+    }
+    const timer = setTimeout(() => {
+      void api.ompRpcCommand({ sessionId, command: "predict_word", fields: { text: request.text, cursor: request.cursor } })
+        .then((result: any) => {
+          if (sequence !== predictionSequence.current || useAppStore.getState().activeSessionId !== sessionId) return;
+          const suffix = typeof result?.data?.suffix === "string" ? result.data.suffix : "";
+          if (!suffix || /[\r\n]/.test(suffix)) { setWordSuggestion(null); return; }
+          const editor = inputRef.current;
+          const stage = stageRef.current;
+          if (!editor || !stage || document.activeElement !== editor || readEditorValue(editor) !== request.text) return;
+          const selection = window.getSelection();
+          if (!selection || !selection.rangeCount || !editor.contains(selection.anchorNode)) return;
+          const selectedRange = editorSelectionRange(editor);
+          if (selectedRange.start !== request.cursor || selectedRange.end !== request.cursor) return;
+          const caret = selection.getRangeAt(0).cloneRange();
+          caret.collapse(true);
+          const caretRect = caret.getBoundingClientRect();
+          const stageRect = stage.getBoundingClientRect();
+          setWordSuggestion({ text: suffix, left: Math.max(0, caretRect.left - stageRect.left), top: Math.max(0, caretRect.top - stageRect.top) });
+          shownPrediction.current = { text: request.text, cursor: request.cursor, suggestion: suffix, sessionId };
+        })
+        .catch(() => { if (sequence === predictionSequence.current) setWordSuggestion(null); });
+    }, 550);
+    return () => clearTimeout(timer);
+  }, [inputRef, inputBlocked, ompPredictionSessionId, predictionInput]);
   useLayoutEffect(() => {
     const editor = inputRef.current;
     return editor ? installComposerDeletionGuard(editor) : undefined;
@@ -105,7 +162,7 @@ export function ComposerInput({
           ))}
         </div>
       ) : null}
-      <div className="composer-input-stage">
+      <div className="composer-input-stage" ref={stageRef}>
         {/* React does not render children into this node; the editor module
           paints atomic attachment chips imperatively. */}
         <div
@@ -123,6 +180,7 @@ export function ComposerInput({
           autoCapitalize="off"
           translate="no"
           onPaste={onPaste}
+          onContextMenu={onContextMenu}
           onBeforeInput={(event) => {
             const native = event.nativeEvent as InputEvent;
             if (
@@ -141,6 +199,9 @@ export function ComposerInput({
             // An input outside a composition proves the previous one ended,
             // even when the IME never sent compositionend (#929).
             if (!native.isComposing) onSettledInput();
+            sendPredictionFeedback(false);
+            setWordSuggestion(null);
+            setPredictionInput({ text: source, cursor: start, composing: native.isComposing });
             onInput(source, start, native.isComposing);
           }}
           onCompositionStart={onCompositionStart}
@@ -148,15 +209,36 @@ export function ComposerInput({
             const element = event.currentTarget;
             const source = readEditorValue(element);
             const { start } = editorSelectionRange(element);
+            sendPredictionFeedback(false);
+            setWordSuggestion(null);
+            setPredictionInput({ text: source, cursor: start, composing: false });
             onCompositionEnd(event);
             onInput(source, start, false);
           }}
           onFocus={onFocus}
-          onBlur={onBlur}
+          onBlur={() => { sendPredictionFeedback(false); setWordSuggestion(null); onBlur(); }}
           onKeyDown={(event: ReactKeyboardEvent<HTMLDivElement>) => {
             // An Enter that confirms an IME candidate must commit text, never
             // send it or drive autocomplete (D125).
             if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
+            if (wordSuggestion && event.key === "Tab" && !event.shiftKey && !composerAc.hasItems && !composerAc.open && !suggestion) {
+              event.preventDefault();
+              const editor = inputRef.current;
+              if (!editor) return;
+              const currentText = readEditorValue(editor);
+              const currentRange = editorSelectionRange(editor);
+              if (currentText.length !== currentRange.start || currentRange.start !== currentRange.end) { setWordSuggestion(null); return; }
+              setWordSuggestion(null);
+              document.execCommand("insertText", false, wordSuggestion.text);
+              const nextText = readEditorValue(editor);
+              const { start } = editorSelectionRange(editor);
+              const accepted = nextText === `${currentText}${wordSuggestion.text}`;
+              sendPredictionFeedback(accepted);
+              if (!accepted) return;
+              setPredictionInput({ text: nextText, cursor: start, composing: false });
+              onInput(nextText, start, false);
+              return;
+            }
             if (event.key === "Enter" && event.altKey && !event.shiftKey && !event.metaKey && !event.ctrlKey) {
               event.preventDefault();
               composerAc.close();
@@ -219,6 +301,7 @@ export function ComposerInput({
             }
           }}
         />
+        {wordSuggestion ? <span className="composer-omp-word-suggestion" aria-hidden="true" style={{ left: wordSuggestion.left, top: wordSuggestion.top }}>{wordSuggestion.text}</span> : null}
         {/* The plugin suggestion (`pi.composer.suggest`) rides in the
           placeholder layer — never a bubble — and only while the draft is
           empty, which is what makes Tab a plain "write this for me". */}

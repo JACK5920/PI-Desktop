@@ -320,6 +320,75 @@ export class AgentSidecar {
     this.localTools.set(name, handler);
   }
 
+  /**
+   * Whether this desktop runner owns a local tool implementation. External
+   * runtimes use this to avoid declaring a host-gated placeholder (for example
+   * `Computer`) when they cannot route its actual execution back through the
+   * runner.
+   */
+  supportsLocalTool(name: string): boolean {
+    return this.localTools.has(name);
+  }
+
+  /**
+   * Execute one tool for a managed external runtime using the same local-tool
+   * bridge as the bundled sidecar. Host-native tools still go through
+   * host-core; local desktop tools retain their normal authorization gate,
+   * mode restrictions, timeout, cancellation signal, and renderer-owned
+   * implementation.
+   */
+  async executeHostTool(params: Record<string, unknown>): Promise<LocalToolResult> {
+    if (String(params.method ?? "tools.execute") !== "tools.execute") {
+      throw new Error("external runtime may only dispatch tools.execute");
+    }
+    const toolName = String(params.toolName ?? "");
+    const localTool = this.localTools.get(toolName);
+    const mode = String(params.mode ?? "agent");
+    if (localTool) {
+      const planLocalTool =
+        toolName === "Skill" ||
+        toolName === "PluginCheck" ||
+        toolName === "PluginScaffold" ||
+        toolName === "PluginPack" ||
+        toolName.startsWith("plugin_");
+      if ((mode === "plan" || mode === "goal") && planLocalTool && toolName !== "BrowserPreview") {
+        return {
+          ok: false,
+          isError: true,
+          errorCode: "TOOL_DISABLED_IN_PLAN",
+          content: `${toolName} is unavailable in ${mode} mode.`,
+        };
+      }
+      if ((mode === "plan" || mode === "goal") && toolName !== "BrowserPreview") {
+        return {
+          ok: false,
+          isError: true,
+          errorCode: "TOOL_DISABLED_IN_PLAN",
+          content: `${toolName} is unavailable in ${mode} mode.`,
+        };
+      }
+      return this.runLocalTool(
+        localTool,
+        {
+          sessionId: String(params.sessionId ?? ""),
+          toolCallId: String(params.toolCallId ?? ""),
+          args: params.args,
+        },
+        params,
+      );
+    }
+    if (!this.host) throw new Error("host unavailable");
+    return this.host.call<LocalToolResult>("tools.execute", params);
+  }
+
+  /** Abort a local handler without changing the Host permission decision. */
+  abortLocalTool(sessionId: string, toolCallId: string): boolean {
+    const controller = this.localToolControllers.get(`${sessionId}:${toolCallId}`);
+    if (!controller) return false;
+    controller.abort();
+    return true;
+  }
+
   setProjectInstructionResolver(resolver: ProjectInstructionResolver): void {
     this.projectInstructionResolver = resolver;
   }

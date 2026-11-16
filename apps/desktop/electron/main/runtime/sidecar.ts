@@ -1,4 +1,4 @@
-import { IPC, type AgentEventEnvelope, type AppSettings, type ProviderPublic, type UiMessage } from "@pi-desktop/shared";
+import { computerUseModelBindingForSource, IPC, type AgentEventEnvelope, type AppSettings, type ProviderPublic, type UiMessage } from "@pi-desktop/shared";
 import {
   findSubagentProviderSource,
   modelConfigWithBinding,
@@ -577,11 +577,18 @@ export function createSidecarRuntime({
   s.setLocalTool("Computer", createComputerUseTool({
     getHost: () => runtimeState.host,
     cursorOverlay: computerCursorOverlay,
-    resolveProvider: async (settings: AppSettings) => {
-      const binding = settings.computerUse?.model;
-      if (!binding) return null;
+    resolveProvider: async (settings: AppSettings, sessionId: string, source: "dedicated" | "conversation") => {
       const host = runtimeState.host;
       if (!host) throw new Error("host unavailable");
+      let conversationModel: { providerId?: string; modelId?: string } | undefined;
+      if (source === "conversation") {
+        const detail = await host.call<{
+          session?: { providerId?: string; modelId?: string };
+        }>("session.get", { id: sessionId });
+        conversationModel = detail?.session;
+      }
+      const binding = computerUseModelBindingForSource(settings.computerUse, conversationModel);
+      if (!binding) return null;
       const { provider } = await host.call<{ provider?: ProviderPublic }>("providers.get", { id: binding.providerId });
       if (!provider?.enabled || !provider.baseUrl) return null;
       const secret = provider.authKind === "none" || provider.authKind === "oauth"

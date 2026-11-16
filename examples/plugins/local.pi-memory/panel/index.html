@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="pi-plugin-chrome" content="v2" />
+<title>记忆</title>
+<style>
+* { box-sizing: border-box; }
+body { font: 13px/1.6 system-ui, sans-serif; padding: calc(var(--pi-plugin-titlebar-height, 26px) + 14px) 16px 16px; color: #e6e6e6; background: #1b1d21; }
+h1 { font-size: 15px; font-weight: 600; margin: 0 0 4px; }
+button, input, textarea { font: inherit; background: #26292f; color: #e6e6e6; border: 1px solid #3a3e46; border-radius: 6px; padding: 6px 10px; }
+button { cursor: pointer; }
+textarea { resize: vertical; box-sizing: border-box; min-height: 64px; }
+::placeholder { color: #8b919b; opacity: 1; }
+.app-status { color: #9aa0aa; margin: 0 0 8px; }
+.main-grid { display: grid; grid-template-columns: minmax(0, 1.28fr) minmax(255px, .92fr); align-items: start; gap: 14px; }
+.memory-column, .settings-column { min-width: 0; }
+.settings-column { position: sticky; top: 0; max-height: calc(100vh - var(--pi-plugin-titlebar-height, 26px) - 18px); overflow-y: auto; padding-right: 2px; }
+.panel-section { border: 1px solid #343840; border-radius: 9px; padding: 10px; margin-bottom: 10px; background: #202329; }
+.section-title { font-size: 13px; font-weight: 600; margin: 0 0 8px; }
+.search-row, .action-row { display: flex; gap: 6px; margin-bottom: 8px; }
+.search-row input { flex: 1; min-width: 0; }
+.action-row { flex-wrap: wrap; }
+.action-row button { flex: 1 1 auto; padding-inline: 7px; }
+.pref { display: grid; grid-template-columns: minmax(0, 1fr) 94px; align-items: center; gap: 8px; padding: 7px 0; border-bottom: 1px solid #343840; }
+.pref:last-child { border-bottom: 0; }
+.pref label { min-width: 0; }
+.pref input[type=number] { width: 94px; }
+.pref input[type=checkbox] { justify-self: end; width: 18px; height: 18px; accent-color: #7db7ff; }
+.settings-column textarea { display: block; width: 100%; min-width: 0; margin-bottom: 8px; }
+.hint { color: #9aa0aa; font-size: 11px; margin: 8px 0 0; }
+.prefs-actions { display: flex; justify-content: flex-end; margin-top: 9px; }
+ul { list-style: none; padding: 0; margin: 0; }
+li { border-bottom: 1px solid #2e3239; padding: 8px 0; }
+.meta { color: #9aa0aa; font-size: 12px; }
+.body { margin: 4px 0; white-space: pre-wrap; word-break: break-word; }
+.body.collapsed { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden; }
+.entry-editor { display: block; width: 100%; min-width: 0; margin: 4px 0; }
+.ops { display: flex; gap: 6px; margin-top: 6px; }
+.ops button { font-size: 12px; padding: 3px 10px; }
+.ops .danger { color: #f09595; }
+#notice { min-height: 18px; color: #9fe1cb; font-size: 12px; margin-bottom: 8px; }
+.empty { color: #8b919b; padding: 12px 0; }
+@media (max-width: 680px) {
+  .main-grid { grid-template-columns: minmax(0, 1fr); }
+  .settings-column { position: static; max-height: none; overflow: visible; }
+}
+</style>
+</head>
+<body>
+<h1>记忆</h1>
+<div id="status" class="app-status">正在加载…</div>
+<div id="notice"></div>
+<main class="main-grid">
+  <section class="memory-column" aria-label="记忆列表">
+    <div class="search-row"><input id="q" placeholder="搜索记忆" /><button id="search">搜索</button></div>
+    <div class="action-row">
+      <button id="quarantine">审阅隔离项</button>
+      <button id="rebuild">刷新常驻摘要</button>
+      <button id="export">导出</button>
+    </div>
+    <ul id="list"></ul>
+  </section>
+  <aside class="settings-column" aria-label="记忆设置与全局记忆">
+    <section class="panel-section">
+      <h2 class="section-title">记忆行为</h2>
+      <div class="pref"><label for="autoCapture">允许模型主动记录重要记忆</label><input id="autoCapture" type="checkbox" /></div>
+      <div class="pref"><label for="autoInject">自动注入常驻摘要</label><input id="autoInject" type="checkbox" /></div>
+      <div class="pref"><label for="budget">常驻字符预算</label><input id="budget" type="number" min="1000" max="24000" step="500" /></div>
+      <div class="pref"><label for="progressDecay">进度半衰期（天）</label><input id="progressDecay" type="number" min="1" max="365" /></div>
+      <div class="pref"><label for="contextDecay">上下文半衰期（天）</label><input id="contextDecay" type="number" min="1" max="365" /></div>
+      <p class="hint">主动记录是给模型的提示；不会后台自动总结整段聊天。</p>
+      <div class="prefs-actions"><button id="saveSettings">保存设置</button></div>
+    </section>
+    <section class="panel-section">
+      <h2 class="section-title">全局记忆 · 跨项目共享</h2>
+      <textarea id="profile" rows="3" placeholder="用户画像：长期偏好与背景"></textarea>
+      <textarea id="global" rows="5" placeholder="补充全局记忆，一行一条"></textarea>
+      <div class="prefs-actions"><button id="saveGlobal">保存全局记忆</button></div>
+    </section>
+  </aside>
+</main>
+<script>
+const bridge = window.pluginBridge;
+const $ = (id) => document.getElementById(id);
+const TYPE = { profile: '画像', feedback: '反馈', project: '项目笔记', reference: '引用', decision: '决策', pattern: '约定', gotcha: '踩坑', progress: '进度', context: '上下文' };
+const TRUST = { 'user-explicit': '用户手写', 'agent-extracted': '模型抽取', 'transcript-derived': '自动派生' };
+const SCOPE = { global: '全局', project: '项目' };
+let reviewingQuarantine = false;
+
+function label(map, value, fallback) {
+  return map[value] || value || fallback;
+}
+function scopeLabel(value) {
+  if (SCOPE[value]) return SCOPE[value];
+  if (typeof value === 'string' && value.startsWith('project:')) return '项目';
+  if (typeof value === 'string' && value.startsWith('session:')) return '会话';
+  return value || '未知';
+}
+function fmtDate(ms) {
+  const n = Number(ms);
+  if (!Number.isFinite(n) || n <= 0) return '';
+  try { return new Date(n).toLocaleDateString('zh-CN'); } catch (err) { return ''; }
+}
+async function call(channel, payload) {
+  try { return await bridge.invoke(channel, payload || {}); }
+  catch (err) { return { error: String((err && err.message) || err) }; }
+}
+function notice(text, isError) {
+  $('notice').textContent = text || '';
+  $('notice').style.color = isError ? '#f09595' : '#9fe1cb';
+}
+function button(text, cls) {
+  const b = document.createElement('button');
+  b.textContent = text;
+  if (cls) b.className = cls;
+  return b;
+}
+
+function render(entries) {
+  const list = $('list');
+  list.innerHTML = '';
+  if (!entries || !entries.length) {
+    const empty = document.createElement('div');
+    empty.className = 'empty';
+    empty.textContent = '暂无记忆。用「保存全局」写全局层，或让 Agent 调用 memory_remember 写项目层。';
+    list.appendChild(empty);
+    return;
+  }
+  for (const e of entries || []) {
+    const li = document.createElement('li');
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    const bits = [
+      label(TYPE, e.type, '未分类'),
+      scopeLabel(e.scope),
+      label(TRUST, e.trust, '未知来源'),
+      '置信度 ' + Number(e.confidence || 0).toFixed(2),
+    ];
+    const date = fmtDate(e.createdAt);
+    if (date) bits.push(date);
+    if (Array.isArray(e.history) && e.history.length) bits.push('已修改 ' + e.history.length + ' 次');
+    if (e.quarantined) bits.push('已隔离');
+    meta.textContent = bits.join(' · ');
+
+    const body = document.createElement('div');
+    body.className = 'body' + (String(e.content || '').length > 320 ? ' collapsed' : '');
+    body.textContent = String(e.content || '');
+
+    const ops = document.createElement('div');
+    ops.className = 'ops';
+    const edit = button('编辑');
+    const expand = button(body.classList.contains('collapsed') ? '展开' : '收起');
+    const remove = button('归档');
+    const purge = button('永久删除', 'danger');
+    edit.onclick = () => startEdit(li, e, body, ops);
+    expand.onclick = () => {
+      body.classList.toggle('collapsed');
+      expand.textContent = body.classList.contains('collapsed') ? '展开' : '收起';
+    };
+    remove.onclick = () => confirmRetire(e, ops);
+    purge.onclick = () => confirmPurge(e, ops);
+    if (String(e.content || '').length > 320) ops.appendChild(expand);
+    ops.appendChild(edit);
+    ops.appendChild(remove);
+    ops.appendChild(purge);
+
+    li.appendChild(meta);
+    li.appendChild(body);
+    li.appendChild(ops);
+    list.appendChild(li);
+  }
+}
+
+function startEdit(li, e, body, ops) {
+  const ta = document.createElement('textarea');
+  ta.className = 'entry-editor';
+  ta.rows = 3;
+  ta.value = String(e.content || '');
+  const save = button('保存');
+  const cancel = button('取消');
+  li.replaceChild(ta, body);
+  ops.innerHTML = '';
+  ops.appendChild(save);
+  ops.appendChild(cancel);
+  ta.focus();
+  save.onclick = async () => {
+    const result = await call('memory.update', { id: e.id, content: ta.value });
+    if (result && result.error) notice('保存失败：' + result.error, true);
+    else notice('已保存，原文已记入修改历史。');
+    await refresh();
+  };
+  cancel.onclick = () => { notice('已取消编辑。'); refresh(); };
+}
+
+function confirmRetire(e, ops) {
+  const yes = button('确认归档');
+  const no = button('取消');
+  ops.innerHTML = '';
+  ops.appendChild(yes);
+  ops.appendChild(no);
+  yes.onclick = async () => {
+    const result = await call('memory.retire', { id: e.id, reason: '面板归档' });
+    if (result && result.error) notice('归档失败：' + result.error, true);
+    else notice('已归档；历史仍保留，可通过导出恢复。');
+    await refresh();
+  };
+  no.onclick = () => { notice('已取消归档。'); refresh(); };
+}
+
+function confirmPurge(e, ops) {
+  const yes = button('永久删除此条', 'danger');
+  const no = button('取消');
+  ops.innerHTML = '';
+  const warning = document.createElement('span');
+  warning.className = 'meta';
+  warning.textContent = '不可撤销：从记忆库及插件管理的摘要/备份中移除。';
+  ops.appendChild(warning);
+  ops.appendChild(yes);
+  ops.appendChild(no);
+  yes.onclick = async () => {
+    const result = await call('memory.purge', { id: e.id });
+    if (result && result.error) notice('永久删除未完成：' + result.error, true);
+    else notice('已完成永久删除及摘要同步。');
+    await refresh();
+  };
+  no.onclick = () => { notice('已取消永久删除。'); refresh(); };
+}
+
+async function refresh() {
+  const status = await call('memory.status');
+  if (status && status.error) {
+    $('status').textContent = '状态读取失败：' + status.error;
+  } else {
+    $('status').textContent = '活跃 ' + status.active + '/' + status.total
+      + ' · 项目 ' + status.projectEntries + ' / 全局 ' + status.globalEntries
+      + ' / 会话 ' + (status.sessionEntries || 0)
+      + ' · ' + status.tier1Chars + '/' + status.budget + ' 字符'
+      + ' · 约 ' + status.tier1Tokens + ' token'
+      + ' · 隔离 ' + status.quarantined
+      + ' · 回合结束标记 ' + status.turnEndMarkers
+      + (status.storeIssues ? ' · 存储异常 ' + status.storeIssues : '');
+    $('status').textContent += status.workspace ? ' · 工作区 ' + status.workspace.name : ' · 无项目（仅全局记忆可用）';
+    if (status.startupIssue) $('status').textContent += ' · 启动迁移异常：' + status.startupIssue;
+  }
+  const g = await call('memory.user.get');
+  if (g) {
+    $('profile').value = g.profile || '';
+    if (Array.isArray(g.userMemory)) $('global').value = g.userMemory.join('\n');
+  }
+  const pref = await call('memory.settings.get');
+  if (pref && pref.settings) {
+    const fields = { autoCapture: 'autoCaptureMemory', autoInject: 'autoInject', budget: 'tier1BudgetChars', progressDecay: 'progressDecayDays', contextDecay: 'contextDecayDays' };
+    for (const [id, key] of Object.entries(fields)) {
+      const element = $(id);
+      if (document.activeElement === element) continue;
+      if (element.type === 'checkbox') element.checked = pref.settings[key] !== false;
+      else element.value = pref.settings[key] ?? '';
+    }
+  }
+  const list = await call('memory.list');
+  if (list && list.error) notice('列表读取失败：' + list.error, true);
+  render(list && list.entries ? list.entries : []);
+}
+
+$('search').onclick = async () => {
+  reviewingQuarantine = false;
+  $('quarantine').textContent = '审阅隔离项';
+  const query = $('q').value.trim();
+  if (!query) { await refresh(); return; }
+  const result = await call('memory.search', { query: query });
+  if (result && result.error) notice('搜索失败：' + result.error, true);
+  else {
+    render(result.entries || []);
+    notice('找到 ' + (result.entries ? result.entries.length : 0) + ' 条。');
+  }
+};
+$('quarantine').onclick = async () => {
+  reviewingQuarantine = !reviewingQuarantine;
+  $('quarantine').textContent = reviewingQuarantine ? '返回普通记忆' : '审阅隔离项';
+  if (reviewingQuarantine) {
+    const result = await call('memory.quarantine.list');
+    if (result && result.error) notice('隔离项读取失败：' + result.error, true);
+    else {
+      render(result.entries || []);
+      notice('这些条目已隔离，不会注入常驻摘要或被 Agent 检索；可在此审阅、编辑或归档。');
+    }
+  } else {
+    $('q').value = '';
+    await refresh();
+  }
+};
+$('rebuild').onclick = async () => {
+  const result = await call('memory.rebuild');
+  notice(result && result.error ? '刷新失败：' + result.error : '常驻摘要已刷新；未建立向量索引。', Boolean(result && result.error));
+  await refresh();
+};
+$('saveGlobal').onclick = async () => {
+  const lines = $('global').value.split('\n').map((s) => s.trim()).filter(Boolean);
+  const result = await call('memory.user.set', { profile: $('profile').value, userMemory: lines });
+  notice(result && result.error ? '保存失败：' + result.error : '全局记忆已保存。', Boolean(result && result.error));
+  await refresh();
+};
+$('saveSettings').onclick = async () => {
+  const result = await call('memory.settings.set', {
+    autoCaptureMemory: $('autoCapture').checked,
+    autoInject: $('autoInject').checked,
+    tier1BudgetChars: Number($('budget').value),
+    progressDecayDays: Number($('progressDecay').value),
+    contextDecayDays: Number($('contextDecay').value),
+  });
+  notice(result && result.error ? '设置保存失败：' + result.error : '记忆设置已保存。', Boolean(result && result.error));
+  await refresh();
+};
+$('export').onclick = async () => {
+  const data = await call('memory.export');
+  if (data && data.error) { notice('导出失败：' + data.error, true); return; }
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'pi-memory-export.json';
+  a.click();
+  URL.revokeObjectURL(url);
+  notice('已导出 JSON（含归档历史；永久删除的条目不包含）。');
+};
+refresh();
+</script>
+</body>
+</html>

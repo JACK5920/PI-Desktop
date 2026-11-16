@@ -522,6 +522,15 @@ approval snapshots the normalized preference into a new Host-owned lifecycle;
 later preference changes do not rewrite existing cycles. This uses the
 existing settings JSON and does not require a SQLite schema migration.
 
+`AppSettings.autoResumePausedTasks` is an optional boolean preference and is
+off when absent. `pausedTaskSessionIds` contains only sessions whose Agent run
+settled after an explicit graceful pause at a completed assistant/tool
+boundary. Startup consumes each eligible id before sending a new continuation
+prompt; failed admission restores the id. An active turn interrupted before
+that checkpoint is not added and is never replayed. These fields use the
+existing host-persisted settings blob and do not require a schema migration
+(ADR 0354).
+
 The settings blob may still contain legacy prompt-enhancement keys from an
 earlier release. They are retained for rollback and downgrade compatibility,
 but the host no longer reads or writes them as active preferences. When the
@@ -1659,9 +1668,11 @@ cached read is proportional to the requested page. Consequences:
   (`last_seq`), which is a deduplicated logical count: a file line whose index
   commit never landed leaves the counter permanently behind the file, and
   clamping to it cut the newest messages out of the tail.
-- The compaction chain is always returned whole with any window, because the
-  newest checkpoint drives model context regardless of which messages are
-  visible.
+- A bounded renderer window includes the checkpoint active at its first
+  message and checkpoints inside that window; a tail window also includes
+  checkpoint rows trailing its final message. An unbounded model-context read
+  returns the full chain. This keeps renderer pages bounded while ensuring a
+  completed tail compaction remains current after session reload.
 
 A regenerate or edit-resend names its cut by **message identity**, not by a
 count. The renderer holds a bounded, deduplicated, display-filtered view, so an

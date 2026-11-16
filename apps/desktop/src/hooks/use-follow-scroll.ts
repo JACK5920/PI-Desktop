@@ -10,6 +10,7 @@ import {
 import {
   isRecentScrollGesture,
   isScrollGestureInput,
+  isUpwardScrollIntent,
   reduceTranscriptScroll,
   TRANSCRIPT_SCROLL_ROUNDING_TOLERANCE_PX,
   type ScrollInputType,
@@ -17,6 +18,32 @@ import {
 import { readScrollInputContext, stopSmoothScroll } from "../lib/scroll-input";
 import type { DisclosureAnchorNotifier } from "../lib/disclosure-anchor-context";
 import { useDisclosureAnchor } from "./use-disclosure-anchor";
+
+const SCROLL_INPUT_EVENTS: readonly ScrollInputType[] = [
+  "wheel",
+  "touchstart",
+  "touchmove",
+  "pointerdown",
+  "keydown",
+];
+
+function attachScrollInput(
+  element: HTMLElement,
+  handler: (event: Event) => void,
+): void {
+  for (const type of SCROLL_INPUT_EVENTS) {
+    element.addEventListener(type, handler, { passive: true });
+  }
+}
+
+function detachScrollInput(
+  element: HTMLElement,
+  handler: (event: Event) => void,
+): void {
+  for (const type of SCROLL_INPUT_EVENTS) {
+    element.removeEventListener(type, handler);
+  }
+}
 
 export type FollowScroll = {
   scrollRef: RefObject<HTMLDivElement | null>;
@@ -47,6 +74,12 @@ export function useFollowScroll(): FollowScroll {
   const lastScrollTopRef = useRef(0);
   const lastScrollGestureAtRef = useRef(-Infinity);
   const followFrameRef = useRef(0);
+  const boundScrollRef = useRef<HTMLDivElement | null>(null);
+  const resizeObserverRef = useRef<{
+    observer: ResizeObserver;
+    content: HTMLDivElement;
+    scroller: HTMLDivElement;
+  } | null>(null);
   const [showJump, setShowJump] = useState(false);
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "auto") => {
@@ -96,34 +129,17 @@ export function useFollowScroll(): FollowScroll {
       stopSmoothScroll(scrollRef.current);
       lastScrollGestureAtRef.current = performance.now();
       releaseDisclosureAnchor();
+      // Take ownership as soon as the reader asks to move upward, rather than
+      // waiting for a scroll event. A queued ResizeObserver/rAF follow between
+      // wheel and scroll delivery would otherwise pull the viewport back down.
+      if (isUpwardScrollIntent(event.type as ScrollInputType, input)) {
+        cancelFollowScroll();
+        pinnedRef.current = false;
+        setShowJump(true);
+      }
     },
-    [releaseDisclosureAnchor],
+    [cancelFollowScroll, releaseDisclosureAnchor],
   );
-
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    el.addEventListener("wheel", markScrollGesture, { passive: true });
-    el.addEventListener("touchstart", markScrollGesture, { passive: true });
-    el.addEventListener("touchmove", markScrollGesture, { passive: true });
-    el.addEventListener("pointerdown", markScrollGesture, { passive: true });
-    el.addEventListener("keydown", markScrollGesture, { passive: true });
-    return () => {
-      el.removeEventListener("wheel", markScrollGesture);
-      el.removeEventListener("touchstart", markScrollGesture);
-      el.removeEventListener("touchmove", markScrollGesture);
-      el.removeEventListener("pointerdown", markScrollGesture);
-      el.removeEventListener("keydown", markScrollGesture);
-    };
-  }, [markScrollGesture]);
-
-  useLayoutEffect(() => {
-    releaseDisclosureAnchor();
-    cancelFollowScroll();
-    pinnedRef.current = true;
-    setShowJump(false);
-    scrollToBottom();
-  }, [cancelFollowScroll, releaseDisclosureAnchor, scrollToBottom]);
 
   const scheduleFollowScroll = useCallback(() => {
     // A queued follow frame must not move the title the reader just toggled:
@@ -147,6 +163,51 @@ export function useFollowScroll(): FollowScroll {
     cancelFollowScroll();
     scrollToBottom();
   }, [cancelFollowScroll, restoreDisclosureAnchor, scrollToBottom]);
+
+  // The scroller can mount after this hook does: the OMP subagent detail
+  // renders it only once an agent is selected. Bindings therefore follow the
+  // node instead of running once on mount. Without this, that late scroller
+  // never records input, every real scroll-up is read as a layout clamp, and
+  // the follow frame keeps dragging the reader back to the bottom.
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (boundScrollRef.current !== el) {
+      const previous = boundScrollRef.current;
+      if (previous) detachScrollInput(previous, markScrollGesture);
+      boundScrollRef.current = el;
+      if (el) {
+        attachScrollInput(el, markScrollGesture);
+        // A scroller that arrives late opens pinned on its latest content.
+        releaseDisclosureAnchor();
+        cancelFollowScroll();
+        pinnedRef.current = true;
+        setShowJump(false);
+        scrollToBottom();
+      }
+    }
+    const content = contentRef.current;
+    const bound = resizeObserverRef.current;
+    if (bound?.content === content && bound?.scroller === el) return;
+    bound?.observer.disconnect();
+    resizeObserverRef.current = null;
+    if (!content || !el || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(followScrollNow);
+    observer.observe(content, { box: "border-box" });
+    observer.observe(el, { box: "border-box" });
+    resizeObserverRef.current = { observer, content, scroller: el };
+  });
+
+  // Unmount only: the effect above re-binds as nodes change and owns no
+  // cleanup of its own.
+  useEffect(
+    () => () => {
+      if (boundScrollRef.current) {
+        detachScrollInput(boundScrollRef.current, markScrollGesture);
+      }
+      resizeObserverRef.current?.observer.disconnect();
+    },
+    [markScrollGesture],
+  );
 
   useEffect(() => cancelFollowScroll, [cancelFollowScroll]);
   useEffect(() => releaseDisclosureAnchor, [releaseDisclosureAnchor]);
@@ -183,16 +244,6 @@ export function useFollowScroll(): FollowScroll {
       setShowJump(transition.showJump);
     }
   }, [cancelFollowScroll, scheduleFollowScroll]);
-
-  useEffect(() => {
-    const content = contentRef.current;
-    const scroller = scrollRef.current;
-    if (!content || !scroller || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(followScrollNow);
-    ro.observe(content, { box: "border-box" });
-    ro.observe(scroller, { box: "border-box" });
-    return () => ro.disconnect();
-  }, [followScrollNow]);
 
   const jumpToLatest = useCallback(() => {
     releaseDisclosureAnchor();

@@ -1,6 +1,6 @@
 import { useSlotSessionId } from "../../../plugins/renderer-slots/use-slots";
 import { useChatNativeFilesAllowed, useChatSessionCapability } from "../../../hooks/use-chat-session-capability";
-import { useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { IconChevronLeft, IconChevronRight, IconClose, IconDownload, IconExternal, IconFolder, IconMinus, IconPlus } from "../../../components/icons";
 import { Button, TooltipButton } from "../../../components/ui";
@@ -12,6 +12,8 @@ import { useReferencedImageDataUrl } from "../../../lib/use-referenced-image-dat
 import { useAppStore } from "../../../stores/app-store";
 import { generatedImageDownloadName } from "./generated-image-download";
 import { GeneratedImageThumbnail, type GeneratedImageRef } from "./GeneratedImageThumbnail";
+import { ContextMenu } from "../../../components/ContextMenu";
+import { useChatFileMenu } from "../../../hooks/use-chat-file-menu";
 
 export function GeneratedImageViewer({ images, selectedIndex, onSelect, onClose, focusReturnRef }: {
   images: GeneratedImageRef[];
@@ -45,7 +47,16 @@ export function GeneratedImageViewer({ images, selectedIndex, onSelect, onClose,
   const zoom = manualZoom?.src === src ? manualZoom.value : fit;
   const downloadName = generatedImageDownloadName(src, selected?.index ?? 0);
   const openFile = useOpenChatFileRef();
+  const { fileMenu, openFileMenu, closeFileMenu } = useChatFileMenu();
   useBlockingOverlay();
+
+  const handleFileContextMenu = (event: ReactMouseEvent<HTMLElement>) => {
+    const target = event.target instanceof Element
+      ? event.target.closest<HTMLElement>("[data-file-ref]")
+      : null;
+    const path = target?.dataset.fileRef;
+    if (path) openFileMenu(event, { path });
+  };
 
   useLayoutEffect(() => {
     const dialog = dialogRef.current;
@@ -124,6 +135,7 @@ export function GeneratedImageViewer({ images, selectedIndex, onSelect, onClose,
       className="generated-image-viewer"
       aria-label={t("settings.generatedImage", { index: selected.index + 1 })}
       onCancel={(event) => { event.preventDefault(); closeViewer(); }}
+      onContextMenu={handleFileContextMenu}
       onKeyDown={(event) => {
         event.stopPropagation();
         if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
@@ -145,7 +157,7 @@ export function GeneratedImageViewer({ images, selectedIndex, onSelect, onClose,
         {images.length > 1 ? <nav className="generated-image-viewer-thumbs" aria-label={t("chat.imagePreview.title")}>
           {images.map((image, index) => <GeneratedImageThumbnail key={image.path} image={image} selected={index === selectedIndex} onSelect={() => void selectImage(index)} className="generated-image-viewer-thumb" />)}
         </nav> : null}
-        <div className="generated-image-viewer-viewport" ref={viewportRef}>
+        <div className="generated-image-viewer-viewport" ref={viewportRef} data-file-ref={selected.path}>
           {src && failedSrc !== src ? <img
             src={src}
             alt={t("settings.generatedImage", { index: selected.index + 1 })}
@@ -176,6 +188,7 @@ export function GeneratedImageViewer({ images, selectedIndex, onSelect, onClose,
           <Button type="button" variant="ghost" disabled={!size} onClick={() => setManualZoom(null)}>{t("chat.imagePreview.fit")}</Button>
         </div>
       </footer>
+      <ContextMenu state={fileMenu} onClose={closeFileMenu} />
     </dialog>,
   );
 }

@@ -291,7 +291,16 @@ export const AssistantTurn = memo(function AssistantTurn({
   const canMutateHistory = canEditMessages && historyActionsAllowed;
   const summary = getAssistantTurnSummary(entry);
   const { actionMessage, metaMessage, latestUsageMessage, usage, responseDurationMs, responseOutputTokens } = summary;
-  const modelId = metaMessage?.modelId ?? latestUsageMessage?.modelId;
+  // New replies carry their own provenance; rows written before the engine was
+  // recorded fall back to the pinned session engine, the best evidence they have.
+  const engine =
+    metaMessage?.engineOrigin ??
+    (session?.agentEngine === "pi" || session?.agentEngine === "omp"
+      ? session.agentEngine
+      : undefined);
+  const modelSource = metaMessage?.modelId ? metaMessage : latestUsageMessage;
+  const modelId = modelSource?.modelId;
+  const responseModelId = modelSource?.responseModelId;
   const complete = !isActive && !summary.hasError && summary.hasContent && Boolean(actionMessage);
   // A live reply is joined only on menu/copy demand. Finished reply plugins
   // still receive exactly the text that the completed turn's Copy action uses.
@@ -438,7 +447,9 @@ export const AssistantTurn = memo(function AssistantTurn({
         {slotReply ? <TurnChangesCard tools={tools} /> : null}
         {!isActive && metaMessage ? (
           <MessageMeta
+            engine={engine}
             modelId={modelId}
+            responseModelId={responseModelId}
             usage={usage}
             responseDurationMs={responseDurationMs}
             responseOutputTokens={responseOutputTokens}

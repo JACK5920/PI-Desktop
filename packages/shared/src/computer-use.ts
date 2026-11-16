@@ -31,6 +31,9 @@ export type ComputerGrantScope = "desktop" | "window";
 /** One `{ providerId, modelId }` the user picked, as in `imageGeneration`. */
 export type ComputerModelBinding = { providerId: string; modelId: string };
 
+/** Which model drives the native Computer loop. Missing keeps legacy dedicated-model behavior. */
+export type ComputerUseModelSource = "dedicated" | "conversation";
+
 /** User-overridable application-level policy guards. Missing values keep the existing defaults. */
 export type ComputerUseRestrictions = {
   /** One switch that disables the guards below without erasing their individual values. */
@@ -43,6 +46,8 @@ export type ComputerUseRestrictions = {
 
 export type ComputerUseSettings = {
   enabled: boolean;
+  /** `conversation` follows the host session's selected chat model; absent means `dedicated`. */
+  modelSource?: ComputerUseModelSource;
   /** Absent means unconfigured; the tool refuses rather than falling back. */
   model?: ComputerModelBinding | null;
   defaultInputPolicy?: ComputerInputPolicy;
@@ -59,6 +64,18 @@ export type ComputerUseSettings = {
   idleExpiryMs?: number;
   restrictions?: ComputerUseRestrictions;
 };
+
+/** Resolve the model binding without ever falling back across the selected source. */
+export function computerUseModelBindingForSource(
+  settings: Pick<ComputerUseSettings, "model" | "modelSource"> | null | undefined,
+  conversationModel?: { providerId?: string | null; modelId?: string | null } | null,
+): ComputerModelBinding | null {
+  if (!settings || (settings.modelSource ?? "dedicated") === "dedicated") {
+    return settings?.model ?? null;
+  }
+  if (!conversationModel?.providerId || !conversationModel.modelId) return null;
+  return { providerId: conversationModel.providerId, modelId: conversationModel.modelId };
+}
 
 export const COMPUTER_USE_DEFAULTS = {
   inputPolicy: "autonomous-in-scope",
@@ -105,6 +122,7 @@ export function validateComputerUseSettings(value: unknown): ComputerUseSettings
   const input = value as Record<string, unknown>;
   const allowed = [
     "enabled",
+    "modelSource",
     "model",
     "defaultInputPolicy",
     "defaultCapture",
@@ -124,6 +142,11 @@ export function validateComputerUseSettings(value: unknown): ComputerUseSettings
   };
 
   const result: ComputerUseSettings = { enabled: input.enabled };
+
+  if (input.modelSource !== undefined) {
+    if (input.modelSource !== "dedicated" && input.modelSource !== "conversation") return invalid();
+    result.modelSource = input.modelSource;
+  }
 
   if (input.model !== undefined && input.model !== null) {
     if (!input.model || typeof input.model !== "object" || Array.isArray(input.model)) return invalid();
@@ -261,6 +284,18 @@ export type ComputerGrantView = {
 
 export type ComputerNode = {
   uid: string;
+  /**
+   * Identity that survives a new observation.
+   *
+   * `uid` is a dispatch handle: the cua backend mints `{snapshot}:{row}`, so it
+   * changes every time the window is read. That is what lets the driver refuse
+   * a stale handle — but it also means `uid` cannot answer "is this the same
+   * element as before". Anything comparing two observations must use this.
+   *
+   * Absent only for a backend that cannot compute it; callers fall back to
+   * `uid`, which is the pre-identity behaviour.
+   */
+  identity?: string;
   role: string;
   /** Accessible name, truncated. Absent when the platform exposes none. */
   label?: string;
@@ -321,23 +356,48 @@ export type ComputerAction = {
   scroll?: { dx: number; dy: number };
   option?: string;
 };
-
 export type ComputerActResult = {
   grantId: string;
   revision: number;
   remainingBudget: number;
   /** What the backend actually dispatched, for the audit trail and the log. */
   dispatched: "accessibility-action" | "window-event" | "system-input";
+  /**
+   * Whether a content write was confirmed by reading the field back.
+   *
+   * A write's result is the content of a field, and the accessibility tree
+   * never publishes a field's content, so the caller cannot confirm it from
+   * the tree. The backend can: it reads the field back and compares it with
+   * what was written, and only the verdict crosses this boundary.
+   *
+   * Absent when the backend could not tell -- which is not a failure.
+   */
+  verified?: boolean;
 };
 
-/** A truthful, value-free marker for what the loop has established so far. */
+
 export type ComputerUseVerification =
   | "observation-only"
   | "observed"
   | "dispatched"
   | "observed-change"
   | "observed-no-change"
+  /**
+   * The action was not dispatched: the loop had already sent the same write
+   * to the same element and did not send it twice. The model has to be able
+   * to tell this apart from a dispatched action, because the element list
+   * never shows a field's content -- without the distinction the model keeps
+   * retrying the same write until the step limit.
+   */
+  | "skipped-duplicate"
   | "model-confirmed"
+  /**
+   * The action ran, the accessibility tree really did not change, and the
+   * result is one UIA cannot express (a selection, a scroll position, focus).
+   * Reported as self-reported rather than as verified: the alternative is an
+   * agent that either retries forever or lies about having evidence.
+   */
+  | "unverified-by-design"
   | "unverified"
   | "refused";
 
@@ -350,6 +410,19 @@ export type ComputerStepRecord = {
   target?: string;
   ok: boolean;
   errorCode?: string;
+  /**
+   * Why the host refused, in the host's own words.
+   *
+   * The refusal code alone says that something was denied, never what: a
+   * rejected chord and an unsupported target both answer
+   * `COMPUTER_ACTION_REJECTED`, and a model that cannot tell them apart
+   * retries variants of the same action until the step limit. The host's
+   * message is diagnostic text by contract -- it names keys, control types
+   * and counts, and carries no window text, typed value or pixels -- so it
+   * is what lets the model choose a different action instead of a different
+   * spelling of the same one.
+   */
+  reason?: string;
   verification?: ComputerUseVerification;
   /** Number of exact current-observation UIDs cited by a `done` answer. */
   evidenceCount?: number;
@@ -373,7 +446,7 @@ export type ComputerRunResult = {
   /** Present when `outcome` is `needs-user`: what the model wants to ask. */
   question?: string;
   errorCode?: string;
-  verification?: "model-confirmed" | "unverified" | "observation-only";
+  verification?: "model-confirmed" | "unverified-by-design" | "unverified" | "observation-only";
 };
 
 /** Sanitized, ephemeral UI status. It is not written to the transcript or audit log. */
@@ -458,4 +531,57 @@ export function validateComputerToolArgs(value: unknown): ComputerToolArgs {
     args.observeOnly = input.observeOnly;
   }
   return args;
+}
+
+/**
+ * Schema version of the `computer.*` RPC surface this build understands.
+ *
+ * The Electron bundle and the `host-core` sidecar are versioned separately,
+ * so an update can leave them out of step. Every shape change to the RPC
+ * payload - a renamed field, a changed enum, a new required argument - is a
+ * breaking change, and the mismatch has to be visible before an action runs
+ * rather than as a puzzling failure in the middle of a run.
+ *
+ * The host declares the range it supports; `host-core` reports the version
+ * it speaks. A version outside the range is refused.
+ */
+export const COMPUTER_RPC_SCHEMA_MIN = 1;
+export const COMPUTER_RPC_SCHEMA_MAX = 1;
+
+/** What `host-core` reports about the contract it speaks. */
+export type ComputerRpcSchema = {
+  schemaVersion: number;
+  hostCoreVersion?: string;
+};
+
+/**
+ * Whether a host-reported schema version is one this build can talk to.
+ *
+ * A host that reports nothing at all is treated as incompatible rather than
+ * as compatible: an older sidecar that predates the version field is exactly
+ * the case this check exists to catch.
+ */
+export function isComputerRpcSchemaCompatible(version: unknown): boolean {
+  if (typeof version !== "number" || !Number.isInteger(version)) return false;
+  return version >= COMPUTER_RPC_SCHEMA_MIN && version <= COMPUTER_RPC_SCHEMA_MAX;
+}
+
+/**
+ * A message a caller can show the user when the two sides do not match.
+ *
+ * It names both versions and what to do, because the failure is a build
+ * mismatch and the fix is not something the user can reason out from a
+ * stack trace.
+ */
+export function computerRpcSchemaMismatchMessage(
+  reported: unknown,
+  hostCoreVersion?: string,
+): string {
+  const shown = typeof reported === "number" ? String(reported) : "unknown";
+  const side = hostCoreVersion ? ` (host-core ${hostCoreVersion})` : "";
+  return (
+    `The Computer Use RPC contract does not match this build: host-core speaks schema ${shown}${side}, ` +
+    `this build supports ${COMPUTER_RPC_SCHEMA_MIN}-${COMPUTER_RPC_SCHEMA_MAX}. ` +
+    `Update PI-Desktop so the app and its host-core sidecar are the same version.`
+  );
 }

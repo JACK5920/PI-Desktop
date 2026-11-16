@@ -36,6 +36,8 @@ export type ShutdownDependencies = {
   state: ShutdownState;
   getHost: () => HostProcess | null;
   getSidecar: () => AgentSidecar | null;
+  getOmpRpcRuntime?: () => { stopAll: () => Promise<void> } | undefined;
+  lockAbortReason: (sessionId: string, turnId: string | null | undefined) => void;
   getMcpControl: () => McpControlServer | null;
   activeTurns: Map<string, string>;
   persistenceOutbox: PersistenceOutbox;
@@ -63,6 +65,8 @@ export function registerShutdownHandlers({
   state,
   getHost,
   getSidecar,
+  getOmpRpcRuntime,
+  lockAbortReason,
   getMcpControl,
   activeTurns,
   persistenceOutbox,
@@ -174,9 +178,13 @@ export function registerShutdownHandlers({
         activeTurns,
         getHost,
         getSidecar,
+        lockAbortReason,
         inflightCheckpointer,
         persistenceOutbox,
         logger,
+      });
+      await getOmpRpcRuntime?.()?.stopAll().catch((error: unknown) => {
+          logger.app("lifecycle", "warn", "OMP RPC runtime shutdown failed", { data: String(error) });
       });
       // Panel windows and docked views are the only pages that call the plugin
       // runtime over the panel bridge. They are torn down, and their pages are
@@ -250,6 +258,7 @@ type TurnSettlementDependencies = {
   activeTurns: Map<string, string>;
   getHost: () => HostProcess | null;
   getSidecar: () => AgentSidecar | null;
+  lockAbortReason: (sessionId: string, turnId: string | null | undefined) => void;
   inflightCheckpointer: InflightCheckpointer;
   persistenceOutbox: PersistenceOutbox;
   logger: Pick<Logger, "app">;
@@ -259,6 +268,7 @@ async function settleRunningTurnsForQuit({
   activeTurns,
   getHost,
   getSidecar,
+  lockAbortReason,
   inflightCheckpointer,
   persistenceOutbox,
   logger,
@@ -277,14 +287,18 @@ async function settleRunningTurnsForQuit({
     await Promise.allSettled(
       sessions.map((sessionId) =>
         Promise.race([
-          sidecar.call("agent.abort", { sessionId }),
+          (async () => {
+            const turnId = activeTurns.get(sessionId);
+            lockAbortReason(sessionId, turnId);
+            if (sidecar) await sidecar.call("agent.abort", { sessionId, ...(turnId ? { turnId } : {}) });
+          })(),
           new Promise((resolve) => setTimeout(resolve, 800)),
         ]),
       ),
     );
   }
-  // The abort surfaces as message_end + error/agent_end, which finishTurn
-  // turns into a settled turn and an outbox append. Wait for that, bounded.
+  // The abort surfaces as message_end + error/agent_end and is persisted by
+  // the sidecar. Wait for that, bounded.
   while (Date.now() < deadline) {
     await persistenceOutbox.flush(getHost);
     if (activeTurns.size === 0 && persistenceOutbox.size() === 0) break;

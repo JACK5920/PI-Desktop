@@ -4,8 +4,10 @@ import {
   AgentSidecar as RuntimeAgentSidecar,
   type StderrHandler,
 } from "@pi-desktop/host-runtime";
+import { PROTOCOL_VERSION } from "@pi-desktop/shared";
 import { redactValue } from "./logger";
 import { getModuleDirectory } from "./module-path";
+import { resolvePiSidecarEntry } from "./pi/sidecar-entry";
 
 export type {
   LocalToolHandler,
@@ -16,9 +18,16 @@ export type {
   VendorAuthResolver,
 } from "@pi-desktop/host-runtime";
 
+let pinnedSidecarEntry: string | undefined;
+
 function resolveSidecarEntry(): string {
+  if (pinnedSidecarEntry) return pinnedSidecarEntry;
   const candidates = [
     join(process.resourcesPath || "", "agent-runtime/sidecar.js"),
+    join(
+      getModuleDirectory(import.meta.url),
+      "../../../../packages/agent-runtime/dist-bundle/sidecar.js",
+    ),
     join(
       getModuleDirectory(import.meta.url),
       "../../../agent-runtime/dist/sidecar.js",
@@ -28,13 +37,14 @@ function resolveSidecarEntry(): string {
       "../../../../packages/agent-runtime/dist/sidecar.js",
     ),
   ];
-  for (const c of candidates) {
-    if (c && existsSync(c)) return c;
-  }
-  return join(
-    getModuleDirectory(import.meta.url),
-    "../../../../packages/agent-runtime/dist/sidecar.js",
-  );
+  const bundledEntry = candidates.find((candidate) => candidate && existsSync(candidate)) ?? candidates[candidates.length - 1]!;
+  const managedEntry = resolvePiSidecarEntry({
+    dataDir: process.env.PI_DESKTOP_DATA_DIR,
+    bundledRuntimeDir: join(bundledEntry, ".."),
+    protocolVersion: PROTOCOL_VERSION,
+  });
+  pinnedSidecarEntry = managedEntry ?? bundledEntry;
+  return pinnedSidecarEntry;
 }
 
 function fallbackStderrLogger(text: string): void {

@@ -1206,6 +1206,25 @@ describe("explicit output-limit repair", () => {
     });
   });
 
+  it.each([
+    ["Perplexity", "400 max_tokens must be less than or equal to 32768", 32768],
+    ["MiniMax", "400 invalid params, model[MiniMax-M3] does not support max tokens > 524288 (2013)", 524288],
+  ])("clamps a published %s output-token ceiling", async (_provider, message, ceiling) => {
+    const result = await repairPayload(message, {
+      model: "provider-model",
+      max_tokens: 600_000,
+      temperature: 0,
+    });
+
+    expect(result.attempts).toBe(2);
+    expect(result.repaired).toEqual({
+      marked: true,
+      model: "provider-model",
+      max_tokens: ceiling,
+      temperature: 0,
+    });
+  });
+
   it("surfaces the original ceiling error when the clamped attempt fails the same way", async () => {
     let attempts = 0;
     const claim = vi.fn(() => undefined);

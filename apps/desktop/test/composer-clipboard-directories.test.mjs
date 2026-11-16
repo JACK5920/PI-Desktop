@@ -14,39 +14,45 @@ function load(path) {
   new Function("require", "module", "exports", result.outputFiles[0].text)(require, module, module.exports);
   return module.exports;
 }
-const { nativeClipboardPaths, readComposerClipboardDirectories } = load("../electron/main/composer-clipboard-directories.ts");
+const { execFileAsync, nativeClipboardPaths, readComposerClipboardDirectories } = load("../electron/main/composer-clipboard-directories.ts");
 const { serializeComposerFileReferences, serializeInlineComposerFileReferences } = load("../../../packages/shared/src/composer-trigger.ts");
 const clipboard = values => ({ availableFormats: () => Object.keys(values), readBuffer: format => Buffer.from(values[format] ?? "") });
 
-test("native URI file lists preserve order and decode spaces/unicode without reading clipboard text", () => {
-  assert.deepEqual(nativeClipboardPaths(clipboard({
+test("native URI file lists preserve order and decode spaces/unicode without reading clipboard text", async () => {
+  assert.deepEqual(await nativeClipboardPaths(clipboard({
     "text/uri-list": "# comment\r\nfile:///tmp/one%20folder\r\nfile:///tmp/%E4%B8%AD%E6%96%87\r\nhttps://example.com/ignored",
     "text/plain": "unrelated clipboard text",
   }), "linux"), ["/tmp/one folder", "/tmp/中文"]);
-  assert.deepEqual(nativeClipboardPaths(clipboard({ "x-special/gnome-copied-files": "copy\nfile:///tmp/a\nfile:///tmp/a" }), "linux"), ["/tmp/a"]);
+  assert.deepEqual(await nativeClipboardPaths(clipboard({ "x-special/gnome-copied-files": "copy\nfile:///tmp/a\nfile:///tmp/a" }), "linux"), ["/tmp/a"]);
 });
 
-test("native file lists enforce metadata and selection bounds", () => {
-  assert.throws(() => nativeClipboardPaths(clipboard({ "text/uri-list": "x".repeat(1024 * 1024 + 1) }), "linux"), /too large/);
-  assert.throws(() => nativeClipboardPaths(clipboard({ "text/uri-list": Array.from({ length: 21 }, (_, i) => `file:///tmp/${i}`).join("\n") }), "linux"), /too many/);
-  assert.throws(() => nativeClipboardPaths(clipboard({ "text/uri-list": "file:///tmp/a%00b" }), "linux"), /null|invalid|encoded/i);
+test("native file lists enforce metadata and selection bounds", async () => {
+  await assert.rejects(nativeClipboardPaths(clipboard({ "text/uri-list": "x".repeat(1024 * 1024 + 1) }), "linux"), /too large/);
+  await assert.rejects(nativeClipboardPaths(clipboard({ "text/uri-list": Array.from({ length: 21 }, (_, i) => `file:///tmp/${i}`).join("\n") }), "linux"), /too many/);
+  await assert.rejects(nativeClipboardPaths(clipboard({ "text/uri-list": "file:///tmp/a%00b" }), "linux"), /null|invalid|encoded/i);
 });
 
-test("Windows uses the complete native FileDropList instead of custom CF_HDROP or one FileNameW", () => {
+test("Windows uses the complete native FileDropList instead of custom CF_HDROP or one FileNameW", async () => {
   const paths = ["C:\\first folder", "C:\\notes.txt", "D:\\中文"];
-  assert.deepEqual(nativeClipboardPaths({ readBuffer: () => assert.fail("Windows must use its native file list") }, "win32", () => paths), paths);
-  assert.throws(() => nativeClipboardPaths(clipboard({}), "win32", () => ["relative"]), /invalid clipboard file path/);
+  assert.deepEqual(await nativeClipboardPaths({ readBuffer: () => assert.fail("Windows must use its native file list") }, "win32", async () => paths), paths);
+  await assert.rejects(nativeClipboardPaths(clipboard({}), "win32", async () => ["relative"]), /invalid clipboard file path/);
 });
 
-test("normalized MIME enumeration does not hide raw Finder file URLs", () => {
+test("normalized MIME enumeration does not hide raw Finder file URLs", async () => {
   const native = clipboard({ "public.file-url": "file:///tmp/synthetic-folder" });
   native.availableFormats = () => ["text/uri-list"];
-  assert.deepEqual(nativeClipboardPaths(native, "darwin"), ["/tmp/synthetic-folder"]);
+  assert.deepEqual(await nativeClipboardPaths(native, "darwin"), ["/tmp/synthetic-folder"]);
 });
 
-test("macOS Finder file-list metadata is decoded in full", { skip: process.platform !== "darwin" }, () => {
+test("macOS Finder file-list metadata is decoded in full", { skip: process.platform !== "darwin" }, async () => {
   const xml = '<?xml version="1.0"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><array><string>/tmp/first folder</string><string>/tmp/second</string></array></plist>';
-  assert.deepEqual(nativeClipboardPaths(clipboard({ NSFilenamesPboardType: xml }), "darwin"), ["/tmp/first folder", "/tmp/second"]);
+  assert.deepEqual(await nativeClipboardPaths(clipboard({ NSFilenamesPboardType: xml }), "darwin"), ["/tmp/first folder", "/tmp/second"]);
+});
+
+test("async child output stays binary and a hung helper rejects at its timeout", async () => {
+  const binary = await execFileAsync(process.execPath, ["-e", "process.stdout.write(Buffer.from([0, 255, 1]))"], {});
+  assert.deepEqual([...binary], [0, 255, 1]);
+  await assert.rejects(execFileAsync(process.execPath, ["-e", "setTimeout(() => {}, 10000)"], { timeout: 50 }), /clipboard file list read failed|timed out/i);
 });
 
 test("directory metadata never copies a tree and mixed files use the existing import capability", async t => {

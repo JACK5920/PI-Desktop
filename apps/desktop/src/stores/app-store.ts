@@ -25,6 +25,7 @@ import {
 } from "../lib/sidebar-session-status";
 import {
   projectWorkspaceFromPath,
+  readLastOpenedSessionId,
   saveSidebarPreferences,
 } from "../lib/sidebar-preferences";
 import {
@@ -36,6 +37,7 @@ import {
   latestPlanProposal,
 } from "../lib/plan-mode-state";
 import { settleBootstrapRequests } from "../lib/bootstrap-result";
+import { PAUSED_TASK_CONTINUATION_PROMPT, withPausedTask, withoutPausedTask } from "../lib/paused-task-recovery";
 import {
   createSessionRuntime,
   type SessionRuntime,
@@ -425,6 +427,46 @@ export const useAppStore = create<AppState>((set, get) => {
         };
       });
 
+      // Only tasks explicitly paused after a completed Agent turn are safe to
+      // continue automatically. An uncleanly interrupted run has no marker and
+      // is never replayed. Clear each marker durably before submitting so a
+      // crash during recovery cannot duplicate the continuation on next boot.
+      const safelyPausedIds = (settings?.autoResumePausedTasks === true
+        ? settings.pausedTaskSessionIds ?? []
+        : []).filter((id) => hydratedSessions.some((session) =>
+        session.id === id && session.source !== "pi-native" && !id.startsWith("remote:"),
+      ));
+      if (safelyPausedIds.length > 0 && settings) {
+        const cleared = safelyPausedIds.reduce(withoutPausedTask, settings);
+        void api.setSettings(cleared).then(async () => {
+          if (generation !== bootstrapGeneration) return;
+          set({ settings: cleared });
+          const failedIds: string[] = [];
+          for (const sessionId of safelyPausedIds) {
+            if (generation !== bootstrapGeneration) return;
+            const accepted = await get().sendPrompt(
+              PAUSED_TASK_CONTINUATION_PROMPT,
+              undefined,
+              sessionId,
+            );
+            if (!accepted) failedIds.push(sessionId);
+          }
+          if (failedIds.length > 0 && generation === bootstrapGeneration) {
+            const latest = get().settings ?? cleared;
+            const restored = failedIds.reduce(withPausedTask, latest);
+            try {
+              await api.setSettings(restored);
+              set({ settings: restored });
+            } catch {
+              // No automatic retry: failure to restore a marker must not turn
+              // into an unbounded or duplicate submission loop.
+            }
+          }
+        }).catch(() => {
+          // Preserve the durable checkpoint when it cannot be claimed.
+        });
+      }
+
       // The artifact's surface depends on which plugin views are launchable, and
       // the launcher list is only read after `ready`. Resolve it before the
       // restore, so the approval artifact does not fall back to the host file tab
@@ -445,17 +487,33 @@ export const useAppStore = create<AppState>((set, get) => {
           branch: currentWorkspace.branch,
         });
       }
-      // Codex opens an empty draft home ("What can I help you build?") rather than
-      // restoring a prior transcript as the first paint. A live host plan is
-      // the exception: its owning session must be visible so approval can be
-      // restored after a renderer reload.
+      // Reopen the most recent conversation instead of a blank home: the model
+      // chip and the work-panel toggle are bound to a session, so an empty first
+      // paint leaves both disabled until the user starts typing. A live host
+      // plan still outranks the restore because its approval must be visible.
       const livePlanSessionId = activePendingPlans[0]?.sessionId;
-      if (livePlanSessionId) {
+      // Reopen the conversation the window was actually showing. Falling back
+      // to the most recently updated session jumped to whichever project had
+      // the newest activity, even when the user had been in a temporary chat.
+      const lastOpenedId = readLastOpenedSessionId();
+      const lastOpened = lastOpenedId
+        ? hydratedSessions.find((session) => session.id === lastOpenedId)
+        : undefined;
+      const restoreTarget = livePlanSessionId
+        ? hydratedSessions.find((session) => session.id === livePlanSessionId)
+        : lastOpened ??
+          sessionRuntime.latestSessionInScope(
+            hydratedSessions,
+            currentWorkspace?.path ?? null,
+            get().sessionMeta,
+          );
+      if (restoreTarget && !restoreTarget.id.startsWith("remote:")) {
+        await get().selectSession(restoreTarget.id);
+      } else if (livePlanSessionId) {
         await get().selectSession(livePlanSessionId);
       } else {
-        // App startup keeps the home composer unpersisted. Explicit New Task
-        // actions use the durable empty-session slot below, but launch itself
-        // must not create a history row merely because the app was opened.
+        // Nothing to restore yet: keep the home composer unpersisted so launch
+        // never creates a history row merely because the app was opened.
         set((s) => {
           const stack = s.navStack.slice(0, s.navIndex + 1);
           const nextStack = [...stack, { page: "chat" as const }].slice(-50);

@@ -122,25 +122,17 @@ test("a second launch surfaces the running window instead of a new one", () => {
   assert.doesNotMatch(body, /new BrowserWindow|createWindow\(\)/);
 });
 
-test("a run with its own data directory keeps the current start behavior", () => {
-  // The lock is scoped to the installation, not to `PI_DESKTOP_DATA_DIR`. E2E
-  // harnesses, the capture rig, and side-by-side profiles point at their own
-  // data directory, share no database, outbox, or logs with the default
-  // installation, and have to stay launchable while one is running.
-  assert.match(
-    installationSource,
-    /const singleInstanceRequired = !process\.env\.PI_DESKTOP_DATA_DIR;/,
-  );
-  assert.match(
-    installationSource,
-    /const hasSingleInstanceLock = singleInstanceRequired\s*\n?\s*\? app\.requestSingleInstanceLock\(\)\s*\n?\s*: true;/,
-  );
+test("an explicit data directory still takes a per-profile single-instance lock", { timeout: 60_000 }, async (t) => {
+  const override = join(tmpdir(), "explicit-installation-profile");
+  const value = await launchInstallation(t, { override, ownsLock: true });
+  assert.equal(value.installation.hasSingleInstanceLock, true);
+  assert.equal(value.calls.filter(([kind]) => kind === "lock").length, 1);
+  assert.deepEqual(value.storageCalls, [[override, true]]);
 });
 
 test("managed relaunch clears the published root before locking and scheduling storage", { timeout: 60_000 }, async (t) => {
   const value = await launchInstallation(t, { override: join(tmpdir(), "previous-published-root"), managed: true });
   assert.equal(process.env.PI_DESKTOP_DATA_DIR, undefined);
-  assert.equal(value.installation.singleInstanceRequired, true);
   assert.equal(value.installation.hasSingleInstanceLock, true);
   assert.equal(value.calls.filter(([kind]) => kind === "lock").length, 1);
   assert.deepEqual(value.storageCalls, [[value.installation.defaultDataDir, false]]);
@@ -150,15 +142,15 @@ test("managed relaunch clears the published root before locking and scheduling s
   assert.equal(value.harness.bootCount, 1);
 });
 
-test("explicit profile overrides still skip installation locking", { timeout: 60_000 }, async (t) => {
+test("an explicit profile that loses its lock does not initialize storage", { timeout: 60_000 }, async (t) => {
   const override = join(tmpdir(), "explicit-installation-profile");
   const value = await launchInstallation(t, { override, ownsLock: false });
   assert.equal(process.env.PI_DESKTOP_DATA_DIR, override);
-  assert.equal(value.installation.singleInstanceRequired, false);
-  assert.equal(value.installation.hasSingleInstanceLock, true);
+  assert.equal(value.installation.hasSingleInstanceLock, false);
   assert.equal(value.installation.defaultDataDir, override);
-  assert.equal(value.calls.some(([kind]) => kind === "lock" || kind === "quit"), false);
-  assert.deepEqual(value.storageCalls, [[override, true]]);
+  assert.equal(value.calls.filter(([kind]) => kind === "lock").length, 1);
+  assert.equal(value.calls.some(([kind]) => kind === "quit"), true);
+  assert.deepEqual(value.storageCalls, []);
 });
 
 test("a duplicate launch never initializes storage or imports the full runtime", { timeout: 60_000 }, async (t) => {

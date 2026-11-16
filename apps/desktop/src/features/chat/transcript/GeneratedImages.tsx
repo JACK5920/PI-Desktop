@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { useTranslation } from "react-i18next";
 import type { UiMessage } from "@pi-desktop/shared";
 import { useReferencedImageDataUrl } from "../../../lib/use-referenced-image-data-url";
@@ -9,6 +9,8 @@ import { IconDownload } from "../../../components/icons";
 import { GeneratedImageViewer } from "./GeneratedImageViewer";
 import { GeneratedImageThumbnail, type GeneratedImageRef } from "./GeneratedImageThumbnail";
 import { generatedImageDownloadName } from "./generated-image-download";
+import { ContextMenu } from "../../../components/ContextMenu";
+import { useChatFileMenu } from "../../../hooks/use-chat-file-menu";
 
 function ImageResult({
   path,
@@ -25,7 +27,7 @@ function ImageResult({
   const dataUrl = useReferencedImageDataUrl(path, mimeType);
   const downloadName = generatedImageDownloadName(dataUrl, index);
   return (
-    <figure className="generated-image-card">
+    <figure className="generated-image-card" data-file-ref={path}>
       <TooltipButton
         type="button"
         className="generated-image-preview"
@@ -54,6 +56,7 @@ export function GeneratedImages({ message }: { message: UiMessage }) {
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
   const focusReturnRef = useRef<HTMLElement | null>(null);
+  const { fileMenu, openFileMenu, closeFileMenu } = useChatFileMenu();
   if (message.toolName !== "GenerateImages") return null;
   const payload = toolResultPayload(message);
   const record =
@@ -69,6 +72,13 @@ export function GeneratedImages({ message }: { message: UiMessage }) {
   });
   const selectedPosition = Math.min(selectedImageIndex, Math.max(0, images.length - 1));
   const selectedImage = images[selectedPosition];
+  const handleFileContextMenu = (event: ReactMouseEvent<HTMLElement>) => {
+    const target = event.target instanceof Element
+      ? event.target.closest<HTMLElement>("[data-file-ref]")
+      : null;
+    const path = target?.dataset.fileRef;
+    if (path) openFileMenu(event, { path });
+  };
   const needsSetup =
     record?.kind === "image-generation-error" &&
     [
@@ -78,7 +88,7 @@ export function GeneratedImages({ message }: { message: UiMessage }) {
       "IMAGE_AUTH_UNSUPPORTED",
     ].includes(String(record.errorCode));
   return (
-    <div className="generated-images" aria-label={t("settings.imageModel")}>
+    <div className="generated-images" aria-label={t("settings.imageModel")} onContextMenu={handleFileContextMenu}>
       {needsSetup ? (
         <div>
           <p>{t("settings.imageModelSetupHint")}</p>
@@ -143,6 +153,7 @@ export function GeneratedImages({ message }: { message: UiMessage }) {
           focusReturnRef={focusReturnRef}
         />
       ) : null}
+      <ContextMenu state={fileMenu} onClose={closeFileMenu} />
     </div>
   );
 }

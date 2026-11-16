@@ -1027,6 +1027,24 @@ pub(crate) fn migrate_v28_to_v29(conn: &Connection, path: &Path) -> Result<()> {
 /// v30 adds an explicit unlimited-token mode while retaining the last finite
 /// token budget. Existing Goal rows remain finite at their saved value.
 pub(crate) fn migrate_v29_to_v30_tx(tx: &rusqlite::Transaction<'_>) -> Result<()> {
+    // Some historical v29 databases were stamped past the v27 -> v28 Goal
+    // migration before its derived tables were present. Rebuild those tables
+    // transactionally from the durable approval rows before altering them.
+    let has_goal_lifecycle_tables: bool = tx.query_row(
+        "SELECT EXISTS(
+           SELECT 1 FROM sqlite_master
+           WHERE type = 'table' AND name = 'goal_lifecycles'
+         ) AND EXISTS(
+           SELECT 1 FROM sqlite_master
+           WHERE type = 'table' AND name = 'goal_runs'
+         )",
+        [],
+        |row| row.get(0),
+    )?;
+    if !has_goal_lifecycle_tables {
+        super::ensure_goal_lifecycle_schema_tx(tx)?;
+    }
+
     let has_unlimited_column: bool = tx.query_row(
         "SELECT EXISTS(
            SELECT 1 FROM pragma_table_info('goal_lifecycles')
@@ -1103,6 +1121,122 @@ pub(crate) fn migrate_v30_to_v31(conn: &Connection, path: &Path) -> Result<()> {
     tx.commit().with_context(|| {
         format!(
             "commit schema v30 to v31 migration; backup {} remains",
+            backup.display()
+        )
+    })?;
+    Ok(())
+}
+
+/// v32 persists the editable Goal objective separately from its initial
+/// approval payload. Existing Goals receive an empty editable objective and
+/// revision 1; their approval record and runtime state remain unchanged.
+pub(crate) fn migrate_v31_to_v32_tx(tx: &rusqlite::Transaction<'_>) -> Result<()> {
+    for (column, definition) in [
+        ("objective_title", "TEXT NOT NULL DEFAULT ''"),
+        ("objective_markdown", "TEXT NOT NULL DEFAULT ''"),
+        (
+            "objective_revision",
+            "INTEGER NOT NULL DEFAULT 1 CHECK (objective_revision > 0)",
+        ),
+    ] {
+        let exists: bool = tx.query_row(
+            "SELECT EXISTS(
+               SELECT 1 FROM pragma_table_info('goal_lifecycles') WHERE name = ?1
+             )",
+            [column],
+            |row| row.get(0),
+        )?;
+        if !exists {
+            tx.execute_batch(&format!(
+                "ALTER TABLE goal_lifecycles ADD COLUMN {column} {definition};"
+            ))?;
+        }
+    }
+    tx.pragma_update(None, "user_version", 32i64)?;
+    Ok(())
+}
+
+pub(crate) fn migrate_v31_to_v32(conn: &Connection, path: &Path) -> Result<()> {
+    let backup = create_migration_backup(conn, path, 31)?;
+    let tx = conn.unchecked_transaction()?;
+    migrate_v31_to_v32_tx(&tx)?;
+    tx.commit().with_context(|| {
+        format!(
+            "commit schema v31 to v32 migration; backup {} remains",
+            backup.display()
+        )
+    })?;
+    Ok(())
+}
+
+/// v33 adds an append-only, turn-scoped artifact ledger. The legacy `artifacts`
+/// table remains the current-file index used by existing callers; the ledger
+/// preserves every observed create/edit/delete/rename and its evidence.
+pub(crate) fn migrate_v32_to_v33_tx(tx: &rusqlite::Transaction<'_>) -> Result<()> {
+    tx.execute_batch(
+        "CREATE TABLE IF NOT EXISTS artifact_events (
+           id TEXT PRIMARY KEY,
+           session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+           turn_id TEXT,
+           tool_call_id TEXT,
+           path TEXT NOT NULL,
+           previous_path TEXT,
+           op TEXT NOT NULL,
+           source TEXT NOT NULL,
+           confidence TEXT NOT NULL,
+           exists_after INTEGER NOT NULL,
+           size_bytes INTEGER,
+           sha256 TEXT,
+           created_at INTEGER NOT NULL
+         );
+         CREATE INDEX IF NOT EXISTS idx_artifact_events_session_time
+           ON artifact_events(session_id, created_at DESC, id);
+         CREATE INDEX IF NOT EXISTS idx_artifact_events_turn
+           ON artifact_events(session_id, turn_id, created_at DESC);",
+    )?;
+    tx.pragma_update(None, "user_version", 33i64)?;
+    Ok(())
+}
+
+pub(crate) fn migrate_v32_to_v33(conn: &Connection, path: &Path) -> Result<()> {
+    let backup = create_migration_backup(conn, path, 32)?;
+    let tx = conn.unchecked_transaction()?;
+    migrate_v32_to_v33_tx(&tx)?;
+    tx.commit().with_context(|| {
+        format!(
+            "commit schema v32 to v33 migration; backup {} remains",
+            backup.display()
+        )
+    })?;
+    Ok(())
+}
+
+/// v34 pins the Agent engine on the conversation itself. Existing sessions get
+/// NULL, which means "keep following the app-wide default" — the only value
+/// that cannot change how an already-started chat behaves on upgrade.
+pub(crate) fn migrate_v33_to_v34_tx(tx: &rusqlite::Transaction<'_>) -> Result<()> {
+    let has_agent_engine: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('sessions') WHERE name = 'agent_engine')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !has_agent_engine {
+        tx.execute_batch(
+            "ALTER TABLE sessions ADD COLUMN agent_engine TEXT
+             CHECK (agent_engine IN ('pi', 'omp'));",
+        )?;
+    }
+    tx.pragma_update(None, "user_version", 34i64)?;
+    Ok(())
+}
+
+pub(crate) fn migrate_v33_to_v34(conn: &Connection, path: &Path) -> Result<()> {
+    let backup = create_migration_backup(conn, path, 33)?;
+    let tx = conn.unchecked_transaction()?;
+    migrate_v33_to_v34_tx(&tx)?;
+    tx.commit().with_context(|| {
+        format!(
+            "commit schema v33 to v34 migration; backup {} remains",
             backup.display()
         )
     })?;

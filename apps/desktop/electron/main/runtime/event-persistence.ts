@@ -68,6 +68,7 @@ export function createEventPersistence({
 }: EventPersistenceDependencies): {
   subagentTagged: (message: UiMessage, envelope: AgentEventEnvelope) => UiMessage;
   persistAgentEvent: (envelope: AgentEventEnvelope) => UiMessage | undefined;
+  publishAgentEvent: (envelope: AgentEventEnvelope) => UiMessage | undefined;
   beginTranscriptRewrite: (sessionId: string) => {
     commit: () => void;
     rollback: () => void;
@@ -127,6 +128,7 @@ function persistAgentEvent(envelope: AgentEventEnvelope): UiMessage | undefined 
     if (envelope.turnId) completionNoticeTurns.delete(envelope.turnId);
     return;
   }
+
   const turnId = activeTurnId;
   const executionId = (() => {
     const candidate = approvedExecutionIdsBySession.get(envelope.sessionId);
@@ -219,6 +221,7 @@ function persistAgentEvent(envelope: AgentEventEnvelope): UiMessage | undefined 
       args: event.args,
       createdAt: new Date(envelope.ts).toISOString(),
       turnId: envelope.turnId ?? turnId,
+      engineOrigin: event.engineOrigin,
       ...toolCallLineage(envelope),
     });
     if (
@@ -455,6 +458,7 @@ function persistAgentEvent(envelope: AgentEventEnvelope): UiMessage | undefined 
         : undefined,
       isError: event.isError,
       status: "complete",
+      ...(started?.engineOrigin ? { engineOrigin: started.engineOrigin } : {}),
       ...toolCallLineage(started ?? {}, envelope),
     };
     void persistenceOutbox
@@ -479,5 +483,13 @@ function persistAgentEvent(envelope: AgentEventEnvelope): UiMessage | undefined 
     return message;
   }
 }
-  return { subagentTagged, persistAgentEvent, beginTranscriptRewrite, flush };
+  // Runtime adapters outside the Pi sidecar must use the same durable event
+  // path as Pi. Keeping this fan-out here prevents an engine from updating the
+  // renderer while silently skipping transcript/checkpoint/turn persistence.
+  function publishAgentEvent(envelope: AgentEventEnvelope): UiMessage | undefined {
+    emitAgentEvent(envelope);
+    return persistAgentEvent(envelope);
+  }
+
+  return { subagentTagged, persistAgentEvent, publishAgentEvent, beginTranscriptRewrite, flush };
 }

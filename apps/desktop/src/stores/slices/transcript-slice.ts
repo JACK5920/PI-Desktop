@@ -188,6 +188,9 @@ export function createTranscriptSlice({
           attachments: promptAttachments,
           truncateFromMessageId,
         });
+        // A successful edit supersedes the failed local attempt that occupied
+        // this message ID; do not re-inject it on the next transcript refresh.
+        runtime.clearPendingPromptAttempt(sessionId, messageId);
         return true;
       } catch (error) {
         try {
@@ -236,13 +239,111 @@ export function createTranscriptSlice({
       }
     },
 
-    retryLastPrompt: async () => {
+    retryLastPrompt: async (messageId) => {
       if (!canEdit()) return;
       const state = get();
       if (state.isRunning) return;
       const sessionId = state.activeSessionId;
       if (!sessionId) return;
       if (state.pendingPlans[sessionId]?.status === "pending") return;
+      if (messageId) {
+        const attempt = state.messages.find(
+          (message) => message.id === messageId && message.role === "user" && message.status === "error",
+        );
+        if (!attempt) return;
+        set((current) => ({
+          isRunning: current.activeSessionId === sessionId ? true : current.isRunning,
+          runningSessions: { ...current.runningSessions, [sessionId]: true },
+          error: null,
+          errorCode: null,
+          errorRetriable: null,
+        }));
+        try {
+          // A failed transport can outlive the caller's error response. Read
+          // durable history first so retry never duplicates an input that the
+          // Host already accepted but whose confirmation arrived late.
+          const latest = await api.getSession(sessionId);
+          const persisted = latest.session?.messages?.find(
+            (message) => message.id === attempt.id && message.role === "user",
+          );
+          if (persisted) {
+            runtime.acceptPromptSubmission(sessionId, attempt.id);
+            runtime.clearPromptSubmission(sessionId, attempt.id);
+            runtime.clearPendingPromptAttempt(sessionId, attempt.id);
+            runtime.cacheSessionTranscript(sessionId, latest.session!.messages ?? []);
+            const recovered = runtime.sessionTranscriptCache.get(sessionId) ?? latest.session!.messages ?? [];
+            set((current) => ({
+              messages: current.activeSessionId === sessionId ? recovered : current.messages,
+              isRunning: current.activeSessionId === sessionId ? false : current.isRunning,
+              runningSessions: { ...current.runningSessions, [sessionId]: false },
+              error: null,
+              errorCode: null,
+              errorRetriable: null,
+            }));
+            return;
+          }
+
+          runtime.beginPromptSubmission(sessionId, attempt.id);
+          const receipt = await api.prompt({
+            sessionId,
+            content: attempt.content,
+            messageId: attempt.id,
+            viewingSessionId: viewingSessionIdForPrompt(get(), sessionId),
+            attachments: promptAttachmentsFromMessage(attempt.attachments),
+          });
+          runtime.acceptPromptSubmission(sessionId, attempt.id);
+          runtime.clearPromptSubmission(sessionId, attempt.id);
+          runtime.clearPendingPromptAttempt(sessionId, attempt.id);
+          if (receipt.managed) {
+            runtime.retractOptimisticUserMessage(sessionId, attempt);
+          } else {
+            runtime.patchSessionMessage(sessionId, attempt.id, { status: "complete" });
+          }
+          set((current) => ({
+            isRunning: current.activeSessionId === sessionId ? false : current.isRunning,
+            runningSessions: { ...current.runningSessions, [sessionId]: false },
+            latestTurnResults: withoutRecordKey(current.latestTurnResults, sessionId),
+            sessionOutcomes: withoutRecordKey(current.sessionOutcomes, sessionId),
+            error: null,
+            errorCode: null,
+            errorRetriable: null,
+          }));
+        } catch (error) {
+          if (runtime.promptSubmissionWasAccepted(sessionId, attempt.id)) {
+            runtime.clearPromptSubmission(sessionId, attempt.id);
+            runtime.clearPendingPromptAttempt(sessionId, attempt.id);
+            set((current) => ({
+              isRunning: current.activeSessionId === sessionId ? false : current.isRunning,
+              runningSessions: { ...current.runningSessions, [sessionId]: false },
+              error: null,
+              errorCode: null,
+              errorRetriable: null,
+            }));
+            return;
+          }
+          runtime.clearPromptSubmission(sessionId, attempt.id);
+          runtime.markPendingPromptFailed(sessionId, attempt);
+          const failureCode = (error as { code?: string } | null)?.code ?? null;
+          set((current) => ({
+            isRunning: current.activeSessionId === sessionId ? false : current.isRunning,
+            runningSessions: { ...current.runningSessions, [sessionId]: false },
+            latestTurnResults: {
+              ...current.latestTurnResults,
+              [sessionId]: {
+                status: "failed",
+                turnId: `${sessionId}:${Date.now()}`,
+                finishedAt: Date.now(),
+                errorCode: failureCode ?? undefined,
+              },
+            },
+            sessionOutcomes: { ...current.sessionOutcomes, [sessionId]: "failed" },
+            error: error instanceof Error ? error.message : String(error),
+            errorCode: failureCode,
+            errorRetriable: false,
+          }));
+        }
+        return;
+      }
       let userIndex = -1;
       for (let i = state.messages.length - 1; i >= 0; i -= 1) {
         const candidate = state.messages[i];
@@ -403,6 +504,7 @@ export function createTranscriptSlice({
         try {
           const result = await api.deleteSessionMessage({ sessionId, messageId });
           if (!result.deleted) return;
+          runtime.clearPendingPromptAttempt(sessionId, messageId);
           // Keep the projection intact until Host confirms the mutation. Late
           // terminal events can replace provisional IDs while this RPC waits;
           // restoring an earlier snapshot would resurrect those replaced rows.

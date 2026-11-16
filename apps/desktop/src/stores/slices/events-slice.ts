@@ -47,6 +47,8 @@ import {
   newerGoalLifecycle,
 } from "../../lib/goal-lifecycle-state";
 import { formatToolValue } from "../../lib/tool-display";
+import { api } from "../../lib/api";
+import { consumeTaskPauseRequest, withPausedTask, withoutPausedTask } from "../../lib/paused-task-recovery";
 import type { AppState } from "../app-state";
 import type { SessionRuntime } from "../runtime/session-runtime";
 import type { StoreAccess } from "./types";
@@ -281,6 +283,37 @@ export function createEventsSlice({
         }
       }
       const event = envelope.event;
+      if (event.type === "agent_start") {
+        const currentSettings = get().settings;
+        if (currentSettings?.pausedTaskSessionIds?.includes(envelope.sessionId)) {
+          const nextSettings = withoutPausedTask(currentSettings, envelope.sessionId);
+          void api.setSettings(nextSettings).then(() => {
+            if (get().settings?.pausedTaskSessionIds?.includes(envelope.sessionId)) {
+              set({ settings: nextSettings });
+            }
+          }).catch(() => undefined);
+        }
+      }
+      const pauseSettledAtBoundary = event.type === "agent_end"
+        ? consumeTaskPauseRequest(envelope.sessionId)
+        : false;
+      if (event.type === "error") {
+        consumeTaskPauseRequest(envelope.sessionId);
+      }
+      if (pauseSettledAtBoundary) {
+        const currentSettings = get().settings;
+        if (currentSettings) {
+          const nextSettings = withPausedTask(currentSettings, envelope.sessionId);
+          void api.setSettings(nextSettings).then(() => {
+            const latest = get().settings;
+            if (latest && !latest.pausedTaskSessionIds?.includes(envelope.sessionId)) {
+              set({ settings: withPausedTask(latest, envelope.sessionId) });
+            }
+          }).catch(() => {
+            get().showToast(i18n.t("chat.pauseGeneratingFailed"), { variant: "error" });
+          });
+        }
+      }
       if (event.type === "agent_end" || event.type === "error") {
         runtime.submittedComposerDrafts.delete(envelope.sessionId);
       }
@@ -304,6 +337,8 @@ export function createEventsSlice({
       }
       if (event.type === "user_message_persisted") {
         const sessionId = envelope.sessionId;
+        runtime.acceptPromptSubmission(sessionId, event.optimisticMessageId);
+        runtime.clearPendingPromptAttempt(sessionId, event.optimisticMessageId);
         const reconcile = (messages: UiMessage[]) =>
           reconcilePersistedUserMessage(messages, event.optimisticMessageId, event.message);
         const state = get();
@@ -416,9 +451,7 @@ export function createEventsSlice({
             envelope.sessionId,
           ),
           latestTurnResults:
-            event.type === "error" && event.error.code === "TURN_ABORTED"
-              ? withoutRecordKey(state.latestTurnResults, envelope.sessionId)
-              : event.type === "agent_end" &&
+            event.type === "agent_end" &&
                   state.latestTurnResults[envelope.sessionId]?.status === "failed"
                 ? state.latestTurnResults
                 : {
@@ -431,9 +464,25 @@ export function createEventsSlice({
                       ...(event.type === "error"
                         ? { errorCode: event.error.code }
                         : {}),
+                      ...(event.type === "error" && event.error.code === "TURN_ABORTED"
+                        ? { partial: true }
+                        : {}),
                     },
                   },
         }));
+        if (envelope.turnId) {
+          const terminalTurnId = envelope.turnId;
+          void api.listArtifacts(envelope.sessionId, 500, terminalTurnId).then(({ artifacts }) => {
+            const latest = get().latestTurnResults[envelope.sessionId];
+            if (latest?.turnId !== terminalTurnId) return;
+            set((state) => ({
+              latestTurnResults: {
+                ...state.latestTurnResults,
+                [envelope.sessionId]: { ...latest, artifacts },
+              },
+            }));
+          }).catch(() => undefined);
+        }
         void flushPendingSessionConfiguration(envelope.sessionId);
         if (event.type === "agent_end") {
           void get().refreshQueuedPrompts(envelope.sessionId);
@@ -491,6 +540,7 @@ export function createEventsSlice({
             : {}),
           ...(envelope.nestedParentToolCallId ? { nestedParentToolCallId: envelope.nestedParentToolCallId } : {}),
           ...(envelope.agentName ? { agentName: envelope.agentName } : {}),
+          ...(event.engineOrigin ? { engineOrigin: event.engineOrigin } : {}),
         });
       } else if (event.type === "tool_end") {
         // A tool result never opens or activates a work-panel tab: Review is a
@@ -556,8 +606,27 @@ export function createEventsSlice({
           notifyInteractivePrompt(envelope.sessionId, "ask", {
             question: event.request.questions?.[0]?.question,
           });
-        } else if (event.type === "agent_end") {
-          void get().refreshSessions();
+        } else if (event.type === "agent_end" || event.type === "error") {
+          const turnId = envelope.turnId ?? `${envelope.sessionId}:${envelope.ts}`;
+          set((state) => ({
+            latestTurnResults: {
+              ...state.latestTurnResults,
+              [envelope.sessionId]: {
+                status: event.type === "error" ? "failed" : "completed",
+                turnId,
+                finishedAt: envelope.ts,
+                ...(event.type === "error" ? { errorCode: event.error.code, ...(event.error.code === "TURN_ABORTED" ? { partial: true } : {}) } : {}),
+              },
+            },
+          }));
+          if (envelope.turnId) {
+            void api.listArtifacts(envelope.sessionId, 500, envelope.turnId).then(({ artifacts }) => {
+              const latest = get().latestTurnResults[envelope.sessionId];
+              if (latest?.turnId !== envelope.turnId) return;
+              set((state) => ({ latestTurnResults: { ...state.latestTurnResults, [envelope.sessionId]: { ...latest, artifacts } } }));
+            }).catch(() => undefined);
+          }
+          if (event.type === "agent_end") void get().refreshSessions();
         } else if (event.type === "planning_state") {
           void get().refreshSessions();
         }
@@ -638,6 +707,7 @@ export function createEventsSlice({
                 toolCallId: event.toolCallId,
                 toolName: event.toolName,
                 toolArgs: event.args,
+                ...(event.engineOrigin ? { engineOrigin: event.engineOrigin } : {}),
                 toolStatus: "running",
                 status: "streaming",
                 ...(envelope.parentToolCallId

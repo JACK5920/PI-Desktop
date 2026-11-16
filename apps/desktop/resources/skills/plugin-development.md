@@ -82,12 +82,12 @@ are not called.
 ## Panel UI
 
 PI-Desktop hosts every panel in a frameless window. The host reserves exactly a
-transparent 46px drag band and renders only a minimal fixed capsule in the
+transparent 26px drag band and renders only a minimal fixed capsule in the
 top-right with minimize, maximize/restore, and close controls. The panel title,
 toolbar, background, and every other visible surface belong to the plugin.
 New pages declare `<meta name="pi-plugin-chrome" content="v2">` and apply
 `var(--pi-plugin-titlebar-height, 0px)` as page-owned top spacing once. Pages
-without the marker retain the legacy additive offset; do not add another 46px
+without the marker retain the legacy additive offset; do not add another 26px
 spacer there. Widgets and docked views use 0px. The drag band is not clickable outside the capsule; development
 panels show a reminder for this constraint.
 
@@ -97,7 +97,7 @@ than `top: 0`:
 ```css
 .panel-toolbar {
   position: sticky;
-  top: var(--pi-plugin-titlebar-height, 46px);
+  top: var(--pi-plugin-titlebar-height, 26px);
   -webkit-app-region: drag;
 }
 
@@ -106,8 +106,8 @@ than `top: 0`:
 }
 ```
 
-Account for the same 46px value in viewport-height calculations:
-`height: calc(100dvh - var(--pi-plugin-titlebar-height, 46px))`.
+Account for the same 26px value in viewport-height calculations:
+`height: calc(100dvh - var(--pi-plugin-titlebar-height, 26px))`.
 
 The panel receives `window.pluginBridge`, not `pi`. Use the fixed bridge channels such as
 `ui.showToast`, `ui.closePanel`, `ui.getNotificationPermission`,

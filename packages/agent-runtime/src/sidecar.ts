@@ -451,6 +451,12 @@ async function handle(method: string, params: any): Promise<unknown> {
     case "agent.testRuntimeIdentity": {
       return testRuntimeIdentity(String(params.sessionId ?? ""));
     }
+    case "agent.getToolDefinitions": {
+      const sessionId = String(params.sessionId ?? "");
+      if (!sessionId) throw new Error("sessionId required");
+      const runtime = await runtimeFor(params, "");
+      return { tools: runtime.getHostToolDefinitions() };
+    }
     case "agent.prompt": {
       const sessionId = String(params.sessionId);
       const content = String(params.content ?? "");

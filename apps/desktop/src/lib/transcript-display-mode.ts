@@ -27,3 +27,15 @@ export function resolveTranscriptDisplayMode(
   const value = settings?.transcriptDisplayMode;
   return isTranscriptDisplayMode(value) ? value : "fully-folded";
 }
+
+/**
+ * Whether a thinking disclosure that normally opens by default should do so
+ * for the active transcript layout. Fully-folded means the leaf reasoning
+ * disclosure starts closed too; readers can still open it explicitly.
+ */
+export function shouldAutoOpenThinking(
+  requested: boolean,
+  mode: TranscriptDisplayMode,
+): boolean {
+  return requested && mode !== "fully-folded";
+}

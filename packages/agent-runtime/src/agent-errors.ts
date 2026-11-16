@@ -26,7 +26,7 @@ export type ClassifiedAgentError = {
 const MAX_ERROR_MESSAGE_CHARS = 600;
 
 const NETWORK_PATTERN =
-  /ECONNREFUSED|ECONNRESET|ECONNABORTED|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|EPIPE|ENETUNREACH|EHOSTUNREACH|UND_ERR|fetch failed|socket hang up|network error|connection error|connection refused|connection abort|dns/i;
+  /\b(?:ECONNREFUSED|ECONNRESET|ECONNABORTED|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|EPIPE|ENETUNREACH|EHOSTUNREACH)\b|\bUND_ERR_[A-Z0-9_]+\b|\bfetch failed\b|\bsocket hang up\b|\bnetwork error\b|\bconnection error\b|\bconnection refused\b|\bconnection abort(?:ed)?\b|\bdns\b/i;
 
 const CONTEXT_PATTERN =
   /context[ _-]?length|maximum context|context window|too many tokens|prompt is too long|input token count|exceeds the (?:maximum|model)|token limit/i;
@@ -60,8 +60,11 @@ const RATE_LIMIT_PATTERN =
 const EXHAUSTED_QUOTA_CODE_PATTERN =
   /\b(?:insufficient_quota|credit_balance_exhausted|organization_spend_limit_exceeded|project_spend_limit_exceeded|organization_usage_limit_exceeded|FreeUsageLimitError)\b/i;
 
+// Zhipu/Z.ai 1308 is a plan usage cap reset after hours, not a transient 429.
+const ZHIPU_USAGE_LIMIT_PATTERN = /"code"\s*:\s*"?1308(?![0-9])/;
+
 const EXHAUSTED_QUOTA_MESSAGE_PATTERN =
-  /\b(?:billing|spending|credit|disk)\s+quotas?\b|\b(?:organization|project)\s+spend\s+limit\s+(?:reached|exceeded)\b|\bquota\b.{0,100}\b(?:plan|billing)\b|\binsufficient\s+credits\b|\brequires\s+more\s+credits\b|\bpayment\s+required\b/i;
+  /\b(?:billing|spending|credit|disk)\s+quotas?\b|\b(?:organization|project)\s+spend\s+limit\s+(?:reached|exceeded)\b|\bquota\b.{0,100}\b(?:plan|billing)\b|\binsufficient\s+credits\b|\brequires\s+more\s+credits\b|\bpayment\s+required\b|\b(?:AccountOverdueError|ServiceOverdue)\b|\boverdue\s+balance\b/i;
 
 /**
  * Whether a provider message reports a context overflow.
@@ -345,16 +348,16 @@ function networkCategoryFromText(text: string): NetworkFailureCategory {
   if (/getaddrinfo|ENOTFOUND|EAI_AGAIN|dns|name resolution/i.test(text)) {
     return "dns";
   }
-  if (isTlsTransportText(text) || /EPROTO/i.test(text)) {
+  if (isTlsTransportText(text) || /\bEPROTO\b/i.test(text)) {
     return "tls";
   }
   if (/timed?\s?out|timeout/i.test(text)) return "timeout";
-  if (/ECONNREFUSED|connection refused/i.test(text)) return "refused";
-  if (/ENETUNREACH|EHOSTUNREACH|no route to host|unreachable/i.test(text)) {
+  if (/\bECONNREFUSED\b|connection refused/i.test(text)) return "refused";
+  if (/\b(?:ENETUNREACH|EHOSTUNREACH)\b|no route to host|unreachable/i.test(text)) {
     return "unreachable";
   }
   if (
-    /ECONNRESET|ECONNABORTED|EPIPE|socket hang up|premature close|reset by peer|connection (?:was )?(?:closed|lost|reset|abort)/i.test(
+    /\b(?:ECONNRESET|ECONNABORTED|EPIPE)\b|socket hang up|premature close|reset by peer|connection (?:was )?(?:closed|lost|reset|abort)/i.test(
       text,
     )
   ) {
@@ -648,6 +651,7 @@ export function classifyAgentError(err: unknown): ClassifiedAgentError {
   if (
     EXHAUSTED_QUOTA_CODE_PATTERN.test(rawMessage) ||
     EXHAUSTED_QUOTA_MESSAGE_PATTERN.test(rawMessage) ||
+    ZHIPU_USAGE_LIMIT_PATTERN.test(rawMessage) ||
     (typeof providerCode === "string" &&
       EXHAUSTED_QUOTA_CODE_PATTERN.test(providerCode))
   ) {

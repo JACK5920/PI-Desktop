@@ -80,6 +80,8 @@ export function contextCompactionMark(
   return {
     id: record.id,
     throughMessageId: record.throughMessageId,
+    ...(record.providerId ? { providerId: record.providerId } : {}),
+    ...(record.modelId ? { modelId: record.modelId } : {}),
     generation: checkpointGeneration(record.details),
     summaryTokens: estimateSummaryTokens(record.summary ?? ""),
     summarized: checkpointSummarized(record.details),

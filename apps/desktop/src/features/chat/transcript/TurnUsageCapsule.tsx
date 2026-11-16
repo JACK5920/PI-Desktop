@@ -18,6 +18,7 @@ import {
   type TurnUsageBreakdown,
 } from "../../../lib/context-usage";
 import { portalToBody } from "../../../lib/portal-visibility";
+import { formatUsageCost, knownUsageCost } from "../../../lib/usage-cost";
 
 const CLOSE_DELAY_MS = 120;
 
@@ -91,6 +92,8 @@ export function TurnUsageCapsule({
 
   const breakdown = turnUsageBreakdown(usage);
   const compactTotal = formatCompactTokenCount(breakdown.totalTokens);
+  const cost = knownUsageCost(usage);
+  const costText = cost === undefined ? undefined : formatUsageCost(cost, i18n.language);
   const speed =
     throughput === undefined
       ? t("chat.usageThroughputUnavailable")
@@ -290,6 +293,12 @@ export function TurnUsageCapsule({
         <span>{t("chat.usageTotal")}</span>
         <strong>{numberFormat.format(breakdown.totalTokens)}</strong>
       </div>
+      {costText ? (
+        <div className="turn-usage-popover-footer">
+          <span>{t(usage.costStatus === "reported" ? "chat.usageCostReported" : "chat.usageCostEstimated")}</span>
+          <strong>{costText}</strong>
+        </div>
+      ) : null}
     </div>
   ) : null;
 

@@ -16,9 +16,10 @@
   max-width: 100%;
   border-radius: var(--radius-lg-plus);
   border-bottom-right-radius: var(--radius-xs);
-  background: color-mix(in oklab, var(--ds-text-primary) 8%, transparent);
+  background: var(--ds-user-bubble-bg);
   padding: 10px 15px;
-  color: var(--ds-text-primary);
+  color: var(--ds-user-bubble-fg);
+  box-shadow: inset 0 0 0 1px var(--ds-user-bubble-border);
   font-size: var(--text-base);
   line-height: var(--leading-chat);
 }
@@ -98,6 +99,26 @@
   visibility: hidden;
   content-visibility: hidden;
   pointer-events: none;
+}
+
+.omp-engine-notice {
+  position: relative;
+  z-index: 3;
+  margin: 6px auto 0;
+  max-width: min(760px, calc(100% - 32px));
+  padding: 6px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--surface-1) 92%, transparent);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  text-align: center;
+}
+.omp-engine-notice button {
+  margin-left: 8px;
+  color: var(--text-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 /* A cold switch keeps the current pane fully legible: only the progress track

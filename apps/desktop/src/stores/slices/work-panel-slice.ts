@@ -11,6 +11,7 @@ import {
   emptyWorkPanelContext,
   fileWorkPanelTab,
   newWorkPanelTab,
+  ompSubagentBatchWorkPanelTab,
   openWorkPanelTabState,
   reorderWorkPanelTabsState,
   replaceWorkPanelTabState,
@@ -104,6 +105,7 @@ export function createWorkPanelSlice({
 }: WorkPanelSliceDependencies): Pick<
   AppState,
   "openSubagentTab"
+  | "openOmpSubagentBatchTab"
   | "openWorkPanel"
   | "toggleWorkPanel"
   | "openWorkPanelTab"
@@ -151,6 +153,12 @@ export function createWorkPanelSlice({
     const id = delegationId.trim();
     if (!id) return;
     get().openWorkPanelTab(subagentWorkPanelTab(id, agentName || undefined));
+  },
+
+  openOmpSubagentBatchTab: (toolCallId, agentId, agentLabel) => {
+    const id = toolCallId.trim();
+    if (!id) return;
+    get().openWorkPanelTab(ompSubagentBatchWorkPanelTab(id, agentId, agentLabel));
   },
 
   openWorkPanel: () => {

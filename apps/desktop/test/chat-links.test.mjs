@@ -71,6 +71,13 @@ test("Windows Markdown file links survive parsing and sanitization without chang
   assert.match(plainMarkup, /<a href="D%3A%5Cperson%5Ctest\.js">test\.js<\/a>/);
   assertMarkdownLinkClick(plainMarkup, String.raw`D:\person\test.js`);
 
+  const rootedDrivePath = "D:/person/pi-stress-test-report-20261112.md";
+  const rootedDriveMarkup = renderSanitizedMarkdown(`[report](/${rootedDrivePath})`);
+  const rootedDriveHref = rootedDriveMarkup.match(/<a href="([^"]+)"/)?.[1];
+  assert.ok(rootedDriveHref, `rooted Windows drive link lost href: ${rootedDriveMarkup}`);
+  assert.equal(decodeURIComponent(rootedDriveHref), rootedDrivePath);
+  assertMarkdownLinkClick(rootedDriveMarkup, rootedDrivePath);
+
   const referencePath = String.raw`D:\person\dir name\报告 2026.js`;
   const referenceMarkup = renderSanitizedMarkdown(
     `[file][local]\n\n[local]: <${referencePath}>`,

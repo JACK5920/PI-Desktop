@@ -38,13 +38,14 @@ test("outcome card exposes one localized continuation action", () => {
   assert.doesNotMatch(outcome, /resultComplete/);
   assert.match(outcome, /resultNeedsAttention/);
   assert.match(outcome, /resultSteps/);
-  assert.equal((outcome.match(/<button/g) ?? []).length, 1);
+  assert.match(outcome, /className="copy-btn primary"/);
+  assert.match(outcome, /className="turn-artifacts-all"/);
   assert.match(outcome, /sendPrompt\(t\("chat\.continueUnfinishedTaskPrompt"\)\)/);
   assert.match(outcome, /t\("chat\.resultContinue"\)/);
   assert.doesNotMatch(outcome, /retryLastPrompt/);
   assert.doesNotMatch(outcome, /focusComposer/);
   assert.doesNotMatch(outcome, /t\("chat\.retry"\)/);
-  assert.doesNotMatch(outcome, /toolWorkPanelTab/);
+  assert.match(outcome, /toolWorkPanelTab\("artifacts"\)/);
   assert.match(
     sendPrompt,
     // The send ships the submitted content through the prompt call.
@@ -62,5 +63,5 @@ test("outcome card yields to an inline assistant error", () => {
     outcome,
     /const hasInlineError = tail\.some\(\(message\) => Boolean\(message\.error\)\);/,
   );
-  assert.match(outcome, /if \(hasInlineError\) return null;/);
+  assert.match(outcome, /if \(hasInlineError\) return <>\{artifactCard\}/);
 });

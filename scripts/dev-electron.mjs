@@ -190,7 +190,14 @@ function run() {
   );
   const child = spawn(
     process.execPath,
-    [electronViteCli, "dev", ...process.argv.slice(2)],
+    // `--watch` is what makes the dev chain rebuild the main bundle when the
+    // main process's own modules change on disk. Without it electron-vite
+    // builds the main bundle exactly once and never listens again, so an
+    // edit under `apps/desktop/electron` or under a workspace package that
+    // the main bundle imports stays invisible until the desktop is restarted
+    // by hand. The flag only rebuilds and relaunches; it never touches the
+    // renderer, which the dev server serves over HMR.
+    [electronViteCli, "dev", "--watch", ...process.argv.slice(2)],
     {
       cwd: DESKTOP_ROOT,
       env,

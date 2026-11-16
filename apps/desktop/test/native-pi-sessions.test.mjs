@@ -10,7 +10,7 @@ const events = await read("../src/stores/slices/events-slice.ts");
 const sidecarDispatch = await read("../../../packages/agent-runtime/src/sidecar.ts");
 
 test("native and plugin-managed model readiness use host-owned session state", () => {
-  assert.match(composer, /const modelReady\s*=\s*remoteSession\s*\?\s*promptAllowed\s*:\s*activeSessionSummary\?\.managedByPlugin\s*\?\s*true\s*:\s*nativeSession\s*\?\s*activeSessionSummary\.capabilities\?\.canPrompt === true\s*:/);
+  assert.match(composer, /const modelReady\s*=\s*agentEngine === "omp"\s*\?\s*!remoteSession && !nativeSession\s*:\s*remoteSession\s*\?\s*promptAllowed\s*:\s*activeSessionSummary\?\.managedByPlugin\s*\?\s*true\s*:\s*nativeSession\s*\?\s*activeSessionSummary\.capabilities\?\.canPrompt === true\s*:/);
 });
 
 test("native abort bypasses smart-stop rewrite and refreshes source detail", () => {
@@ -79,6 +79,9 @@ test("durable user acknowledgement reconciles active, cached and background rows
     const runtime = {
       liveSessionTranscripts: new Set(), sessionTranscriptCache: new Map([[id, [...state.messages]]]),
       cacheSessionTranscript: (key, rows) => runtime.sessionTranscriptCache.set(key, rows),
+      // Durable acks retire the optimistic attempt before reconciling the row.
+      acceptPromptSubmission: () => {},
+      clearPendingPromptAttempt: () => {},
     };
     const slice = createEventsSlice({ ...stateHarness(state), runtime });
     for (const index of [1, 2]) {
@@ -157,9 +160,9 @@ test("native prompt only dispatches sidecar and cannot create a host queue entry
 
 test("native model readiness never depends on a Desktop provider but read-only fails closed", () => {
   const expression = composer.match(/const modelReady = ([\s\S]*?);/)[1];
-  const evaluateReady = new Function("isImageGenerationModel", "imageGenerationCandidates", "settings", "nativeSession", "activeSessionSummary", "provider", "modelId", "remoteSession", "promptAllowed", `return ${expression}`);
-  const ready = (nativeSession, activeSessionSummary, provider, modelId, settings, remoteSession = false, promptAllowed = false) =>
-    evaluateReady(isImageGenerationModel, imageGenerationBindings(settings?.imageGenerationModels, settings?.imageGeneration), settings, nativeSession, activeSessionSummary, provider, modelId, remoteSession, promptAllowed);
+  const evaluateReady = new Function("agentEngine", "isImageGenerationModel", "imageGenerationCandidates", "settings", "nativeSession", "activeSessionSummary", "provider", "modelId", "remoteSession", "promptAllowed", `return ${expression}`);
+  const ready = (nativeSession, activeSessionSummary, provider, modelId, settings, remoteSession = false, promptAllowed = false, agentEngine = "pi") =>
+    evaluateReady(agentEngine, isImageGenerationModel, imageGenerationBindings(settings?.imageGenerationModels, settings?.imageGeneration), settings, nativeSession, activeSessionSummary, provider, modelId, remoteSession, promptAllowed);
   assert.equal(ready(true, { capabilities: { canPrompt: true } }, undefined, undefined), true);
   assert.equal(ready(true, { capabilities: { canPrompt: false } }, { enabled: true, hasSecret: true }, "model"), false);
   assert.equal(ready(true, {}, undefined, undefined), false);

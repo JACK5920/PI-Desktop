@@ -137,6 +137,8 @@ export async function transcriptAutoCollapseProbe() {
     // A mere press is not a disclosure choice: the automatic close at settle
     // still applies, and the answer stays outside the folded process.
     render("press", [thoughtLive], true);
+    check(!expanded(thoughtHeader()), "fully-folded keeps live reasoning collapsed by default");
+    click(thoughtHeader());
     const prose = container.querySelector<HTMLElement>(".thinking-prose");
     if (!prose) throw new Error("Missing visible reasoning");
     press(prose);
@@ -173,6 +175,7 @@ export async function transcriptAutoCollapseProbe() {
 
     // The same rule protects an active text selection, and only that selection.
     render("selection", [thoughtLive], true);
+    click(thoughtHeader());
     const selectedProse = container.querySelector<HTMLElement>(".thinking-prose");
     if (!selectedProse) throw new Error("Missing selection target");
     press(selectedProse);
@@ -191,7 +194,6 @@ export async function transcriptAutoCollapseProbe() {
     // Child choices stay local: they are restored, never used to pin ancestors.
     render("child", [thoughtLive], true);
     click(thoughtHeader());
-    click(thoughtHeader());
     render("child", [thoughtDone, answer], false);
     focusOutside();
     check(
@@ -201,7 +203,7 @@ export async function transcriptAutoCollapseProbe() {
     click(header());
     check(
       expanded(thoughtHeader()),
-      "reopening the turn restores the explicit reasoning choice",
+      "reopening the turn restores the manually expanded reasoning",
     );
     click(thoughtHeader());
     click(header());
@@ -221,9 +223,13 @@ export async function transcriptAutoCollapseProbe() {
         mode === "flat" || expanded(groupHeader()),
         `${mode}: the running activity group stays open beyond four items`,
       );
+      const liveThinkingHeaders = [
+        ...container.querySelectorAll<HTMLElement>(".tool-row.thinking .tool-row-header"),
+      ];
       check(
-        [...container.querySelectorAll(".tool-row.thinking .tool-row-header")].every(expanded),
-        `${mode}: Show thinking keeps reasoning expanded`,
+        liveThinkingHeaders.length === 1 &&
+          liveThinkingHeaders.every((element) => expanded(element) === (mode !== "fully-folded")),
+        `${mode}: reasoning follows the mode default while Show thinking is enabled`,
       );
 
       // A manual close is authoritative while the turn keeps streaming.
@@ -246,8 +252,14 @@ export async function transcriptAutoCollapseProbe() {
       render(`reasoning-${mode}`, [thoughtDone, ...reads, answer], false);
       click(header());
       check(
-        (mode === "flat" || expanded(groupHeader())) && expanded(thoughtHeader()),
-        `${mode}: settled reasoning stays visible under Show thinking`,
+        (mode === "flat" || expanded(groupHeader())) &&
+          (mode === "fully-folded" ? !expanded(thoughtHeader()) : expanded(thoughtHeader())),
+        `${mode}: settled reasoning follows the mode default under Show thinking`,
+      );
+      if (mode === "fully-folded") click(thoughtHeader());
+      check(
+        expanded(thoughtHeader()),
+        `${mode}: reasoning can still be opened manually`,
       );
 
       configure({ transcriptDisplayMode: mode, showThinking: false });

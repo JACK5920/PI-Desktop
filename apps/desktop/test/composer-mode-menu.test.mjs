@@ -59,11 +59,11 @@ test("opening one menu closes the other", () => {
   );
   assert.match(
     toolbarSource,
-    /onCloseOtherMenus=\{\(\) => \{\s*\n\s*modelMenu\.setOpen\(false\);\s*\n\s*setPermissionOpen\(false\);/,
+    /onCloseOtherMenus=\{\(\) => \{\s*\n\s*modelMenu\.setOpen\(false\);\s*\n\s*setEngineOpen\(false\);\s*\n\s*setPermissionOpen\(false\);/,
   );
   assert.match(
     toolbarSource,
-    /onCloseOtherMenus=\{\(\) => \{\s*\n\s*modelMenu\.setOpen\(false\);\s*\n\s*setModeOpen\(false\);/,
+    /onCloseOtherMenus=\{\(\) => \{\s*\n\s*modelMenu\.setOpen\(false\);\s*\n\s*setEngineOpen\(false\);\s*\n\s*setModeOpen\(false\);/,
   );
   // A blocked composer closes both menus, not just the approval one.
   assert.match(composerSource, /setModeOpen\(false\);\s*\n\s*setPermissionOpen\(false\);/);

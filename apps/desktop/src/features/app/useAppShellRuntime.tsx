@@ -143,7 +143,13 @@ export function useAppShellRuntime() {
   useLayoutEffect(() => {
     const shell = appShellRef.current;
     if (!shell) return;
-    const update = () => setShellWidth(Math.round(shell.clientWidth));
+    // A resize that lands on the same rounded width still re-renders the whole
+    // width budget; dropping the no-op update keeps fullscreen/maximize from
+    // restarting that work on every observer tick.
+    const update = () => {
+      const next = Math.round(shell.clientWidth);
+      setShellWidth((prev) => (prev === next ? prev : next));
+    };
     update();
     if (typeof ResizeObserver === "undefined") {
       window.addEventListener("resize", update);

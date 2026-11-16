@@ -15,8 +15,10 @@ export function collectLiveDelegationEntries(
       live.set(entry.id, true);
     } else if (entry.kind === "message") {
       const { message } = entry;
+      // System notices are part of the current run and must not settle prior delegates.
+      if (message.role === "system") continue;
       if (message.role === "user" && message.steering) continue;
-      if (message.role === "user" || message.role === "system") break;
+      if (message.role === "user") break;
     }
   }
   return live;

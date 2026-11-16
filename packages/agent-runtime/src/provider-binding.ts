@@ -393,6 +393,11 @@ export function buildProviderModel(
   const thinkingProtocolCompat = catalogModel.thinkingProtocol
     ? { forceAdaptiveThinking: catalogModel.thinkingProtocol === "adaptive" }
     : undefined;
+  const copilotSupportsReasoningEffort =
+    provider.vendorKey?.trim().toLowerCase() === "github-copilot"
+      ? catalog?.supportsReasoningEffort ??
+        (catalogModel.reasoningOptions ?? []).some((option) => option.type === "effort")
+      : undefined;
   const autoAdaptiveThinking =
     catalogModel.thinkingProtocol === undefined && requiresAdaptiveThinking(catalogModel);
   // A generic model projection can still be present when the catalog misses a
@@ -422,7 +427,9 @@ export function buildProviderModel(
           // Only an explicit saved binding may override endpoint compatibility.
           ...(typeof catalog?.supportsReasoningEffort === "boolean"
             ? { supportsReasoningEffort: catalog.supportsReasoningEffort }
-            : {}),
+            : typeof copilotSupportsReasoningEffort === "boolean"
+              ? { supportsReasoningEffort: copilotSupportsReasoningEffort }
+              : {}),
           supportsDeveloperRole: catalogModel.compat?.supportsDeveloperRole === true,
         }
       : binding.api === "anthropic-messages" &&

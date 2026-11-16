@@ -13,6 +13,8 @@ Plan 和 Goal 是**合约模式**：两者在执行之前协商提案
 (`plan | goal`) 是区分它们的地方，下图读起来是一样的
 将 Goal/Plan 替换为 Plan/Goal：
 
+Composer 的模式菜单还提供内置 Goal 阶段模板。选择模板后，通过现有会话配置流程切换到 Goal 模式，并在 Composer 当前光标处插入可编辑的请求草稿；已有草稿文本和附件会保留。模板只是输入指引，不是持久化提案，也不会创建第二条任务记录。以 Goal 模式发送后仍由现有 Agent `SubmitGoal` 流程生成不可变提案快照，并沿用现有审批界面与 Host 管理的 Goal 生命周期。用户可以发送前编辑模板草稿，也可以按现有流程处理模型生成的契约。
+
 ```text
 Agent / inactive
   -- user selects Plan while idle OR Agent calls EnterPlanMode --> Plan / planning
@@ -25,6 +27,10 @@ Plan | Goal / awaiting_approval
        --> same contract mode / planning
 Agent / queued
   -- dispatcher starts --> Agent / running
+Agent / running
+  -- 用户请求暂停 --> 完成当前 assistant/tool 边界 --> Agent / idle（暂停检查点）
+Agent / idle（暂停检查点）
+  -- 用户恢复 --> 同一会话中的新用户轮次
 Agent / running
   -- complete | fail | abort --> Agent / inactive
 
@@ -114,6 +120,11 @@ accept_prompt
    预序列化输入框快照；曾经助理文字、思考或任何
    工具行开始，中止保留部分转录本并恢复不
    草稿。
+3a. Composer 的暂停使用 graceful stop：完成当前 assistant 回答和工具批次后，
+     在对应 `agent_end` 到达时才保存暂停检查点；停止仍是立即 Abort。
+3b. 恢复会基于持久转录提交一个新的 continuation 用户轮次，不会重放旧请求或工具调用。
+     `autoResumePausedTasks` 缺省关闭；只有明确安全暂停的检查点可以在启动时继续，
+     在工具操作中途被中断的任务绝不自动重放（ADR 0354 / ADR 0053）。
 4. 权限超时变为工具被拒绝，然后代理可以根据运行时处理继续或结束
 5. 终端回合状态持久后，会话状态返回空闲状态。父级终态错误会中止残留委托，因此“继续”不会变成 `AGENT_BUSY`（D352）。系统中断的委托以失败结算并保留手动恢复资格；显式 Stop 和销毁仍不可恢复
 6. 更改渲染器的活动 project/session 不会转换或中止

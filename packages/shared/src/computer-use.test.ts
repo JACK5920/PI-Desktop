@@ -1,7 +1,12 @@
-import { expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   COMPUTER_MAX_STEPS_LIMIT,
+  COMPUTER_RPC_SCHEMA_MAX,
+  COMPUTER_RPC_SCHEMA_MIN,
   COMPUTER_USE_DEFAULTS,
+  computerRpcSchemaMismatchMessage,
+  computerUseModelBindingForSource,
+  isComputerRpcSchemaCompatible,
   needsAccessibilityRequest,
   type ComputerCapabilities,
   validateComputerToolArgs,
@@ -72,6 +77,23 @@ it("computerUse settings keep an explicit model binding", () => {
   expect(value.defaultInputPolicy).toBe("autonomous-in-scope");
   expect(value.defaultCapture).toBe("a11y-and-pixels");
   expect(value.denylist).toEqual(["com.apple.keychainaccess"]);
+});
+
+it("computerUse model source defaults compatibly and accepts conversation mode", () => {
+  expect(validateComputerUseSettings({ enabled: true }).modelSource).toBeUndefined();
+  expect(validateComputerUseSettings({ enabled: true, modelSource: "dedicated" }).modelSource).toBe("dedicated");
+  expect(validateComputerUseSettings({ enabled: true, modelSource: "conversation" }).modelSource).toBe("conversation");
+  expect(() => validateComputerUseSettings({ enabled: true, modelSource: "fallback" })).toThrow(/invalid/);
+});
+
+it("model-source resolution follows the chosen model and never silently falls back", () => {
+  const dedicated = { providerId: "dedicated-provider", modelId: "dedicated-model" };
+  const conversation = { providerId: "chat-provider", modelId: "chat-model" };
+  expect(computerUseModelBindingForSource({ model: dedicated })).toEqual(dedicated);
+  expect(computerUseModelBindingForSource({ model: dedicated, modelSource: "dedicated" }, conversation)).toEqual(dedicated);
+  expect(computerUseModelBindingForSource({ model: dedicated, modelSource: "conversation" }, conversation)).toEqual(conversation);
+  expect(computerUseModelBindingForSource({ model: dedicated, modelSource: "conversation" }, null)).toBeNull();
+  expect(computerUseModelBindingForSource({ model: null, modelSource: "conversation" })).toBeNull();
 });
 
 it("computerUse grant budgets have no product upper limit", () => {
@@ -154,4 +176,46 @@ it("OS permission requests are offered only for missing macOS Accessibility", ()
   for (const platform of ["linux", "win32", "other"] as const) {
     expect(needsAccessibilityRequest({ ...capabilities, platform, backend: "unsupported" })).toBe(false);
   }
+});
+
+describe("computer RPC schema version", () => {
+  // The Electron bundle and the host-core sidecar are versioned separately, so
+  // an update can leave them out of step. A mismatch has to be caught before
+  // an action runs, not halfway through one.
+  it("accepts a version inside the supported range", () => {
+    expect(isComputerRpcSchemaCompatible(COMPUTER_RPC_SCHEMA_MIN)).toBe(true);
+    expect(isComputerRpcSchemaCompatible(COMPUTER_RPC_SCHEMA_MAX)).toBe(true);
+  });
+
+  it("rejects a version outside the supported range", () => {
+    expect(isComputerRpcSchemaCompatible(COMPUTER_RPC_SCHEMA_MAX + 1)).toBe(false);
+    expect(isComputerRpcSchemaCompatible(COMPUTER_RPC_SCHEMA_MIN - 1)).toBe(false);
+    expect(isComputerRpcSchemaCompatible(0)).toBe(false);
+    expect(isComputerRpcSchemaCompatible(9999)).toBe(false);
+  });
+
+  it("treats a missing or malformed version as incompatible", () => {
+    // An older sidecar that predates the version field is exactly the case
+    // this check exists to catch, so absence must not read as compatible.
+    expect(isComputerRpcSchemaCompatible(undefined)).toBe(false);
+    expect(isComputerRpcSchemaCompatible(null)).toBe(false);
+    expect(isComputerRpcSchemaCompatible("1")).toBe(false);
+    expect(isComputerRpcSchemaCompatible(1.5)).toBe(false);
+    expect(isComputerRpcSchemaCompatible(NaN)).toBe(false);
+  });
+
+  it("names both versions and the fix in the mismatch message", () => {
+    const message = computerRpcSchemaMismatchMessage(2, "0.99.0");
+    expect(message).toContain("2");
+    expect(message).toContain("0.99.0");
+    expect(message).toContain(String(COMPUTER_RPC_SCHEMA_MIN));
+    expect(message).toContain(String(COMPUTER_RPC_SCHEMA_MAX));
+    expect(message).toContain("Update PI-Desktop");
+  });
+
+  it("still names the supported range when the host reported nothing", () => {
+    const message = computerRpcSchemaMismatchMessage(undefined);
+    expect(message).toContain("unknown");
+    expect(message).toContain(String(COMPUTER_RPC_SCHEMA_MIN));
+  });
 });

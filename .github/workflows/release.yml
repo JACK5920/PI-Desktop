@@ -337,6 +337,10 @@ jobs:
         if: matrix.platform == 'macos' && env.MACOS_SIGN_RELEASE == 'true'
         run: scripts/verify-macos-release.sh apps/desktop/release
 
+      - name: Package PI runtime update artifact
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: node scripts/package-pi-engine-runtime.mjs --platform "${{ matrix.platform }}" --arch "${{ matrix.arch }}" --release-tag "${GITHUB_REF_NAME}"
+
       - name: Verify Linux host-core glibc floor
         if: matrix.platform == 'linux'
         run: node scripts/check-linux-host-glibc.mjs target/release/pi-desktop-host-core
@@ -405,6 +409,7 @@ jobs:
             apps/desktop/release/*.asar
             apps/desktop/release/*.blockmap
             apps/desktop/release/latest*.yml
+            apps/desktop/release/pi-engine-runtime-*
 
   pi-host-bundle:
     name: Bundle pi-host (Linux ${{ matrix.arch }})

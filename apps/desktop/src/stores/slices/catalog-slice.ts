@@ -74,6 +74,7 @@ export function createCatalogSlice({
     loadProviderModels: async (providerId) => {
       const { refreshedProviderModels, providerModelLoads } = catalogRuntime;
       if (refreshedProviderModels.has(providerId)) return;
+      if (!catalogRuntime.canRetryProviderModels(providerId)) return;
       const generation = catalogRuntime.providerGeneration();
       const existing = providerModelLoads.get(providerId);
       if (existing) {
@@ -108,6 +109,7 @@ export function createCatalogSlice({
           }
         }
 
+        let refreshFailed = false;
         try {
           const refreshed = await api.listProviderModels({
             providerId,
@@ -132,11 +134,18 @@ export function createCatalogSlice({
               },
             }));
           }
+          refreshFailed = Boolean(refreshed.error?.trim());
         } catch {
           // Keep the cached catalog; the menu already has a usable fallback.
+          refreshFailed = true;
         } finally {
           if (generation === catalogRuntime.providerGeneration()) {
-            refreshedProviderModels.add(providerId);
+            if (refreshFailed) {
+              catalogRuntime.markProviderModelFailure(providerId);
+            } else {
+              catalogRuntime.markProviderModelSuccess(providerId);
+              refreshedProviderModels.add(providerId);
+            }
           }
         }
       })();

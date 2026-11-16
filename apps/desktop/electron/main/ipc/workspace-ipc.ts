@@ -4,11 +4,12 @@ import { dirname } from "node:path";
 import { homedir } from "node:os";
 import { existsSync, statSync } from "node:fs";
 import { realpath, stat } from "node:fs/promises";
-import { isAbsolute, join, resolve } from "node:path";
+import { basename, isAbsolute, join, resolve } from "node:path";
 import {
   ErrorCodes,
   IPC,
   type ComposerPasteFile,
+  type FsChatRefMatch,
   type FsChatRefProjectRoot,
   type FsChatRefResolveResult,
   type ProjectGroupRecord,
@@ -41,6 +42,7 @@ import {
 } from "@pi-desktop/host-runtime";
 import { openableMp4Path } from "../open-attachment-video";
 import { isChatRefOutsideRoots, resolveChatFileRef } from "../chat-ref-resolve";
+import { resolveOmpCwdFileRef } from "../omp/chat-file-ref.mjs";
 import { rebaseWorktreeRef, type WorktreeRefContext } from "../worktree-ref";
 import { getWorkspaceFileIndex, searchWorkspaceFiles } from "../fs-index";
 import {
@@ -59,6 +61,35 @@ import type { PluginRuntime } from "../plugin-runtime";
 import type { IpcRegistrar } from "./types";
 
 type WorkspaceRecord = { path: string; name: string };
+
+/**
+ * Resolve an absolute file path the user clicked in the transcript.
+ *
+ * The user picking a file is the permission: a deliverable the agent wrote to
+ * the Desktop (or anywhere else) opens by absolute path even though it sits
+ * outside the project and the session stores. Relative and shorthand
+ * references still resolve only inside the known roots, so ordinary
+ * completion never wanders the disk.
+ */
+async function userClickedAbsoluteRef(raw: string): Promise<FsChatRefMatch | null> {
+  const cleaned = raw
+    .trim()
+    .replace(/^@/, "")
+    .replace(/(?::\d+(?::\d+|-\d+)?|#L\d+(?:-L?\d+)?)$/i, "");
+  if (!isAbsolute(cleaned)) return null;
+  try {
+    const absolutePath = await realpath(cleaned);
+    if (!(await stat(absolutePath)).isFile()) return null;
+    return {
+      root: "scratch",
+      relativePath: basename(absolutePath),
+      absolutePath,
+      matchedBy: "exact-absolute",
+    };
+  } catch {
+    return null;
+  }
+}
 
 export function createComposerTemplateLoader(
   logger: Pick<Logger, "app">,
@@ -958,6 +989,34 @@ export function registerWorkspaceIpc({
     }
   };
 
+  /**
+   * OMP has a native working directory even when a chat is not bound to a PI
+   * project. Keep that directory out of generic project discovery; use it only
+   * for exact transcript file references after Host confirms this is a local
+   * OMP session.
+   */
+  const optionalOmpWorkingDirectory = async (sessionId?: string): Promise<string | null> => {
+    const id = String(sessionId ?? "").trim();
+    const owner = getHost();
+    if (!id || !owner) return null;
+    try {
+      const { session } = await owner.call<{
+        session?: { agentEngine?: string; projectPath?: string | null; remoteWorkspace?: unknown };
+      }>("session.get", { id, messageLimit: 1 });
+      if (!session || session.agentEngine !== "omp" || session.remoteWorkspace) return null;
+      // A bound project should already have resolved through workspaceRootInfo;
+      // do not fall back to its parent path if a worktree lookup failed.
+      if (session.projectPath?.trim()) return null;
+      const candidate = homedir();
+      if (!isAbsolute(candidate)) return null;
+      const canonical = await realpath(candidate);
+      if (!(await stat(canonical)).isDirectory()) return null;
+      return canonical;
+    } catch {
+      return null;
+    }
+  };
+
   handle(
     IPC.invoke.fsRead,
     async (input: { path?: string; mimeType?: string; sessionId?: string } = {}) => {
@@ -980,6 +1039,8 @@ export function registerWorkspaceIpc({
         workspaceRoot,
         await fsExtraRoots(workspaceRoot),
         input.mimeType,
+        // The path came from a click in the transcript, not from a tool call.
+        { allowAnyAbsolute: true },
       );
     },
   );
@@ -1000,6 +1061,7 @@ export function registerWorkspaceIpc({
         workspaceRoot,
         await fsExtraRoots(workspaceRoot),
         input.mimeType,
+        { allowAnyAbsolute: true },
       );
     },
   );
@@ -1035,6 +1097,8 @@ export function registerWorkspaceIpc({
       requested,
       workspaceRoot,
       await fsExtraRoots(workspaceRoot),
+      // Reveal is a user action on a path the user just clicked.
+      { allowAnyAbsolute: true },
     );
     if (!target) {
       throw Object.assign(new Error("path outside allowed roots"), {
@@ -1054,6 +1118,7 @@ export function registerWorkspaceIpc({
       requested,
       workspaceRoot,
       await fsExtraRoots(workspaceRoot),
+      { allowAnyAbsolute: true },
     );
     if (!target) {
       throw Object.assign(new Error("path is not openable"), {
@@ -1124,6 +1189,11 @@ export function registerWorkspaceIpc({
           : null,
       );
       const workspaceRoot = rootInfo?.root ?? null;
+      if (!workspaceRoot && input.sessionId) {
+        const ompCwd = await optionalOmpWorkingDirectory(input.sessionId);
+        const ompMatch = await resolveOmpCwdFileRef(ref, ompCwd);
+        if (ompMatch) return { match: ompMatch };
+      }
       const roots = {
         project: projectRootsFor(workspaceRoot),
         scratch: await sessionScratchRoot(input.sessionId),
@@ -1134,7 +1204,11 @@ export function registerWorkspaceIpc({
         attachments: join(dataDir, "attachments"),
       };
       if (await isChatRefOutsideRoots(ref, roots)) {
-        return { match: null, reason: "outside-allowed-roots" };
+        // A click is the user's own decision, so an absolute path that really
+        // exists opens wherever the agent wrote it (Desktop, Downloads) rather
+        // than being refused by the project containment check.
+        const external = await userClickedAbsoluteRef(ref);
+        return external ? { match: external } : { match: null, reason: "outside-allowed-roots" };
       }
       return { match: await resolveChatFileRef(ref, roots) };
     },

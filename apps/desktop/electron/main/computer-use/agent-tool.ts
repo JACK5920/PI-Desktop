@@ -1,5 +1,9 @@
 import {
+  COMPUTER_RPC_SCHEMA_MAX,
+  COMPUTER_RPC_SCHEMA_MIN,
   COMPUTER_USE_DEFAULTS,
+  computerRpcSchemaMismatchMessage,
+  isComputerRpcSchemaCompatible,
   validateComputerToolArgs,
   type AppSettings,
   type ComputerActResult,
@@ -8,6 +12,7 @@ import {
   type ComputerGrantView,
   type ComputerInspection,
   type ComputerLoopActivity,
+  type ComputerRpcSchema,
   type ComputerRunActivity,
   type ComputerRunPhase,
   type ComputerStepRecord,
@@ -53,6 +58,25 @@ function decisionContext(request: {
   };
 }
 
+/**
+ * Output budget for one Computer Use decision.
+ *
+ * The decision is a single JSON object, but the bound model may be a
+ * reasoning model, and a gateway can turn the reasoning on whatever it
+ * likes: a request that asks for no reasoning still comes back with a
+ * `reasoning_content` the caller cannot turn off.
+ *
+ * A budget of 700 was enough for the JSON and nothing else, so on a long
+ * observation the reasoning ate the whole budget, the answer was cut with
+ * `finish_reason: "length"`, and the content came back empty. The loop read
+ * that as "the model returned no JSON object" and refused the step, so the
+ * tool was simply unusable on a reasoning model.
+ *
+ * The budget has to cover the reasoning and the answer together. 4096 leaves
+ * room for a few thousand reasoning tokens and a full action object, and it
+ * is still a hard cap rather than an open-ended completion.
+ */
+const COMPUTER_DECISION_MAX_OUTPUT_TOKENS = 4096;
 function failure(errorCode: string, message: string) {
   return {
     ok: false,
@@ -87,7 +111,7 @@ function toActivityStep(step: ComputerStepRecord): ComputerActivityStep | null {
 /** Main-process executor for the Agent Runtime's host-authorized Computer tool. */
 export function createComputerUseTool(options: {
   getHost: () => Pick<HostProcess, "call"> | null;
-  resolveProvider: (settings: AppSettings) => Promise<RuntimeProviderConfig | null>;
+  resolveProvider: (settings: AppSettings, sessionId: string, source: "dedicated" | "conversation") => Promise<RuntimeProviderConfig | null>;
   capture?: typeof captureGrantedWindow;
   cursorOverlay?: { apply: (event: ComputerCursorEvent) => void };
 }): LocalToolHandler {
@@ -99,8 +123,16 @@ export function createComputerUseTool(options: {
     const settings = await host.call<AppSettings>("settings.get");
     const config = settings.computerUse;
     if (!config?.enabled) return failure("COMPUTER_DISABLED", "Enable Computer Use in Settings first.");
-    const provider = await options.resolveProvider(settings);
-    if (!provider) return failure("COMPUTER_MODEL_NOT_CONFIGURED", "Choose a dedicated Computer Use model in Settings. The conversation model is not used as a fallback.");
+    const modelSource = config.modelSource ?? "dedicated";
+    const provider = await options.resolveProvider(settings, sessionId, modelSource);
+    if (!provider) {
+      return failure(
+        "COMPUTER_MODEL_NOT_CONFIGURED",
+        modelSource === "conversation"
+          ? "The current conversation model could not be resolved. Select an available conversation model or switch Computer Use to a dedicated model in Settings."
+          : "Choose a dedicated Computer Use model in Settings.",
+      );
+    }
     const captureMode = config.defaultCapture ?? COMPUTER_USE_DEFAULTS.capture;
     if (captureMode === "a11y-and-pixels" && !visionFromModelConfig(provider.modelConfig)) {
       return failure(
@@ -118,6 +150,27 @@ export function createComputerUseTool(options: {
         throw codedError(error);
       }
     };
+
+    // The Electron bundle and the host-core sidecar are versioned separately,
+    // so an update can leave them out of step. A change to the shape of the
+    // `computer.*` payloads is a breaking change, and the mismatch has to
+    // surface here - before a grant exists and before any input is sent -
+    // rather than as a puzzling failure in the middle of a run.
+    let schema: ComputerRpcSchema | undefined;
+    try {
+      schema = await callHost<ComputerRpcSchema>("computer.rpcSchema");
+    } catch {
+      // A sidecar that predates the command cannot report a version, which
+      // is itself the incompatibility this check exists to catch.
+      schema = undefined;
+    }
+    if (!isComputerRpcSchemaCompatible(schema?.schemaVersion)) {
+      return failure(
+        "COMPUTER_RPC_SCHEMA_MISMATCH",
+        computerRpcSchemaMismatchMessage(schema?.schemaVersion, schema?.hostCoreVersion),
+      );
+    }
+
     const grant = await callHost<ComputerGrantView>("computer.grantCreate", {
       sessionId,
       origin: "agent",
@@ -212,7 +265,7 @@ export function createComputerUseTool(options: {
             return (await completeOneShot(provider, context, "off", {
               signal,
               sessionId,
-              maxOutputTokens: 700,
+              maxOutputTokens: COMPUTER_DECISION_MAX_OUTPUT_TOKENS,
             })).text;
           },
           onCursor: (event) => options.cursorOverlay?.apply(event),
@@ -240,7 +293,25 @@ export function createComputerUseTool(options: {
         result.outcome === "done" ? "completed" : result.outcome === "needs-user" ? "asking" : result.outcome === "unverified" ? "unverified" : "failed",
         result.errorCode,
       );
-      return { ok: result.outcome === "done", isError: result.outcome !== "done", content: result };
+      // Three states, not two. `isError` means "nothing happened", and a run
+      // that dispatched real input is not that: the agent must be able to see
+      // that an action landed even when UIA cannot prove it. Folding
+      // `unverified` and `step-limit` into an error made the agent believe the
+      // machine was untouched and repeat work that had already been done.
+      const dispatchedSomething = result.steps.some(
+        (step) => step.ok && step.action !== "observe" && step.action !== "switch" && step.action !== "done" && step.action !== "ask",
+      );
+      const nothingHappened =
+        result.outcome === "failed" ||
+        result.outcome === "revoked" ||
+        result.outcome === "expired" ||
+        result.outcome === "budget-exhausted" ||
+        (result.outcome === "unverified" && !dispatchedSomething);
+      return {
+        ok: result.outcome === "done",
+        isError: nothingHappened,
+        content: result,
+      };
     } finally {
       await host.call("computer.grantRevoke", { reason: "agent-finished" }).catch(() => undefined);
       if (getActiveComputerUseRun()?.grant.grantId === grant.grantId) publishComputerUseRun(null);

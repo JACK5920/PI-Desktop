@@ -28,12 +28,12 @@ Related specs:
 
 Panel chrome contract:
 
-- PI-Desktop owns exactly a transparent 46px drag band and the minimal
+- PI-Desktop owns exactly a transparent 26px drag band and the minimal
   top-right three-button window-control capsule on every platform.
 - Normal-flow panel content is offset below that band automatically. Do not
-  add another 46px top padding.
+  add another 26px top padding.
 - If a panel adds fixed or sticky top UI, anchor it at
-  `top: var(--pi-plugin-titlebar-height, 46px)`. The plugin owns that UI and
+  `top: var(--pi-plugin-titlebar-height, 26px)`. The plugin owns that UI and
   should add `-webkit-app-region: no-drag` to its interactive controls.
 
 ## ui-slots-lab

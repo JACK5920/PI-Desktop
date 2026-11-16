@@ -8,7 +8,9 @@ import type {
   QueuedTurnSummary,
 } from "@pi-desktop/shared";
 import { api } from "../../lib/api";
+import { withoutPausedTask } from "../../lib/paused-task-recovery";
 import { isRemoteSession, sessionAllows } from "../../lib/remote-session-safety";
+import { resolveAgentEngine } from "../../lib/session-agent-engine";
 import {
   enqueueQueuedPrompt,
   isPendingQueuedPrompt,
@@ -466,6 +468,43 @@ export function createQueueSlice({
         if (!sessionId) throw new Error(i18n.t("errors.noActiveSession"));
         if (get().pendingPlans[sessionId]?.status === "pending") return false;
         if (get().runningSessions[sessionId]) {
+          const current = get().sessions.find((session) => session.id === sessionId);
+          // Steering is an OMP capability; decide on the engine this very
+          // conversation runs, not on whatever the default happens to be.
+          if (resolveAgentEngine({
+            session: current,
+            settingsEngine: get().settings?.agentEngine,
+          }) === "omp") {
+            if (!sessionAllows(current, "canSteer")) return false;
+            const expectedTurnId = get().agentStatuses[sessionId]?.currentTurnId;
+            if (!expectedTurnId) {
+              get().showToast(i18n.t("chat.steeringUnavailable"), { variant: "info" });
+              return false;
+            }
+            const annotationSnapshot = (get().responseAnnotations[sessionId] ?? []).map((annotation) => ({ ...annotation }));
+            const submittedContent = buildAnnotatedPrompt(content, annotationSnapshot);
+            const message = optimisticUserMessage(
+              crypto.randomUUID(), submittedContent, draft?.fileReferences ?? [],
+            );
+            runtime.insertOptimisticUserMessage(sessionId, message);
+            try {
+              await api.steer({
+                sessionId,
+                expectedTurnId,
+                content: submittedContent,
+                messageId: message.id,
+                streamingBehavior: "followUp",
+                attachments: draft ? promptAttachmentsFromDraft(draft.fileReferences) : [],
+              });
+              get().consumeAcceptedAnnotations(sessionId, annotationSnapshot);
+              onAccepted?.(sessionId);
+              return true;
+            } catch (error) {
+              runtime.retractOptimisticUserMessage(sessionId, message);
+              get().showToast(messageErrorFromUnknown(error).message, { variant: "error" });
+              return false;
+            }
+          }
           // Native Pi children have no Desktop prompt queue. Reject the send
           // here so the caller restores the draft instead of round-tripping a
           // queue item the backend refuses.
@@ -479,6 +518,12 @@ export function createQueueSlice({
           const accepted = await get().enqueuePrompt(content, draft, sessionId);
           if (accepted) onAccepted?.(sessionId);
           return accepted;
+        }
+        const pausedSettings = get().settings;
+        if (pausedSettings?.pausedTaskSessionIds?.includes(sessionId)) {
+          const cleared = withoutPausedTask(pausedSettings, sessionId);
+          await api.setSettings(cleared);
+          set({ settings: cleared });
         }
         const startedIn = sessionId;
         const annotationSnapshot: ResponseAnnotation[] = (
@@ -556,6 +601,7 @@ export function createQueueSlice({
             runtime.submittedComposerDrafts.delete(startedIn);
             return false;
           }
+          runtime.beginPromptSubmission(startedIn, optimisticMessage.id);
           const receipt = await api.prompt({
             sessionId,
             content: submittedContent,
@@ -563,6 +609,8 @@ export function createQueueSlice({
             viewingSessionId: isRemoteSession(current) ? null : viewingSessionIdForPrompt(get(), sessionId),
             attachments: draft ? promptAttachmentsFromDraft(draft.fileReferences) : [],
           });
+          runtime.acceptPromptSubmission(startedIn, optimisticMessage.id);
+          runtime.clearPromptSubmission(startedIn, optimisticMessage.id);
           if (receipt.managed) {
             runtime.submittedComposerDrafts.delete(startedIn);
             runtime.retractOptimisticUserMessage(startedIn, optimisticMessage);
@@ -596,9 +644,33 @@ export function createQueueSlice({
           onAccepted?.(startedIn);
           return true;
         } catch (error) {
-          runtime.submittedComposerDrafts.delete(startedIn);
-          runtime.retractOptimisticUserMessage(startedIn, optimisticMessage);
           const messageError = messageErrorFromUnknown(error);
+          // Renderer status can lag Host admission by one event. If the Host
+          // rejects a prompt specifically because a turn is already active,
+          // preserve the user's exact draft as a normal queued follow-up
+          // instead of leaving a failed duplicate bubble that looks lost.
+          if (
+            messageError.code === "AGENT_BUSY" &&
+            current?.source !== "pi-native" && current?.source !== "remote"
+          ) {
+            runtime.clearPromptSubmission(startedIn, optimisticMessage.id);
+            runtime.retractOptimisticUserMessage(startedIn, optimisticMessage);
+            const queued = await get().enqueuePrompt(content, draft, startedIn);
+            if (queued) {
+              runtime.submittedComposerDrafts.delete(startedIn);
+              onAccepted?.(startedIn);
+              return true;
+            }
+          }
+          runtime.submittedComposerDrafts.delete(startedIn);
+          if (runtime.promptSubmissionWasAccepted(startedIn, optimisticMessage.id)) {
+            runtime.clearPromptSubmission(startedIn, optimisticMessage.id);
+            get().consumeAcceptedAnnotations(startedIn, annotationSnapshot);
+            onAccepted?.(startedIn);
+            return true;
+          }
+          runtime.clearPromptSubmission(startedIn, optimisticMessage.id);
+          runtime.markPendingPromptFailed(startedIn, optimisticMessage);
           const errorRow = assistantErrorMessage(messageError);
           set((state) => {
             return {

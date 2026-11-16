@@ -20,9 +20,10 @@ import {
   IconChevronLeft,
   IconChevronRight,
   IconPencil,
+  IconRefresh,
   IconTrash,
 } from "../../../components/icons";
-import { TooltipButton } from "../../../components/ui";
+import { Button, TooltipButton } from "../../../components/ui";
 import { userMessageMenuItems } from "./menu-items";
 import { ActionSlotSide } from "./ActionBarSlots";
 import { slotMessage } from "../../../plugins/renderer-slots/slot-message";
@@ -108,6 +109,7 @@ export const MessageRow = memo(function MessageRow({
   const editUserMessage = useAppStore((s) => s.editUserMessage);
   const activateMessageRevision = useAppStore((s) => s.activateMessageRevision);
   const deleteMessage = useAppStore((s) => s.deleteMessage);
+  const retryLastPrompt = useAppStore((s) => s.retryLastPrompt);
   const paneSessionId = useSlotSessionId();
   const historyActionsAllowed = useTranscriptHistoryActionsAllowed();
   const isUser = message.role === "user";
@@ -182,6 +184,7 @@ export const MessageRow = memo(function MessageRow({
   const revisionCount = message.revisionCount ?? 0;
   const activeRevision = message.activeRevision ?? revisionCount;
   const showRevisionPager = editableUserMessage && revisionCount > 1;
+  const failedUserAttempt = isUser && message.status === "error";
   const extraAttachments = useMemo(() => {
     return getExtraMessageAttachments(
       displayed,
@@ -425,7 +428,19 @@ export const MessageRow = memo(function MessageRow({
                           .map((part, index) => renderContentPart(part, index, "inline"))}
                       </>
                     ) : (
-                      userContentParts.map((part, index) =>
+                      message.inlineContent?.length ? (() => {
+                        let sourceOffset = 0;
+                        return message.inlineContent.map((part, index) => {
+                          if (part.type === "text") {
+                            const start = sourceOffset;
+                            sourceOffset += part.text.length;
+                            return <LinkifiedText key={`omp-text-${index}`} text={part.text} attachments={message.attachments} sourceOffset={start} />;
+                          }
+                          return <span className="omp-inline-image-block" key={`omp-image-${index}`}>
+                            <img src={part.dataUrl} alt={t("chat.ompInlineImageAlt", { index: index + 1 })} loading="lazy" />
+                          </span>;
+                        });
+                      })() : userContentParts.map((part, index) =>
                         renderContentPart(part, index, "content"),
                       )
                     )}
@@ -434,13 +449,18 @@ export const MessageRow = memo(function MessageRow({
                 ) : attachmentChips}
               </>
             ) : (
-              <div className="prose-chat">
-                <Markdown
-                  source={displayed}
-                  responseAnnotations={responseAnnotations}
-                  annotationSessionId={paneSessionId}
-                />
-              </div>
+              <>
+                {displayed ? <div className="prose-chat">
+                  <Markdown
+                    source={displayed}
+                    responseAnnotations={responseAnnotations}
+                    annotationSessionId={paneSessionId}
+                  />
+                </div> : null}
+                {!message.inlineContent?.some((block) => block.type === "image") && message.inlineImages?.length ? <div className="omp-inline-images" aria-label={t("chat.ompInlineImages")}>
+                  {message.inlineImages.map((image, index) => <img key={`${image.mimeType}:${index}`} src={image.dataUrl} alt={t("chat.ompInlineImageAlt", { index: index + 1 })} loading="lazy" />)}
+                </div> : null}
+              </>
             )}
           </div>
         ) : null}
@@ -450,9 +470,20 @@ export const MessageRow = memo(function MessageRow({
         {!editing && isUser && sentAnnotations.length > 0 ? (
           <MessageAnnotationSummary annotations={sentAnnotations} />
         ) : null}
-        {!editing && (hasAnswer || showRevisionPager) ? (
+        {!editing && (hasAnswer || showRevisionPager || failedUserAttempt) ? (
           <div className="message-actions">
             <MessageTimestamp createdAt={message.createdAt} />
+            {failedUserAttempt ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={isRunning || !canMutateHistory}
+                onClick={() => void retryLastPrompt(message.id)}
+                aria-label={t("errors.action.retry")}
+              >
+                <IconRefresh size={13} />{t("errors.action.retry")}
+              </Button>
+            ) : null}
             <ActionSlotSide slot="userAction" side="left" message={slotUser} />
             {showRevisionPager ? (
               <div className="message-revision-pager" role="group" aria-label={t("chat.revisions")}>

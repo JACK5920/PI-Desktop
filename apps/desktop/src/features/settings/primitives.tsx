@@ -62,16 +62,18 @@ export function SettingsCard({
   title,
   description,
   action,
+  className,
   children,
 }: {
   title?: string;
   description?: string;
   /** Card-level control rendered at the end of the heading line. */
   action?: ReactNode;
+  className?: string;
   children: ReactNode;
 }) {
   return (
-    <section className="settings-card-block">
+    <section className={className ? `settings-card-block ${className}` : "settings-card-block"}>
       {title ? (
         /*
           The help mark is the heading's sibling, not its child: a nested

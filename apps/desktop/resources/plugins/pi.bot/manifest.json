@@ -1,0 +1,107 @@
+{
+  "schemaVersion": 1,
+  "id": "pi.bot",
+  "name": "MiniMax Bot",
+  "version": "0.7.24",
+  "description": "MiniMax Code 官方 Bot 团队插件的源码级移植：多 Bot 私聊、群聊 @ 点名接力、团队记忆、定时任务、派活与用量统计。默认按需启动：没有打开任何窗口时不运行 Bot 服务。",
+  "i18n": {
+    "en": {
+      "name": "MiniMax Bot",
+      "description": "Source-level port of the MiniMax Code Bot team plugin: multi-bot chats, @-mention relay, shared memory, schedules, task dispatch and usage stats. On demand: the bot service does not run while no window is open."
+    },
+    "zh-CN": {
+      "name": "MiniMax Bot 团队",
+      "description": "MiniMax Code 官方 Bot 团队插件的源码级移植：多 Bot 私聊、群聊 @ 点名接力、团队记忆、定时任务、派活与用量统计。默认按需启动：没有打开任何窗口时不运行 Bot 服务。"
+    }
+  },
+  "author": "MiniMax Code (ported)",
+  "main": "main.cjs",
+  "icon": "icon.png",
+  "ui": {
+    "panel": "panel/index.html",
+    "width": 1180,
+    "height": 780,
+    "title": {
+      "en": "MiniMax Bot",
+      "zh-CN": "MiniMax Bot 团队"
+    }
+  },
+  "contributes": {
+    "views": [
+      {
+        "id": "bot",
+        "title": {
+          "en": "MiniMax Bot",
+          "zh-CN": "MiniMax Bot"
+        },
+        "icon": "bot",
+        "entry": "panel/index.html",
+        "order": 5
+      }
+    ],
+    "commands": [
+      {
+        "id": "pibot.open",
+        "title": "MiniMax Bot: 打开独立窗口",
+        "keywords": [
+          "bot",
+          "团队",
+          "minimax",
+          "机器人"
+        ],
+        "category": "Bot"
+      }
+    ],
+    "launcherTriggers": [
+      {
+        "id": "pibot-launcher",
+        "pattern": "^(bot|bots|团队|机器人|minimax)$",
+        "flags": "i",
+        "title": {
+          "en": "Open MiniMax Bot",
+          "zh-CN": "打开 MiniMax Bot 团队"
+        }
+      }
+    ]
+  },
+  "permissions": [
+    "ui.panel",
+    "ui.view",
+    "agent.complete",
+    "models.list",
+    "fs.read",
+    "fs.write",
+    "net.fetch",
+    "desktop.control",
+    "shell.openExternal"
+  ],
+  "fs": {
+    "read": {
+      "root": "workspace",
+      "scope": [
+        "**/*"
+      ]
+    },
+    "write": {
+      "root": "workspace",
+      "scope": [
+        "pi-bot/**",
+        "*.md"
+      ]
+    }
+  },
+  "net": {
+    "domains": [
+      "127.0.0.1",
+      "localhost"
+    ]
+  },
+  "engines": {
+    "piDesktop": ">=0.21.0"
+  },
+  "activationEvents": [
+    "onStartup",
+    "onCommand:pibot.open",
+    "onView:bot"
+  ]
+}

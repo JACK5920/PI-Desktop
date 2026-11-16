@@ -40,7 +40,7 @@ const SESSION_AFFINITY_COMPAT_APIS: ReadonlySet<string> = new Set([
   "anthropic-messages",
 ]);
 
-/** Responses has native session headers, but needs this proxy-safe alias. */
+/** Responses endpoints get explicit, proxy-safe session headers. */
 const SESSION_AFFINITY_OPTION_HEADER_APIS: ReadonlySet<string> = new Set([
   "openai-responses",
 ]);
@@ -132,8 +132,8 @@ export function withSessionPromptCacheKey(input: {
 
 /**
  * `options` with session identity appended at the request boundary. Responses
- * already emits `session_id`, but common reverse proxies drop underscore
- * headers; add the stable hyphenated alias for custom endpoints. Completions
+ * headers are set explicitly rather than relying on SDK/provider defaults;
+ * this also adds the stable hyphenated alias for custom endpoints. Completions
  * gets its missing body key after every other `onPayload` hook, so a
  * payload-rewriting extension cannot drop it.
  *
@@ -160,11 +160,18 @@ export function withSessionAffinityOptions(
   if (sessionId && SESSION_AFFINITY_OPTION_HEADER_APIS.has(input.api)) {
     const headers = { ...(options.headers ?? {}) };
     for (const key of Object.keys(headers)) {
-      if (key.toLowerCase() === "x-session-affinity") delete headers[key];
+      if (["session_id", "x-client-request-id", "x-session-affinity"].includes(key.toLowerCase())) {
+        delete headers[key];
+      }
     }
     nextOptions = {
       ...options,
-      headers: { ...headers, "x-session-affinity": sessionId },
+      headers: {
+        ...headers,
+        session_id: sessionId,
+        "x-client-request-id": sessionId,
+        "x-session-affinity": sessionId,
+      },
     };
   }
 

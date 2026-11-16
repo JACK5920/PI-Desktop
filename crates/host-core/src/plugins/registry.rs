@@ -101,8 +101,18 @@ impl PluginManager {
                 let manifest = match Self::read_manifest(&path) {
                     Ok(manifest) => manifest,
                     // A malformed bundled plugin is a build defect. Skip it
-                    // rather than refusing to start the whole host.
-                    Err(_) => continue,
+                    // rather than refusing to start the whole host -- but say
+                    // so: skipping also drops the row from the registry, and a
+                    // silent skip makes the plugin vanish from the UI with no
+                    // trace in any log to explain it.
+                    Err(error) => {
+                        tracing::warn!(
+                            plugin_dir = ?path,
+                            %error,
+                            "bundled plugin manifest is unreadable; it is not registered"
+                        );
+                        continue;
+                    }
                 };
                 let previous = self.runtime.iter().find(|p| p.id == manifest.id);
                 let now = Utc::now().to_rfc3339();

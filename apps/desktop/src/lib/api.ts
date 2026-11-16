@@ -198,6 +198,61 @@ import {
 } from "@pi-desktop/shared";
 
 export type ImportSource = "claude-code" | "opencode" | "codex" | "pi";
+export type OmpEngineProgress = {
+  stage: "check" | "download" | "verify" | "reuse" | "activate";
+  version: string;
+  assetName?: string;
+  downloadedBytes?: number;
+  totalBytes?: number;
+};
+export type OmpEngineOperation = {
+  state: "running" | "cancelling" | "completed" | "cancelled" | "failed";
+  action: "install" | "import";
+  progress: OmpEngineProgress | null;
+  error?: string;
+  startedAt: number;
+  updatedAt: number;
+};
+export type PiEngineProgress = {
+  stage: "check" | "download" | "verify" | "extract" | "smoke" | "activate";
+  version?: string;
+  assetName?: string;
+  downloadedBytes?: number;
+  totalBytes?: number;
+};
+export type PiEngineOperation = {
+  state: "running" | "cancelling" | "completed" | "cancelled" | "failed";
+  action: "install";
+  progress: PiEngineProgress | null;
+  error?: string;
+  startedAt: number;
+  updatedAt: number;
+};
+export type PiEngineManifest = {
+  schemaVersion: 1;
+  engine: "pi";
+  desktopVersion: string;
+  agentRuntimeVersion: string;
+  protocolVersion: number;
+  piPackages: Record<"@earendil-works/pi-agent-core" | "@earendil-works/pi-ai" | "@earendil-works/pi-coding-agent", string>;
+  piPatchHashes: Record<"@earendil-works/pi-agent-core" | "@earendil-works/pi-ai" | "@earendil-works/pi-coding-agent", string>;
+  files: Array<{ path: string; size: number; sha256: string }>;
+};
+export type PiEngineStatus = {
+  supported: boolean;
+  runningManifest?: PiEngineManifest | null;
+  installedManifest?: PiEngineManifest | null;
+  latestManifest?: PiEngineManifest | null;
+  latestReleaseTag?: string | null;
+  latestPackageVersions?: Partial<PiEngineManifest["piPackages"]>;
+  latestReleaseNotes?: string | null;
+  previousVersion?: string | null;
+  canRollback?: boolean;
+  restartRequired?: boolean;
+  updateAvailable?: boolean;
+  remoteError?: string | null;
+  operation?: PiEngineOperation | null;
+};
 // One definition, owned by the shared package (the host and sidecar use the
 // same shape); re-exported so existing renderer imports keep working.
 import type {
@@ -401,6 +456,33 @@ export type BackgroundTasksListResult = {
   version: number;
 };
 
+export type ArtifactSummary = {
+  id: string;
+  sessionId: string;
+  sessionTitle: string | null;
+  path: string;
+  op: string;
+  turnId: string | null;
+  toolCallId: string | null;
+  source: string;
+  confidence: string;
+  existsAfter: boolean;
+  existsNow: boolean;
+  sizeBytes: number | null;
+  sha256: string | null;
+  previousPath: string | null;
+  turnStatus: string | null;
+  sourceMessageId?: string | null;
+  updatedAt: string;
+};
+
+export type ArtifactsListResult = {
+  artifacts: ArtifactSummary[];
+  total: number;
+  hasMore: boolean;
+  offset: number;
+};
+
 export type BackgroundTaskOutput = {
   id: string;
   state: "running" | "exited" | "failed" | "stopped";
@@ -459,6 +541,10 @@ export function normalizeSettings(settings: AppSettings): AppSettings {
     sidebarRunningRail: settings.sidebarRunningRail === true,
     keepCommandsExpanded: settings.keepCommandsExpanded !== false,
     scheduledTasksEnabled: settings.scheduledTasksEnabled !== false,
+    autoResumePausedTasks: settings.autoResumePausedTasks === true,
+    pausedTaskSessionIds: Array.isArray(settings.pausedTaskSessionIds)
+      ? [...new Set(settings.pausedTaskSessionIds.filter((id) => typeof id === "string" && id.length <= 256))]
+      : [],
     goalBudgetDefaults: normalizeGoalBudgetDefaults(settings.goalBudgetDefaults),
     transcriptDisplayMode: isTranscriptDisplayModeValue(settings.transcriptDisplayMode)
       ? settings.transcriptDisplayMode
@@ -590,6 +676,24 @@ export function validateSettingsWrite(settings: AppSettings): AppSettings {
     typeof settings.scheduledTasksEnabled !== "boolean"
   ) {
     throw Object.assign(new Error("scheduledTasksEnabled is invalid"), {
+      errorCode: "INVALID_PARAMS",
+    });
+  }
+  if (
+    Object.prototype.hasOwnProperty.call(settings, "autoResumePausedTasks") &&
+    typeof settings.autoResumePausedTasks !== "boolean"
+  ) {
+    throw Object.assign(new Error("autoResumePausedTasks is invalid"), {
+      errorCode: "INVALID_PARAMS",
+    });
+  }
+  if (
+    Object.prototype.hasOwnProperty.call(settings, "pausedTaskSessionIds") &&
+    (!Array.isArray(settings.pausedTaskSessionIds) || settings.pausedTaskSessionIds.some(
+      (id) => typeof id !== "string" || id.length > 256,
+    ))
+  ) {
+    throw Object.assign(new Error("pausedTaskSessionIds is invalid"), {
       errorCode: "INVALID_PARAMS",
     });
   }
@@ -733,6 +837,69 @@ function isGoalProgressEvent(value: unknown): value is GoalProgressEvent {
   );
 }
 
+export const OMP_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+export type OmpThinkingLevel = (typeof OMP_THINKING_LEVELS)[number];
+
+/** Per-model settings kept app-side; only app-owned providers push them to the engine. */
+export type OmpModelOverride = {
+  displayName?: string;
+  defaultThinkingLevel?: OmpThinkingLevel;
+  contextWindow?: number;
+  maxTokens?: number;
+  supportsImages?: boolean;
+};
+
+export type OmpModelOverrideInput = OmpModelOverride & { key: string };
+
+export type OmpCustomModelApiStyle = "openai-completions" | "openai-responses" | "anthropic-messages" | "google-generative-ai";
+
+/** One model stored under a custom OMP service, with what the picker kept. */
+export type OmpCustomModelEntry = {
+  id: string;
+  displayName?: string;
+  contextWindow: number;
+  maxTokens: number;
+  supportsImages: boolean;
+  thinkingLevels: OmpThinkingLevel[];
+  defaultThinkingLevel?: OmpThinkingLevel;
+  supportsReasoningEffort?: boolean;
+};
+
+/** A saved custom service; one provider row owns every model below it. */
+export type OmpCustomModelProvider = {
+  id: string;
+  providerId: string;
+  providerName: string;
+  baseUrl: string;
+  api: OmpCustomModelApiStyle;
+  auth: "apiKey" | "none";
+  configured: boolean;
+  models: OmpCustomModelEntry[];
+};
+
+export type OmpCustomModelSaveInput = {
+  id?: string;
+  providerName: string;
+  baseUrl: string;
+  api: OmpCustomModelApiStyle;
+  auth: "apiKey" | "none";
+  models: Array<{
+    id: string;
+    displayName?: string;
+    contextWindow: number;
+    maxTokens: number;
+    supportsImages?: boolean;
+    thinkingLevels?: OmpThinkingLevel[];
+    defaultThinkingLevel?: OmpThinkingLevel;
+    supportsReasoningEffort?: boolean;
+  }>;
+  apiKey?: string;
+};
+
+export function ompModelOverrideKey(provider: string, modelId: string): string {
+  return `${encodeURIComponent(provider)}::${encodeURIComponent(modelId)}`;
+}
+
 export const api = {
   getVersion: () => invoke<AppVersionInfo>(IPC.invoke.appGetVersion),
   health: () => invoke<HostHealth>(IPC.invoke.appHealth),
@@ -841,6 +1008,8 @@ export const api = {
     })),
   getSessionCollaboration: (sessionId: string) =>
     invoke<SessionCollaborationSummary>(IPC.invoke.sessionCollaboration, { sessionId }),
+  getSessionUsageCost: (sessionId: string) =>
+    invoke<import("@pi-desktop/shared").SessionUsageCost>(IPC.invoke.sessionUsageCost, { sessionId }),
   deleteSession: (id: string) => invoke(IPC.invoke.sessionDelete, id),
   getSessionScratchPath: (sessionId: string) =>
     invoke<{ path: string }>(IPC.invoke.sessionGetScratchPath, { sessionId }),
@@ -862,8 +1031,18 @@ export const api = {
     }).then((result) => ({ ...result, session: normalizeSession(result.session) })),
   configureSession: (
     id: string,
-    config: Pick<SessionSummary, "mode" | "providerId" | "modelId"> &
-      Partial<Pick<SessionSummary, "thinkingLevel" | "permissionMode" | "fastMode">>,
+    config: Pick<SessionSummary, "mode"> &
+      Partial<
+        Pick<
+          SessionSummary,
+          | "providerId"
+          | "modelId"
+          | "thinkingLevel"
+          | "permissionMode"
+          | "fastMode"
+          | "agentEngine"
+        >
+      >,
   ) =>
     invoke<{ session: SessionSummary }>(
       IPC.invoke.sessionConfigure,
@@ -885,6 +1064,102 @@ export const api = {
   runImportModelConfigs: (items: ModelConfigImportCandidate[]) =>
     invoke<ImportRunResult>(IPC.invoke.modelConfigImportRun, items),
   getSettings: () => invoke<AppSettings>(IPC.invoke.settingsGet).then(normalizeSettings),
+  getOmpEngineStatus: () => invoke<{
+    supported: boolean;
+    installedVersion?: string | null;
+    previousVersion?: string | null;
+    latestVersion?: string | null;
+    canRollback?: boolean;
+    operation?: OmpEngineOperation | null;
+  }>(IPC.invoke.ompEngineStatus),
+  getOmpCustomModels: () => invoke<{
+    providers: OmpCustomModelProvider[];
+  }>(IPC.invoke.ompCustomModelGet),
+  saveOmpCustomModel: (input: OmpCustomModelSaveInput) =>
+    invoke<OmpCustomModelProvider>(IPC.invoke.ompCustomModelSave, input),
+  deleteOmpCustomModel: (id: string) => invoke<{ ok: boolean }>(IPC.invoke.ompCustomModelDelete, { id }),
+  probeOmpCustomModels: (input: {
+    baseUrl: string;
+    api: OmpCustomModelApiStyle;
+    auth: "apiKey" | "none";
+    apiKey?: string;
+    id?: string;
+  }) => invoke<{ models: Array<{ id: string; name?: string; contextWindow?: number }> }>(IPC.invoke.ompCustomModelProbe, input),
+  getOmpSelectedModel: () =>
+    invoke<{ provider: string; modelId: string } | null>(IPC.invoke.ompSelectedModelGet),
+  getOmpHiddenModels: () => invoke<{ hiddenModels: string[] }>(IPC.invoke.ompModelVisibilityGet),
+  setOmpHiddenModels: (hiddenModels: string[]) => invoke<{ hiddenModels: string[] }>(IPC.invoke.ompModelVisibilitySet, { hiddenModels }),
+  getOmpModelOverrides: () => invoke<{ overrides: Record<string, OmpModelOverride> }>(IPC.invoke.ompModelOverrideGet),
+  setOmpModelOverride: (input: OmpModelOverrideInput) => invoke<{ overrides: Record<string, OmpModelOverride> }>(IPC.invoke.ompModelOverrideSet, input),
+  getOmpProfileSettings: () => invoke<{ defaultThinkingLevel: string | null; configPath: string }>(IPC.invoke.ompProfileSettingsGet),
+  setOmpProfileSettings: (input: { defaultThinkingLevel: string | null }) => invoke<{ defaultThinkingLevel: string | null; configPath: string }>(IPC.invoke.ompProfileSettingsSet, input),
+  stopOmpManagement: () => invoke<{ ok: boolean }>(IPC.invoke.ompManagementStop),
+  onOmpEngineProgress: (listener: (progress: OmpEngineProgress) => void) => {
+    if (!window.piDesktop?.on) return () => undefined;
+    return window.piDesktop.on(IPC.event.ompEngineProgress, (payload) => listener(payload as OmpEngineProgress));
+  },
+  installOrUpdateOmpEngine: () => invoke<{
+    installedVersion: string | null;
+    previousVersion: string | null;
+    latestVersion: string | null;
+    canRollback: boolean;
+    operation: OmpEngineOperation | null;
+  }>(IPC.invoke.ompEngineInstallOrUpdate),
+  cancelOmpEngineOperation: () => invoke<{
+    cancelled: boolean;
+    operation: OmpEngineOperation | null;
+  }>(IPC.invoke.ompEngineCancel),
+  openOmpReleases: () => invoke<{ ok: boolean }>(IPC.invoke.ompEngineOpenReleases),
+  openOmpEngineStorageFolder: () => invoke<{ ok: boolean }>(IPC.invoke.ompEngineOpenStorageFolder),
+  importLocalOmpEngine: () => invoke<{
+    cancelled?: boolean;
+    installedVersion?: string | null;
+    previousVersion?: string | null;
+    latestVersion?: string | null;
+    canRollback?: boolean;
+    operation?: OmpEngineOperation | null;
+  }>(IPC.invoke.ompEngineImportLocal),
+  rollbackOmpEngine: () => invoke<{
+    installedVersion: string | null;
+    previousVersion: string | null;
+    latestVersion: string | null;
+    canRollback: boolean;
+    operation: OmpEngineOperation | null;
+  }>(IPC.invoke.ompEngineRollback),
+  getPiEngineStatus: () => invoke<PiEngineStatus>(IPC.invoke.piEngineStatus),
+  installOrUpdatePiEngine: () => invoke<PiEngineStatus>(IPC.invoke.piEngineInstallOrUpdate),
+  cancelPiEngineOperation: () => invoke<{
+    cancelled: boolean;
+    operation: PiEngineOperation | null;
+  }>(IPC.invoke.piEngineCancel),
+  openPiEngineReleases: () => invoke<{ ok: boolean }>(IPC.invoke.piEngineOpenReleases),
+  openPiDependencyRepository: () => invoke<{ ok: boolean }>(IPC.invoke.piEngineOpenDependencyRepository),
+  rollbackPiEngine: () => invoke<PiEngineStatus>(IPC.invoke.piEngineRollback),
+  onPiEngineProgress: (listener: (progress: PiEngineProgress) => void) => {
+    if (!window.piDesktop?.on) return () => undefined;
+    return window.piDesktop.on(IPC.event.piEngineProgress, (payload) => listener(payload as PiEngineProgress));
+  },
+  attachOmpRpc: (input: { sessionId: string; skipMessages?: boolean }) =>
+    invoke<{ runId: string; state: unknown; messages: unknown }>(IPC.invoke.ompRpcAttach, input),
+  forkOmpSession: (input: { sessionId: string; entryId: string }) =>
+    invoke<{ session: SessionSummary; parentMessages: UiMessage[] }>(IPC.invoke.ompRpcForkSession, input)
+      .then((result) => ({ ...result, session: normalizeSession(result.session) })),
+  ompRpcCommand: (input: { sessionId: string; command: string; fields?: Record<string, unknown> }) =>
+    invoke<unknown>(IPC.invoke.ompRpcCommand, input),
+  respondOmpRpcUi: (input: { sessionId: string; response: Record<string, unknown> }) =>
+    invoke<{ ok: boolean }>(IPC.invoke.ompRpcUiResponse, input),
+  acquireOmpMicrophone: (input: { sessionId: string }) =>
+    invoke<{ ok: boolean }>(IPC.invoke.ompMicrophoneAcquire, input),
+  releaseOmpMicrophone: (input: { sessionId: string }) =>
+    invoke<{ ok: boolean }>(IPC.invoke.ompMicrophoneRelease, input),
+  onOmpRpcEvent: (listener: (event: {
+    sessionId: string; runId: string; frame: Record<string, unknown>;
+  }) => void) => {
+    if (!window.piDesktop?.on) return () => undefined;
+    return window.piDesktop.on(IPC.event.ompRpcEvent, (payload) => listener(payload as {
+      sessionId: string; runId: string; frame: Record<string, unknown>;
+    }));
+  },
   computerCapabilities: () => invoke<ComputerCapabilities>(IPC.invoke.computerCapabilities),
   computerGrantDescribe: () => invoke<{ grant: ComputerGrantView | null }>(IPC.invoke.computerGrantDescribe),
   computerGrantRevoke: (input: { sessionId: string; grantId: string }) =>
@@ -925,6 +1200,8 @@ export const api = {
     invoke<JevKeyCheckResult>(IPC.invoke.jevTest, value),
   backgroundTasksList: () =>
     invoke<BackgroundTasksListResult>(IPC.invoke.backgroundTasksList),
+  listArtifacts: (sessionId: string, limit = 200, turnId?: string, offset = 0) =>
+    invoke<ArtifactsListResult>(IPC.invoke.artifactList, { sessionId, limit, offset, ...(turnId ? { turnId } : {}) }),
   backgroundTasksOutput: (id: string) =>
     invoke<BackgroundTaskOutput>(IPC.invoke.backgroundTasksOutput, { id }),
   backgroundTasksStop: (id: string) =>

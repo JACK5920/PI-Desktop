@@ -666,8 +666,10 @@ export async function turnProcessProbe() {
     ];
     check(
       liveThinkingHeaders.length === 2 &&
-        liveThinkingHeaders.every((header) => header.getAttribute("aria-expanded") === "true"),
-      "fully folded expands each visible thinking row by default",
+        liveThinkingHeaders.every((header) => header.getAttribute("aria-expanded") === "false") &&
+        !container.textContent?.includes("Earlier reasoning remains available.") &&
+        !container.textContent?.includes("Latest reasoning remains available."),
+      "fully folded keeps every visible thinking row collapsed by default",
     );
     render(
       [earlierThinking, read, completedThinking, thinkingAnswer],
@@ -689,11 +691,25 @@ export async function turnProcessProbe() {
     check(
       settledThinkingGroupHeader?.getAttribute("aria-expanded") === "true" &&
         settledThinkingHeaders.length === 2 &&
-        settledThinkingHeaders.every((header) => header.getAttribute("aria-expanded") === "true") &&
+        settledThinkingHeaders.every((header) => header.getAttribute("aria-expanded") === "false") &&
+        !container.textContent?.includes("Earlier reasoning remains available.") &&
+        !container.textContent?.includes("Latest reasoning remains available.") &&
+        row("read")?.querySelector<HTMLElement>(".tool-row-header")?.getAttribute("aria-expanded") === "false",
+      "reopening the process reveals the group while thinking and tool details stay collapsed",
+    );
+    for (const index of [0, 1]) {
+      const header = container.querySelectorAll<HTMLElement>(".tool-row.thinking .tool-row-header")[index];
+      click(header ?? null);
+    }
+    const manuallyOpenedThinkingHeaders = [
+      ...container.querySelectorAll<HTMLElement>(".tool-row.thinking .tool-row-header"),
+    ];
+    check(
+      manuallyOpenedThinkingHeaders.every((header) => header.getAttribute("aria-expanded") === "true") &&
         container.textContent?.includes("Earlier reasoning remains available.") === true &&
         container.textContent?.includes("Latest reasoning remains available.") === true &&
         row("read")?.querySelector<HTMLElement>(".tool-row-header")?.getAttribute("aria-expanded") === "false",
-      "reopening the process reveals the open group and reasoning while tool payloads stay collapsed",
+      "thinking rows remain manually expandable without opening tool payloads",
     );
 
     const largeGroup = Array.from({ length: 5 }, (_, index) =>

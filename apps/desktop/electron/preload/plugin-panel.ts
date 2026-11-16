@@ -160,7 +160,7 @@ function publishTitlebarHeight(): void {
 
 function pluginOwnsTitlebarSpacing(): boolean {
   // A floating widget publishes a titlebar height of 0 and draws edge to edge,
-  // so the host must not add the legacy 46px offset either.
+  // so the host must not add the legacy 26px offset either.
   return isWidgetPanel() || pluginChromeMode() !== "legacy";
 }
 
@@ -255,7 +255,7 @@ function pluginChromeMode(): PluginPanelChromeMode {
 }
 
 /**
- * v3 keeps the page visible through the 46px band. Only these page-owned
+ * v3 keeps the page visible through the 26px band. Only these page-owned
  * elements need holes in the host drag map; ordinary empty space remains
  * draggable. Plugins can opt custom controls into the same contract with
  * `data-pi-plugin-no-drag`.
@@ -520,7 +520,7 @@ function chromeLabels(input = panelLocale()): ChromeLabels {
       maximize: "最大化",
       restore: "還原",
       close: "關閉",
-      safeArea: "開發提示 · 頂部 46px 為拖曳區",
+      safeArea: "開發提示 · 頂部 26px 為拖曳區",
     };
   }
   if (locale.startsWith("ko")) {
@@ -530,7 +530,7 @@ function chromeLabels(input = panelLocale()): ChromeLabels {
       maximize: "최대화",
       restore: "복원",
       close: "닫기",
-      safeArea: "개발 안내 · 상단 46px는 드래그 전용",
+      safeArea: "개발 안내 · 상단 26px는 드래그 전용",
     };
   }
   if (locale.startsWith("tr")) {
@@ -540,7 +540,7 @@ function chromeLabels(input = panelLocale()): ChromeLabels {
       maximize: "Büyüt",
       restore: "Geri yükle",
       close: "Kapat",
-      safeArea: "Geliştirici ipucu · üst 46 piksel yalnızca sürükleme alanıdır",
+      safeArea: "Geliştirici ipucu · üst 26 piksel yalnızca sürükleme alanıdır",
     };
   }
   if (locale.startsWith("de")) {
@@ -550,7 +550,7 @@ function chromeLabels(input = panelLocale()): ChromeLabels {
       maximize: "Maximieren",
       restore: "Wiederherstellen",
       close: "Schließen",
-      safeArea: "Entwicklerhinweis · die oberen 46 px dienen nur zum Ziehen",
+      safeArea: "Entwicklerhinweis · die oberen 26 px dienen nur zum Ziehen",
     };
   }
   if (locale.startsWith("es")) {
@@ -560,7 +560,7 @@ function chromeLabels(input = panelLocale()): ChromeLabels {
       maximize: "Maximizar",
       restore: "Restaurar",
       close: "Cerrar",
-      safeArea: "Aviso de desarrollo · los 46 px superiores son solo para arrastrar",
+      safeArea: "Aviso de desarrollo · los 26 px superiores son solo para arrastrar",
     };
   }
   if (locale.startsWith("fr")) {
@@ -570,7 +570,7 @@ function chromeLabels(input = panelLocale()): ChromeLabels {
       maximize: "Agrandir",
       restore: "Restaurer",
       close: "Fermer",
-      safeArea: "Indication de développement · les 46 px supérieurs servent uniquement au déplacement",
+      safeArea: "Indication de développement · les 26 px supérieurs servent uniquement au déplacement",
     };
   }
   if (locale.startsWith("pt")) {
@@ -580,7 +580,7 @@ function chromeLabels(input = panelLocale()): ChromeLabels {
       maximize: "Maximizar",
       restore: "Restaurar",
       close: "Fechar",
-      safeArea: "Dica de desenvolvimento · os 46px superiores são apenas para arrastar",
+      safeArea: "Dica de desenvolvimento · os 26px superiores são apenas para arrastar",
     };
   }
   if (locale.startsWith("zh")) {
@@ -590,7 +590,7 @@ function chromeLabels(input = panelLocale()): ChromeLabels {
       maximize: "最大化",
       restore: "还原",
       close: "关闭",
-      safeArea: "开发提示 · 顶部 46px 为拖拽区",
+      safeArea: "开发提示 · 顶部 26px 为拖拽区",
     };
   }
   return {
@@ -599,7 +599,7 @@ function chromeLabels(input = panelLocale()): ChromeLabels {
     maximize: "Maximize",
     restore: "Restore",
     close: "Close",
-    safeArea: "Dev hint · top 46px is drag-only",
+    safeArea: "Dev hint · top 26px is drag-only",
   };
 }
 
@@ -629,7 +629,7 @@ function installPanelChrome(): void {
 
   // Publish this before the page's DOMContentLoaded handlers run so modern
   // plugin CSS can resolve its variable without an extra reflow or a second
-  // 46px offset.
+  // 26px offset.
   publishTitlebarHeight();
   publishPanelShape();
 
@@ -738,6 +738,15 @@ function installPanelChrome(): void {
     );
   };
   syncPageColors();
+  // A plugin that owns its palette (pi.bot writes `data-panel-theme` from a
+  // script) has not necessarily painted it by the time this runs, so the first
+  // sample can capture the pre-theme surface. Re-sample across the first paint
+  // instead of leaving the band one palette behind the page.
+  window.requestAnimationFrame(() => {
+    syncPageColors();
+    window.setTimeout(syncPageColors, 300);
+    window.setTimeout(syncPageColors, 1200);
+  });
   host.setAttribute("role", "toolbar");
   host.setAttribute("aria-label", labels.toolbar);
   const shadow = host.attachShadow({ mode: "closed" });
@@ -752,7 +761,16 @@ function installPanelChrome(): void {
       z-index: 2147483647;
       display: block;
       height: ${PLUGIN_PANEL_TITLEBAR_HEIGHT}px;
+      /* Paint the band with the page's own sampled surface instead of leaving
+         the window background exposed. A plugin that picks a palette different
+         from the app theme used to show a dark native strip above a light page
+         (and vice versa). Same colour on both sides of the seam, no strip. */
+      background: var(--pi-plugin-panel-page-background, transparent);
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    }
+    /* v3 pages paint through the band themselves; a host fill would cover them. */
+    :host([data-chrome-mode="paint-through"]) {
+      background: transparent;
     }
     .chrome {
       position: relative;
@@ -791,7 +809,7 @@ function installPanelChrome(): void {
       top: 50%;
       left: 10px;
       z-index: 1;
-      max-width: calc(100% - 126px);
+      max-width: calc(100% - 140px);
       overflow: hidden;
       color: color-mix(in oklab, var(--pi-plugin-panel-page-foreground) 46%, transparent);
       font-size: 10px;
@@ -807,20 +825,20 @@ function installPanelChrome(): void {
       app-region: no-drag;
       pointer-events: auto;
       position: absolute;
-      top: 9px;
-      right: 8px;
+      top: 2px;
+      right: 6px;
       z-index: 2;
       box-sizing: border-box;
       display: flex;
-      width: 96px;
-      height: 28px;
+      width: 120px;
+      height: ${PLUGIN_PANEL_TITLEBAR_HEIGHT - 4}px;
       align-items: center;
       gap: 1px;
       overflow: hidden;
-      border: 1px solid color-mix(in oklab, var(--pi-plugin-panel-page-foreground) 16%, transparent);
+      border: 1px solid color-mix(in oklab, var(--pi-plugin-panel-page-foreground) 14%, transparent);
       border-radius: 999px;
       padding: 1px;
-      background: color-mix(in oklab, var(--pi-plugin-panel-page-foreground) 6%, transparent);
+      background: color-mix(in oklab, var(--pi-plugin-panel-page-foreground) 5%, transparent);
       user-select: none;
     }
     .control {
@@ -829,12 +847,12 @@ function installPanelChrome(): void {
       pointer-events: auto;
       display: inline-flex;
       min-width: 0;
-      height: 24px;
+      height: ${PLUGIN_PANEL_TITLEBAR_HEIGHT - 8}px;
       flex: 1 1 0;
       align-items: center;
       justify-content: center;
       border: 0;
-      border-radius: 7px;
+      border-radius: 6px;
       outline: none;
       background: transparent;
       color: color-mix(in oklab, var(--pi-plugin-panel-page-foreground) 58%, transparent);

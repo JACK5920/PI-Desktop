@@ -702,6 +702,23 @@ describe("classifyAgentError", () => {
     });
   });
 
+  it.each([
+    '429 {"error":{"code":"1308","message":"Plan usage limit reached"}}',
+    '429: {"error":{"code":1308,"message":"Usage limit reached"}}',
+  ])("does not retry the Zhipu usage-limit code: %s", (message) => {
+    expect(classifyAgentError(Object.assign(new Error(message), { status: 429 }))).toMatchObject({
+      code: "PROVIDER_ERROR",
+      retriable: false,
+    });
+  });
+
+  it("keeps an unrelated 429 mentioning 1308 retryable", () => {
+    expect(classifyAgentError(Object.assign(
+      new Error('429 {"error":{"code":"1302","message":"request 13080 rate limit"}}'),
+      { status: 429 },
+    ))).toMatchObject({ code: "PROVIDER_RATE_LIMITED", retriable: true });
+  });
+
   // OpenRouter reports an empty balance as HTTP 402. Backing off cannot add
   // credits, so the same-turn transient budget must not replay the request.
   it.each([
@@ -799,6 +816,24 @@ describe("classifyAgentError", () => {
           networkHost: "api.example.com",
         },
       });
+  });
+
+  it.each(["EXECONNRESET", "ETIMEDOUTX", "ERR_EPIPE_ID"])(
+    "does not treat an errno-like substring as a network code: %s",
+    (message) => {
+      expect(classifyAgentError(new Error(`provider returned ${message}`)).code)
+        .not.toBe("NETWORK_ERROR");
+    },
+  );
+
+  it.each([
+    "403 AccountOverdueError: overdue balance",
+    '403 {"code":"AccountOverdueError","message":"account overdue balance"}',
+  ])("treats Volcengine overdue-account failures as terminal: %s", (message) => {
+    expect(classifyAgentError(new Error(message))).toMatchObject({
+      code: "PROVIDER_ERROR",
+      retriable: false,
+    });
   });
 
   it("names the failing layer behind a nested DNS cause", () => {
@@ -1043,7 +1078,7 @@ describe("classifyAgentError", () => {
     // unbounded detail: the message is untrusted text.
     const flood = `EDNS${"A".repeat(3_000)}`;
     expect(describeNetworkFailure(flood, flood).code).toBeUndefined();
-    expect(classifyAgentError(flood).details).not.toHaveProperty("networkCode");
+    expect(classifyAgentError(flood).details ?? {}).not.toHaveProperty("networkCode");
 
     // A body word that merely contains "proxy" is not a proxy layer either.
     const bodyWord = Object.assign(new TypeError("fetch failed"), {

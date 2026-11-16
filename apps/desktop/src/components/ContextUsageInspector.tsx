@@ -30,6 +30,8 @@ import {
   type ContextInspectorPlacement,
 } from "../lib/context-inspector-position";
 import { useSessionTiming } from "../features/chat/context-usage/useSessionTiming";
+import { useSessionUsageCost } from "../features/chat/context-usage/useSessionUsageCost";
+import { formatUsageCost } from "../lib/usage-cost";
 
 const CONTEXT_RING_RADIUS = 9;
 const CONTEXT_RING_CIRCUMFERENCE = 2 * Math.PI * CONTEXT_RING_RADIUS;
@@ -38,6 +40,7 @@ export function ContextUsageInspector({
   usage,
   turnUsage,
   contextWindow,
+  contextWindowEstimated = false,
   tools,
   responseDurationMs,
   responseOutputTokens,
@@ -47,13 +50,14 @@ export function ContextUsageInspector({
   usage: MessageUsage;
   turnUsage: MessageUsage;
   contextWindow: number;
+  contextWindowEstimated?: boolean;
   tools: UiMessage[];
   responseDurationMs?: number;
   responseOutputTokens?: number;
   responseOutputEstimated?: boolean;
   compactedContextTokens?: number;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const panelId = useId();
   // The transcript shows one row per compaction; the inspector adds what those
   // rows cannot — how much of the model context the newest summary occupies.
@@ -96,6 +100,16 @@ export function ContextUsageInspector({
     isRunning: isSessionRunning,
     modelRequestActivity,
   });
+  const sessionCostState = useSessionUsageCost({
+    enabled: open,
+    sessionId,
+    refreshKey: `${sessionMessages.length}:${sessionMessages.at(-1)?.id ?? ""}:${usage.operationId ?? ""}:${usage.totalTokens}`,
+  });
+  const sessionCostProviders = sessionCostState?.status === "ready" ? sessionCostState.data.providers : [];
+  const sessionCostTotal = sessionCostProviders.reduce((sum, provider) => sum + provider.total, 0);
+  const sessionUnpricedCount = sessionCostProviders.reduce((sum, provider) => sum + provider.unpricedRequests, 0);
+  const sessionCostKnownCount = sessionCostProviders.reduce((sum, provider) => sum + provider.pricedRequests, 0);
+  const sessionCostReportedCount = sessionCostProviders.reduce((sum, provider) => sum + provider.reportedRequests, 0);
   const context = composerContextUsage({
     usage,
     contextWindow,
@@ -331,7 +345,7 @@ export function ContextUsageInspector({
         </strong>
       </div>
       <div className="context-inspector-window">
-        <span>{t("chat.usageContextWindow")}</span>
+        <span>{t("chat.usageContextWindow")}{contextWindowEstimated ? ` · ${t("chat.usageContextWindowEstimated")}` : ""}</span>
         <strong>
           {t("chat.usageContextTokens", {
             used: formatCompactTokenCount(context.usedTokens),
@@ -405,6 +419,18 @@ export function ContextUsageInspector({
         </div>
       ) : null}
       <div className="context-inspector-summary">
+        <div className="context-inspector-summary-row">
+          <strong>{t("chat.usageSessionCost")}</strong>
+          <span className="context-inspector-summary-values">
+            {sessionCostState?.status === "ready" && sessionCostKnownCount > 0
+              ? `${sessionUnpricedCount > 0 ? "≥" : ""}${formatUsageCost(sessionCostTotal, i18n.language)} · ${t(sessionUnpricedCount > 0 ? "chat.usageCostLowerBound" : sessionCostReportedCount === sessionCostKnownCount ? "chat.usageCostReported" : "chat.usageCostEstimated")}`
+              : sessionCostState?.status === "error"
+                ? t("chat.usageCostUnavailable")
+                : sessionCostState?.status === "ready"
+                  ? t("chat.usageCostUnavailable")
+                  : t("chat.usageCostLoading")}
+          </span>
+        </div>
         <div className="context-inspector-summary-row">
           <strong>{t("chat.usageProviderUsage")}</strong>
           <span className="context-inspector-summary-values">

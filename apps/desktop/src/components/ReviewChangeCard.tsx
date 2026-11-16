@@ -10,7 +10,8 @@ import { reviewChangeFromMessage } from "../lib/workspace-review";
 import { useAppStore } from "../stores/app-store";
 import { useCopy } from "./Markdown";
 import { cx } from "./ui";
-import { IconCheck, IconChevronRight, IconCopy, IconSnapshot } from "./icons";
+import { IconChat, IconCheck, IconChevronRight, IconCopy, IconSnapshot } from "./icons";
+import { composerDraftBridge } from "../features/chat/composer/plugins/draft-bridge";
 
 /* Git-status letters carry the status without relying on color alone; the
    localized word stays in the row's accessible name. */
@@ -33,7 +34,17 @@ function reviewDiffText(change: ReviewChange): string {
     .join("\n");
 }
 
-function DiffBody({ message, compact }: { message: UiMessage; compact: boolean }) {
+function DiffBody({
+  message,
+  compact,
+  allowLineFeedback,
+  sessionId,
+}: {
+  message: UiMessage;
+  compact: boolean;
+  allowLineFeedback: boolean;
+  sessionId?: string;
+}) {
   const { t } = useTranslation();
   const change = reviewChangeFromMessage(message);
   const localToolsAllowed = useChatSessionCapability("canUseLocalTools");
@@ -73,6 +84,26 @@ function DiffBody({ message, compact }: { message: UiMessage; compact: boolean }
                     {line.type === "add" ? "+" : line.type === "del" ? "−" : " "}
                   </span>
                   <span className="diff-line-text">{line.text}</span>
+                  {allowLineFeedback && sessionId && localToolsAllowed ? (
+                    <button
+                      type="button"
+                      className="review-line-feedback"
+                      aria-label={t("panel.review.addLineFeedback", { defaultValue: "Ask about this line" })}
+                      title={t("panel.review.addLineFeedback", { defaultValue: "Ask about this line" })}
+                      onClick={() => {
+                        const sign = line.type === "add" ? "+" : line.type === "del" ? "−" : " ";
+                        const messageText = `Please review this line in ${change.path}:\n${sign}${line.text}`;
+                        try {
+                          composerDraftBridge.appendTextForSession(sessionId, messageText);
+                        } catch {
+                          // The active conversation may have changed after this
+                          // card rendered; never place the note in another draft.
+                        }
+                      }}
+                    >
+                      <IconChat size={13} />
+                    </button>
+                  ) : null}
                 </div>
               ))}
             </div>
@@ -124,12 +155,17 @@ export const ReviewChangeCard = memo(function ReviewChangeCard({
   message,
   compact = false,
   asToolRow = false,
+  allowLineFeedback = false,
+  sessionId,
   openRequest,
 }: {
   message: UiMessage;
   compact?: boolean;
   /** The card is the tool-level row: one file header and its diff body. */
   asToolRow?: boolean;
+  /** Only the Review panel may append a selected diff line to the draft. */
+  allowLineFeedback?: boolean;
+  sessionId?: string;
   /** Each new value expands the diff once; the user can collapse it again. */
   openRequest?: number;
 }) {
@@ -205,7 +241,12 @@ export const ReviewChangeCard = memo(function ReviewChangeCard({
       </button>
       {open ? (
         <div className="review-change-card-body" id={detailsId}>
-          <DiffBody message={message} compact={compact} />
+          <DiffBody
+            message={message}
+            compact={compact}
+            allowLineFeedback={allowLineFeedback && !asToolRow}
+            sessionId={sessionId}
+          />
         </div>
       ) : null}
     </section>

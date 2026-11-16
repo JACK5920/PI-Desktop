@@ -1,0 +1,22 @@
+export function mergeOmpSubagentRoster<T extends { id: string; status?: unknown }>(previous: T[], incoming: T[]): Array<T & { observedActive: boolean; lastKnownStatus?: unknown }>;
+export function getOmpSubagentRoster(sessionId: string): Array<Record<string, any>>;
+export function subscribeOmpSubagentRoster(sessionId: string, listener: (roster: Array<Record<string, any>>) => void): () => void;
+export function recordOmpSubagentRoster(sessionId: string, incoming: Array<Record<string, any>>): Array<Record<string, any>>;
+export function recordOmpSubagentTranscriptOutcome(sessionId: string, agentId: string, outcome: "completed" | "failed" | "aborted", options?: { confirmed?: boolean }): Array<Record<string, any>>;
+export function recordOmpSubagentDeliveries(sessionId: string, toolCallId: string, toolResultText: string): Array<Record<string, any>>;
+export function parseOmpTaskResultDeliveries(text: string): Array<{
+  id: string;
+  agent: string;
+  status: string;
+  duration: string;
+  outcome: "" | "completed" | "failed" | "aborted";
+  output: string;
+  outputTruncated: boolean;
+  error: string;
+  abortReason: string;
+}>;
+export function ompToolResultText(message: Record<string, any> | null | undefined): string;
+export function applyOmpSubagentFrame(sessionId: string, frame: Record<string, any>): Array<Record<string, any>>;
+export function agentsForOmpToolCall<T extends Record<string, any> & { parentToolCallId?: string }>(roster: T[], toolCallId: string): { agents: T[]; correlated: boolean };
+export function summarizeOmpBatchRoster<T extends Record<string, any> & { parentToolCallId?: string }>(roster: T[], toolCallIds: string[]): { agents: T[]; total: number; running: number; finished: number; completed: number; aborted: number; failed: number; unconfirmed: number };
+export function isOmpTaskBatch(engineOrigin: string | undefined, toolName: string | undefined, toolArgs: unknown): boolean;

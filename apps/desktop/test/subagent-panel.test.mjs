@@ -7,6 +7,10 @@ const tabSource = await readFile(
   new URL("../src/components/workpanel/SubagentTranscriptTab.tsx", import.meta.url),
   "utf8",
 );
+const contentSource = await readFile(
+  new URL("../src/components/workpanel/SubagentTranscriptContent.tsx", import.meta.url),
+  "utf8",
+);
 const workPanelSource = await readFile(
   new URL("../src/components/workpanel/WorkPanel.tsx", import.meta.url),
   "utf8",
@@ -38,11 +42,11 @@ test("a topology node opens a real subagent tab in the work panel", () => {
   assert.match(transcriptSource, /openSubagentTab\(panelSelectionId, agentName \|\| undefined\)/);
   assert.match(
     transcriptSource,
-    /activeWorkPanelTabId === `subagent:\$\{panelSelectionId\}`/,
+    /activeWorkPanelTabId === \(ompBatch \? `omp-subagent-batch:\$\{panelSelectionId\}` : `subagent:\$\{panelSelectionId\}`\)/,
   );
   assert.match(
     transcriptSource,
-    /aria-controls=\{panelOpen \? `work-panel-surface-subagent:\$\{panelSelectionId\}` : undefined\}/,
+    /controlsId=\{`work-panel-surface-/,
   );
   assert.match(storeSource, /openSubagentTab: \(delegationId, agentName\) => \{/);
   assert.match(
@@ -52,16 +56,16 @@ test("a topology node opens a real subagent tab in the work panel", () => {
   // The overlay state and its actions are gone: closing happens per tab.
   assert.doesNotMatch(storeSource, /subagentPanel/);
   assert.doesNotMatch(storeSource, /toggleSubagentPanel|closeSubagentPanel/);
-  assert.match(tabsSource, /\| "plugin"\s*\|\s*"subagent";/);
+  assert.match(tabsSource, /\| "plugin"\s*\|\s*"subagent"\s*\|\s*"omp-subagent-batch";/);
   assert.match(
     tabsSource,
     /export function subagentWorkPanelTab\(\s*delegationId: string,\s*agentName\?: string,\s*\): WorkPanelTab \{/,
   );
   assert.match(tabsSource, /id: `subagent:\$\{delegationId\}`/);
-  assert.match(tabsSource, /tab\.kind === "subagent"\)/);
+  assert.match(tabsSource, /tab\.kind === "subagent" \|\| tab\.kind === "omp-subagent-batch"\)/);
   // Retained runtime state must survive the session-switch sanitizer.
   assert.match(tabsSource, /export function subagentTabDisplayLabels\(/);
-  assert.match(tabsSource, /tab\.kind === "subagent"\)/);
+  assert.match(tabsSource, /tab\.kind === "subagent" \|\| tab\.kind === "omp-subagent-batch"\)/);
   // Retained runtime state must survive the session-switch sanitizer.
   assert.match(tabsSource, /export function subagentTabDisplayLabels\(/);
 });
@@ -88,10 +92,12 @@ test("the work panel renders the delegation tab like every other resource", () =
 test("the delegation tab renders a message list with a read-only composer", () => {
   assert.match(tabSource, /data-testid="subagent-transcript-tab"/);
   assert.match(tabSource, /buildSubagentTranscript\(messages, delegationId\)/);
-  assert.match(tabSource, /className="message-row user"/);
-  assert.match(tabSource, /className="message-user-text selectable"/);
-  assert.match(tabSource, /className="message-row assistant"/);
-  assert.match(tabSource, /data-message-id=\{row\.message\.id\}/);
+  assert.match(tabSource, /<SubagentTranscriptContent/);
+  assert.match(contentSource, /className=\{`message-row user\$\{compactTasks \? " omp-subagent-task-row" : ""\}`\}/);
+  assert.match(contentSource, /compactTasks = false/);
+  assert.match(contentSource, /className="message-user-text selectable"/);
+  assert.match(contentSource, /className="message-row assistant"/);
+  assert.match(contentSource, /data-message-id=\{row\.message\.id\}/);
   assert.match(tabSource, /<Textarea/);
   assert.match(tabSource, /disabled/);
   assert.match(tabSource, /rows=\{2\}/);

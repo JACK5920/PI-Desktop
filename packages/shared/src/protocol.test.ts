@@ -35,6 +35,11 @@ describe("Browser recovery IPC", () => {
     expect(IPC.invoke.browserGetPages).toBe("pi-desktop/browser/getPages");
     expect(IPC_WHITELIST.has(IPC.invoke.browserGetPages)).toBe(true);
   });
+
+  it("allows the additive read-only session usage-cost channel", () => {
+    expect(IPC.invoke.sessionUsageCost).toBe("pi-desktop/session/usage-cost");
+    expect(IPC_WHITELIST.has(IPC.invoke.sessionUsageCost)).toBe(true);
+  });
 });
 
 describe("Plan protocol contracts", () => {

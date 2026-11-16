@@ -31,6 +31,10 @@ const topologySource = await readFile(
   new URL("../src/lib/subagent-topology.ts", import.meta.url),
   "utf8",
 );
+const nodeCardSource = await readFile(
+  new URL("../src/features/chat/transcript/SubagentNodeCard.tsx", import.meta.url),
+  "utf8",
+);
 const toolDisplaySource = await readFile(
   new URL("../src/lib/tool-display.ts", import.meta.url),
   "utf8",
@@ -159,7 +163,11 @@ test("a Task node shows the effective model after the subagent name", () => {
   );
   assert.match(
     transcriptSource,
-    /className="subagent-topology-node-model"[\s\S]*?title=\{modelLabel\}/,
+    /<SubagentNodeCard[\s\S]*?model=\{modelId \|\| undefined\}/,
+  );
+  assert.match(
+    nodeCardSource,
+    /className="subagent-topology-node-model"[\s\S]*?title=\{\[model, thinking\]\.filter\(Boolean\)\.join\(" "\)\}/,
   );
   assert.match(
     toolPresentationSource,
@@ -186,11 +194,11 @@ test("a Task node and detail header show the effective thinking level", () => {
   assert.doesNotMatch(transcriptSource, /thinkingLevel\./);
   assert.match(
     transcriptSource,
-    /const modelLabel = \[modelId, thinkingLabel\]\.filter\(Boolean\)\.join\(" "\);/,
+    /<SubagentNodeCard[\s\S]*?thinking=\{thinkingLabel \|\| undefined\}/,
   );
   assert.match(
-    transcriptSource,
-    /className="subagent-topology-node-model"[\s\S]*?title=\{modelLabel\}[\s\S]*?aria-label=\{modelLabel\}/,
+    nodeCardSource,
+    /className="subagent-topology-node-thinking"/,
   );
 });
 
@@ -244,23 +252,19 @@ test("every Task row renders as one accessible delegation topology", () => {
   assert.match(transcriptSource, /className="subagent-topology-agents"/);
   assert.match(transcriptSource, /role="list"/);
   assert.match(transcriptSource, /variant="topology"/);
-  assert.match(transcriptSource, /className="subagent-topology-node-header"/);
-  assert.match(transcriptSource, /aria-expanded=\{panelOpen\}/);
+  assert.match(transcriptSource, /expanded=\{panelOpen\}/);
+  assert.match(transcriptSource, /controlsId=\{`work-panel-surface-\$\{ompBatch \? `omp-subagent-batch:\$\{panelSelectionId\}` : `subagent:\$\{panelSelectionId\}`\}`\}/);
+  assert.match(nodeCardSource, /className="subagent-topology-node-header"/);
+  assert.match(nodeCardSource, /aria-expanded=\{expanded\}/);
+  assert.match(nodeCardSource, /aria-controls=\{expanded \? controlsId : undefined\}/);
+  assert.doesNotMatch(nodeCardSource, /tool-row-caret/);
   assert.match(
     transcriptSource,
-    /aria-controls=\{panelOpen \? `work-panel-surface-subagent:\$\{panelSelectionId\}` : undefined\}/,
+    /if \(!localToolsAllowed\) return;\s*if \(ompBatch\) openOmpSubagentBatchTab\(message\.toolCallId \|\| message\.id\);\s*else openSubagentTab\(panelSelectionId, agentName \|\| undefined\);/,
   );
-  const topologyNode = transcriptSource.slice(
-    transcriptSource.indexOf('className="subagent-topology-node-header"'),
-    transcriptSource.indexOf(
-      "</button>",
-      transcriptSource.indexOf('className="subagent-topology-node-header"'),
-    ),
-  );
-  assert.doesNotMatch(topologyNode, /tool-row-caret/);
   assert.match(
-    topologyNode,
-    /onClick=\{\s*\(\) => \{\s*if \(!hasDetails\) return;\s*onUserInteraction\?\.\(\);\s*localToolsAllowed && openSubagentTab\(panelSelectionId, agentName \|\| undefined\);\s*\}\}/,
+    transcriptSource,
+    /if \(localToolsAllowed\) openOmpSubagentBatchTab\(ompBatchToolCallId, String\(agent\.id\), label\)/,
   );
   assert.match(
     transcriptSource,
@@ -268,7 +272,7 @@ test("every Task row renders as one accessible delegation topology", () => {
   );
   assert.match(
     transcriptSource,
-    /activeWorkPanelTabId === `subagent:\$\{panelSelectionId\}`/,
+    /activeWorkPanelTabId === \(ompBatch \? `omp-subagent-batch:\$\{panelSelectionId\}` : `subagent:\$\{panelSelectionId\}`\)/,
   );
   assert.match(storeSource, /openWorkPanelTab\(subagentWorkPanelTab\(id, agentName \|\| undefined\)\)/);
   assert.match(transcriptSource, /const inlineOpen = variant !== "topology" && open;/);
@@ -395,6 +399,13 @@ test("an expanded delegate run follows the latest output while pinned (D302)", (
     followScrollSource,
     /new ResizeObserver\(scheduleFollowScroll\)/,
   );
+  // A scroller that mounts after the hook (the OMP subagent detail renders it
+  // only once an agent is selected) must still get its input listeners and
+  // observer: binding once on mount left follow unable to see real input, so
+  // every scroll-up was read as a layout clamp and dragged back down.
+  assert.match(followScrollSource, /boundScrollRef\.current !== el/);
+  assert.match(followScrollSource, /attachScrollInput\(el, markScrollGesture\)/);
+  assert.match(followScrollSource, /detachScrollInput\(boundScrollRef\.current, markScrollGesture\)/);
 
   // The jump control overlays the bounded scroller; overflow stays off
   // `.subagent-run` so the collapse rail is not clipped.

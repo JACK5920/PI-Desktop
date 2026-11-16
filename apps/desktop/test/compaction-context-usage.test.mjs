@@ -26,8 +26,8 @@ const mark = (throughMessageId, extra = {}) => ({
   ...extra,
 });
 
-function inspect(messages, compactions) {
-  return latestTurnContextInspector(messages, {}, providers, compactions);
+function inspect(messages, compactions, currentModel, providerList = providers) {
+  return latestTurnContextInspector(messages, {}, providerList, compactions, currentModel);
 }
 
 test("the composer reflects a finished compaction before the next request (#2015)", () => {
@@ -75,4 +75,33 @@ test("a compaction anchored on a message the transcript does not hold is ignored
   ];
   const inspector = inspect(messages, [mark("missing", { contextTokens: 12_000 })]);
   assert.equal(inspector.compactedContextTokens, undefined);
+});
+
+test("compacted context uses the checkpoint model after the historical model is retired", () => {
+  const historicalUsage = { inputTokens: 480_000, outputTokens: 2_238, totalTokens: 482_238 };
+  const messages = [message("a1", "assistant", { providerId: "p", modelId: "retired", usage: historicalUsage })];
+  const configured = [{ id: "p", models: [{ id: "current", contextWindow: 1_000_000 }] }];
+  const checkpoint = mark("a1", { contextTokens: 20_619, providerId: "p", modelId: "current" });
+  const inspector = inspect(messages, [checkpoint], { providerId: "p", modelId: "current" }, configured);
+  assert.equal(inspector.contextWindow, 1_000_000);
+  assert.equal(composerContextUsage(inspector).usedPercent, 2);
+  assert.equal(inspector.usage, historicalUsage);
+});
+
+test("legacy compactions use the exact current model while preserving request model usage", () => {
+  const configured = [{ id: "p", models: [{ id: "m", contextWindow: 100_000 }, { id: "current", contextWindow: 1_000_000 }] }];
+  const messages = [message("a1", "assistant", { providerId: "p", modelId: "m", usage })];
+  const current = { providerId: "p", modelId: "current" };
+  assert.equal(inspect(messages, [], current, configured).contextWindow, 100_000);
+  const after = inspect(messages, [mark("a1", { contextTokens: 20_619 })], current, configured);
+  assert.equal(after.contextWindow, 1_000_000);
+  assert.equal(after.usage, usage);
+});
+
+test("unknown compacted model capacity is explicitly estimated", () => {
+  const configured = [{ id: "p", models: [{ id: "other", contextWindow: 1_000_000 }] }];
+  const messages = [message("a1", "assistant", { providerId: "p", modelId: "retired", usage })];
+  const inspector = inspect(messages, [mark("a1", { contextTokens: 20_619 })], { providerId: "p", modelId: "retired" }, configured);
+  assert.equal(inspector.contextWindow, 128_000);
+  assert.equal(inspector.contextWindowEstimated, true);
 });

@@ -50,6 +50,32 @@ test("every shipped catalog matches English keys and interpolation variables", (
   }
 });
 
+test("Goal template menu and editable prompt scaffolds are present in every catalog", () => {
+  const keys = [
+    "goal.templates.heading",
+    "goal.templates.hint",
+    "goal.templates.deliveryTitle",
+    "goal.templates.deliveryDescription",
+    "goal.templates.deliveryPrompt",
+    "goal.templates.bugfixTitle",
+    "goal.templates.bugfixDescription",
+    "goal.templates.bugfixPrompt",
+    "goal.templates.researchTitle",
+    "goal.templates.researchDescription",
+    "goal.templates.researchPrompt",
+  ];
+  for (const [locale, catalog] of Object.entries(catalogs)) {
+    const flat = flattenCatalog(catalog);
+    for (const key of keys) {
+      assert.equal(typeof flat[key], "string", `${locale}: ${key}`);
+      assert.ok(flat[key].trim().length > 0, `${locale}: ${key} must not be blank`);
+    }
+    if (locale !== "en") {
+      assert.notEqual(flat["goal.templates.heading"], english["goal.templates.heading"], `${locale}: heading must be localized`);
+    }
+  }
+});
+
 test("Live Voice preparation and call recovery copy is localized in every shipped catalog", () => {
   const keys = [
     "prepareCall", "details", "workOptions", "allowWork", "noWorkSession",

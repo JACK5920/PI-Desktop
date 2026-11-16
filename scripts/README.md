@@ -40,6 +40,11 @@ disagrees, so a green `check:release-docs` is a precondition, not a substitute.
 | Script | Alias | Purpose |
 |---|---|---|
 | `dev-electron.mjs` | `pnpm dev`, through `predev` | Launch Electron against the dev server. On macOS it builds and reuses the fingerprinted branded host bundle under `.cache/electron-dev/` |
+| `swap-host-core.ps1` | — | Build `host-core` into a separate target directory and swap the binary into a running dev desktop. The dev supervisor restarts the host; Electron stays up. The agent's own turn is cut by the restart, so run this from a terminal outside the agent's shell |
+| `swap-host-core-detached.ps1` | — | Start `swap-host-core.ps1` outside the caller's process tree, so the swap itself survives stopping the host. `pwsh -File scripts/swap-host-core-detached.ps1` |
+
+See [the hot-reload runbook](../docs/hot-reload-host-core.md) for why the
+build, the replacement and the restart each have to be done the way they are.
 
 ## End-to-end
 

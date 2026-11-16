@@ -41,7 +41,18 @@ impl Roots {
         let suffix = [&self.source, &self.canonical_source, &self.project_source]
             .into_iter()
             .find_map(|root| strip_path_prefix(path, root))?;
-        Some(self.destination.join(suffix).to_string_lossy().into_owned())
+        // Rebuild from path components. On Windows, joining a PathBuf that
+        // contains normalized forward slashes preserves those slashes in the
+        // serialized path instead of emitting a native, consistent spelling.
+        let mut relocated = self.destination.clone();
+        for component in suffix.components() {
+            match component {
+                Component::Normal(part) => relocated.push(part),
+                Component::CurDir => {}
+                Component::Prefix(_) | Component::RootDir | Component::ParentDir => return None,
+            }
+        }
+        Some(relocated.to_string_lossy().into_owned())
     }
 
     fn string(&self, value: &mut Value) -> bool {

@@ -1334,3 +1334,6 @@ prevent the corresponding terminal tool event from being delivered.
 
 对于已知工具，如果模型把完整的 Qwen 风格 `<tool_call><function=Name><parameter=...>...</parameter>
 </function></tool_call>` 块作为助手正文输出，该回复会显示 `TOOL_CALL_NOT_EXECUTED` 诊断。原始正文保留；相关消息标记为错误，但有效的结构化同级调用和正常后续执行不受影响。正文绝不会被解析成可执行参数，不会静默启用工具，也不会消耗提供方重试。代码围栏、行内代码、引用或缩进示例、未知工具名和不完整块仍视为普通文本。这是保守的格式诊断，不是通用 XML 解析器，也不代表模型确实有执行意图。
+
+
+受信扩展调用 `setThinkingLevel` 后，必须同时更新运行时偏好和下一次请求使用的 Agent 状态。经过模型能力钳制后，扩展读取档位必须与实际请求参数一致。

@@ -10,6 +10,16 @@ and share one projection, one approval row, and one hard deny (**D198**). `kind`
 (`plan | goal`) is what distinguishes them, and the diagram below reads the same
 with Goal/`SubmitGoal` substituted for Plan/`SubmitPlan`:
 
+The Composer's mode menu also offers built-in Goal templates. Selecting one
+stages Goal mode through the existing session-configuration path and inserts a
+editable request scaffold at the current Composer caret; existing
+draft text and attachments are preserved. The template is input guidance, not a
+durable proposal or a second task record. Sending it in Goal mode continues
+through the existing Agent `SubmitGoal` flow, immutable proposal snapshot,
+approval surface, and Host-owned Goal lifecycle. The user can edit the scaffold
+before sending; the model-produced contract is resolved through the existing
+approval behavior.
+
 ```text
 Agent / inactive
   -- user selects Plan while idle OR Agent calls EnterPlanMode --> Plan / planning
@@ -65,6 +75,8 @@ interruption keeps the durable session in Agent.
 idle <-> running <-> waiting_permission
            \/ aborted
            \/ error
+running -- pause request --> finish current assistant/tool boundary --> idle (paused checkpoint)
+paused checkpoint -- resume --> a new user turn in the same session
 ```
 
 | status | meaning |
@@ -126,6 +138,16 @@ turn that has ended.
    denied and the agent may continue or end based on runtime handling
 6. Session status returns to idle after terminal turn states are persisted
 7. Changing the renderer's active project/session does not transition or abort
+8. Pause is a graceful stop request, not provider-stream suspension. It is
+   considered paused only when the active turn has settled after its current
+   assistant response and tool batch. Immediate Stop remains Abort.
+9. Resume is a new prompt over the persisted transcript; it never replays the
+   old request or tool call. The continuation prompt directs the Agent to
+   inspect recorded results and ask before retrying an uncertain side effect.
+10. Only an explicit safe-pause checkpoint is eligible for optional startup
+    continuation. `autoResumePausedTasks` defaults off. A turn interrupted
+    before reaching the checkpoint is never automatically replayed, preserving
+    ADR 0053's no-replay rule.
    any background session
 8. A tool transition retains the originating session's persisted project root,
    or that session's own scratch root when it is temporary; it never adopts the

@@ -29,7 +29,7 @@ import {
   snapshotComposerDraft,
   writeComposerDraft,
 } from "../../../../lib/composer-draft-cache";
-import type { ComposerDraftSnapshot } from "../../../../lib/composer-smart-stop";
+import { applyComposerPrefillText, type ComposerDraftSnapshot } from "../../../../lib/composer-smart-stop";
 import { sessionAllows } from "../../../../lib/remote-session-safety";
 import { useAppStore } from "../../../../stores/app-store";
 import {
@@ -108,6 +108,7 @@ type UseComposerDraftOptions = {
     sessionId: string;
     text: string;
     fileReferences: ComposerDraftSnapshot["fileReferences"];
+    append?: boolean;
   } | null;
   clearComposerPrefill: () => void;
   prefill?: ComposerPrefill | null;
@@ -539,7 +540,7 @@ export function useComposerDraft({
       createFileReferenceFromSnapshot(fileReference, composerPrefill.sessionId),
     );
     const prefilled = attachImageTokens(composerPrefill.text, prefilledReferences, nextChipToken);
-    setValue(prefilled.text);
+    setValue((current) => applyComposerPrefillText(current, prefilled.text, composerPrefill.append));
     setFileReferences((current) => [
       ...current.filter(
         (fileReference) => fileReference.sessionId !== composerPrefill.sessionId,
