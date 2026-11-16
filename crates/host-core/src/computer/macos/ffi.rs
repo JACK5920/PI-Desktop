@@ -505,6 +505,20 @@ pub(super) fn supported_actions(names: &[String]) -> Vec<ActionKind> {
     actions
 }
 
+/// A cross-observation identity that excludes the label because a changed
+/// label is often the evidence that an action succeeded.
+pub(super) fn make_identity(path: &[usize], role: &str) -> String {
+    let location = if path.is_empty() {
+        "root".to_string()
+    } else {
+        path.iter()
+            .map(usize::to_string)
+            .collect::<Vec<_>>()
+            .join(".")
+    };
+    format!("{role}#{location}")
+}
+
 /// `uid` encodes the path from the window root plus a digest of the role and
 /// label it had when inspected. A later action re-walks the path and checks the
 /// digest, so a tree that changed underneath refuses instead of acting on

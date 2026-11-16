@@ -34,6 +34,17 @@ const artifact = (overrides: Partial<ArtifactSummary> & Pick<ArtifactSummary, "i
 };
 
 describe("selectTurnDeliverables", () => {
+  it("does not read conversation bodies when no deliverables can be shown", () => {
+    const unreadMessage = {
+      id: "assistant-final",
+      role: "assistant",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      get content(): string { throw new Error("unexpected transcript body read"); },
+    } as UiMessage;
+
+    expect(selectTurnDeliverables([], [unreadMessage])).toEqual({ artifacts: [], total: 0 });
+  });
+
   it("uses latest path state, excludes deleted/unverified/legacy rows, and ranks cited reports first", () => {
     const selected = selectTurnDeliverables([
       artifact({ id: "old", path: "src/answer.ts", updatedAt: "2026-11-13T09:00:00.000Z" }),

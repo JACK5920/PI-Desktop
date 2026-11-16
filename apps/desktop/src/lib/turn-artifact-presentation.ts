@@ -37,6 +37,8 @@ export function selectTurnDeliverables(
   maxItems = 6,
 ): { artifacts: ArtifactSummary[]; total: number } {
   const candidates = selectCurrentArtifacts(artifacts);
+  if (candidates.length === 0 || maxItems <= 0) return { artifacts: [], total: candidates.length };
+
   const finalText = messages.filter((message) => message.role === "assistant")
     .map((message) => message.content).join("\n");
   const normalizedFinalText = finalText.replace(/[\\/]+/g, "/").toLocaleLowerCase();
