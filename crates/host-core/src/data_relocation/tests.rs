@@ -137,7 +137,11 @@ fn relocates_a_real_copied_profile_without_recovery_or_changing_user_content() {
     let original = fs::read(&transcript).unwrap();
     let key_before = fs::read(source.join("secrets/.machine-key")).unwrap();
     relocate(&source, &destination).unwrap();
-    let moved_attachment = destination.join("scratch").join("chat").join("pasted").join("input.txt");
+    let moved_attachment = destination
+        .join("scratch")
+        .join("chat")
+        .join("pasted")
+        .join("input.txt");
     let new_transcript = fs::read_to_string(destination.join("sessions/chat.jsonl")).unwrap();
     let lines: Vec<_> = new_transcript.lines().collect();
     let message: Value = serde_json::from_str(lines[0]).unwrap();
@@ -182,7 +186,10 @@ fn relocates_a_real_copied_profile_without_recovery_or_changing_user_content() {
     let plugins = read_json(&destination.join("plugins/registry.json"));
     assert_eq!(
         plugins[0]["path"],
-        json!(destination.join("plugins").join("installed").join("example"))
+        json!(destination
+            .join("plugins")
+            .join("installed")
+            .join("example"))
     );
     assert_eq!(plugins[1]["path"], json!(source.join("dev-source")));
     assert_eq!(plugins[2]["path"], json!(external));
@@ -280,7 +287,10 @@ fn exact_path_boundaries_preserve_prose_prefix_neighbors_and_traversal() {
     let prose = format!("cat {}", inside.display());
     let mut value = json!({"path":inside, "ref":neighbor, "args":{"command":prose, "path":traversal}, "text":inside, "userCode":{"content":{"path":inside}}});
     assert!(roots.structured(&mut value));
-    assert_eq!(value["path"], json!(roots.destination.join("nested").join("file")));
+    assert_eq!(
+        value["path"],
+        json!(roots.destination.join("nested").join("file"))
+    );
     assert_eq!(value["ref"], json!(neighbor));
     assert_eq!(value["args"]["path"], json!(traversal));
     assert_eq!(value["userCode"]["content"]["path"], json!(inside));
