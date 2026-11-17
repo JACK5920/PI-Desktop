@@ -994,6 +994,10 @@ function registerIpc() {
     activeUserSkills,
     pluginActiveInProject,
     getWorkPanelReservationWidth: () => mainState.requestedWorkPanelReservation,
+    getWindowMinimumSize: () => ({
+      width: workPanelMinimumWindowWidth(),
+      height: WINDOW_MIN_HEIGHT,
+    }),
     setWorkPanelReservationWidth: (width: number) => {
       mainState.requestedWorkPanelReservation = width;
     },

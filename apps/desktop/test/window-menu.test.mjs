@@ -195,7 +195,8 @@ test("Windows and Linux use menu-free frameless chrome with window controls", ()
   assert.match(controlsSource, /windowControl\("getState"\)/);
   assert.match(controlsSource, /ariaLabel=\{t\("window\.minimize"/);
   assert.match(controlsSource, /ariaLabel=\{t\("window\.close"/);
-  assert.equal((appSource.match(/<WindowControls\s*\/>/g) ?? []).length, 1);
+  assert.equal((appSource.match(/<WindowControls\b/g) ?? []).length, 1);
+  assert.match(appSource, /<WindowControls[\s\S]*?miniMode=\{miniMode\}/);
   // The controls are rendered under the recovery surface too, so a window that
   // never reaches the shell is still closable (issue #831).
   assert.match(

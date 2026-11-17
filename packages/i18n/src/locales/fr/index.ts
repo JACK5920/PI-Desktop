@@ -112,7 +112,10 @@ export const fr = {
     "minimize": "Réduire",
     "maximize": "Agrandir",
     "restore": "Restaurer",
-    "close": "Fermer"
+    "close": "Fermer",
+    "enterMiniMode": "Fenêtre compacte",
+    "exitMiniMode": "Restaurer la fenêtre complète",
+    "alwaysOnTop": "Garder au premier plan",
   },
   "tray": {
     "running": "En cours",

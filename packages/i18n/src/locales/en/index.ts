@@ -112,6 +112,9 @@ export const en = {
     maximize: "Maximize",
     restore: "Restore",
     close: "Close",
+    enterMiniMode: "Compact window",
+    exitMiniMode: "Restore full window",
+    alwaysOnTop: "Keep on top",
   },
   tray: {
     running: "Running",

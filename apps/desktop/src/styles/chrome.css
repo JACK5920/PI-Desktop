@@ -542,6 +542,21 @@
   transition: padding-left var(--motion-duration-fast) var(--motion-ease-in);
 }
 
+/* The single compact-window action on macOS occupies the far-right chrome. */
+.app-shell:has(> .window-controls-macos) .conversation-topbar {
+  right: 52px;
+}
+
+.app-shell.is-mini-window .conversation-topbar.ct-mini {
+  right: var(--ds-window-controls-width);
+  padding-left: 12px;
+}
+
+.app-shell.is-mini-window .conversation-topbar.ct-mini .ct-lead,
+.app-shell.is-mini-window .conversation-topbar.ct-mini .ct-right {
+  display: none;
+}
+
 .conversation-topbar .ct-left,
 .conversation-topbar .ct-right {
   -webkit-app-region: no-drag;
@@ -1218,6 +1233,34 @@
    * controls and panel actions cannot read as part of the same button group. */
   background: var(--ds-bg-primary);
   /* Continuous with the adjacent titlebar: no side seam (D297). */
+}
+
+/* The compact titlebar uses only the pin, restore and close actions. */
+.window-controls-mini {
+  justify-content: flex-end;
+}
+
+.window-controls-macos {
+  width: 44px;
+  padding-left: 0;
+  background: transparent;
+}
+
+.window-controls-macos .window-control-btn {
+  flex: 0 0 36px;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-md);
+}
+
+.window-control-btn.is-active {
+  color: var(--ds-accent);
+  background: var(--ds-bg-active);
+}
+
+.window-control-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
 }
 
 /* Electron resolves app-region hit testing across siblings. The controls must

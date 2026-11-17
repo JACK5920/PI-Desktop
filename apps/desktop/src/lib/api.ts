@@ -159,6 +159,7 @@ import type {
   RemoteInteractionUpdate,
   UpdateState,
   WindowControlAction,
+  WindowControlState,
   CloseBehavior,
   LifecycleDialogChoice,
   LifecycleDialogKind,
@@ -2088,7 +2089,7 @@ export const api = {
       { theme, color, cornerRadius },
     ),
   windowControl: (action: WindowControlAction) =>
-    invoke<{ maximized: boolean; macosWindowTranslucency: boolean }>(
+    invoke<WindowControlState>(
       IPC.invoke.windowControl,
       { action },
     ),
@@ -2148,6 +2149,13 @@ export const api = {
     ),
   openWorkPanelTabMenu: (request: WorkPanelTabMenuRequest) =>
     invoke<WorkPanelTabMenuAction | null>(IPC.invoke.workPanelTabMenu, request),
+  onWindowModeChanged: (listener: (event: WindowControlState) => void) => {
+    if (!window.piDesktop?.on) return () => undefined;
+    return window.piDesktop.on(IPC.event.windowModeChanged, (payload) => {
+      if (!payload || typeof payload !== "object") return;
+      listener(payload as WindowControlState);
+    });
+  },
   onWindowMaximized: (listener: (event: { maximized: boolean }) => void) => {
     if (!window.piDesktop?.on) return () => undefined;
     return window.piDesktop.on(IPC.event.windowMaximized, (payload) =>

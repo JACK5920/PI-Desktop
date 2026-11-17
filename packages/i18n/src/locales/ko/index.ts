@@ -114,6 +114,9 @@ export const ko = {
     maximize: "최대화",
     restore: "복원",
     close: "닫기",
+    enterMiniMode: "미니 창",
+    exitMiniMode: "전체 창으로 복원",
+    alwaysOnTop: "항상 위에",
   },
   tray: {
     running: "실행 중",

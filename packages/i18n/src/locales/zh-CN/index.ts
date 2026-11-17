@@ -113,6 +113,9 @@ export const zhCN = {
     maximize: "最大化",
     restore: "还原",
     close: "关闭",
+    enterMiniMode: "迷你窗口",
+    exitMiniMode: "恢复完整窗口",
+    alwaysOnTop: "窗口置顶",
   },
   tray: {
     running: "运行中",

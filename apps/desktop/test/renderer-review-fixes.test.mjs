@@ -53,7 +53,10 @@ test("the crash fallback never interprets the error as markup", () => {
 
 test("window controls draw through the icon wrappers", () => {
   assert.doesNotMatch(windowControls, /from "lucide-react"/);
-  assert.match(windowControls, /import \{ IconClose, IconCopy, IconMinus, IconSquare \} from "\.\/icons";/);
+  assert.match(windowControls, /from "\.\/icons"/);
+  for (const icon of ["IconBrowser", "IconClose", "IconCopy", "IconMinus", "IconPanelRestore", "IconPin", "IconSquare"]) {
+    assert.match(windowControls, new RegExp(`\\b${icon}\\b`));
+  }
 });
 
 

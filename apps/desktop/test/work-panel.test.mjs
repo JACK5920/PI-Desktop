@@ -198,7 +198,7 @@ test("a viewport-fixed toggle is the sole pointer collapse control", () => {
   // family and its interaction states).
   assert.match(
     globalStyles,
-    /\.work-panel-new-tab,\n\.work-panel-maximize \{[^}]*background:\s*transparent;/s,
+    /\.work-panel-new-tab,\r?\n\.work-panel-maximize \{[^}]*background:\s*transparent;/s,
   );
   assert.doesNotMatch(
     globalStyles,
@@ -762,7 +762,7 @@ test("preview mode keeps shell actions and restores routes before navigation", (
   // follow the boot surface that is actually up (splash or startup recovery).
   assert.match(
     appSource,
-    /\{\(ready && !showSplash\) \|\| startupPhase !== "starting" \? \(\s*<WindowControls \/>/,
+    /\{\(ready && !showSplash\) \|\| startupPhase !== "starting" \? \([\s\S]*?<WindowControls[\s\S]*?miniMode=\{miniMode\}/,
   );
   assert.match(appSource, /const workPanelMaximizedRef = useRef\(false\)/);
   assert.match(

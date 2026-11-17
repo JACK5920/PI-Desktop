@@ -112,7 +112,10 @@ export const es = {
     "minimize": "Minimizar",
     "maximize": "Maximizar",
     "restore": "Restaurar",
-    "close": "Cerrar"
+    "close": "Cerrar",
+    "enterMiniMode": "Ventana compacta",
+    "exitMiniMode": "Restaurar ventana completa",
+    "alwaysOnTop": "Mantener encima",
   },
   "tray": {
     "running": "En curso",

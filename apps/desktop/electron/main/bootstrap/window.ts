@@ -37,6 +37,7 @@ import {
 import { readWindowState, writeWindowState } from "../window-preferences";
 import { suppressLinuxFramelessSystemMenu } from "../frameless-system-menu";
 import { isWindowFullScreen } from "../window-fullscreen";
+import { isMiniWindowMode } from "../mini-window-mode";
 import { DEFAULT_WINDOW_CORNER_RADIUS, installWindowShape } from "../window-shape";
 import {
   installWindows11CornerController,
@@ -293,10 +294,11 @@ export async function createWindow({
   });
   let workPanelReconcileTimer: NodeJS.Timeout | null = null;
   const scheduleWorkPanelReservation = () => {
+    if (isMiniWindowMode(window)) return;
     if (workPanelReconcileTimer) clearTimeout(workPanelReconcileTimer);
     workPanelReconcileTimer = setTimeout(() => {
       workPanelReconcileTimer = null;
-      if (isLiveWindow()) applyWorkPanelReservation();
+      if (isLiveWindow() && !isMiniWindowMode(window)) applyWorkPanelReservation();
     }, 0);
   };
 
@@ -378,7 +380,7 @@ export async function createWindow({
   };
 
   const armNativeWorkPanelResizeFinish = () => {
-    if (!nativeWorkPanelResize) return;
+    if (isMiniWindowMode(window) || !nativeWorkPanelResize) return;
     if (nativeWorkPanelResize.settleTimer) {
       clearTimeout(nativeWorkPanelResize.settleTimer);
     }
@@ -392,6 +394,7 @@ export async function createWindow({
 
   const beginNativeWorkPanelResize = (baseBoundsOverride?: WindowBounds) => {
     if (
+      isMiniWindowMode(window) ||
       nativeWorkPanelResize ||
       windowState.requestedWorkPanelReservation <= 0 ||
       isWindowFullScreen(window) ||
@@ -426,6 +429,7 @@ export async function createWindow({
   const setWorkPanelChatWidth = (requestedWidth: number) => {
     if (
       !isLiveWindow() ||
+      isMiniWindowMode(window) ||
       windowState.requestedWorkPanelReservation <= 0 ||
       isWindowFullScreen(window) ||
       window.isMaximized()
@@ -478,7 +482,7 @@ export async function createWindow({
   windowState.setWorkPanelChatWidthForWindow = setWorkPanelChatWidth;
 
   window.on("will-resize", (event, newBounds, details) => {
-    if (windowState.workPanelChatResizeActive) return;
+    if (isMiniWindowMode(window) || windowState.workPanelChatResizeActive) return;
     if (!isWorkPanelOuterResizeEdge(details?.edge)) return;
     const currentBounds = window.getBounds();
     const state = beginNativeWorkPanelResize(
@@ -504,7 +508,7 @@ export async function createWindow({
   });
 
   const observeNativeWorkPanelResize = () => {
-    if (windowState.workPanelChatResizeActive) return;
+    if (isMiniWindowMode(window) || windowState.workPanelChatResizeActive) return;
     if (nativeWorkPanelResize) {
       syncNativeWorkPanelResize("preview");
       armNativeWorkPanelResizeFinish();
@@ -645,7 +649,7 @@ export async function createWindow({
   // longer on. Callers that legitimately sit on a maximized window (unmaximize,
   // restore) keep the original bail-out.
   const refitWindowToWorkArea = (ignoreMaximized = false) => {
-    if (!isLiveWindow() || process.platform === "darwin") return;
+    if (!isLiveWindow() || isMiniWindowMode(window) || process.platform === "darwin") return;
     if (
       (window.isMaximized() && !ignoreMaximized) ||
       isWindowFullScreen(window) ||
@@ -683,7 +687,7 @@ export async function createWindow({
   });
 
   const reconcileWorkPanelDisplay = () => {
-    if (!isLiveWindow()) return;
+    if (!isLiveWindow() || isMiniWindowMode(window)) return;
     const display = screen.getDisplayMatching(window.getBounds());
     const nextDisplayKey = displayWorkAreaKey(display.id, display.workArea);
     if (nextDisplayKey === windowState.workPanelDisplayKey) return;
@@ -702,7 +706,7 @@ export async function createWindow({
   const WORK_PANEL_MOVE_SETTLE_MS = 220;
   let workPanelMoveSettleTimer: NodeJS.Timeout | null = null;
   const noteUserWindowMove = () => {
-    if (!isLiveWindow()) return;
+    if (!isLiveWindow() || isMiniWindowMode(window)) return;
     const currentBounds = window.getBounds();
     if (
       windowState.expectedWorkPanelBounds &&
@@ -746,7 +750,7 @@ export async function createWindow({
     // fallback leaves Electron's own flag false while the window really is
     // fullscreen, and resizing the minimum then fights the fullscreen state
     // (issue #1655).
-    if (isLiveWindow() && !isWindowFullScreen(window)) {
+    if (isLiveWindow() && !isMiniWindowMode(window) && !isWindowFullScreen(window)) {
       const minimum = clampMinimumSizeToWorkArea(
         { width: workPanelMinimumWindowWidth(), height: windowMinHeight },
         screen.getDisplayMatching(window.getBounds()).workArea,
@@ -852,6 +856,7 @@ export async function createWindow({
   const ensureStableBounds = (force = false) => {
     if (
       !isLiveWindow() ||
+      isMiniWindowMode(window) ||
       boundsGuard ||
       windowState.workPanelChatResizeActive ||
       captureViewportOverride ||
@@ -930,7 +935,7 @@ export async function createWindow({
 
   const scheduleBoundsCheck = () => {
     if (boundsTimer) clearTimeout(boundsTimer);
-    if (!isLiveWindow() || windowState.workPanelChatResizeActive) return;
+    if (!isLiveWindow() || isMiniWindowMode(window) || windowState.workPanelChatResizeActive) return;
     const scheduledBounds = window.getBounds();
     boundsTimer = setTimeout(() => {
       boundsTimer = null;
@@ -988,6 +993,7 @@ export async function createWindow({
     if (
       !isLiveWindow() ||
       boundsGuard ||
+      isMiniWindowMode(window) ||
       windowState.workPanelNativeResizeActive ||
       windowState.workPanelChatResizeActive ||
       isWindowFullScreen(window)
@@ -1118,6 +1124,7 @@ export async function createWindow({
       (!cg && cgHelperAvailable && missingCgStreak >= 3);
     const electronTiny =
       electronBounds.width < 500 || electronBounds.height < 400;
+    if (isMiniWindowMode(window)) return;
     if (shelved || electronTiny) {
       ensureStableBounds(true);
       return;

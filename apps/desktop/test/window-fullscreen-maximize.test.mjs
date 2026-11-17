@@ -194,7 +194,7 @@ test("the display-topology reconcile uses the tracked fullscreen flag", () => {
   // window really is fullscreen, so only the tracked flag is reliable there.
   assert.match(
     lifecycleSource,
-    /if \(isLiveWindow\(\) && !isWindowFullScreen\(window\)\) \{/,
+    /if \(isLiveWindow\(\) && !isMiniWindowMode\(window\) && !isWindowFullScreen\(window\)\) \{/,
   );
 });
 
