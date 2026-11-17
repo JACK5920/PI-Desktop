@@ -13,7 +13,7 @@ const settingsPage = await readFile(
 
 test("settings hides and inerts chat without aria-hiding a focused descendant", () => {
   const chatShell = appShell.match(
-    /<div\s+className="app-chat-shell"[\s\S]*?>/,
+    /<div\s+className=\{cx\("app-chat-shell"[\s\S]*?hidden=\{page === "settings"\}[\s\S]*?>/,
   )?.[0];
 
   assert.ok(chatShell, "chat shell must exist");
@@ -45,6 +45,6 @@ test("chat code loads inside the existing route boundary and stays mounted in Se
   );
   assert.match(
     appShell,
-    /className="app-chat-shell"[\s\S]*?hidden=\{page === "settings"\}[\s\S]*?<ChatSurface visible=\{page === "chat"\} \/>/,
+    /className=\{cx\("app-chat-shell"[\s\S]*?hidden=\{page === "settings"\}[\s\S]*?<ChatSurface visible=\{page === "chat"\} \/>/,
   );
 });

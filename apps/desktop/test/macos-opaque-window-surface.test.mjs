@@ -169,7 +169,7 @@ test("only macOS sidebar and splash surfaces receive the translucent glass treat
     )?.[0] ?? "";
   assert.match(macAncestorBlock, /background:\s*transparent/);
 
-  const mainPaneBlock = styleBlock("\\.main-pane");
+  const mainPaneBlock = stylesSource.match(/(?:^|\n)\.main-pane\s*\{[^}]*\}/)?.[0] ?? "";
   const mainTitlebarBlock = styleBlock("\\.main-titlebar");
   const conversationTopbarBlock = styleBlock("\\.conversation-topbar");
   for (const block of [mainPaneBlock, mainTitlebarBlock, conversationTopbarBlock]) {

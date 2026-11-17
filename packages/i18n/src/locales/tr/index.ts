@@ -114,6 +114,9 @@ export const tr = {
     maximize: "Büyüt",
     restore: "Geri yükle",
     close: "Kapat",
+    enterMiniMode: "Küçük pencere",
+    exitMiniMode: "Tam pencereye dön",
+    alwaysOnTop: "Üstte tut",
   },
   tray: {
     running: "Çalışan",

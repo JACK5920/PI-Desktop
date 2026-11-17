@@ -85,7 +85,7 @@ test("a collapsed sidebar keeps the preferred chat band and only changes motion"
     /sidebarCollapsed && "sidebar-collapsed"/,
   );
 
-  const mainPaneBlock = globalStyles.match(/\.main-pane\s*\{[\s\S]*?\}/)?.[0] ?? "";
+  const mainPaneBlock = globalStyles.match(/(?:^|\n)\.main-pane\s*\{[\s\S]*?\}/)?.[0] ?? "";
   assert.match(mainPaneBlock, /--chat-content-max-width:\s*760px/);
   assert.match(
     mainPaneBlock,

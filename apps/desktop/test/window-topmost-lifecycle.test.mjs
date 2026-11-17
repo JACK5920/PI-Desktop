@@ -19,7 +19,7 @@ const recovery = source.slice(
 const watchdogStart = source.indexOf("  const boundsWatchdog:");
 const watchdog = source.slice(watchdogStart, source.indexOf('  window.on("closed",', watchdogStart));
 
-function createRecoveryWindow(platform, { tiny = false, visible = true, minimized = false } = {}) {
+function createRecoveryWindow(platform, { tiny = false, visible = true, minimized = false, mini = false } = {}) {
   let now = 10000;
   let bounds = { x: 80, y: 70, width: tiny ? 300 : 1000, height: 700 };
   let topmost = false;
@@ -54,6 +54,7 @@ function createRecoveryWindow(platform, { tiny = false, visible = true, minimize
     windowMinHeight: 560,
     windowBoundsSettleMs: 300,
     isLiveWindow: () => true,
+    isMiniWindowMode: () => mini,
     screen: { getDisplayMatching: () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1080 } }) },
     clampMinimumSizeToWorkArea,
     emptyWorkPanelReservationState,
@@ -89,6 +90,14 @@ function createRecoveryWindow(platform, { tiny = false, visible = true, minimize
     },
   };
 }
+
+test("mini windows bypass tiny-geometry recovery", () => {
+  const app = createRecoveryWindow("win32", { tiny: true, mini: true });
+  app.window.emit("show");
+  app.advance(10000);
+  assert.deepEqual(app.window.getBounds(), { x: 80, y: 70, width: 300, height: 700 });
+  assert.equal(app.calls.includes("bounds"), false);
+});
 
 for (const platform of ["win32", "linux", "darwin"]) {
   for (const event of ["show", "focus", "restore"]) {

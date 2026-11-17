@@ -153,7 +153,7 @@ test("the shell key, the menu item, and the accelerator run one action", () => {
   assert.match(protocolSource, /"restoreMainWindow",\s*\n\s*"toggleMainWindow",/);
   assert.match(lifecycleSource, /action === "restoreMainWindow" \|\| action === "toggleMainWindow"/);
   assert.match(menuSource, /labels\.menu\.toggleWindow/);
-  assert.match(windowControlsSource, /api\.windowControl\("close"\)/);
+  assert.match(windowControlsSource, /runAction\("close"\)/);
   assert.match(menuSource, /dispatchNative\("toggleMainWindow"\)/);
   assert.doesNotMatch(menuSource, /summonWindow|closeWindow/);
 });

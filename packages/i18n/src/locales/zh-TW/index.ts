@@ -113,6 +113,9 @@ export const zhTW = {
     maximize: "最大化",
     restore: "還原",
     close: "關閉",
+    enterMiniMode: "迷你視窗",
+    exitMiniMode: "恢復完整視窗",
+    alwaysOnTop: "視窗置頂",
   },
   tray: {
     running: "執行中",

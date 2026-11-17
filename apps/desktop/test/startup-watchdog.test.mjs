@@ -228,9 +228,9 @@ test("the boot surfaces keep the window controls, so a stuck launch is closable"
   // once already: the assertion pins the phase-aware condition.
   assert.match(
     shell,
-    /\{\(ready && !showSplash\) \|\| startupPhase !== "starting" \? \(\s*<WindowControls \/>/,
+    /\{\(ready && !showSplash\) \|\| startupPhase !== "starting" \? \([\s\S]*?<WindowControls[\s\S]*?miniMode=\{miniMode\}/,
   );
-  assert.equal((shell.match(/<WindowControls\s*\/>/g) ?? []).length, 1);
+  assert.equal((shell.match(/<WindowControls\b/g) ?? []).length, 1);
   assert.match(css, /\.app-shell:has\(> \.startup-recovery\) > \.window-controls \{\n\s+z-index: 1500;/);
 });
 

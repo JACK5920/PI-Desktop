@@ -112,7 +112,10 @@ export const ptBR = {
     minimize: "Minimizar",
     maximize: "Maximizar",
     restore: "Restaurar",
-    close: "Fechar"
+    close: "Fechar",
+    enterMiniMode: "Janela compacta",
+    exitMiniMode: "Restaurar janela completa",
+    alwaysOnTop: "Manter no topo",
   },
   tray: {
     running: "Em execução",

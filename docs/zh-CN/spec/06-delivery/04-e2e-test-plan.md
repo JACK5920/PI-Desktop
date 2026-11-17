@@ -6023,6 +6023,7 @@ eleven-tool-round desktop paths are verified by
 | C — 对话和直播（输入框草稿） | E2E-011c、E2E-011c-1、E2E-011c-2 |
 | C / F / 安全 / 品质 — Goal 生命周期 | E2E-GOAL-lifecycle |
 | C / F / 品质 — Goal 预算编辑 | E2E-GOAL-lifecycle、E2E-GOAL-budget-editor |
+| A / C / F / 品质 — 紧凑聊天窗口与输入框连续性 | E2E-CHROME-compact-chat-window |
 | A / C / F / Quality — Tray session navigation | E2E-TRAY-bounded-session-navigation |
 | D——工作区 | E2E-012、E2E-013、E2E-022B、E2E-024I、E2E-047、E2E-049、E2E-057、E2E-058、E2E-060、E2E-068、E2E-075、E2E-078、E2E-153 |
 | D——工作区（项目排序） | E2E-253 |
@@ -10371,3 +10372,14 @@ PluginPack 产物的解包目录，仅用于开发验证。验收 #1711 前需�
 - **路径：** 分别从 Agent、Plan、Goal 打开 Composer 模式菜单并选择每个内置 Goal 模板；验证会话切到 Goal 模式，且在光标位置插入可编辑的草稿。再覆盖光标两侧已有文本及带文件附件的草稿。编辑模板后，用确定性 Goal provider fixture 发送并返回 `SubmitGoal`，然后通过现有审批界面处理生成的提案。
 - **预期：** 选择模板会保留原有草稿文本和附件，不会自行创建提案或生命周期记录，也不会改写不可变审批快照。以 Goal 模式发送后只创建正常的 `SubmitGoal` 提案，并沿用现有审批与 Host 管理的生命周期。拒绝后仍按现有行为返回可编辑的 Goal 规划状态。
 - **覆盖：** `goal-templates.test.mjs`、`composer-mode-menu.test.mjs`、i18n catalog 一致性、Goal 提案/审批测试和桌面类型检查；不使用真实 provider，也不新增持久化数据源。
+
+### E2E-CHROME-compact-chat-window
+
+- **前置条件：** 使用隔离 profile 启动已构建的桌面应用，准备本地会话、未发送的输入框草稿、已打开的工作面板标签和已知的常规窗口尺寸。无需调用真实模型服务。
+- **路径：** 分别从普通窗口和最大化窗口进入紧凑模式。在紧凑模式中查看聊天和输入框、移动/调整窗口大小、切换置顶，然后恢复窗口。再分别测试打开搜索、设置和最大化的工作面板；在紧凑模式下关闭应用，并在同一隔离 profile 中重新启动。
+- **预期：** 紧凑模式使用单个原生窗口，初始约为 440×640 DIP，并限制在显示器工作区内。当前会话、输入框草稿和隐藏的工作面板标签状态均保留。输入框和工具栏位于同一框架内，中间没有分隔线。紧凑标题栏提供置顶、恢复和关闭操作。恢复后返回捕获的常规窗口尺寸与最大化状态；打开搜索、设置或最大化工作面板时先恢复完整窗口。紧凑模式中的移动、调整大小和关闭操作不会覆盖已保存的常规窗口尺寸。
+- **规格：** `04-ux/01-ui-ia.md` §7；`03-runtime/01-ipc-protocol.md` 窗口控制。
+- **验收：** A / C / F / 品质。
+- **里程碑：** MVP 后回归覆盖。
+- **自动化：** `apps/desktop/test/mini-window-mode.test.mjs` 覆盖窗口几何、状态快照、IPC 契约及输入框无分隔线契约。原生窗口定位和交互恢复仍需在目标平台运行桌面 E2E 验收。
+- **状态：** 已有单元测试/源码契约覆盖；原生平台验证仍待完成。

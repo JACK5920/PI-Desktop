@@ -60,10 +60,21 @@ export const WINDOW_CONTROL_ACTIONS = [
   "getState",
   "minimize",
   "toggleMaximize",
+  "enterMiniMode",
+  "exitMiniMode",
+  "toggleAlwaysOnTop",
   "close",
 ] as const;
 
 export type WindowControlAction = (typeof WINDOW_CONTROL_ACTIONS)[number];
+
+export type WindowControlState = {
+  maximized: boolean;
+  miniMode: boolean;
+  alwaysOnTop: boolean;
+  fullScreen: boolean;
+  macosWindowTranslucency: boolean;
+};
 
 export type LifecycleDialogKind = "quit-confirmation" | "close-behavior";
 export type LifecycleDialogChoice = "cancel" | "confirm" | "tray" | "quit";
@@ -566,6 +577,7 @@ export const IPC = {
      */
     pluginComposerSuggestion: "pi-desktop/plugin/composer/event/suggestion",
     windowMaximized: "pi-desktop/window/event/maximized",
+    windowModeChanged: "pi-desktop/window/event/modeChanged",
     windowFullScreen: "pi-desktop/window/event/fullscreen",
     windowWorkPanelResize: "pi-desktop/window/event/workPanelResize",
     lifecycleDialogRequest: "pi-desktop/window/event/lifecycleDialogRequest",

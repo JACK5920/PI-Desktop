@@ -13,12 +13,12 @@ test("Settings hides the mounted chat shell and keeps its portal layers out of v
     readFile(new URL("../src/lib/portal-visibility.tsx", import.meta.url), "utf8"),
   ]);
   assert.match(appShell, /<PortalVisibilityProvider visible=\{page !== "settings"\}>/);
-  assert.match(appShell, /className="app-chat-shell"[\s\S]*?hidden=\{page === "settings"\}/);
+  assert.match(appShell, /className=\{cx\("app-chat-shell"[\s\S]*?hidden=\{page === "settings"\}/);
   assert.match(appShell, /inert=\{page === "settings" \? true : undefined\}/);
-  const chatShell = appShell.match(/<div\s+className="app-chat-shell"[\s\S]*?>/)?.[0];
+  const chatShell = appShell.match(/<div\s+className=\{cx\("app-chat-shell"[\s\S]*?hidden=\{page === "settings"\}[\s\S]*?>/)?.[0];
   assert.ok(chatShell, "chat shell must exist");
   assert.doesNotMatch(chatShell, /aria-hidden/);
-  assert.match(appShell, /className="app-chat-shell"[\s\S]*?<ChatSurface visible=\{page === "chat"\} \/>/);
+  assert.match(appShell, /className=\{cx\("app-chat-shell"[\s\S]*?<ChatSurface visible=\{page === "chat"\} \/>/);
   assert.match(appShell, /\{page === "settings" \? \([\s\S]*?<SettingsPage \/>/);
   assert.match(appShell, /<ChatSurface visible=\{page === "chat"\} \/>/);
   assert.match(appShell, /<SearchDialog open=\{searchOpen\}/);

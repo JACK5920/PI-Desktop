@@ -103,7 +103,49 @@ export function AppShell() {
     requestedWorkPanelWidth,
   } = useAppShellRuntime();
   const [toastAnchor, setToastAnchor] = useState<HTMLElement | null>(null);
+  const [windowControlState, setWindowControlState] = useState({
+    maximized: false,
+    miniMode: false,
+    alwaysOnTop: false,
+    fullScreen: false,
+    macosWindowTranslucency: false,
+  });
   useCopyTex();
+
+  useEffect(() => {
+    let mounted = true;
+    let stateRevision = 0;
+    const unsubscribeMode = api.onWindowModeChanged((state) => {
+      stateRevision += 1;
+      if (mounted) setWindowControlState(state);
+    });
+    const unsubscribeMaximized = api.onWindowMaximized(({ maximized }) => {
+      stateRevision += 1;
+      if (mounted) setWindowControlState((state) => ({ ...state, maximized }));
+    });
+    const unsubscribeFullScreen = api.onWindowFullScreen(({ fullScreen }) => {
+      stateRevision += 1;
+      if (mounted) setWindowControlState((state) => ({ ...state, fullScreen }));
+    });
+    const revisionBeforeRead = stateRevision;
+    void api.windowControl("getState").then((state) => {
+      if (mounted && stateRevision === revisionBeforeRead) setWindowControlState(state);
+    }).catch(() => undefined);
+    return () => {
+      mounted = false;
+      unsubscribeMode();
+      unsubscribeMaximized();
+      unsubscribeFullScreen();
+    };
+  }, []);
+
+  const miniMode = windowControlState.miniMode;
+  useEffect(() => {
+    if (!miniMode || (page === "chat" && !searchOpen && !workPanelMaximized)) return;
+    void api.windowControl("exitMiniMode").then(setWindowControlState).catch((error: unknown) => {
+      console.warn("Failed to restore the full window", error);
+    });
+  }, [miniMode, page, searchOpen, workPanelMaximized]);
 
   useEffect(() => {
     void loadChatSurface().catch((error: unknown) => {
@@ -146,7 +188,7 @@ export function AppShell() {
       <>
         <PortalVisibilityProvider visible={page !== "settings"}>
           <div
-            className="app-chat-shell"
+            className={cx("app-chat-shell", miniMode && "is-mini-window")}
             hidden={page === "settings"}
             inert={page === "settings" ? true : undefined}
           >
@@ -205,6 +247,7 @@ export function AppShell() {
                     onToggleSidebar={toggleSidebar}
                     onNewTask={() => void runMenuCommand("newTask")}
                     onOpenSearch={() => setSearchOpen(true)}
+                    miniMode={miniMode}
                   />
                 ) : (
                   <div
@@ -373,6 +416,7 @@ export function AppShell() {
         page === "settings" && ready && "settings-mode",
         sidebarCollapsed && "sidebar-collapsed",
         workPanelMaximized && "work-panel-maximized",
+        miniMode && "is-mini-window",
         showSplash && "is-booting",
       )}
       style={{ "--ds-sidebar-width": `${sidebarWidth}px` } as CSSProperties}
@@ -385,7 +429,12 @@ export function AppShell() {
           window controls — the only ones a frameless Windows/Linux window has.
           The controls therefore follow the boot surface that is actually up. */}
       {(ready && !showSplash) || startupPhase !== "starting" ? (
-        <WindowControls />
+        <WindowControls
+        miniMode={miniMode}
+        alwaysOnTop={windowControlState.alwaysOnTop}
+        miniModeAvailable={ready && page === "chat" && !searchOpen && !workPanelMaximized && !windowControlState.fullScreen}
+        onStateChange={setWindowControlState}
+      />
       ) : null}
       <ProjectCreateDialog />
       <LifecycleConfirmationDialog />

@@ -1,4 +1,4 @@
-import { BrowserWindow, Menu } from "electron";
+import { BrowserWindow, Menu, screen } from "electron";
 import { isWindowBackgroundColor, MAX_WINDOW_CORNER_RADIUS } from "@pi-desktop/plugin-sdk";
 import {
   builtinWindowBackground,
@@ -10,6 +10,7 @@ import {
   parseTraySessionPreferences,
   type NativeMenuAction,
   type WindowControlAction,
+  type WindowControlState,
   type LifecycleDialogChoice,
   type TraySessionPreferences,
   type WorkPanelTabMenuAction,
@@ -20,11 +21,22 @@ import {
   waitForNativeMenuResult,
 } from "../work-panel-tab-menu";
 import {
+  clampBoundsToWorkArea,
+  clampMinimumSizeToWorkArea,
   emptyWorkPanelReservationState,
   parseWorkPanelChatWidth,
   parseWorkPanelReservationWidth,
   type WorkPanelReservationState,
 } from "../work-panel-window";
+import { isWindowFullScreen } from "../window-fullscreen";
+import {
+  beginMiniWindowMode,
+  calculateMiniWindowBounds,
+  endMiniWindowMode,
+  isMiniWindowMode,
+  miniWindowMinimumSize,
+  miniWindowRestoreState,
+} from "../mini-window-mode";
 import {
   DEFAULT_WINDOW_CORNER_RADIUS,
 } from "../window-shape";
@@ -39,6 +51,7 @@ export type WindowIpcDependencies = {
   setWorkPanelReservationWidth: (width: number) => void;
   setWorkPanelReservation: (state: WorkPanelReservationState) => void;
   getWorkPanelChatWidthSetter: () => ((width: number) => number) | null;
+  getWindowMinimumSize: () => { width: number; height: number };
   applyCloseBehavior: (behavior: "tray" | "quit") => void;
   getCloseBehavior: () => "ask" | "tray" | "quit";
   markLifecycleDialogRendererReady: (window: BrowserWindow) => boolean;
@@ -63,6 +76,7 @@ export function registerWindowIpc({
   setWorkPanelReservationWidth,
   setWorkPanelReservation,
   getWorkPanelChatWidthSetter,
+  getWindowMinimumSize,
   applyCloseBehavior,
   getCloseBehavior,
   markMenuRendererReady,
@@ -92,9 +106,11 @@ export function registerWindowIpc({
         errorCode: ErrorCodes.INVALID_ARGUMENT,
       });
     }
-    if (!getMainWindow() || getMainWindow()?.isDestroyed()) {
+    const mainWindow = getMainWindow();
+    if (!mainWindow || mainWindow.isDestroyed()) {
       throw new Error("main window unavailable");
     }
+    if (isMiniWindowMode(mainWindow)) return { requested: 0, reserved: 0 };
     setWorkPanelReservationWidth(0);
     setWorkPanelReservation(emptyWorkPanelReservationState());
     return { requested: 0, reserved: 0 };
@@ -107,8 +123,12 @@ export function registerWindowIpc({
         errorCode: ErrorCodes.INVALID_ARGUMENT,
       });
     }
-    if (!getMainWindow() || getMainWindow()?.isDestroyed()) {
+    const mainWindow = getMainWindow();
+    if (!mainWindow || mainWindow.isDestroyed()) {
       throw new Error("main window unavailable");
+    }
+    if (isMiniWindowMode(mainWindow)) {
+      return { requested, applied: mainWindow.getBounds().width };
     }
     const setter = getWorkPanelChatWidthSetter();
     if (!setter || getWorkPanelReservationWidth() <= 0) {
@@ -187,34 +207,95 @@ export function registerWindowIpc({
     ) {
       throw new Error("unsupported window control action");
     }
-    // A window outside macOS has no vibrancy surface: report `false` so the
-    // renderer never reads "not applicable" as "translucent".
     const macosWindowTranslucency =
       process.platform === "darwin" && isMacosWindowTranslucent();
     const mainWindow = getMainWindow();
     if (!mainWindow || mainWindow.isDestroyed()) {
-      return { maximized: false, macosWindowTranslucency };
+      return {
+        maximized: false,
+        miniMode: false,
+        alwaysOnTop: false,
+        fullScreen: false,
+        macosWindowTranslucency,
+      } satisfies WindowControlState;
     }
+    const state = (): WindowControlState => ({
+      maximized: !mainWindow.isDestroyed() && mainWindow.isMaximized(),
+      miniMode: isMiniWindowMode(mainWindow),
+      alwaysOnTop: !mainWindow.isDestroyed() && mainWindow.isAlwaysOnTop(),
+      fullScreen: !mainWindow.isDestroyed() && isWindowFullScreen(mainWindow),
+      // The surface this window was created with, so a Settings switch can tell
+      // whether the stored preference has taken effect (#1064 / ADR 0332).
+      macosWindowTranslucency,
+    });
+    const publishState = () => {
+      if (!mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) {
+        mainWindow.webContents.send(IPC.event.windowModeChanged, state());
+      }
+    };
+
     switch (input.action as WindowControlAction) {
       case "getState":
         break;
       case "minimize":
         mainWindow.minimize();
         break;
-      // `toggleMaximize` and the rest run through the shared native-menu
-      // action so the maximize/fullscreen interlock (issue #1655) has one
-      // implementation: calling `mainWindow.maximize()` directly would skip
-      // the fullscreen-first rule and leave both flags set.
+      case "enterMiniMode": {
+        if (isWindowFullScreen(mainWindow)) {
+          throw new Error("mini window is unavailable while the window is full screen");
+        }
+        const wasMaximized = mainWindow.isMaximized();
+        const restoreBounds = wasMaximized
+          ? mainWindow.getNormalBounds()
+          : mainWindow.getBounds();
+        const workArea = screen.getDisplayMatching(mainWindow.getBounds()).workArea;
+        if (!beginMiniWindowMode(mainWindow, { bounds: restoreBounds, wasMaximized })) {
+          break;
+        }
+        if (wasMaximized) mainWindow.unmaximize();
+        const minimum = miniWindowMinimumSize(workArea);
+        mainWindow.setMinimumSize(minimum.width, minimum.height);
+        mainWindow.setBounds(calculateMiniWindowBounds(workArea), false);
+        publishState();
+        break;
+      }
+      case "exitMiniMode": {
+        const restore = miniWindowRestoreState(mainWindow);
+        if (!restore) break;
+        const workArea = screen.getDisplayMatching(restore.bounds).workArea;
+        const bounds = clampBoundsToWorkArea(restore.bounds, workArea);
+        const requestedMinimum = getWindowMinimumSize();
+        const minimum = clampMinimumSizeToWorkArea(requestedMinimum, workArea);
+        mainWindow.setMinimumSize(minimum.width, minimum.height);
+        mainWindow.setBounds(bounds, false);
+        if (restore.wasMaximized) mainWindow.maximize();
+        endMiniWindowMode(mainWindow);
+        publishState();
+        break;
+      }
+      case "toggleAlwaysOnTop":
+        mainWindow.setAlwaysOnTop(!mainWindow.isAlwaysOnTop(), "floating");
+        publishState();
+        break;
+      // `toggleMaximize` and close run through the shared native-menu action so
+      // the maximize/fullscreen interlock has one implementation.
       case "toggleMaximize":
       case "close":
+        if (isMiniWindowMode(mainWindow) && input.action === "toggleMaximize") {
+          const restore = miniWindowRestoreState(mainWindow);
+          if (restore) {
+            const workArea = screen.getDisplayMatching(restore.bounds).workArea;
+            const minimum = clampMinimumSizeToWorkArea(getWindowMinimumSize(), workArea);
+            mainWindow.setMinimumSize(minimum.width, minimum.height);
+            mainWindow.setBounds(clampBoundsToWorkArea(restore.bounds, workArea), false);
+            if (restore.wasMaximized) mainWindow.maximize();
+            endMiniWindowMode(mainWindow);
+            publishState();
+          }
+        }
         return executeNativeMenuAction(input.action as NativeMenuAction);
     }
-    return {
-      maximized: !mainWindow.isDestroyed() && mainWindow.isMaximized(),
-      // The surface this window was created with, so a Settings switch can tell
-      // whether the stored preference has taken effect (#1064 / ADR 0332).
-      macosWindowTranslucency,
-    };
+    return state();
   });
 
   handle(IPC.invoke.closeBehaviorGet, async () => ({

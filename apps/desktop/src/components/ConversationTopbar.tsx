@@ -47,12 +47,14 @@ export function ConversationTopbar({
   onToggleSidebar,
   onNewTask,
   onOpenSearch,
+  miniMode = false,
 }: {
   sidebarCollapsed: boolean;
   workPanelOpen: boolean;
   onToggleSidebar: () => void;
   onNewTask: () => void;
   onOpenSearch: () => void;
+  miniMode?: boolean;
 }) {
   const { t } = useTranslation();
   const activeSessionId = useAppStore((s) => s.activeSessionId);
@@ -228,7 +230,7 @@ export function ConversationTopbar({
     <div
       className={`conversation-topbar${sidebarCollapsed ? " ct-collapsed" : ""}${
         workPanelOpen ? " ct-work-panel-open" : ""
-      }`}
+      }${miniMode ? " ct-mini" : ""}`}
       role="toolbar"
       aria-label={t("nav.conversation")}
     >

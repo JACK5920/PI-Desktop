@@ -37,6 +37,54 @@
   -webkit-app-region: no-drag;
 }
 
+/* The compact window keeps the current chat tree mounted while removing
+   navigation and the work panel from layout. This preserves panel tabs, drafts,
+   transcript scroll and the active session for the one-click restore path. */
+.app-chat-shell.is-mini-window {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.app-chat-shell.is-mini-window > .sidebar,
+.app-chat-shell.is-mini-window > .work-panel,
+.app-chat-shell.is-mini-window > .app-work-panel-toggle {
+  display: none !important;
+}
+
+.app-chat-shell.is-mini-window > .main-pane,
+.app-shell.is-mini-window .chat-surface,
+.app-shell.is-mini-window .route-page {
+  min-width: 0;
+}
+
+.app-shell.is-mini-window .main-pane {
+  --chat-content-max-width: 100%;
+  --chat-composer-max-width: 100%;
+  --chat-prose-max-width: 100%;
+}
+
+.app-shell.is-mini-window .main-pane .composer-shell {
+  border: 1px solid var(--ds-border-subtle) !important;
+}
+
+/* Keep the input and its toolbar as one plate, with no separator at the seam. */
+.app-shell.is-mini-window .main-pane .composer-shell > .composer-toolbar {
+  border: 0 !important;
+  border-block-start: 0 !important;
+  outline: 0 !important;
+  box-shadow: none !important;
+  background-image: none;
+}
+
+.app-shell.is-mini-window .main-pane .composer-shell > .composer-toolbar::before,
+.app-shell.is-mini-window .main-pane .composer-shell > .composer-toolbar::after {
+  content: none !important;
+  display: none !important;
+}
+
 .main-pane {
   position: relative;
   display: flex;
