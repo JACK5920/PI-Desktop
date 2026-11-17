@@ -172,6 +172,16 @@ export default defineConfig({
   preload: {
     // The preload must be a fully bundled CJS file so it can run in a
     // sandboxed renderer without Node module resolution.
+    // Main and renderer already consume the shared source entry; this exact
+    // subpath alias prevents preload from bundling a stale shared dist file.
+    resolve: {
+      alias: [
+        {
+          find: /^@pi-desktop\/shared\/protocol$/,
+          replacement: resolve(__dirname, "../../packages/shared/src/protocol.ts"),
+        },
+      ],
+    },
     build: {
       rollupOptions: {
         input: {

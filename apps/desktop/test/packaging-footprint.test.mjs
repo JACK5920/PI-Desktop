@@ -133,6 +133,31 @@ test("sandbox preload entries use standalone shared subpath bundles", () => {
   assert.doesNotMatch(pluginPanelPreloadSource, /from "@pi-desktop\/shared"/);
 });
 
+test("main preload bundles the live shared IPC protocol source", async () => {
+  const preloadStart = viteConfigSource.indexOf("  preload: {");
+  const rendererStart = viteConfigSource.indexOf("  renderer: {", preloadStart);
+  assert.ok(preloadStart >= 0 && rendererStart > preloadStart);
+  const preloadConfig = viteConfigSource.slice(preloadStart, rendererStart);
+  const protocolSource = await readFile(
+    new URL("../../../packages/shared/src/protocol.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.ok(
+    preloadConfig.includes("shared\\/protocol") &&
+      preloadConfig.includes("../../packages/shared/src/protocol.ts"),
+    "the main preload must resolve the protocol subpath to source instead of stale package dist",
+  );
+  assert.match(
+    protocolSource,
+    /windowModeChanged:\s*"pi-desktop\/window\/event\/modeChanged"/,
+  );
+  assert.match(
+    protocolSource,
+    /export const IPC_WHITELIST = new Set<string>\(\[\s*\.\.\.Object\.values\(IPC\.invoke\),\s*\.\.\.Object\.values\(IPC\.event\),\s*\]\)/,
+  );
+});
+
 test("packaging keeps only shipped locales and excludes non-runtime artifacts", () => {
   assert.deepEqual(packageJson.build.electronLanguages, [
     "en-US",
