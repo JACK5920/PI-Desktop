@@ -116,6 +116,20 @@ test("models carry per-model settings and the composer honors the stored default
   assert.match(styles, /\.settings-omp-model-configure/);
 });
 
+test("OMP profile worktree exit settings require a UI confirmation for force cleanup", async () => {
+  const profile = await readFile(new URL("../src/components/settings/OmpProfileSettings.tsx", import.meta.url), "utf8");
+  const profileModule = await readFile(new URL("../electron/main/omp/profile-settings.mjs", import.meta.url), "utf8");
+  const settingsIpc = await readFile(new URL("../electron/main/ipc/settings-ipc.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(profile, /electron\/main\/omp\/profile-settings/);
+  assert.match(profile, /value === "force"/);
+  assert.match(profile, /profileWorktreeForceWarning/);
+  assert.match(profile, /profileWorktreeForceConfirm/);
+  assert.match(profile, /profileWorktreeForceCancel/);
+  assert.match(profileModule, /worktree:[\s\S]*?onExit:/);
+  assert.match(profileModule, /atomicWrite\(configPath/);
+  assert.match(settingsIpc, /worktreeOnExit/);
+});
+
 test("OMP thinking-level names and the composer label use separate locale keys", async () => {
   const picker = await readFile(new URL("../src/features/chat/composer/ComposerOmpModelPicker.tsx", import.meta.url), "utf8");
   const en = await readFile(new URL("../../../packages/i18n/src/locales/en/index.ts", import.meta.url), "utf8");

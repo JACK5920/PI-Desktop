@@ -1092,8 +1092,8 @@ export const api = {
   setOmpHiddenModels: (hiddenModels: string[]) => invoke<{ hiddenModels: string[] }>(IPC.invoke.ompModelVisibilitySet, { hiddenModels }),
   getOmpModelOverrides: () => invoke<{ overrides: Record<string, OmpModelOverride> }>(IPC.invoke.ompModelOverrideGet),
   setOmpModelOverride: (input: OmpModelOverrideInput) => invoke<{ overrides: Record<string, OmpModelOverride> }>(IPC.invoke.ompModelOverrideSet, input),
-  getOmpProfileSettings: () => invoke<{ defaultThinkingLevel: string | null; configPath: string }>(IPC.invoke.ompProfileSettingsGet),
-  setOmpProfileSettings: (input: { defaultThinkingLevel: string | null }) => invoke<{ defaultThinkingLevel: string | null; configPath: string }>(IPC.invoke.ompProfileSettingsSet, input),
+  getOmpProfileSettings: () => invoke<{ defaultThinkingLevel: string | null; worktreeOnExit: "keep" | "ask" | "remove" | "force" | null; configPath: string }>(IPC.invoke.ompProfileSettingsGet),
+  setOmpProfileSettings: (input: { defaultThinkingLevel?: string | null; worktreeOnExit?: "keep" | "ask" | "remove" | "force" | null }) => invoke<{ defaultThinkingLevel: string | null; worktreeOnExit: "keep" | "ask" | "remove" | "force" | null; configPath: string }>(IPC.invoke.ompProfileSettingsSet, input),
   stopOmpManagement: () => invoke<{ ok: boolean }>(IPC.invoke.ompManagementStop),
   onOmpEngineProgress: (listener: (progress: OmpEngineProgress) => void) => {
     if (!window.piDesktop?.on) return () => undefined;
