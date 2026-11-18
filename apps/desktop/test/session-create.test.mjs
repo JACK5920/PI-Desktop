@@ -128,6 +128,16 @@ test("new task reuses renderer-empty sessions without a blocking list refresh", 
   assert.match(newSession, /pendingNewSessionRequests/);
 });
 
+test("explicit no-project creation clears workspace scope instead of inheriting it", () => {
+  const newSession =
+    sessionSlice.match(/newSession: async [\s\S]*?\n    forkSession: async/)?.[0] ?? "";
+  assert.ok(newSession.length > 0, "newSession implementation not found");
+  assert.match(newSession, /options && "projectPath" in options/);
+  assert.match(newSession, /options\.projectPath \?\? null/);
+  assert.match(newSession, /requestedProjectPath === null && get\(\)\.workspace/);
+  assert.match(newSession, /clearProject\(\{ navigationIntent: intent \}\)/);
+});
+
 test("creating a session reveals the empty destination before host IO", () => {
   const persist =
     sessionCoordination.match(

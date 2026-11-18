@@ -2118,7 +2118,6 @@ export function Sidebar({
       temporary?: boolean;
       projectPath?: string;
       global?: boolean;
-      showLastReplyDate?: boolean;
     },
   ) => items.map((session) => {
     const meta = sessionMeta[session.id] ?? {};
@@ -2138,7 +2137,7 @@ export function Sidebar({
       outcome: sessionOutcomes[session.id],
       hasPendingPermission,
     });
-    const lastReplyDate = options?.showLastReplyDate
+    const lastReplyDate = settings?.sidebarSessionTime === true
       ? formatSessionLastReplyDate(
           session.updatedAt,
           new Date(),
@@ -2308,7 +2307,6 @@ export function Sidebar({
       const result: React.ReactNode[] = [
         ...renderSessionRows(sessions, {
           projectPath: entry.path,
-      showLastReplyDate: settings?.sidebarSessionTime === true,
         }),
       ];
       // Add "load more" button if there are hidden sessions
@@ -2765,7 +2763,6 @@ export function Sidebar({
           <RemoteProjectGroups groups={remoteProjectGroups}
             renderSessions={(sessions) => renderSessionRows(sessions, {
               temporary: false,
-              showLastReplyDate: settings?.sidebarSessionTime === true,
             })} />
         </div>
 

@@ -61,6 +61,7 @@ export const WINDOW_CONTROL_ACTIONS = [
   "minimize",
   "toggleMaximize",
   "enterMiniMode",
+  "resetMiniModeSize",
   "exitMiniMode",
   "toggleAlwaysOnTop",
   "close",

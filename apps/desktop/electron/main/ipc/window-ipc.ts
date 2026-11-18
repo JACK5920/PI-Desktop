@@ -34,9 +34,12 @@ import {
   calculateMiniWindowBounds,
   endMiniWindowMode,
   isMiniWindowMode,
+  MINI_WINDOW_DEFAULT_SIZE,
+  MINI_WINDOW_MINIMUM_SIZE,
   miniWindowMinimumSize,
   miniWindowRestoreState,
 } from "../mini-window-mode";
+import { readMiniWindowSize, writeMiniWindowSize } from "../window-preferences";
 import {
   DEFAULT_WINDOW_CORNER_RADIUS,
 } from "../window-shape";
@@ -46,6 +49,7 @@ import type { IpcRegistrar } from "./types";
 
 export type WindowIpcDependencies = {
   registrar: IpcRegistrar;
+  dataDir: string;
   getMainWindow: () => BrowserWindow | null;
   getWorkPanelReservationWidth: () => number;
   setWorkPanelReservationWidth: (width: number) => void;
@@ -71,6 +75,7 @@ export type WindowIpcDependencies = {
  */
 export function registerWindowIpc({
   registrar,
+  dataDir,
   getMainWindow,
   getWorkPanelReservationWidth,
   setWorkPanelReservationWidth,
@@ -244,6 +249,12 @@ export function registerWindowIpc({
         if (isWindowFullScreen(mainWindow)) {
           throw new Error("mini window is unavailable while the window is full screen");
         }
+        if (isMiniWindowMode(mainWindow)) break;
+        const preferredMiniSize = readMiniWindowSize(
+          dataDir,
+          MINI_WINDOW_MINIMUM_SIZE.width,
+          MINI_WINDOW_MINIMUM_SIZE.height,
+        );
         const wasMaximized = mainWindow.isMaximized();
         const restoreBounds = wasMaximized
           ? mainWindow.getNormalBounds()
@@ -255,13 +266,33 @@ export function registerWindowIpc({
         if (wasMaximized) mainWindow.unmaximize();
         const minimum = miniWindowMinimumSize(workArea);
         mainWindow.setMinimumSize(minimum.width, minimum.height);
+        mainWindow.setBounds(
+          calculateMiniWindowBounds(workArea, preferredMiniSize ?? MINI_WINDOW_DEFAULT_SIZE),
+          false,
+        );
+        publishState();
+        break;
+      }
+      case "resetMiniModeSize": {
+        if (!isMiniWindowMode(mainWindow)) break;
+        const workArea = screen.getDisplayMatching(mainWindow.getBounds()).workArea;
+        const minimum = miniWindowMinimumSize(workArea);
+        mainWindow.setMinimumSize(minimum.width, minimum.height);
         mainWindow.setBounds(calculateMiniWindowBounds(workArea), false);
+        writeMiniWindowSize(dataDir, MINI_WINDOW_DEFAULT_SIZE);
         publishState();
         break;
       }
       case "exitMiniMode": {
         const restore = miniWindowRestoreState(mainWindow);
         if (!restore) break;
+        const miniBounds = mainWindow.getBounds();
+        if (
+          miniBounds.width >= MINI_WINDOW_MINIMUM_SIZE.width &&
+          miniBounds.height >= MINI_WINDOW_MINIMUM_SIZE.height
+        ) {
+          writeMiniWindowSize(dataDir, miniBounds);
+        }
         const workArea = screen.getDisplayMatching(restore.bounds).workArea;
         const bounds = clampBoundsToWorkArea(restore.bounds, workArea);
         const requestedMinimum = getWindowMinimumSize();
@@ -284,6 +315,13 @@ export function registerWindowIpc({
         if (isMiniWindowMode(mainWindow) && input.action === "toggleMaximize") {
           const restore = miniWindowRestoreState(mainWindow);
           if (restore) {
+            const miniBounds = mainWindow.getBounds();
+            if (
+              miniBounds.width >= MINI_WINDOW_MINIMUM_SIZE.width &&
+              miniBounds.height >= MINI_WINDOW_MINIMUM_SIZE.height
+            ) {
+              writeMiniWindowSize(dataDir, miniBounds);
+            }
             const workArea = screen.getDisplayMatching(restore.bounds).workArea;
             const minimum = clampMinimumSizeToWorkArea(getWindowMinimumSize(), workArea);
             mainWindow.setMinimumSize(minimum.width, minimum.height);

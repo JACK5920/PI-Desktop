@@ -992,6 +992,7 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
   registerWindowIpc({
     setTraySessionPreferences: traySessions.setPreferences,
     registrar,
+    dataDir,
     getMainWindow,
     getWorkPanelReservationWidth,
     setWorkPanelReservationWidth,

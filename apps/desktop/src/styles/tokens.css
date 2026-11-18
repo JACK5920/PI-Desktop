@@ -200,6 +200,7 @@
   );
   /* Keep an 8px visual buffer between work-panel actions and window chrome. */
   --ds-window-controls-width: 120px;
+  --ds-mini-window-controls-width: 144px;
   /* macOS traffic lights sit at the window's top-left. Their footprint is
      native geometry, injected at boot from @pi-desktop/shared (window-chrome.ts)
      so it cannot drift from the position electron/main/bootstrap/window.ts

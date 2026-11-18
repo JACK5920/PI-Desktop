@@ -5,13 +5,13 @@ export type MiniWindowRestoreState = {
   wasMaximized: boolean;
 };
 
-const MINI_WINDOW_TARGET = { width: 440, height: 640 } as const;
-const MINI_WINDOW_MINIMUM = { width: 320, height: 400 } as const;
+export const MINI_WINDOW_DEFAULT_SIZE = { width: 440, height: 640 } as const;
+export const MINI_WINDOW_MINIMUM_SIZE = { width: 320, height: 400 } as const;
 const miniWindowStates = new WeakMap<object, MiniWindowRestoreState>();
 
 export function calculateMiniWindowBounds(
   workArea: WindowBounds,
-  target = MINI_WINDOW_TARGET,
+  target: { width: number; height: number } = MINI_WINDOW_DEFAULT_SIZE,
 ): WindowBounds {
   const width = Math.max(1, Math.min(Math.floor(target.width), workArea.width));
   const height = Math.max(1, Math.min(Math.floor(target.height), workArea.height));
@@ -25,8 +25,8 @@ export function calculateMiniWindowBounds(
 
 export function miniWindowMinimumSize(workArea: Pick<WindowBounds, "width" | "height">) {
   return {
-    width: Math.max(1, Math.min(MINI_WINDOW_MINIMUM.width, workArea.width)),
-    height: Math.max(1, Math.min(MINI_WINDOW_MINIMUM.height, workArea.height)),
+    width: Math.max(1, Math.min(MINI_WINDOW_MINIMUM_SIZE.width, workArea.width)),
+    height: Math.max(1, Math.min(MINI_WINDOW_MINIMUM_SIZE.height, workArea.height)),
   };
 }
 
