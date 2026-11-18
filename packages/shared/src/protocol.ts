@@ -4,7 +4,7 @@ export const PROTOCOL_VERSION = 11 as const;
 export const SCHEMA_VERSION = 28 as const;
 export const APP_ID = "net.aiuo.pi-desktop";
 export const APP_NAME = "PI-Desktop";
-export const APP_VERSION = "0.21.0";
+export const APP_VERSION = "0.22.0";
 /** Reserved RPC session for OMP provider management; never maps to a PI chat. */
 export const OMP_SETTINGS_RPC_SESSION_ID = "pi-desktop-omp-provider-settings";
 

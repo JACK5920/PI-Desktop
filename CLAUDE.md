@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Policy-Sync: 2026-09-26.1
+Policy-Sync: 2026-11-18.2
 
 Instructions for Claude Code CLI and Claude Cowork on PI-Desktop.
 
@@ -30,80 +30,53 @@ Reply to the user in the language they used (Chinese request → Chinese answer,
 
 ## Hard rules (do not negotiate)
 
-### Worktree isolation
+### Fixed two-root layout
 
-Every request uses:
+Exactly two maintained PI-Desktop project roots are allowed. Never develop directly on main; use an in-place task branch when safe:
 
-```text
-1 request = 1 branch + 1 dedicated worktree
-```
+- E:\PI-Desktop-main: read-only source/reference baseline.
+- E:\PI-Desktop-dev: sole writable development checkout and build root.
 
-- Never develop on `main` or in the primary checkout.
-- Never merge unvalidated task code into local `main`.
-- Never reuse, modify, or delete another agent's branch or worktree.
-- Never discard unrelated work in the primary checkout.
-- Resolve conflicts only inside your own task worktree.
+All edits, tests, packaging, and generated app output stay inside
+E:\PI-Desktop-dev. Never create a third clone, copied checkout, or Git
+worktree. Temporary test fixtures are transient and are not project roots;
+preserve existing user-data directories.
 
-Create the worktree from current remote `main`:
+The Desktop and Start Menu PI-Desktop Dev shortcuts must launch
+E:\PI-Desktop-dev\apps\desktop\release\win-unpacked\PI-Desktop.exe
+with `--pi-desktop-dev` and the established development `--user-data-dir`
+(`%APPDATA%\PI-Desktop Dev`), preserving the `.pi-desktop-dev` Host profile.
+Do not launch a source script, dev-electron.mjs, test-profile wrapper, or an
+executable outside the development root. Verify shortcut target and executable
+version after build.
 
-```bash
-git fetch origin main
-git worktree add \
-  -b <type>/<short-description> \
-  <worktree-path> \
-  origin/main
-cd <worktree-path>
-```
-
-Suggested worktree path: `../PI-Desktop-worktrees/<short-description>`.
-
-Branch names: `feat/...`, `fix/...`, `docs/...`, `refactor/...`, `chore/...`.
+Inspect git status --short before every task and preserve existing changes.
+Use the same development checkout; create or switch a branch there only when
+safe without disturbing dirty work. Do not use git worktree, reset, stash, or
+clean unrelated changes. Do not publish or merge without the user's request. Do not merge task changes into local main before candidate E2E. Do not open or update a PR that is behind origin/main.
 
 ### Delivery order (code-bearing changes)
 
-```text
-1. branch + worktree from origin/main
-2. implement in the worktree
-3. targeted static/unit/integration checks
-4. review the full diff
-5. commit
-6. fetch + rebase/refresh against latest origin/main (private branch)
-7. resolve conflicts in the worktree
-8. task-candidate E2E in the same worktree
-9. push branch
-10. open/update PR
-11. PR integration validation
-12. merge into remote main through repository gates
-13. synchronize local main
-14. remove your worktree and merged local branch
-```
+    1. inspect status in E:\PI-Desktop-dev and preserve existing changes
+    2. implement in the same development checkout (no extra worktree)
+    3. targeted static/unit/integration checks
+    4. review the full diff
+    5. commit only when the user asks
+    6. refresh a private branch only when safe and clean
+    7. task-candidate E2E in E:\PI-Desktop-dev
+    8. push/open/update a PR only when requested
+    9. PR integration validation and authorized merge
 
-Do **not** insert `merge task → local main` between refresh and task-candidate E2E. The task branch itself is the local integration candidate after incorporating latest `origin/main`. Do not open or update a PR that is behind `origin/main`. Run `pnpm check:pr-base` before opening or updating a PR.
-
-Record E2E evidence:
-
-```text
-Task candidate:
-Base main:
-E2E suites:
-Result:
-Environment:
-```
-
-If a required suite cannot run, report `NOT RUN` with reason, alternative validation, and remaining risk. Never report a skipped command as passing.
+Record E2E evidence with the tested commit and base revision. If a required
+suite cannot run, report NOT RUN with the reason and remaining risk.
 
 ### E2E environment reuse
 
 Task-candidate E2E uses the host development environment already provisioned
-in the primary checkout. Reuse its Node/pnpm toolchain, compatible
-`node_modules`, Electron, Rust/Cargo targets, stores, caches, and ignored
-configuration by reference or link when needed.
-
-Never run `pnpm install` or `npm install`, or create a second dependency or
-runtime environment, solely for E2E. Keep temporary profiles, data, sockets,
-ports, logs, and artifacts isolated. Install or rebuild only for missing or
-incompatible host dependencies, and record the reason; clean CI/release
-runners may install from lockfiles.
+in E:\PI-Desktop-dev. Reuse its Node/pnpm toolchain, compatible node_modules,
+Electron, Rust/Cargo targets, stores, caches, and ignored configuration.
+Never run pnpm install or npm install, or create a second dependency or runtime environment solely for E2E; keep
+temporary test state transient.
 
 ### Architecture (frozen)
 
@@ -280,7 +253,7 @@ Docs-only changes: review rendered Markdown and `git diff --check`; no runtime t
 
 Before editing:
 
-1. Confirm you are (or will create) a dedicated worktree — not the primary checkout, not `main`.
+1. Confirm E:\PI-Desktop-dev is the active development checkout; never create a third project directory or worktree.
 2. Identify observable behavior, persistence, protocol, security, and architecture impact.
 3. Read the relevant spec/ADR and list the validation you will run.
 4. For a linked issue, verify the claim against current code first. For a linked PR, preserve a sound direction; do not force-push contributor branches.

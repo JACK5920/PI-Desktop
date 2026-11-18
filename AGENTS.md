@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Policy-Sync: 2026-09-26.1
+Policy-Sync: 2026-11-18.2
 
 Mandatory rules for AI coding agents working in PI-Desktop.
 
@@ -193,125 +193,79 @@ or security boundary requires an ADR.
 
 ---
 
-## 5. Multi-Agent Isolation Is Mandatory
+## 5. Fixed Two-Root Project Layout
 
-Assume multiple agents work concurrently.
+This user-mandated layout overrides generic worktree-isolation guidance. Never develop directly on main; use an in-place task branch when safe.
+PI-Desktop has exactly two maintained project roots:
 
-Every development request uses:
+| Role | Canonical path | Rule |
+| --- | --- | --- |
+| Source/reference | E:\PI-Desktop-main | Read-only baseline; do not edit or build here. |
+| Development | E:\PI-Desktop-dev | The only writable project checkout; all edits, tests, packaging, and generated app output stay here. |
 
-```text
-1 request = 1 branch + 1 dedicated worktree
-```
+Do not create a third project root, clone, copied checkout, or Git
+worktree. Build output is allowed only inside E:\PI-Desktop-dev.
+Temporary test fixtures may live under the operating-system temp directory
+for the duration of a test; they are not project roots and must not become
+persistent development copies. Existing user-data directories are not
+project roots and must not be deleted or migrated as part of this rule.
 
-The primary checkout and local `main` are coordination surfaces, not
-development workspaces.
+All source changes and iterations happen only in E:\PI-Desktop-dev.
+The E:\PI-Desktop-main reference directory remains untouched. Preserve
+all existing uncommitted changes. Inspect git status --short before each
+task; never reset, stash, clean, or switch branches if that could disturb
+existing work. If branch isolation is needed and safe, create or switch a
+branch in the same E:\PI-Desktop-dev directory; never create a worktree.
+Do not publish or merge without the user's request. Do not merge task changes into local main before candidate E2E. Do not open or update a PR that is behind origin/main.
 
-### Never
+### Development desktop launcher
 
-* develop directly on `main`
-* develop in the primary checkout
-* merge unvalidated task code into local `main`
-* use local `main` as a temporary integration branch
-* reuse another task's worktree
-* modify another agent's branch
-* delete another agent's branch or worktree
-* reset or discard unrelated work
-* include unrelated changes in your task
-* depend on uncommitted work from another worktree
+The Desktop and Start Menu PI-Desktop Dev shortcuts must launch the
+executable built inside the development root:
 
-### Start from current `main`
+    E:\PI-Desktop-dev\apps\desktop\release\win-unpacked\PI-Desktop.exe
 
-```bash
-git fetch origin main
-
-git worktree add \
-  -b <type>/<short-description> \
-  <worktree-path> \
-  origin/main
-
-cd <worktree-path>
-```
-
-All implementation, targeted validation, conflict resolution, and
-task-candidate E2E happen inside the task's dedicated worktree.
+The shortcut must not launch a source-tree script, scripts/dev-electron.mjs,
+an isolated test launcher/profile, or the installed application outside the
+development root. Pass `--pi-desktop-dev` and the established development `--user-data-dir`
+(`%APPDATA%\PI-Desktop Dev`) so the packaged executable selects the existing
+`.pi-desktop-dev` Host profile and its separate Electron userData. The switch
+marks only this explicitly launched packaged build as development. After
+rebuilding, verify the shortcut target, executable version, and active OMP
+pointer before claiming the development app is current.
 
 ### E2E environment reuse
 
-Task-candidate E2E runs from the dedicated request worktree but reuses the
-host development environment already provisioned in the primary checkout.
-Reuse the host Node/pnpm toolchain, compatible `node_modules`, Electron,
-Rust/Cargo targets, package-manager stores, build caches, and ignored local
-configuration by reference or link when needed.
+Run task-candidate checks from the sole development root and reuse its
+existing Node/pnpm toolchain, compatible node_modules, Electron, Rust/Cargo
+targets, package-manager stores, build caches, and ignored local
+configuration. Never run pnpm install or npm install, or create a second dependency or runtime environment solely for E2E. Do not create another checkout or dependency/runtime root
+just to run E2E. Keep mutable test state (temporary profiles, sockets, ports,
+logs, and artifacts) transient and isolated. Install or rebuild dependencies
+only when the existing environment is missing or incompatible, and record
+that reason. Clean CI and release runners may install from lockfiles.
 
-Do not run `pnpm install`, `npm install`, or create a second dependency or
-runtime environment solely to execute E2E. Keep only mutable test state
-(temporary profiles, data directories, sockets, ports, logs, and artifacts)
-isolated to the request worktree or its scratch directory. Install or rebuild
-dependencies only when the host environment is missing or incompatible, and
-record that reason. Clean CI and release runners may install from lockfiles.
+### Candidate validation and delivery
 
-### Before candidate validation
+Refresh a private branch against current origin/main only when the
+development checkout is clean and doing so cannot disturb pre-existing work.
+Resolve conflicts in the same development directory. Before opening or
+updating a PR, confirm origin/main is an ancestor of HEAD and run
+pnpm check:pr-base; do not publish a branch behind origin/main. Do not open or update a PR that is behind origin/main.
 
-Refresh the task against the latest remote `main`.
+    1. inspect status in E:\PI-Desktop-dev and preserve existing changes
+    2. implement in E:\PI-Desktop-dev (same checkout; no extra worktree)
+    3. run targeted static/unit/integration checks
+    4. review the task diff
+    5. commit only when the user asks
+    6. refresh a private branch only when safe and clean
+    7. run task-candidate E2E in E:\PI-Desktop-dev
+    8. push/open/update a PR only when requested
+    9. validate the PR integration candidate before any authorized merge
 
-For a private branch that has not been pushed or shared:
-
-```bash
-git fetch origin main
-git rebase origin/main
-```
-
-If the branch has already been shared and rewriting history would be
-unsafe, do not force-push merely to rebase. Use a non-destructive
-integration strategy or rely on the PR integration candidate per § 16.
-
-Resolve conflicts inside your own worktree. Never resolve task conflicts
-by modifying the primary checkout.
-
-### Before opening or updating a PR
-
-The request head must contain the latest `origin/main`. `origin/main`
-must be an ancestor of that head:
-
-```bash
-git fetch origin main
-git merge-base --is-ancestor origin/main HEAD
-pnpm check:pr-base
-```
-
-If that fails, refresh in the task worktree (`git rebase origin/main` on
-a private branch; a non-destructive merge when rewriting history would
-be unsafe), then re-run the check. Do not open or update a PR that is
-behind `origin/main`.
-
-### Fixed delivery order
-
-```text
-1. create dedicated branch + worktree from current origin/main
-2. implement in the request worktree
-3. run targeted static/unit/integration checks
-4. review the task diff
-5. commit the task
-6. refresh the task branch against latest origin/main (`pnpm check:pr-base`)
-7. resolve conflicts inside the task worktree
-8. run required task-candidate E2E in the task worktree
-9. push the request branch
-10. open/update the PR/MR
-11. validate the PR integration candidate
-12. merge into remote main through repository gates
-13. synchronize local main
-14. remove the worktree and merged local branch
-```
-
-Do not insert `merge task → local main` between steps 6 and 8. The task
-branch itself becomes the local integration candidate by incorporating
-the latest `origin/main`. Do not open or update a PR that is behind
-`origin/main`.
-
-A task-candidate E2E result is valid only when its tested commit and
-base revision are known. The PR integration gate then protects against
-`main` changing between local candidate validation and final merge.
-
+Record E2E evidence with the tested commit and base revision. A task-candidate
+result applies only to the commit that actually ran; PR integration
+validation remains a separate gate when remote publishing is authorized.
 ---
 
 ## 6. Small, Coherent Changes — and When to Refactor
@@ -819,7 +773,7 @@ Task Candidate Validation
 PR Integration Validation
 ```
 
-Task Candidate Validation runs in the request worktree after the
+Task Candidate Validation runs in E:\PI-Desktop-dev after the
 request branch incorporates the latest available `origin/main`.
 
 PR Integration Validation verifies the actual code that is about to
@@ -841,59 +795,35 @@ new integration candidate.
 
 ---
 
-## 16. E2E Validates Integration Candidates, Not Branch Names
+## 16. E2E Validates Integration Candidates in the Sole Development Directory
 
-E2E validates executable integration state. It does **not** validate
-whether Git reports the current branch name as `main`.
-
-The invariant:
-
-```text
-latest applicable main + task changes = candidate executable state
-```
-
-not:
-
-```text
-current branch name == main
-```
+E2E validates executable integration state. It does not validate a branch
+name. The only project checkout allowed for candidate validation is
+E:\PI-Desktop-dev; do not create a third folder or worktree.
 
 ### 16.1 Task-candidate E2E
 
-Every code-bearing change runs relevant E2E suites against a candidate
-that contains:
-
-1. the request's commits
-2. the latest `origin/main` incorporated at candidate preparation
-3. all conflict resolutions required to combine them
-
-Normally:
-
-```bash
-git fetch origin main
-git rebase origin/main
-```
-
-then E2E from the same task worktree.
+Every code-bearing change runs relevant E2E suites from E:\PI-Desktop-dev
+after the candidate includes the latest applicable origin/main when that
+refresh can be done without disturbing existing uncommitted work. If the
+checkout is dirty with unrelated user work, preserve it and report the exact
+validation boundary; do not use a second checkout as a workaround.
 
 Record:
 
-```text
-Task candidate:
-Base main:
-E2E suites:
-Result:
-Environment:
-```
+    Task candidate:
+    Base main:
+    E2E suites:
+    Result:
+    Environment:
 
-An E2E result applies only to the commit that actually ran. Do not
-modify local `main` to create this candidate.
+An E2E result applies only to the commit and tree that actually ran.
 
 ### 16.2 PR integration E2E
 
-The final landing decision uses PR integration E2E, run against the
-integration candidate defined above.
-
+The final landing decision uses PR integration E2E against the actual
+integration candidate. This remote or CI validation does not authorize
+creating another local project directory.
 ---
 
 ## 17. Git Hygiene and Commit Messages
