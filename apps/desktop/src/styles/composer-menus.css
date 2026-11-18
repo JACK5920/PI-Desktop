@@ -1266,6 +1266,7 @@
 .omp-rpc-login-link { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px; border-radius: var(--radius-sm); background: var(--surface-1); }
 .omp-rpc-login-link > span { min-width: 0; flex: 1 1 220px; overflow-wrap: anywhere; color: var(--text-secondary); font-size: var(--text-sm); }
 .omp-rpc-login-link > p { flex-basis: 100%; }
+.omp-rpc-risk-warning { padding: 12px; border: 1px solid color-mix(in oklab, var(--ds-warning) 32%, var(--ds-border-subtle)); border-radius: var(--radius-sm); background: color-mix(in oklab, var(--ds-warning) 9%, var(--ds-raised)); }
 .omp-rpc-dialog p { margin: 0; color: var(--text-secondary); white-space: pre-wrap; }
 .omp-rpc-options,
 .omp-rpc-questions { display: flex; flex-direction: column; gap: 8px; }

@@ -67,7 +67,7 @@ export type ToolMatchGroup = {
   path: string;
   lines: { line: number; text: string }[];
 };
-export type ToolFieldRow = { label: string; value: string };
+export type ToolFieldRow = { label: string; value: string; labelKey?: string; valueKey?: string };
 
 type BlockBase = {
   role: ToolBlockRole;
@@ -620,14 +620,36 @@ function resultBlocks(
       // Bash progress updates use `details.output`; the completed result uses
       // `details.stdout`. A present empty stdout is meaningful too: it must
       // suppress a stale progress snapshot rather than fall back to output.
-      const stdout =
-        typeof details?.stdout === "string"
-          ? details.stdout
-          : stringAt(details, "output");
+      const hasNativeOutput = typeof details?.stdout === "string" || typeof details?.output === "string";
+      const stdout = typeof details?.stdout === "string" ? details.stdout : stringAt(details, "output");
       if (stdout) blocks.push(codeBlock("stdout", stdout));
       const stderr = stringAt(details, "stderr");
       if (stderr !== null) {
         blocks.push(codeBlock("stderr", stderr, "", { tone: "error" }));
+      }
+      if (typeof details?.fork === "object" && details.fork !== null && !Array.isArray(details.fork)) {
+        const fork = details.fork as Record<string, unknown>;
+        const rows: ToolFieldRow[] = [];
+        if (typeof fork.carried === "boolean") {
+          rows.push({
+            label: "Environment changes carried back",
+            value: fork.carried ? "Yes" : "No",
+            labelKey: "chat.ompShellForkCarried",
+            valueKey: fork.carried ? "chat.ompShellForkYes" : "chat.ompShellForkNo",
+          });
+        }
+        if (typeof fork.jobs === "boolean") {
+          rows.push({
+            label: "Background jobs left in isolated shell",
+            value: fork.jobs ? "Yes" : "No",
+            labelKey: "chat.ompShellForkJobs",
+            valueKey: fork.jobs ? "chat.ompShellForkYes" : "chat.ompShellForkNo",
+          });
+        }
+        if (rows.length > 0) blocks.push({ kind: "fields", role: "details", rows });
+      }
+      if (!hasNativeOutput && typeof message.content === "string" && message.content.length > 0) {
+        blocks.unshift(codeBlock("stdout", message.content));
       }
       mapped = command !== null;
       break;
