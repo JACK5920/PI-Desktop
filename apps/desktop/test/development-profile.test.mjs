@@ -11,15 +11,53 @@ const here = dirname(fileURLToPath(import.meta.url));
 register(pathToFileURL(join(here, "helpers/ts-import-hooks.mjs")));
 const {
   applyDevelopmentUserData,
+  DEVELOPMENT_BUILD_SWITCH,
   DEVELOPMENT_DATA_DIR_NAME,
   DEVELOPMENT_INSTALLATION_NAME,
   INSTALLATION_DATA_DIR_NAME,
   resolveDataDir,
+  resolveDevelopmentBuild,
 } = await import("../electron/main/data-paths.ts");
 
 const indexSource = await readMainModule("index.ts");
 const installationSource = await readMainModule("installation.ts");
 const entrySource = await readMainModule("entry.ts");
+
+test("a packaged development executable can select the development profile explicitly", () => {
+  assert.equal(DEVELOPMENT_BUILD_SWITCH, "--pi-desktop-dev");
+  assert.equal(
+    resolveDevelopmentBuild({
+      environmentValue: undefined,
+      packaged: true,
+      argv: ["PI-Desktop.exe"],
+    }),
+    false,
+  );
+  assert.equal(
+    resolveDevelopmentBuild({
+      environmentValue: undefined,
+      packaged: true,
+      argv: ["PI-Desktop.exe", DEVELOPMENT_BUILD_SWITCH],
+    }),
+    true,
+  );
+  assert.equal(
+    resolveDevelopmentBuild({
+      environmentValue: "1",
+      packaged: true,
+      argv: ["PI-Desktop.exe"],
+    }),
+    true,
+  );
+  assert.equal(
+    resolveDevelopmentBuild({
+      environmentValue: undefined,
+      packaged: false,
+      argv: ["electron"],
+    }),
+    true,
+  );
+});
 
 test("a development build owns a different data directory than the shipped app", () => {
   const home = join(tmpdir(), "pi-desktop-profile-home");
@@ -123,9 +161,9 @@ test("a development build takes its own userData before the single-instance lock
 
   // The two profiles are told apart by the same verdict everywhere, and it is
   // reached before the name the lock path derives from.
-  const development = installationSource.search(
-    /const isDevelopmentBuild =\s*\n?\s*process\.env\.PI_DESKTOP_DEV === "1" \|\| !app\.isPackaged;/,
-  );
+  const development = installationSource.indexOf("resolveDevelopmentBuild({");
+  assert.match(installationSource, /process\.argv\.includes\(DEVELOPMENT_BUILD_SWITCH\)/);
+  assert.ok(installationSource.includes('if (launchedAsDevelopment) process.env.PI_DESKTOP_DEV = "1";'));
   assert.ok(development > 0 && development < apply);
 });
 
