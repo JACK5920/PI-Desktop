@@ -240,6 +240,7 @@ export const IPC = {
     ompManagementStop: "pi-desktop/omp/management/stop",
     ompRpcAttach: "pi-desktop/omp/rpc/attach",
     ompRpcCommand: "pi-desktop/omp/rpc/command",
+    ompRpcReopenWithModel: "pi-desktop/omp/rpc/reopenWithModel",
     ompRpcForkSession: "pi-desktop/omp/rpc/forkSession",
     ompRpcUiResponse: "pi-desktop/omp/rpc/uiResponse",
     ompMicrophoneAcquire: "pi-desktop/omp/microphone/acquire",

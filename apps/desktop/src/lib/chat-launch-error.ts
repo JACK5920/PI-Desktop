@@ -32,8 +32,10 @@ type VendorModelProvider = {
 
 /**
  * Vendor accounts refuse a session model the account list did not return.
- * An empty list means the catalog has not loaded, not that the account
- * offers nothing, so it must not turn a normal empty chat into an error.
+ * OMP custom providers (`pi_custom_*`) have the same rule: their model list is
+ * whatever the user configured, and a renamed/removed entry stops the session
+ * from opening. An empty list means the catalog has not loaded, not that the
+ * provider offers nothing, so it must not turn a normal empty chat into an error.
  */
 export function vendorAccountOmitsSessionModel(
   session: VendorSessionModel | null | undefined,
@@ -43,7 +45,10 @@ export function vendorAccountOmitsSessionModel(
   const modelId = session?.modelId?.trim();
   if (!providerId || !modelId) return false;
   const provider = providers.find((item) => item.id === providerId);
-  if (!provider || provider.authKind !== OAUTH_AUTH_KIND) return false;
+  if (!provider) return false;
+  const isVendorAccount = provider.authKind === OAUTH_AUTH_KIND;
+  const isOmpCustomProvider = provider.id.startsWith("pi_custom_");
+  if (!isVendorAccount && !isOmpCustomProvider) return false;
   const models = provider.models ?? [];
   if (models.length === 0) return false;
   return !models.some((model) => sameComposerModelId(model.id, modelId));

@@ -6,6 +6,8 @@ import { useAppStore } from "../../../stores/app-store";
 import { IconBot, IconCheck, IconChevronDown, IconSearch, IconX } from "../../../components/icons";
 import { AnchoredMenu } from "../../../components/settings/AnchoredMenu";
 import { TooltipButton } from "../../../components/ui";
+import { readOmpThinkingLevels, selectOmpModelAndRefreshThinkingLevels } from "./omp-model-selection.mjs";
+import { readOmpModelRecovery, type OmpModelRecoveryInfo, type OmpRecoveryCandidate } from "../../../lib/omp-model-recovery";
 
 type OmpModel = { provider: string; id: string; name?: string; contextWindow?: number };
 type OmpThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
@@ -190,6 +192,9 @@ export function ComposerOmpModelPicker({
   const [slowModeSupported, setSlowModeSupported] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // A dead session model blocks attach itself; candidates come from Main so
+  // the menu can offer a way out without ever showing an empty catalog.
+  const [recovery, setRecovery] = useState<OmpModelRecoveryInfo | null>(null);
   // Kept beside the catalog so choosing a model does not need another IPC round trip.
   const overridesRef = useRef<Record<string, OmpModelOverride>>({});
   // True when the session-change effect already painted something usable, so a
@@ -261,9 +266,17 @@ export function ComposerOmpModelPicker({
         });
       const reportedLevels = Array.isArray(levels.data?.levels) ? levels.data.levels : [];
       if (loadSeqRef.current !== seq) return false;
-      // Only a live engine's non-empty ladder may replace the painted one; a
-      // reconnect that reports nothing must not shrink the thinking row.
-      const nextLevels = (draft || state) && reportedLevels.length ? reportedLevels : thinkingLevelsRef.current;
+      // Preserve a warm ladder on transient empty reconnects, but never carry
+      // another model's capabilities across a confirmed model change.
+      const cachedModel = cached?.model ?? readStoredModel(cacheKey);
+      const modelChanged = Boolean(liveState?.model) && (
+        cachedModel?.provider !== liveState?.model?.provider || cachedModel?.id !== liveState?.model?.id
+      );
+      const nextLevels = (draft || state) && reportedLevels.length
+        ? reportedLevels
+        : !draft && liveState && modelChanged
+          ? reportedLevels
+          : thinkingLevelsRef.current;
       thinkingLevelsRef.current = nextLevels;
       setModels(nextModels);
       setThinkingLevels(nextLevels);
@@ -297,8 +310,13 @@ export function ComposerOmpModelPicker({
         slowModeSupported: draft ? false : liveState ? liveState.slowModeSupported === true : previousCache?.slowModeSupported ?? false,
       });
       paintedRef.current = true;
+      setRecovery(null);
       return true;
     } catch (cause) {
+      setRecovery(readOmpModelRecovery(
+        (cause as { code?: string } | null)?.code,
+        (cause as { details?: unknown } | null)?.details,
+      ));
       setError(cause instanceof Error ? cause.message : String(cause));
       return false;
     } finally {
@@ -310,6 +328,14 @@ export function ComposerOmpModelPicker({
     const cached = pickerCache.get(cacheKey);
     if (cached) pickerCache.set(cacheKey, { ...cached, ...patch });
   }, [cacheKey]);
+
+  // The chat error card asks this picker to open when the saved model died, so
+  // the user can reach models outside the current session's candidate list.
+  useEffect(() => {
+    const openPicker = () => setOpen(true);
+    window.addEventListener("pi:open-omp-model-picker", openPicker);
+    return () => window.removeEventListener("pi:open-omp-model-picker", openPicker);
+  }, []);
 
   useEffect(() => {
     setModelQuery("");
@@ -437,6 +463,10 @@ export function ComposerOmpModelPicker({
         if (!result.data) return;
         const state = result.data;
         const nextModel = state.model ?? null;
+        const cachedModel = pickerCache.get(cacheKey)?.model ?? null;
+        const modelChanged = Boolean(nextModel) && (
+          cachedModel?.provider !== nextModel?.provider || cachedModel?.id !== nextModel?.id
+        );
         setModel(nextModel);
         setThinkingLevel(state.thinkingLevel ?? null);
         setFastMode(state.fastModeEnabled === true);
@@ -450,6 +480,19 @@ export function ComposerOmpModelPicker({
           slowMode: state.slowModeEnabled === true,
           slowModeSupported: state.slowModeSupported === true,
         });
+        if (modelChanged) {
+          const catalogModels = pickerCache.get(cacheKey)?.models ?? readStoredCatalog()?.models ?? [];
+          thinkingLevelsRef.current = [];
+          setThinkingLevels([]);
+          patchCache({ thinkingLevels: [] });
+          writeStoredCatalog(catalogModels, []);
+          const levels = await readOmpThinkingLevels({ rpcCommand: api.ompRpcCommand, sessionId });
+          if (disposed || useAppStore.getState().activeSessionId !== sessionId) return;
+          thinkingLevelsRef.current = levels;
+          setThinkingLevels(levels);
+          patchCache({ thinkingLevels: levels });
+          writeStoredCatalog(catalogModels, levels);
+        }
       } catch {
         // A state refresh must not interrupt typing or surface transient RPC
         // reconnect errors as a failed model-selection operation.
@@ -471,14 +514,66 @@ export function ComposerOmpModelPicker({
     };
   }, [cacheKey, patchCache, sessionId]);
 
+  /**
+   * Reopen the conversation on a replacement model. This path exists because a
+   * dead saved model makes `attach` itself fail, so `set_model` is unreachable
+   * until the native session has been reopened with an explicit pair.
+   */
+  const reopenWithCandidate = async (candidate: OmpRecoveryCandidate) => {
+    setLoading(true);
+    try {
+      await api.reopenOmpRpcWithModel({
+        sessionId: rpcSessionId,
+        provider: candidate.provider,
+        modelId: candidate.id,
+      });
+      setRecovery(null);
+      setError(null);
+      setModel(candidate);
+      writeStoredModel(cacheKey, candidate);
+      await load();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const choose = async (candidate: OmpModel) => {
+    // Moving a live conversation to another vendor sends its context there;
+    // that is a decision the user must confirm explicitly.
+    if (!draft && model && candidate.provider !== model.provider) {
+      if (!window.confirm(t("errors.crossProviderConfirm", { provider: candidate.provider }))) return;
+    }
     setLoading(true);
     try {
       await loadPromiseRef.current?.catch(() => false);
-      await api.ompRpcCommand({ sessionId: rpcSessionId, command: "set_model", fields: { provider: candidate.provider, modelId: candidate.id } });
-      setModel(candidate);
-      writeStoredModel(cacheKey, candidate);
-      patchCache({ model: candidate });
+      let nextThinkingLevels = thinkingLevels;
+      let nextThinkingLevel = thinkingLevel;
+      await selectOmpModelAndRefreshThinkingLevels({
+        rpcCommand: api.ompRpcCommand,
+        sessionId: rpcSessionId,
+        provider: candidate.provider,
+        modelId: candidate.id,
+        onModelApplied: () => {
+          setModel(candidate);
+          writeStoredModel(cacheKey, candidate);
+          nextThinkingLevels = [];
+          nextThinkingLevel = null;
+          thinkingLevelsRef.current = [];
+          setThinkingLevels([]);
+          setThinkingLevel(null);
+          patchCache({ model: candidate, thinkingLevel: null, thinkingLevels: [] });
+          writeStoredCatalog(models, []);
+        },
+        onThinkingLevels: (levels) => {
+          nextThinkingLevels = levels;
+          thinkingLevelsRef.current = levels;
+          setThinkingLevels(levels);
+          patchCache({ thinkingLevels: levels });
+          writeStoredCatalog(models, levels);
+        },
+      });
       const nextRecent = [
         { provider: candidate.provider, id: candidate.id },
         ...recent.filter((entry) => !(entry.provider === candidate.provider && entry.id === candidate.id)),
@@ -486,19 +581,31 @@ export function ComposerOmpModelPicker({
       setRecent(nextRecent);
       writeRecentModels(nextRecent);
       if (!draft) {
-        const refreshed: any = await api.ompRpcCommand({ sessionId: rpcSessionId, command: "get_state" });
-        const nativeState = refreshed?.data;
+        const refreshed = await api.ompRpcCommand({ sessionId: rpcSessionId, command: "get_state" }) as {
+          data?: {
+            thinkingLevel?: OmpThinkingLevel | null;
+            slowModeEnabled?: boolean;
+            slowModeSupported?: boolean;
+          };
+        };
+        const nativeState = refreshed.data;
         if (nativeState) {
+          nextThinkingLevel = nativeState.thinkingLevel ?? null;
+          setThinkingLevel(nextThinkingLevel);
           setSlowMode(nativeState.slowModeEnabled === true);
           setSlowModeSupported(nativeState.slowModeSupported === true);
-          patchCache({ slowMode: nativeState.slowModeEnabled === true, slowModeSupported: nativeState.slowModeSupported === true });
+          patchCache({
+            thinkingLevel: nextThinkingLevel,
+            slowMode: nativeState.slowModeEnabled === true,
+            slowModeSupported: nativeState.slowModeSupported === true,
+          });
         }
       }
       // A model-level default thinking level is applied right after switching,
       // so the next turn uses what the settings page promised. A draft has no
       // live turn yet, so the engine picks its default when the chat starts.
       const preferred = overridesRef.current[modelVisibilityKey(candidate.provider, candidate.id)]?.defaultThinkingLevel;
-      if (!draft && preferred && thinkingLevels.includes(preferred) && preferred !== thinkingLevel) {
+      if (!draft && preferred && nextThinkingLevels.includes(preferred) && preferred !== nextThinkingLevel) {
         await api.ompRpcCommand({ sessionId: rpcSessionId, command: "set_thinking_level", fields: { level: preferred } });
         setThinkingLevel(preferred);
         patchCache({ thinkingLevel: preferred });
@@ -507,6 +614,16 @@ export function ComposerOmpModelPicker({
       // reasoning level right after, and reopening the picker was making that
       // a two-step dance. The menu closes when the click lands outside it.
     } catch (cause) {
+      if ((cause as { code?: string } | null)?.code === "MODEL_UNAVAILABLE") {
+        // The engine refused to restore the old model before `set_model` could
+        // run. Reopening with the picked pair applies it in one step.
+        await reopenWithCandidate(candidate);
+        return;
+      }
+      setRecovery(readOmpModelRecovery(
+        (cause as { code?: string } | null)?.code,
+        (cause as { details?: unknown } | null)?.details,
+      ));
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setLoading(false);
@@ -624,6 +741,22 @@ export function ComposerOmpModelPicker({
       </label>
       {!loading && models.length === 0 && !error ? <div className="composer-menu-hint" role="status">{t("settings.omp.noModels")}</div> : null}
       {error ? <div className="composer-menu-hint" role="alert">{error}</div> : null}
+      {recovery?.candidates.length ? (
+        <div className="composer-menu-hint" role="group" aria-label={t("errors.MODEL_UNAVAILABLE")}>
+          <span>{t("errors.MODEL_UNAVAILABLE")}</span>
+          <div className="composer-model-recovery-actions">
+            {recovery.candidates.slice(0, 5).map((candidate) => (
+              <button
+                key={`${candidate.provider}:${candidate.id}`}
+                type="button"
+                onClick={() => void reopenWithCandidate(candidate)}
+              >
+                {t("errors.action.useCandidate", { model: candidate.name || candidate.id })}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
       <div
         className="composer-model-body"
         data-rail={sections.length > 1 ? "true" : undefined}

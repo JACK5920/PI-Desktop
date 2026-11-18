@@ -1147,6 +1147,8 @@ export const api = {
       .then((result) => ({ ...result, session: normalizeSession(result.session) })),
   ompRpcCommand: (input: { sessionId: string; command: string; fields?: Record<string, unknown> }) =>
     invoke<unknown>(IPC.invoke.ompRpcCommand, input),
+  reopenOmpRpcWithModel: (input: { sessionId: string; provider: string; modelId: string }) =>
+    invoke<{ ok: boolean }>(IPC.invoke.ompRpcReopenWithModel, input),
   respondOmpRpcUi: (input: { sessionId: string; response: Record<string, unknown> }) =>
     invoke<{ ok: boolean }>(IPC.invoke.ompRpcUiResponse, input),
   acquireOmpMicrophone: (input: { sessionId: string }) =>

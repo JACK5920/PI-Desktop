@@ -1,9 +1,10 @@
-import { memo, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   messageHasTranscriptContent,
   vendorAccountOmitsSessionModel,
 } from "../lib/chat-launch-error";
+import { readOmpModelRecovery, type OmpRecoveryCandidate } from "../lib/omp-model-recovery";
 import { Composer } from "./Composer";
 import { HomeMascotLogo } from "./HomeMascotLogo";
 import { HomeProjectSwitcher } from "./HomeProjectSwitcher";
@@ -74,12 +75,32 @@ export const ChatSurface = memo(function ChatSurface({
   const workspace = useAppStore((state) => state.workspace);
   const error = useAppStore((state) => state.error);
   const errorCode = useAppStore((state) => state.errorCode);
+  const errorDetails = useAppStore((state) => state.errorDetails);
   const errorRetriable = useAppStore((state) => state.errorRetriable);
   const nativeOmpSelected = useAppStore(agentEngineForState) === "omp";
   const [hiddenVendorModelKey, setHiddenVendorModelKey] = useState<string | null>(
     null,
   );
   const providers = useAppStore((state) => state.providers);
+  // OMP custom services live in the engine profile, not in PI's provider list.
+  // A stale custom model still has to be caught before the first prompt.
+  const [ompCustomProviders, setOmpCustomProviders] = useState<
+    Array<{ id: string; models: Array<{ id: string }> }>
+  >([]);
+  useEffect(() => {
+    if (!nativeOmpSelected) return;
+    let disposed = false;
+    void api.getOmpCustomModels()
+      .then((result) => {
+        if (disposed) return;
+        setOmpCustomProviders(result.providers.map((provider) => ({
+          id: provider.providerId,
+          models: (provider.models ?? []).map((model) => ({ id: model.id })),
+        })));
+      })
+      .catch(() => undefined);
+    return () => { disposed = true; };
+  }, [nativeOmpSelected]);
   const activeSession = useAppStore((state) =>
     state.activeSessionId
       ? state.sessions.find((session) => session.id === state.activeSessionId)
@@ -117,6 +138,11 @@ export const ChatSurface = memo(function ChatSurface({
   const isTemporarySession = Boolean(
     activeSessionId && activeSession && !isRemoteSession(activeSession) && !activeSession.projectPath?.trim(),
   );
+  const homeSessionProjectPath = isRemoteSession(activeSession)
+    ? null
+    : activeSession
+      ? activeSession.projectPath
+      : workspace?.path ?? null;
   const emptyTitleParts = useMemo(() => {
     const marker = "__PROJECT__";
     const template = t("chat.emptyTitleInProject", { project: marker });
@@ -146,9 +172,13 @@ export const ChatSurface = memo(function ChatSurface({
   // not take over just because the destination projection is still empty.
   const showEmptyState =
     !hasTranscript && (!visibleSessionId || visibleSessionId === activeSessionId);
+  const modelProviders = useMemo(
+    () => [...providers, ...ompCustomProviders],
+    [providers, ompCustomProviders],
+  );
   const vendorModelMissing = !isRemoteSession(activeSession) && vendorAccountOmitsSessionModel(
     activeSession,
-    providers,
+    modelProviders,
   );
   const vendorModelKey = vendorModelMissing
     ? `${activeSession?.providerId ?? ""}:${activeSession?.modelId ?? ""}`
@@ -162,6 +192,29 @@ export const ChatSurface = memo(function ChatSurface({
     : showVendorModelError
       ? "MODEL_NOT_CONFIGURED"
       : null;
+  const recovery = useMemo(
+    () => readOmpModelRecovery(noticeCode, errorDetails),
+    [noticeCode, errorDetails],
+  );
+  const reopenWithModel = async (candidate: OmpRecoveryCandidate) => {
+    if (!activeSessionId) return;
+    if (recovery?.provider && candidate.provider !== recovery.provider) {
+      if (!window.confirm(t("errors.crossProviderConfirm", { provider: candidate.provider }))) return;
+    }
+    try {
+      await api.reopenOmpRpcWithModel({
+        sessionId: activeSessionId,
+        provider: candidate.provider,
+        modelId: candidate.id,
+      });
+      useAppStore.getState().clearError();
+    } catch (cause) {
+      useAppStore.getState().showToast(
+        cause instanceof Error ? cause.message : String(cause),
+        { variant: "error" },
+      );
+    }
+  };
   return (
     <div
       className={`chat-surface route-surface${sessionSwitching ? " session-switching" : ""}`}
@@ -195,13 +248,28 @@ export const ChatSurface = memo(function ChatSurface({
                   {heroProject ? (
                     <>
                       {emptyTitleParts.before}
-                      <HomeProjectSwitcher name={heroProject} path={isRemoteSession(activeSession) ? null : workspace?.path || activeSession?.projectPath || null} />
+                      <HomeProjectSwitcher
+                        name={heroProject}
+                        path={homeSessionProjectPath}
+                      />
                       {emptyTitleParts.after}
                     </>
                   ) : isTemporarySession ? (
-                    t("chat.emptyTitleTemporary")
+                    <>
+                      {t("chat.emptyTitleTemporary")} {" "}
+                      <HomeProjectSwitcher
+                        name={t("project.noProject")}
+                        path={null}
+                      />
+                    </>
                   ) : (
-                    t("chat.emptyTitle")
+                    <>
+                      {t("chat.emptyTitle")} {" "}
+                      <HomeProjectSwitcher
+                        name={t("project.noProject")}
+                        path={homeSessionProjectPath}
+                      />
+                    </>
                   )}
                 </h1>
               </div>
@@ -244,7 +312,10 @@ export const ChatSurface = memo(function ChatSurface({
             </span>
             {!isRemoteSession(activeSession) && (noticeCode === "MODEL_NOT_CONFIGURED" ||
               noticeCode === "PROVIDER_SECRET_MISSING" ||
-              noticeCode === "PROVIDER_UNAUTHORIZED") && (
+              noticeCode === "PROVIDER_UNAUTHORIZED" ||
+              noticeCode === "PROVIDER_UNAVAILABLE" ||
+              noticeCode === "AUTH_FAILED" ||
+              noticeCode === "ACCOUNT_RESTRICTED") && (
               <button
                 type="button"
                 className="chat-error-action"
@@ -257,6 +328,38 @@ export const ChatSurface = memo(function ChatSurface({
                 {t("errors.action.openSettings")}
               </button>
             )}
+            {recovery?.candidates.slice(0, 3).map((candidate) => (
+              <button
+                key={`${candidate.provider}:${candidate.id}`}
+                type="button"
+                className="chat-error-action"
+                onClick={() => void reopenWithModel(candidate)}
+              >
+                {t("errors.action.useCandidate", { model: candidate.name || candidate.id })}
+              </button>
+            ))}
+            {recovery ? (
+              <button
+                type="button"
+                className="chat-error-action"
+                onClick={() => {
+                  // The picker owns its own open state and renders the live
+                  // catalog, including models outside the original provider.
+                  window.dispatchEvent(new CustomEvent("pi:open-omp-model-picker"));
+                }}
+              >
+                {t("errors.action.chooseModel")}
+              </button>
+            ) : null}
+            {recovery ? (
+              <button
+                type="button"
+                className="chat-error-action"
+                onClick={() => useAppStore.getState().clearError()}
+              >
+                {t("errors.action.viewHistoryOnly")}
+              </button>
+            ) : null}
             {errorRetriable && !isRunning ? (
               <button
                 type="button"

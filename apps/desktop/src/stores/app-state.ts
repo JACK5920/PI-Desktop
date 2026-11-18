@@ -265,6 +265,8 @@ export type AppState = {
   navIndex: number;
   error?: string | null;
   errorCode?: string | null;
+  /** Structured payload attached to the current error (recovery candidates). */
+  errorDetails?: unknown;
   /** Whether the current error is worth a one-click retry. */
   errorRetriable?: boolean | null;
   bootstrap: () => Promise<void>;

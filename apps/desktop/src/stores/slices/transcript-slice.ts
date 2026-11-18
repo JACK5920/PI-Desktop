@@ -173,6 +173,7 @@ export function createTranscriptSlice({
         isRunning: true,
         error: null,
         errorCode: null,
+        errorDetails: null,
         errorRetriable: null,
         runningSessions: { ...current.runningSessions, [sessionId]: true },
         latestTurnResults: withoutRecordKey(current.latestTurnResults, sessionId),
@@ -256,6 +257,7 @@ export function createTranscriptSlice({
           runningSessions: { ...current.runningSessions, [sessionId]: true },
           error: null,
           errorCode: null,
+          errorDetails: null,
           errorRetriable: null,
         }));
         try {
@@ -278,6 +280,7 @@ export function createTranscriptSlice({
               runningSessions: { ...current.runningSessions, [sessionId]: false },
               error: null,
               errorCode: null,
+              errorDetails: null,
               errorRetriable: null,
             }));
             return;
@@ -306,6 +309,7 @@ export function createTranscriptSlice({
             sessionOutcomes: withoutRecordKey(current.sessionOutcomes, sessionId),
             error: null,
             errorCode: null,
+            errorDetails: null,
             errorRetriable: null,
           }));
         } catch (error) {
@@ -317,6 +321,7 @@ export function createTranscriptSlice({
               runningSessions: { ...current.runningSessions, [sessionId]: false },
               error: null,
               errorCode: null,
+              errorDetails: null,
               errorRetriable: null,
             }));
             return;
@@ -339,6 +344,7 @@ export function createTranscriptSlice({
             sessionOutcomes: { ...current.sessionOutcomes, [sessionId]: "failed" },
             error: error instanceof Error ? error.message : String(error),
             errorCode: failureCode,
+            errorDetails: (error as { details?: unknown } | null)?.details ?? null,
             errorRetriable: false,
           }));
         }
@@ -367,6 +373,7 @@ export function createTranscriptSlice({
         isRunning: true,
         error: null,
         errorCode: null,
+        errorDetails: null,
         errorRetriable: null,
         runningSessions: { ...current.runningSessions, [sessionId]: true },
         latestTurnResults: withoutRecordKey(current.latestTurnResults, sessionId),
@@ -397,12 +404,13 @@ export function createTranscriptSlice({
           sessionOutcomes: { ...current.sessionOutcomes, [sessionId]: "failed" },
           error: error instanceof Error ? error.message : String(error),
           errorCode: (error as { code?: string })?.code ?? null,
+          errorDetails: (error as { details?: unknown } | null)?.details ?? null,
           errorRetriable: false,
         }));
       }
     },
 
-    clearError: () => set({ error: null, errorCode: null, errorRetriable: null }),
+    clearError: () => set({ error: null, errorCode: null, errorDetails: null, errorRetriable: null }),
 
     activateMessageRevision: async (rootUserId, revisionIndex) => {
       if (!canEdit()) return;
@@ -451,6 +459,7 @@ export function createTranscriptSlice({
               : current.sessionHistory,
           error: null,
           errorCode: null,
+          errorDetails: null,
         }));
       } catch (error) {
         set({
@@ -500,7 +509,7 @@ export function createTranscriptSlice({
         if (!get().messages.some((message) => message.id === messageId)) return;
         const fullWindow = { messageStart: 0, hasMoreBefore: false };
         runtime.cacheSessionTranscript(sessionId, get().messages, fullWindow);
-        set({ error: null, errorCode: null });
+        set({ error: null, errorCode: null, errorDetails: null });
         try {
           const result = await api.deleteSessionMessage({ sessionId, messageId });
           if (!result.deleted) return;

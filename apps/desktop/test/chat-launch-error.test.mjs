@@ -54,6 +54,35 @@ test("an empty vendor chat names a model the account did not return", () => {
   );
 });
 
+test("an OMP custom provider also refuses a model it no longer lists", () => {
+  const providers = [{
+    id: "pi_custom_gateway",
+    authKind: "api_key",
+    models: [{ id: "old-model" }],
+  }];
+  assert.equal(
+    vendorAccountOmitsSessionModel(
+      { providerId: "pi_custom_gateway", modelId: "renamed-model" },
+      providers,
+    ),
+    true,
+  );
+  assert.equal(
+    vendorAccountOmitsSessionModel(
+      { providerId: "pi_custom_gateway", modelId: "old-model" },
+      providers,
+    ),
+    false,
+  );
+  assert.equal(
+    vendorAccountOmitsSessionModel(
+      { providerId: "pi_custom_gateway", modelId: "anything" },
+      [{ id: "pi_custom_gateway", authKind: "api_key", models: [] }],
+    ),
+    false,
+  );
+});
+
 test("the chat surface shows that omission instead of an empty page", async () => {
   const { readFile } = await import("node:fs/promises");
   const surface = await readFile(
