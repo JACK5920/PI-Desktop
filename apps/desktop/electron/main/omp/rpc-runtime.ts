@@ -8,6 +8,16 @@ import { normalizeOmpHostToolRequest, workspacePathFromOmpUri } from "./host-bri
 import { normalizeOmpTranscriptSnapshot } from "../../../src/lib/omp-transcript-sync.mjs";
 import { OMP_TASK_TOOLS_GUARD_EXTENSION } from "./task-tools-guard.mjs";
 import { readOmpProfileSettings } from "./profile-settings.mjs";
+import {
+  buildModelUnavailableError,
+  buildProviderUnavailableError,
+  catalogProviders,
+  extractRestoreModelFailure,
+  isRestoreModelFailure,
+  restoreMappedSessionFile,
+  selectModelCandidates,
+  type OmpModelRef,
+} from "./session-model-recovery";
 
 const MAX_PHYSICAL_FRAME_BYTES = 1024 * 1024;
 const MAX_LOGICAL_FRAME_BYTES = 64 * 1024 * 1024;
@@ -123,6 +133,8 @@ function normalizeHostToolResult(value: unknown): {
 export class OmpRpcRuntime {
   private readonly sessions = new Map<string, RpcSession>();
   private readonly starting = new Map<string, Promise<RpcSession>>();
+  /** Serializes whole reopen transactions so two picks cannot race the child. */
+  private readonly reopening = new Map<string, Promise<void>>();
   /** Desired per-session subagent event level survives OMP RPC process restarts. */
   private readonly subagentSubscriptions = new Map<string, "off" | "events" | "messages">();
   private stopping = false;
@@ -159,6 +171,47 @@ export class OmpRpcRuntime {
    */
   async connect(input: { sessionId: string; cwd: string; workspaceRoot?: string }): Promise<void> {
     await this.ensureSession(input);
+  }
+
+  /** Reopen a conversation on an explicitly chosen model after a restore failure. */
+  async openSessionWithModel(
+    input: { sessionId: string; cwd: string; workspaceRoot?: string },
+    provider: string,
+    modelId: string,
+  ): Promise<void> {
+    const cleanProvider = provider.trim();
+    const cleanModelId = modelId.trim();
+    if (!cleanProvider || !cleanModelId || cleanProvider.length > 200 || cleanModelId.length > 512) {
+      throw new Error("OMP model override is invalid");
+    }
+    // The live child pinned the old model at startup; only a fresh process can
+    // apply an explicit model to the native session file. The whole sequence
+    // (wait for a start, stop, start with the explicit pair) is serialized per
+    // session: overlapping picks would otherwise share one `starting` promise
+    // and one of them would silently lose.
+    const previous = this.reopening.get(input.sessionId);
+    const operation = (async () => {
+      if (previous) await previous.catch(() => undefined);
+      const inFlight = this.starting.get(input.sessionId);
+      if (inFlight) await inFlight.catch(() => undefined);
+      await this.stop(input.sessionId);
+      this.staleCatalogs.delete(input.sessionId);
+      await this.ensureSession(input, { provider: cleanProvider, modelId: cleanModelId });
+      // Keep the remembered default aligned with the explicit pick so restarting
+      // the app reopens this conversation on the model the user chose.
+      const profileDir = join(this.options.rootDir, "runtime", "profile");
+      await mkdir(profileDir, { recursive: true });
+      await writeFile(join(profileDir, "pi-selected-model.json"), JSON.stringify({
+        provider: cleanProvider,
+        modelId: cleanModelId,
+      }), { encoding: "utf8", mode: 0o600 });
+    })();
+    this.reopening.set(input.sessionId, operation);
+    try {
+      await operation;
+    } finally {
+      if (this.reopening.get(input.sessionId) === operation) this.reopening.delete(input.sessionId);
+    }
   }
 
   async attach(input: { sessionId: string; cwd: string; workspaceRoot?: string }, options: { includeMessages?: boolean } = {}): Promise<{ runId: string; state: OmpRpcFrame["data"]; messages: OmpRpcFrame["data"] }> {
@@ -365,17 +418,33 @@ export class OmpRpcRuntime {
     await operation;
   }
 
-  private async restoreMappedParent(sessionId: string, parentFile: string): Promise<unknown[]> {
-    const switched = await this.command(sessionId, "switch_session", { sessionPath: parentFile }, REQUEST_TIMEOUT_MS, true);
-    const switchData = switched.data as Record<string, unknown> | undefined;
-    if (switchData?.cancelled === true) throw new Error("OMP cancelled restoring the parent session");
-    const state = await this.command(sessionId, "get_state");
-    const stateData = state.data as Record<string, unknown> | undefined;
-    if (!sameNativePath(await this.resolveSessionFile(stateData?.sessionFile, dirname(parentFile)), parentFile)) throw new Error("OMP restored a different parent session");
-    const messages = await this.command(sessionId, "get_messages");
-    const normalized = normalizeOmpTranscriptSnapshot(messages.data);
-    if (!normalized.ok) throw new Error(`OMP parent transcript cannot be safely restored: ${normalized.reason}`);
-    return normalized.messages;
+  /**
+   * Move the live RPC child back onto the mapped parent file and optionally
+   * read the parent transcript from that restored session. The plain switch
+   * runs first; the explicit model is only sent when the saved one is proven
+   * unrestorable, so a healthy conversation never rewrites its history model.
+   */
+  private restoreMappedSession(
+    sessionId: string,
+    sessionFile: string,
+    model: OmpModelRef | null = null,
+    options: { readMessages?: boolean } = {},
+  ): Promise<unknown[]> {
+    return restoreMappedSessionFile(
+      (type, fields) => type === "switch_session"
+        ? this.command(sessionId, "switch_session", fields ?? {}, REQUEST_TIMEOUT_MS, true)
+        : this.command(sessionId, type, fields ?? {}),
+      sessionFile,
+      model,
+      options,
+      async (state) => sameNativePath(
+        await this.resolveSessionFile(
+          (state as Record<string, unknown> | undefined)?.sessionFile,
+          dirname(sessionFile),
+        ),
+        sessionFile,
+      ),
+    );
   }
 
   private emitLoginFailure(session: RpcSession, cause: unknown): void {
@@ -424,6 +493,10 @@ export class OmpRpcRuntime {
     let sourceSessionDir: string | null = null;
     let forkAttempted = false;
     let mappingsPinned = false;
+    // The model the conversation is already running on, captured before `fork`
+    // moves the process to the child. It is the only safe explicit pair for any
+    // later switch back to the parent file.
+    let liveModel: OmpModelRef | null = null;
     try {
       if (source.busy || source.pending.size > 0) throw new Error("OMP 会话仍在运行，暂不能分叉");
       const before = await this.command(sourceId, "get_state");
@@ -439,6 +512,11 @@ export class OmpRpcRuntime {
       originalFile = await this.resolveSessionFile(beforeData?.sessionFile, sourceSessionDir);
       const hadTargetMapping = await this.readSessionMapping(targetId);
       if (hadTargetMapping) throw new Error("目标 PI 会话已经绑定 OMP 原生历史");
+
+      const liveModelInfo = beforeData?.model as { provider?: unknown; id?: unknown } | undefined;
+      liveModel = typeof liveModelInfo?.provider === "string" && typeof liveModelInfo?.id === "string"
+        ? { provider: liveModelInfo.provider, modelId: liveModelInfo.id }
+        : null;
 
       await this.beginForkTranscriptSync(sourceId, targetId, originalFile);
       forkAttempted = true;
@@ -461,7 +539,9 @@ export class OmpRpcRuntime {
         [targetId]: childFile,
       });
       mappingsPinned = true;
-      const parentMessages = await this.restoreMappedParent(sourceId, originalFile);
+      // Read the parent after switching back: `fork` flushes before it splits,
+      // so a pre-fork copy could miss the last flushed writes or a hook edit.
+      const parentMessages = await this.restoreMappedSession(sourceId, originalFile, liveModel);
       return { messages: normalizedChild.messages, parentMessages };
     } catch (error) {
       if (mappingsPinned && originalFile) {
@@ -474,14 +554,16 @@ export class OmpRpcRuntime {
       }
       if (forkAttempted && originalFile && sourceSessionDir && this.sessions.get(sourceId) && !this.sessions.get(sourceId)!.closing) {
         try {
-          await this.restoreMappedParent(sourceId, originalFile);
+          await this.restoreMappedSession(sourceId, originalFile, liveModel, { readMessages: false });
         } catch {
           // A fresh process reads the persisted parent mapping and repairs an
-          // in-memory fork switch without touching either native file.
+          // in-memory fork switch without touching either native file. Reopen
+          // on the captured live model so a renamed saved model cannot block
+          // the rollback either.
           try {
             const cwd = source.cwd;
             await this.stop(sourceId);
-            await this.connect({ sessionId: sourceId, cwd });
+            await this.ensureSession({ sessionId: sourceId, cwd }, liveModel ?? undefined);
             const state = await this.command(sourceId, "get_state");
             const stateData = state.data as Record<string, unknown> | undefined;
             if (!sameNativePath(await this.resolveSessionFile(stateData?.sessionFile, sourceSessionDir), originalFile)) throw new Error("restart restored wrong parent");
@@ -590,10 +672,14 @@ export class OmpRpcRuntime {
     await Promise.all([...this.sessions.keys()].map((sessionId) => this.stop(sessionId)));
   }
 
-  private async ensureSession(input: { sessionId: string; cwd: string; workspaceRoot?: string }): Promise<RpcSession> {
+  private async ensureSession(
+    input: { sessionId: string; cwd: string; workspaceRoot?: string },
+    explicitModel?: OmpModelRef,
+  ): Promise<RpcSession> {
     const workspaceRoot = input.workspaceRoot ? resolve(input.workspaceRoot) : null;
     const existing = this.sessions.get(input.sessionId);
     if (existing) {
+      if (explicitModel) throw new Error("OMP 会话仍在运行，无法切换模型；请先停止当前会话");
       if (!sameNativePath(existing.cwd, input.cwd) || (existing.workspaceRoot && workspaceRoot && !sameNativePath(existing.workspaceRoot, workspaceRoot)) || Boolean(existing.workspaceRoot) !== Boolean(workspaceRoot)) {
         throw new Error("OMP conversation workspace changed; reconnect before using this session");
       }
@@ -603,7 +689,7 @@ export class OmpRpcRuntime {
     const inFlight = this.starting.get(input.sessionId);
     if (inFlight) return inFlight;
     if (this.stopping) throw new Error("OMP RPC runtime is shutting down");
-    const start = this.startSession(input);
+    const start = this.startSession(input, false, explicitModel);
     this.starting.set(input.sessionId, start);
     try {
       return await start;
@@ -612,7 +698,11 @@ export class OmpRpcRuntime {
     }
   }
 
-  private async startSession(input: { sessionId: string; cwd: string; workspaceRoot?: string }, bootstrapModelAttempt = false): Promise<RpcSession> {
+  private async startSession(
+    input: { sessionId: string; cwd: string; workspaceRoot?: string },
+    bootstrapModelAttempt = false,
+    explicitModel?: OmpModelRef,
+  ): Promise<RpcSession> {
     const binaryPath = await this.options.manager.getExecutablePath();
     if (!binaryPath) throw new Error("尚未安装或导入已验证的 OMP 引擎");
     const key = sessionKey(input.sessionId);
@@ -741,9 +831,21 @@ export class OmpRpcRuntime {
     const timeout = setTimeout(() => session.rejectReady(new Error("OMP RPC ready timeout")), 20_000);
     try {
       await ready;
-      await this.command(input.sessionId, "open_session", { sessionDir });
+      // `open_session` restores the model saved in the session file. Naming a
+      // provider/model pair makes OMP skip that restore branch entirely, which
+      // is the only supported way out of a model that was renamed upstream.
+      await this.command(input.sessionId, "open_session", {
+        sessionDir,
+        ...(explicitModel ? { provider: explicitModel.provider, modelId: explicitModel.modelId } : {}),
+      });
       if (mappedSessionFile) {
-        const switched = await this.command(input.sessionId, "switch_session", { sessionPath: mappedSessionFile });
+        // `switch_session` restores the mapped file's saved model exactly like
+        // `open_session` does, so the same explicit pair has to ride along or a
+        // forked conversation still dies on the renamed model.
+        const switched = await this.command(input.sessionId, "switch_session", {
+          sessionPath: mappedSessionFile,
+          ...(explicitModel ? { provider: explicitModel.provider, modelId: explicitModel.modelId } : {}),
+        });
         const switchData = switched.data as Record<string, unknown> | undefined;
         if (switchData?.cancelled === true) throw new Error("OMP cancelled restoring its mapped native session");
         const state = await this.command(input.sessionId, "get_state");
@@ -764,17 +866,56 @@ export class OmpRpcRuntime {
       await this.command(input.sessionId, "set_event_filter", { events: null, messageUpdates: "full" });
       return session;
     } catch (error) {
+      const retryingWithBootstrapModel = session.bootstrapFallbackRequested && !bootstrapModelAttempt && !selectedModel && !this.stopping;
+      // Read the live catalog before the child dies: a validated replacement
+      // lets the renderer offer "reopen with this model" instead of trapping
+      // the conversation on the same restore failure forever.
+      const failure = retryingWithBootstrapModel
+        ? null
+        : await this.describeSessionOpenFailure(input.sessionId, error).catch(() => null);
       this.sessions.delete(input.sessionId);
       session.closing = true;
       child.kill();
-      if (session.bootstrapFallbackRequested && !bootstrapModelAttempt && !selectedModel && !this.stopping) {
+      if (retryingWithBootstrapModel) {
         this.options.log?.("info", "OMP has no default model; retrying RPC startup with the GUI bootstrap model");
-        return this.startSession(input, true);
+        return this.startSession(input, true, explicitModel);
       }
-      throw error;
+      throw failure ?? error;
     } finally {
       clearTimeout(timeout);
     }
+  }
+
+  /**
+   * Convert an `open_session` failure into a structured recovery error.
+   *
+   * The catalog read must happen while the child is still alive, so this is
+   * called from the start failure path before the process is killed. A failed
+   * catalog read still produces MODEL_UNAVAILABLE with an empty candidate list:
+   * the renderer can then offer a manual pick instead of a dead end.
+   */
+  private async describeSessionOpenFailure(sessionId: string, error: unknown): Promise<Error | null> {
+    const message = asError(error).message;
+    if (!isRestoreModelFailure(message)) return null;
+    // A catalog read on a stale session normally restarts the child; doing that
+    // here would recurse into this same failure path.
+    this.staleCatalogs.delete(sessionId);
+    let catalog: unknown = null;
+    try {
+      // A recovery lookup must not inherit the full 60s command budget: the
+      // session is already failing, and the user is waiting for an action.
+      catalog = (await this.command(sessionId, "get_available_models", {}, 5_000)).data;
+    } catch {
+      // The engine may have exited during the failed open; keep the structured
+      // error even when the catalog is unavailable.
+    }
+    const providers = catalogProviders(catalog);
+    const ref = extractRestoreModelFailure(message, providers);
+    if (!ref) return null;
+    if (providers.length > 0 && !providers.includes(ref.provider)) {
+      return buildProviderUnavailableError(ref);
+    }
+    return buildModelUnavailableError(ref, selectModelCandidates(catalog, ref.provider));
   }
 
   private write(session: RpcSession, frame: Record<string, unknown>): void {

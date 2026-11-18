@@ -11,14 +11,32 @@ const [chatSurface, switcher, styles] = await Promise.all([
   loadStyles(),
 ]);
 
-test("empty-home project name opens a switcher instead of the folder picker", () => {
-  assert.match(chatSurface, /<HomeProjectSwitcher/);
-  assert.match(chatSurface, /name=\{heroProject\}/);
+test("every empty-home scope exposes the shared selector instead of a folder picker", () => {
   const emptyStart = chatSurface.indexOf('data-testid="home-empty"');
   const emptyEnd = chatSurface.indexOf("<SessionPane", emptyStart);
   const emptyBlock = chatSurface.slice(emptyStart, emptyEnd);
+  assert.match(emptyBlock, /<h1>[\s\S]*<HomeProjectSwitcher/);
+  assert.match(emptyBlock, /name=\{heroProject\}[\s\S]*emptyTitleParts\.after/);
+  assert.match(emptyBlock, /name=\{t\("project\.noProject"\)\}/);
+  assert.doesNotMatch(emptyBlock, /data-testid="home-session-scope"/);
   assert.doesNotMatch(emptyBlock, /onClick=\{\(\) => void openProject\(\)\}/);
   assert.match(emptyBlock, /<HomeProjectSwitcher[\s\S]*\/>/);
+});
+
+test("one empty-home scope picker is available for project and no-project chats", () => {
+  const emptyStart = chatSurface.indexOf('data-testid="home-empty"');
+  const emptyEnd = chatSurface.indexOf("<SessionPane", emptyStart);
+  const emptyBlock = chatSurface.slice(emptyStart, emptyEnd);
+
+  assert.match(emptyBlock, /<HomeProjectSwitcher/);
+  assert.match(switcher, /project\.noProject/);
+  assert.match(switcher, /project\.chooseConversationLocation/);
+  assert.match(switcher, /newSession\(\{ projectPath: null \}\)/);
+  assert.match(switcher, /key: NO_PROJECT_KEY, name: t\("project\.noProject"\)/);
+  assert.match(switcher, /data-testid=\{project\.key === NO_PROJECT_KEY\s*\?\s*"home-project-switcher-no-project"/);
+  assert.match(switcher, /project\.key === NO_PROJECT_KEY\) return selectNoProject\(\)/);
+  assert.match(switcher, /activeSession \? activeSession\.projectPath : path\) \?\? NO_PROJECT_KEY/);
+  assert.match(switcher, /role="menuitemradio"[\s\S]*aria-checked=\{current\}/);
 });
 
 test("home project switcher lists sidebar projects and can clone a git repo", () => {

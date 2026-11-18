@@ -548,7 +548,7 @@
 }
 
 .app-shell.is-mini-window .conversation-topbar.ct-mini {
-  right: var(--ds-window-controls-width);
+  right: var(--ds-mini-window-controls-width);
   padding-left: 12px;
 }
 
@@ -1235,8 +1235,9 @@
   /* Continuous with the adjacent titlebar: no side seam (D297). */
 }
 
-/* The compact titlebar uses only the pin, restore and close actions. */
+/* Compact controls reserve room for pin, size reset, restore, and close. */
 .window-controls-mini {
+  width: var(--ds-mini-window-controls-width);
   justify-content: flex-end;
 }
 

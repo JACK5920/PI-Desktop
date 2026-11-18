@@ -24,6 +24,25 @@ test("OMP profile defaults use a separate app-owned native config overlay and pr
   }
 });
 
+test("OMP worktree exit policy round-trips all native choices without replacing other profile defaults", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-profile-worktree-"));
+  try {
+    await writeOmpProfileSettings(root, { defaultThinkingLevel: "high" });
+    for (const policy of ["keep", "ask", "remove", "force"]) {
+      const saved = await writeOmpProfileSettings(root, { worktreeOnExit: policy });
+      assert.equal(saved.worktreeOnExit, policy);
+      assert.equal(saved.defaultThinkingLevel, "high");
+      assert.equal((await readOmpProfileSettings(root)).worktreeOnExit, policy);
+      assert.match(await readFile(saved.configPath, "utf8"), new RegExp(`\\s+onExit: ${policy}\\n`));
+    }
+    const cleared = await writeOmpProfileSettings(root, { worktreeOnExit: null });
+    assert.equal(cleared.worktreeOnExit, null);
+    assert.equal(cleared.defaultThinkingLevel, "high");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("OMP profile settings reject secret-like, unknown, and malformed data without overwriting it", async () => {
   const root = await mkdtemp(join(tmpdir(), "omp-profile-invalid-"));
   try {

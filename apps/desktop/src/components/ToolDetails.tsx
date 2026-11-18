@@ -34,7 +34,7 @@ const BLOCK_LABEL_KEYS: Record<ToolBlock["role"], string> = {
   input: "chat.toolInput",
 };
 
-function blockCopyText(block: ToolBlock): string {
+function blockCopyText(block: ToolBlock, translate: (key: string) => string): string {
   switch (block.kind) {
     case "asktool":
       return block.questions
@@ -53,7 +53,9 @@ function blockCopyText(block: ToolBlock): string {
         )
         .join("\n");
     case "fields":
-      return block.rows.map((row) => `${row.label}: ${row.value}`).join("\n");
+      return block.rows
+        .map((row) => `${row.labelKey ? translate(row.labelKey) : row.label}: ${row.valueKey ? translate(row.valueKey) : row.value}`)
+        .join("\n");
     case "note":
       return block.code ? `${block.code}: ${block.text}` : block.text;
   }
@@ -207,6 +209,7 @@ function MatchList({ block }: { block: Extract<ToolBlock, { kind: "matches" }> }
 }
 
 function BlockBody({ block, streaming }: { block: ToolBlock; streaming: boolean }) {
+  const { t } = useTranslation();
   switch (block.kind) {
     case "asktool":
       return <AskToolResult block={block} />;
@@ -255,9 +258,9 @@ function BlockBody({ block, streaming }: { block: ToolBlock; streaming: boolean 
       return (
         <dl className="tool-fields">
           {block.rows.map((row) => (
-            <div className="tool-field" key={row.label}>
-              <dt className="tool-field-label">{row.label}</dt>
-              <dd className="tool-field-value">{row.value}</dd>
+            <div className="tool-field" key={row.labelKey ?? row.label}>
+              <dt className="tool-field-label">{row.labelKey ? t(row.labelKey) : row.label}</dt>
+              <dd className="tool-field-value">{row.valueKey ? t(row.valueKey) : row.value}</dd>
             </div>
           ))}
         </dl>
@@ -307,7 +310,7 @@ export function ToolDetailBlocks({
               // for anyone who cannot see that stderr is the tinted one.
               <span className="sr-only">{label}</span>
             ) : (
-              <BlockHead label={label} copy={blockCopyText(block)} />
+              <BlockHead label={label} copy={blockCopyText(block, (key) => t(key))} />
             )}
             <BlockBody block={block} streaming={streaming} />
           </section>

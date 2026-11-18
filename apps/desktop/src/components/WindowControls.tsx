@@ -8,6 +8,7 @@ import {
   IconMinus,
   IconPanelRestore,
   IconPin,
+  IconRefresh,
   IconSquare,
 } from "./icons";
 import { TooltipButton } from "./ui";
@@ -95,6 +96,15 @@ export function WindowControls({
             onClick={() => runAction("toggleAlwaysOnTop")}
           >
             <IconPin size={13} strokeWidth={1.5} aria-hidden />
+          </TooltipButton>
+          <TooltipButton
+            type="button"
+            className="window-control-btn"
+            tooltip={t("window.resetMiniModeSize", "Reset compact size")}
+            ariaLabel={t("window.resetMiniModeSize", "Reset compact size")}
+            onClick={() => runAction("resetMiniModeSize")}
+          >
+            <IconRefresh size={13} strokeWidth={1.5} aria-hidden />
           </TooltipButton>
           <TooltipButton
             type="button"

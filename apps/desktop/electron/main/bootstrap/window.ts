@@ -34,10 +34,10 @@ import {
   type WindowBounds,
   type WorkPanelReservationState,
 } from "../work-panel-window";
-import { readWindowState, writeWindowState } from "../window-preferences";
+import { readWindowState, writeMiniWindowSize, writeWindowState } from "../window-preferences";
 import { suppressLinuxFramelessSystemMenu } from "../frameless-system-menu";
 import { isWindowFullScreen } from "../window-fullscreen";
-import { isMiniWindowMode } from "../mini-window-mode";
+import { isMiniWindowMode, MINI_WINDOW_MINIMUM_SIZE } from "../mini-window-mode";
 import { DEFAULT_WINDOW_CORNER_RADIUS, installWindowShape } from "../window-shape";
 import {
   installWindows11CornerController,
@@ -1032,11 +1032,29 @@ export async function createWindow({
       writeWindowState(dataDir, bounds);
     }
   };
+  const persistMiniWindowSize = () => {
+    if (!isLiveWindow() || !isMiniWindowMode(window)) return;
+    const bounds = window.getBounds();
+    if (
+      bounds.width < MINI_WINDOW_MINIMUM_SIZE.width ||
+      bounds.height < MINI_WINDOW_MINIMUM_SIZE.height
+    ) {
+      return;
+    }
+    writeMiniWindowSize(dataDir, bounds);
+  };
+  const persistCurrentWindowState = () => {
+    if (isMiniWindowMode(window)) {
+      persistMiniWindowSize();
+      return;
+    }
+    persistNormalWindowState();
+  };
   const scheduleStateSave = () => {
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
       saveTimer = null;
-      persistNormalWindowState();
+      persistCurrentWindowState();
     }, 600);
   };
   window.on("resize", scheduleStateSave);
@@ -1046,7 +1064,7 @@ export async function createWindow({
       clearTimeout(saveTimer);
       saveTimer = null;
     }
-    persistNormalWindowState();
+    persistCurrentWindowState();
     // Windows/Linux close-behavior: "tray" hides the window and keeps the
     // app running under the tray icon, "ask" prompts on the first close,
     // and "quit" (plus macOS and explicit-quit closes) falls through to the

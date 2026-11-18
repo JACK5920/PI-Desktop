@@ -1,13 +1,24 @@
 import { app } from "electron";
 import { APP_ID, APP_NAME } from "@pi-desktop/shared";
-import { applyDevelopmentUserData, desktopDataDir } from "./data-paths";
+import {
+  applyDevelopmentUserData,
+  desktopDataDir,
+  DEVELOPMENT_BUILD_SWITCH,
+  resolveDevelopmentBuild,
+} from "./data-paths";
 import { ignoreBrokenStdio } from "./logger";
 import { installMainProcessErrorHandlers } from "./main-process-errors";
 
 // Complete identity and locking synchronously, before the ready promise or any writer.
 ignoreBrokenStdio();
 installMainProcessErrorHandlers();
-export const isDevelopmentBuild = process.env.PI_DESKTOP_DEV === "1" || !app.isPackaged;
+const launchedAsDevelopment = process.argv.includes(DEVELOPMENT_BUILD_SWITCH);
+if (launchedAsDevelopment) process.env.PI_DESKTOP_DEV = "1";
+export const isDevelopmentBuild = resolveDevelopmentBuild({
+  environmentValue: process.env.PI_DESKTOP_DEV,
+  packaged: app.isPackaged,
+  argv: process.argv,
+});
 app.setName(APP_NAME);
 applyDevelopmentUserData(app, isDevelopmentBuild);
 if (process.platform === "win32") app.setAppUserModelId(APP_ID);

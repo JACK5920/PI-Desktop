@@ -57,14 +57,44 @@ const claude = claudeRaw ? normalize(claudeRaw) : "";
 /** @type {{ id: string, anyOf: string[] }[]} */
 const REQUIRED_ANCHORS = [
   {
-    id: "worktree-isolation",
-    anyOf: ["1 request = 1 branch + 1 dedicated worktree"],
+    id: "two-root-layout",
+    anyOf: [
+      "exactly two maintained project roots",
+      "exactly two maintained pi-desktop project roots are allowed",
+    ],
+  },
+  {
+    id: "single-development-root",
+    anyOf: [
+      "the only writable project checkout",
+      "sole writable development checkout",
+    ],
+  },
+  {
+    id: "no-third-project-root",
+    anyOf: [
+      "do not create a third project root, clone, copied checkout, or git worktree",
+      "never create a third clone, copied checkout, or git worktree",
+    ],
+  },
+  {
+    id: "development-executable-shortcut",
+    anyOf: [
+      "e:\\pi-desktop-dev\\apps\\desktop\\release\\win-unpacked\\pi-desktop.exe",
+    ],
+  },
+  {
+    id: "development-launch-profile",
+    anyOf: [
+      "--pi-desktop-dev",
+    ],
   },
   {
     id: "never-develop-on-main",
     anyOf: [
       "never develop on `main`",
       "never develop directly on `main`",
+      "never develop directly on main",
       "develop directly on `main`",
     ],
   },
@@ -89,11 +119,17 @@ const REQUIRED_ANCHORS = [
   },
   {
     id: "no-local-main-before-e2e",
-    anyOf: ["merge task → local main"],
+    anyOf: [
+      "merge task → local main",
+      "do not merge task changes into local main before candidate e2e",
+    ],
   },
   {
     id: "pr-contains-latest-main",
-    anyOf: ["do not open or update a PR that is behind `origin/main`"],
+    anyOf: [
+      "do not open or update a PR that is behind `origin/main`",
+      "do not open or update a PR that is behind origin/main",
+    ],
   },
   {
     id: "task-candidate-e2e",
@@ -104,6 +140,7 @@ const REQUIRED_ANCHORS = [
     anyOf: [
       "do not run `pnpm install`, `npm install`, or create a second dependency or runtime environment solely to execute e2e",
       "never run `pnpm install` or `npm install`, or create a second dependency or runtime environment, solely for e2e",
+      "never run pnpm install or npm install, or create a second dependency or runtime environment solely for e2e",
     ],
   },
   {

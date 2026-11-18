@@ -30,6 +30,7 @@ import { remoteProjectKey, type RemoteProjectEntry } from "../lib/remote-project
 import { isRemoteSession } from "../lib/remote-session-safety";
 
 type ProjectMenuEntry = { key: string; name: string; title: string; localPath?: string; remoteProject?: RemoteProjectEntry };
+const NO_PROJECT_KEY = "__no-project__";
 
 export function HomeProjectSwitcher({
   name,
@@ -44,7 +45,6 @@ export function HomeProjectSwitcher({
   const workspace = useAppStore((state) => state.workspace);
   const projectMeta = useAppStore((state) => state.projectMeta);
   const projectSort = useAppStore((state) => state.projectSort);
-  const activeProjectPath = useAppStore((state) => state.activeProjectPath);
   const activeSession = useAppStore((state) => state.sessions.find((session) => session.id === state.activeSessionId));
   const newSession = useAppStore((state) => state.newSession);
   const openProject = useAppStore((state) => state.openProject);
@@ -74,6 +74,7 @@ export function HomeProjectSwitcher({
   );
   const visible = useMemo(
     (): ProjectMenuEntry[] => [
+      { key: NO_PROJECT_KEY, name: t("project.noProject"), title: t("project.noProject") },
       ...filterSwitcherProjects(projects, query).map((project) => ({ key: project.key, name: project.name,
         title: openProjects.find((item) => item.path === project.path)?.remote?.path
           ?? (workspace?.path === project.path ? workspace.remote?.path : undefined)
@@ -82,11 +83,11 @@ export function HomeProjectSwitcher({
         .map((project) => ({ key: `remote:${project.key}`, name: `${project.label} · ${project.hostLabel}`,
           title: `${project.label} · ${project.hostLabel}`, remoteProject: project })),
     ],
-    [projects, query, remoteCatalog.projects, openProjects, workspace],
+    [projects, query, remoteCatalog.projects, openProjects, workspace, t],
   );
   const activeKey = isRemoteSession(activeSession) && activeSession?.remoteHostKey && activeSession.remoteProjectId
     ? `remote:${remoteProjectKey(activeSession.remoteHostKey, activeSession.remoteProjectId)}`
-    : normalizeProjectPath(activeProjectPath ?? path);
+    : normalizeProjectPath(activeSession ? activeSession.projectPath : path) ?? NO_PROJECT_KEY;
   const cloneTarget = parseGitCloneUrl(cloneUrl, {
     allowInsecureHttp: allowInsecureUserEndpoints(settings),
   });
@@ -127,7 +128,25 @@ export function HomeProjectSwitcher({
     [activeKey, busy, close, newSession, reportError],
   );
 
+  const selectNoProject = useCallback(async () => {
+    if (busy || busyRef.current) return;
+    close();
+    if (activeKey === NO_PROJECT_KEY) return;
+    busyRef.current = true;
+    setBusy(true);
+    try {
+      await newSession({ projectPath: null });
+    } catch (error) {
+      reportError(error);
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
+  }, [activeKey, busy, close, newSession, reportError]);
+
   const selectMenuProject = async (project: ProjectMenuEntry) => {
+    if (project.key === NO_PROJECT_KEY) return selectNoProject();
+    if (project.key === activeKey) return close();
     if (project.localPath) return selectProject(project.localPath);
     if (busy || busyRef.current || !project.remoteProject?.connected) return;
     busyRef.current = true; setBusy(true);
@@ -224,7 +243,7 @@ export function HomeProjectSwitcher({
       open={open}
       onClose={close}
       menuClassName="home-project-switcher-menu"
-      label={t("project.switchProject")}
+      label={t("project.chooseConversationLocation")}
       role="menu"
       align="start"
       side="bottom"
@@ -238,8 +257,8 @@ export function HomeProjectSwitcher({
           data-testid="home-project-switcher"
           aria-haspopup="menu"
           aria-expanded={open}
-          aria-label={`${t("project.switchProject")}: ${name}`}
-          title={(workspace?.path === path ? workspace?.remote?.path : undefined) || path || t("project.switchProject")}
+          aria-label={`${t("project.chooseConversationLocation")}: ${name}`}
+          title={(workspace?.path === path ? workspace?.remote?.path : undefined) || path || name}
           disabled={busy}
           onClick={() => {
             if (open) {
@@ -338,41 +357,51 @@ export function HomeProjectSwitcher({
                 {t("project.noSearchResults")}
               </div>
             ) : (
-              visible.map((project, index) => {
-                const current = project.key === activeKey;
-                return (
-                  <button
-                    key={project.key}
-                    id={`home-project-switcher-option-${index}`}
-                    type="button"
-                    role="menuitemradio"
-                    tabIndex={-1}
-                    aria-checked={current}
-                    data-switcher-index={index}
-                    title={project.title}
-                    className={cx(
-                      "home-project-switcher-item",
-                      current && "is-current",
-                      highlight === index && "is-active",
-                    )}
-                    disabled={busy || project.remoteProject?.connected === false}
-                    onMouseEnter={() => setHighlight(index)}
-                    onClick={() => void selectMenuProject(project)}
-                  >
-                    <IconFolder size={14} aria-hidden />
-                    <span className="home-project-switcher-item-name">
-                      {project.name}
-                    </span>
-                    {current ? (
-                      <IconCheck
-                        size={14}
-                        className="home-project-switcher-check"
-                        aria-hidden
-                      />
-                    ) : null}
-                  </button>
-                );
-              })
+              <>
+                {visible.map((project, index) => {
+                  const current = project.key === activeKey;
+                  return (
+                    <button
+                      key={project.key}
+                      id={`home-project-switcher-option-${index}`}
+                      type="button"
+                      role="menuitemradio"
+                      tabIndex={-1}
+                      aria-checked={current}
+                      data-switcher-index={index}
+                      data-testid={project.key === NO_PROJECT_KEY
+                        ? "home-project-switcher-no-project"
+                        : undefined}
+                      title={project.title}
+                      className={cx(
+                        "home-project-switcher-item",
+                        current && "is-current",
+                        highlight === index && "is-active",
+                      )}
+                      disabled={busy || project.remoteProject?.connected === false}
+                      onMouseEnter={() => setHighlight(index)}
+                      onClick={() => void selectMenuProject(project)}
+                    >
+                      <IconFolder size={14} aria-hidden />
+                      <span className="home-project-switcher-item-name">
+                        {project.name}
+                      </span>
+                      {current ? (
+                        <IconCheck
+                          size={14}
+                          className="home-project-switcher-check"
+                          aria-hidden
+                        />
+                      ) : null}
+                    </button>
+                  );
+                })}
+                {query.trim() && visible.length === 1 ? (
+                  <div className="home-project-switcher-empty">
+                    {t("project.noSearchResults")}
+                  </div>
+                ) : null}
+              </>
             )}
           </div>
           {remoteCatalog.busy && <p role="status">{t("remote:loading")}</p>}

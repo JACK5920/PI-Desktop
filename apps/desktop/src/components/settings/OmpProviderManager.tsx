@@ -153,6 +153,8 @@ export function OmpProviderManager() {
   const login = async (provider: LoginProvider) => {
     if (!provider.available || busy) return;
     setBusyProvider(provider.id); setError(null);
+    // Reset the URL guard before a new login can emit its pre-auth risk prompt.
+    setAuthPromptReset((value) => value + 1);
     try {
       await ompManagementSession.run(() => api.ompRpcCommand({ sessionId: OMP_SETTINGS_RPC_SESSION_ID, command: "login", fields: { providerId: provider.id } }));
       await refresh();
@@ -200,7 +202,7 @@ export function OmpProviderManager() {
 
   const hidden = new Set(hiddenModels);
   return <>
-    <OmpRpcInteraction sessionId={OMP_SETTINGS_RPC_SESSION_ID} onPendingChange={setAuthPromptPending} resetSignal={authPromptReset} />
+    <OmpRpcInteraction sessionId={OMP_SETTINGS_RPC_SESSION_ID} onPendingChange={setAuthPromptPending} resetSignal={authPromptReset} context="provider-management" />
     <SettingsCard title={t("settings.omp.providersTitle")} description={t("settings.omp.providersDescription")} className="settings-stack">
       <>
         {error && <p role="alert" className="settings-error-text">{error}</p>}

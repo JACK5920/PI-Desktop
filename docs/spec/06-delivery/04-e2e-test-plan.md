@@ -266,6 +266,19 @@
 - **Component coverage:** `provider-model-list-refresh.test.mjs` also renders
   the actual settings panes and verifies saved bindings remain editable.
 
+### OMP Composer thinking-level refresh
+
+- **Preconditions:** An isolated OMP RPC fixture exposes one model with only
+  `off` and another with `medium`, `high`, `xhigh`, and `max`.
+- **Sequence:** Open the OMP model picker and select the second model while the
+  first model's thinking-level cache is still painted.
+- **Expected:** The old ladder is cleared after `set_model`; the picker then
+  displays only levels reported for the selected model. An empty response does
+  not resurrect the prior model's options after reopening the picker.
+- **Coverage:** `apps/desktop/test/omp-thinking-level-refresh.test.mjs` verifies
+  command order, cache replacement, empty responses, and picker wiring. This is
+  isolated RPC/component-flow coverage, not live-provider acceptance.
+
 
 ### E2E-PI-130-kernel-upgrade
 
@@ -2673,6 +2686,26 @@ identify the platform validation still needed.
 - **Milestone**: M2
 - **Status**: Async ownership behavior covered by
   `apps/desktop/test/composer-submit-race.test.mjs`; rendered UI scenario Draft
+
+#### E2E-011d: Choose project scope from the empty conversation home
+
+- **Preconditions**: At least one retained local project is available, plus an
+  empty project conversation and an empty Temporary conversation.
+- **Steps**: 1) Open each empty conversation and verify the same inline location
+  selector appears inside the hero sentence. 2) From Temporary, open it and choose
+  a project. 3) Return to the empty home and choose “No project”. 4) Repeat with
+  a remote project when one is connected. 5) Inspect the sidebar and reopen the
+  original conversations.
+- **Expected**: The selector marks the current scope, keeps “No project” visible
+  while filtering projects, and supports keyboard arrow/Enter selection. Each
+  changed scope opens an empty session in the selected project or Temporary
+  scope; existing conversations are not moved or rebound, and the project or
+  remote workspace context matches the selected session.
+- **Automation**: `node --test apps/desktop/test/home-project-switcher.test.mjs`.
+- **Specs linked**: `04-ux/08-component-spec.md` (§15.3).
+- **Acceptance**: C (conversation scope selection and session isolation)
+- **Milestone**: M2
+- **Status**: Source-level regression covered; full UI scenario pending
 
 #### E2E-SESSION-reference-conversation-link: A pasted conversation link carries that conversation into the turn
 
@@ -17596,18 +17629,20 @@ plugin-form fixtures in an isolated temporary directory at runtime.
 
 #### E2E-LAYOUT-sidebar-row-states
 
-- **Preconditions**: Host-seeded project, pinned and standalone conversations;
+- **Preconditions**: Host-seeded project, pinned and standalone conversations,
+  and a remote conversation;
   the sidebar Session time preference enabled; a current workspace; built
   desktop with isolated data and profile directories.
 - **Steps**: In dark and light themes, select a project conversation, hover its
   project title and an unselected conversation, then hover the selected row.
-  Check that a project session date is visible at rest and replaced by its
-  action in the same trailing slot on hover and focus; verify no divider appears
+  Check that project, pinned, standalone, and remote session dates are visible
+  at rest and replaced by their action in the same trailing slot on hover and
+  focus; verify no divider appears
   before the date, dates through seven calendar days are relative, and older
   dates show month and day without a year. Exercise the window-blur handler,
   drop-target styling, project action hover and keyboard Tab/Shift+Tab focus. Fold and
-  reopen its group. Select pinned and
-  standalone conversations. Open Settings and return. Enable reduced motion and
+  reopen its group. Select pinned, standalone, and remote conversations. Verify
+  missing and invalid update timestamps do not show a date. Open Settings and return. Enable reduced motion and
   inspect both row transition durations. In a separate twelve-session project,
   load the remaining two sessions, fold and reopen the group, and verify only
   the initial ten sessions remain visible.
@@ -17619,10 +17654,12 @@ plugin-form fixtures in an isolated temporary directory at runtime.
   retains an outline, action buttons retain local feedback, drop-target paint
   wins over hover, and blur releases hover without clearing selection. Settings
   replaces sidebar navigation, and returning restores conversation and workspace
-  context without a second selected row. Project session rows show dates at rest
-  in the same trailing slot used for session actions, with no divider. Hover and
-  focus replace the date with the action in that slot. Dates through seven
-  calendar days are relative and older dates show month and day without a year.
+  context without a second selected row. Project, pinned, standalone, and remote
+  session rows show dates at rest in the same trailing slot used for session
+  actions, with no divider. Hover and focus replace the date with the action in
+  that slot. Dates through seven calendar days are relative and older dates
+  show month and day without a year. Missing or invalid timestamps render no
+  date in any group.
   Loading more sessions
   reveals all twelve; folding and reopening restores the initial ten and the
   two-session remainder control. Rendered component tests additionally cover no
@@ -20508,11 +20545,29 @@ permission-request UI below has isolated fixture automation.
 ### E2E-CHROME-compact-chat-window
 
 - **Preconditions:** Built desktop in an isolated profile with a local session, an unsent Composer draft, an open Work panel tab, and a known normal window rectangle. No live provider call is required.
-- **Path:** Enter compact mode from a normal window and from a maximized window. While compact, inspect the chat and Composer, move/resize the compact window, toggle always-on-top, then restore. Repeat by opening search, Settings, and a maximized Work panel while compact. Close the app while compact and relaunch in the same isolated profile.
-- **Expected:** Compact mode uses one native window centered at approximately 440×640 DIP, clamped to the display work area. The current conversation, draft, and hidden Work panel tab state survive. The Composer input and toolbar remain inside one frame with no divider line. The compact titlebar exposes pin, restore, and close actions. Restore returns to the captured normal bounds and maximized state; opening search, Settings, or a maximized Work panel restores the full window first. Compact movement/resizing and closing do not replace persisted normal bounds.
+- **Path:** Enter compact mode from a normal window and from a maximized window. While compact, inspect the chat and Composer, move/resize the compact window, exit and re-enter, use reset-size, then restore. Repeat by opening search, Settings, and a maximized Work panel while compact. Close the app while compact and relaunch in the same isolated profile.
+- **Expected:** Compact mode uses one native window centered on the current display, clamped to its work area. First use starts at 440×640 DIP; subsequent entries and relaunches reuse the last valid user-resized dimensions. Reset-size restores the 440×640 DIP default. The current conversation, draft, and hidden Work panel tab state survive. The Composer input and toolbar remain inside one frame with no divider line. The compact titlebar exposes pin, reset-size, restore, and close actions. Restore returns to the captured normal bounds and maximized state; opening search, Settings, or a maximized Work panel restores the full window first. Compact movement/resizing and closing do not replace persisted normal bounds.
   Window-state subscription also initializes without a preload whitelist error: the main and preload bundles resolve the same current shared IPC protocol source.
 - **Specs:** `04-ux/01-ui-ia.md` §7; `03-runtime/01-ipc-protocol.md` window controls.
 - **Acceptance:** A / C / F / Quality.
 - **Milestone:** Post-MVP regression coverage.
 - **Automation:** `apps/desktop/test/mini-window-mode.test.mjs` covers geometry, state snapshots, IPC contracts, and the Composer no-divider contract; `apps/desktop/test/packaging-footprint.test.mjs` verifies the main preload bundles the shared IPC protocol source. Native window placement and interactive restoration require the executing platform's desktop E2E run.
 - **Status:** Unit/source-contract covered; native platform qualification remains required.
+
+
+### E2E-OMP-18-22-native-rpc-compatibility
+
+- **Preconditions:** SHA-verified OMP 18.22.1 binary; isolated temporary profile and session data; no real provider credentials.
+- **Path:** Open an OMP session; run the native Bash panel and inspect its structured output; stop or settle a turn with OMP terminal/yield metadata; open OMP profile settings and select each worktree exit policy, including confirming the destructive `force` option. In the separate provider-management session, begin a provider login, verify the pre-auth risk warning is shown, decline once and confirm no authorization URL is emitted, then repeat and explicitly accept; confirm the URL appears only after acceptance.
+- **Expected:** Historical Bash rows retain only `exitCode` and the boolean `fork.carried` / `fork.jobs` fields while output remains sourced from the message body. `agent_end` does not close the PI durable turn; `prompt_result` / `session_settled` does. Profile choices round-trip through the app-managed OMP config overlay and apply to newly started OMP sessions. Force removal requires an explicit second confirmation that states the data-loss consequences. Provider risk confirmation is isolated from ordinary chat inputs; decline cancels login before URL emission, while acceptance sends the exact native `yes` value before the authorization URL is exposed. The test does not open a browser or complete OAuth.
+- **Coverage:** `omp-rpc-native-integration.test.mjs` (isolated native worktree policy, OAuth risk decline and accept paths), `omp-rpc-prompts.test.mjs`, `omp-profile-settings.test.mjs`, `omp-engine-settings.test.mjs`, `tool-presentation.test.mjs`, renderer-key and catalog tests, Desktop TypeScript check, and the isolated native OMP smoke.
+
+### E2E-OMP-18-22-latest-native-rpc-parity
+
+- **Preconditions:** SHA-verified OMP `18.22.2` Windows x64 binary; temporary isolated RPC profile; no account credentials or conversation data.
+- **Path:** Compare the pinned upstream command and outbound-frame manifests with the desktop allowlist and event routes. Attach an isolated native OMP session, request its provider catalog, and verify the settings surface accepts an upstream provider that is not hard-coded in PI (Kiro in 18.22.2). Do not start an OAuth or model request.
+- **Expected:** All 74 upstream commands are accounted for, every documented outbound frame has exactly one desktop route, host capability frames remain owned by the runtime, and Kiro appears from OMP's native provider catalog through the data-driven settings list. The test profile remains separate from the user's OMP profile.
+- **Coverage:** `omp-rpc-command-parity.test.mjs`, `omp-rpc-frame-parity.test.mjs`, and `omp-rpc-native-integration.test.mjs` with `PI_OMP_BINARY` set to the verified v18.22.2 executable.
+- **Specs:** [OMP RPC-UI parity](../../project/omp-rpc-gui-parity.md).
+- **Acceptance:** Automated protocol and isolated binary acceptance only; no live credentials, OAuth completion, external model call, audio device qualification, or terminal-TUI parity is inferred.
+- **Milestone:** Maintenance. **Status:** Automated; external-account/device qualification remains manual.

@@ -205,6 +205,25 @@ test("Bash progress output renders in the stdout channel before completion", () 
   assert.deepEqual(roles(completedEmpty), []);
 });
 
+test("Bash fork outcomes explain state carry-over and jobs left in the isolated shell", () => {
+  const blocks = buildToolPresentation({
+    toolName: "Bash",
+    toolStatus: "success",
+    toolArgs: { command: "export TOKEN=x; sleep 5 &" },
+    toolResult: envelope({
+      output: "done\n",
+      exitCode: 0,
+      fork: { carried: false, jobs: true },
+    }),
+  }, { hideSummaryArg: true });
+  assert.deepEqual(roles(blocks), ["stdout", "details"]);
+  assert.equal(byRole(blocks, "stdout").text, "done\n");
+  assert.deepEqual(byRole(blocks, "details").rows, [
+    { label: "Environment changes carried back", value: "No", labelKey: "chat.ompShellForkCarried", valueKey: "chat.ompShellForkNo" },
+    { label: "Background jobs left in isolated shell", value: "Yes", labelKey: "chat.ompShellForkJobs", valueKey: "chat.ompShellForkYes" },
+  ]);
+});
+
 test("the run outcome comes from the exit code, not from the call's status", () => {
   const run = (details, toolStatus) =>
     runOutcome({

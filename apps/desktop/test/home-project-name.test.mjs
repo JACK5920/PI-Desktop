@@ -38,6 +38,7 @@ globalThis.cancelAnimationFrame ??= (handle) => clearTimeout(handle);
 const emptyStateOf = (html) => ({
   kind: html.match(/data-home-session-kind="([^"]*)"/)?.[1],
   title: html.match(/<h1>([\s\S]*?)<\/h1>/)?.[1] ?? "",
+  html,
 });
 
 test("the empty home names the project even before its first session exists", async (t) => {
@@ -57,7 +58,15 @@ test("the empty home names the project even before its first session exists", as
   );
   const { useAppStore } = await server.ssrLoadModule("/src/stores/app-store.ts");
   const i18n = createInstance();
-  await i18n.init({ lng: "en", resources: { en: { translation: catalogs.en } } });
+  const englishCatalog = {
+    ...catalogs.en,
+    project: {
+      ...catalogs.en.project,
+      noProject: "No project",
+      chooseConversationLocation: "Choose conversation location",
+    },
+  };
+  await i18n.init({ lng: "en", resources: { en: { translation: englishCatalog } } });
 
   const render = (state) => {
     Object.assign(useAppStore.getInitialState(), {
@@ -79,21 +88,22 @@ test("the empty home names the project even before its first session exists", as
   };
 
   // A freshly opened project owns the empty home: the title names it and the
-  // switcher offers the same project path.
+  // shared location selector offers the same project path.
   const opened = render({
     workspace: { path: "/work/demo-app", name: "Demo App" },
     activeProjectPath: "/work/demo-app",
   });
   assert.equal(opened.kind, "project");
   assert.match(opened.title, /^What can we build in /);
-  assert.match(opened.title, /switch project: Demo App/i);
+  assert.match(opened.title, /aria-label="Choose conversation location: Demo App"/i);
   assert.match(opened.title, /title="\/work\/demo-app"/);
+  assert.doesNotMatch(opened.html, /data-testid="home-session-scope"/);
   assert.doesNotMatch(opened.title, /What can I help you build\?/);
 
   // Without a project name the hero still names the folder it opened.
   const unnamed = render({ workspace: { path: "/work/demo-app" } });
   assert.equal(unnamed.kind, "project");
-  assert.match(unnamed.title, />demo-app<\/button>/);
+  assert.match(unnamed.title, /aria-label="Choose conversation location: demo-app"/i);
 
   // A session on screen decides: a temporary session stays temporary even when
   // a workspace is still open.
@@ -104,14 +114,13 @@ test("the empty home names the project even before its first session exists", as
     activeProjectPath: "/work/demo-app",
   });
   assert.equal(temporary.kind, "temporary");
-  assert.equal(
-    temporary.title,
-    catalogs.en.chat.emptyTitleTemporary,
-    "a temporary session must not inherit the open project's name",
-  );
+  assert.ok(temporary.title.startsWith(catalogs.en.chat.emptyTitleTemporary));
+  assert.match(temporary.title, /aria-label="Choose conversation location: No project"/i);
+  assert.doesNotMatch(temporary.html, /title="\/work\/demo-app"/);
 
   // With no project and no session the generic home title is still correct.
   const bare = render({});
   assert.equal(bare.kind, "empty");
-  assert.equal(bare.title, catalogs.en.chat.emptyTitle);
+  assert.ok(bare.title.startsWith(catalogs.en.chat.emptyTitle));
+  assert.match(bare.title, /aria-label="Choose conversation location: No project"/i);
 });

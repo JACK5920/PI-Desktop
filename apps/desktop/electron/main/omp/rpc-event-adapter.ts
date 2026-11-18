@@ -1,5 +1,26 @@
-import type { AgentEventEnvelope, UiMessage } from "@pi-desktop/shared";
+import type { AgentEventEnvelope, AppError, UiMessage } from "@pi-desktop/shared";
 import type { OmpRpcFrame } from "./rpc-runtime";
+import { classifyOmpFailure } from "./session-model-recovery";
+
+/**
+ * Map an OMP failure onto PI's error contract. OMP's own code wins only when
+ * the message carries no actionable signal; authentication, permission and
+ * missing-model failures must never look like a transient runtime error.
+ */
+function ompFailureError(
+  message: string,
+  upstreamCode?: string,
+  upstreamRetriable?: boolean,
+  httpStatus?: number,
+): AppError {
+  const classification = classifyOmpFailure(message, upstreamCode, upstreamRetriable, httpStatus);
+  return {
+    code: classification.code,
+    message,
+    retriable: classification.retriable,
+    ...(classification.model ? { details: classification.model } : {}),
+  };
+}
 
 function textContent(value: unknown): string {
   if (typeof value === "string") return value;
@@ -224,6 +245,10 @@ export function ompFrameToAgentEvent(input: {
       const toolCallId = String(frame.toolCallId ?? "");
       return toolCallId ? envelope({ type: "tool_end", toolCallId, result: frame.result ?? frame.content ?? "", isError: frame.isError === true }) : null;
     }
+    case "agent_end":
+      // OMP 18.22 adds terminal/yield metadata here; it is advisory. The PI
+      // durable turn remains open until prompt_result/session_settled confirms settlement.
+      return null;
     case "prompt_result": {
       if (frame.status === "completed") {
         // OMP can yield while async work is still able to wake the session.
@@ -231,16 +256,24 @@ export function ompFrameToAgentEvent(input: {
         return frame.sessionSettled === false ? null : envelope({ type: "agent_end", messageIds: [...messageIds] });
       }
       const errorText = typeof frame.error === "string" ? frame.error : String((frame.error as any)?.message ?? (frame.status === "aborted" ? "任务已停止" : "OMP 任务失败"));
-      return envelope({ type: "error", error: {
-        code: frame.status === "aborted" ? "TURN_ABORTED" : String((frame.error as any)?.code ?? "OMP_RUNTIME_ERROR"),
-        message: errorText,
-        retriable: Boolean((frame.error as any)?.retryable),
-      } });
+      if (frame.status === "aborted") {
+        return envelope({ type: "error", error: { code: "TURN_ABORTED", message: errorText, retriable: false } });
+      }
+      return envelope({ type: "error", error: ompFailureError(
+        errorText,
+        typeof (frame.error as any)?.code === "string" ? (frame.error as any).code : undefined,
+        (frame.error as any)?.retryable === true,
+        typeof (frame.error as any)?.httpStatus === "number" ? (frame.error as any).httpStatus : undefined,
+      ) });
     }
     case "session_settled":
       return envelope({ type: "agent_end", messageIds: [...messageIds] });
     case "runtime_error":
-      return envelope({ type: "error", error: { code: "OMP_RUNTIME_ERROR", message: String(frame.message ?? "OMP runtime error"), retriable: true } });
+      return envelope({ type: "error", error: ompFailureError(
+        String(frame.message ?? "OMP runtime error"),
+        typeof frame.code === "string" ? frame.code : undefined,
+        typeof frame.retriable === "boolean" ? frame.retriable : undefined,
+      ) });
     default: return null;
   }
 }

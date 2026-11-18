@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
 
-// Canonical RpcCommand union from oh-my-pi v18.20.2
-// (can1357/oh-my-pi, tag commit 7c49c11aa5bbaf3f418406583096168ad5b8c6dc).
+// Canonical RpcCommand union from oh-my-pi v18.22.2
+// (can1357/oh-my-pi, tag commit e1ae2cc). The upstream RPC command/types and
+// documentation are byte-identical to v18.22.1, so the command manifest stays
+// unchanged; update this list only after auditing the new release source.
 // Keep this list synchronized when the managed OMP release changes; a new
 // upstream command must be implemented, deliberately handled internally, or
 // explicitly rejected with a documented reason before the update is accepted.

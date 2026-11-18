@@ -551,6 +551,7 @@ export function createQueueSlice({
           isRunning: state.activeSessionId === startedIn ? true : state.isRunning,
           error: null,
           errorCode: null,
+          errorDetails: null,
           errorRetriable: null,
           runningSessions: { ...state.runningSessions, [startedIn]: true },
           latestTurnResults: withoutRecordKey(state.latestTurnResults, startedIn),

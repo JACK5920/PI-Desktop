@@ -478,7 +478,7 @@ visually distinct from list content.
 | Session completed | Green check mark from the latest unread task notification when the row is not selected |
 | Session failed | Red circled alert mark from the latest unread task notification when the row is not selected |
 | Hover row | Project headers and all conversation rows share one full-row `--ds-bg-hover` surface, radius and transition; selected conversation fill takes precedence |
-| Project session metadata | When Session time is enabled, the trailing slot shows the last-reply date at rest and replaces it with session actions on hover or keyboard focus, without a divider. Dates within seven calendar days are relative; older dates show localized month and day without a year |
+| Session metadata | When Session time is enabled, every project, pinned, temporary, and remote conversation row shows the last-reply date in its trailing slot at rest and replaces it with session actions on hover or keyboard focus, without a divider. Dates within seven calendar days are relative; older dates show localized month and day without a year. Missing or invalid timestamps show no date |
 | Current workspace | Project header shows the workspace dot, never a persistent selection fill; topbar follows that workspace; composer exposes no workspace identity |
 | Navigation selection | Only the selected conversation on the chat page uses `--ds-bg-active`, including pinned and standalone rows; folding its group never transfers selection to the header. No conversation or a non-chat page means no selected conversation row |
 | Keyboard focus | The focused control keeps its visible outline; the project title stays transparent and independent action buttons retain their own hover feedback |
@@ -777,7 +777,7 @@ controls.
 | Project archive | omitted from default view; restorable from archived view |
 | Project delete | the row-menu danger action always opens a confirmation dialog naming the project and session count; X, Cancel, Escape, and backdrop dismiss without changes; explicit confirmation stops listed running sessions before removing the durable project row, owned sessions/transcripts, and project memory; the folder is never deleted; deleting a root of a stored multi-folder project group is refused until the root is detached through Edit project. Chats on a detached root remain available as a standalone project. A path the host no longer knows is still removed from the list. |
 | Project memory | row-menu editor reads and saves a compact list of titled or untitled memory cards for the exact project path; cards can be added, edited, and removed, the context is available in later chats, and it is never a higher-priority instruction |
-| Session list | exact-path matches only; no basename grouping; the latest ten unpinned sessions appear initially without time-group headings, and Load more reveals the remaining history; when Session time is enabled, each project row shows the title and a localized last-reply age through seven calendar days or a month/day date afterward; hovering or focusing the row replaces that date with session actions in the same slot; collapsing the project clears the expanded-list state so the next expansion returns to the initial ten |
+| Session list | exact-path matches only; no basename grouping; the latest ten unpinned sessions appear initially without time-group headings, and Load more reveals the remaining history; when Session time is enabled, project, pinned, temporary, and remote rows show the title and a localized last-reply age through seven calendar days or a month/day date afterward; hovering or focusing the row replaces that date with session actions in the same slot; missing or invalid timestamps show no date; collapsing the project clears the expanded-list state so the next expansion returns to the initial ten |
 | Active group | exactly one group reflects the selected host workspace |
 | Task state | In-progress, selected, completed, and failed indicators update by session without replacing the visible transcript; precedence is in-progress, selected, then terminal outcome |
 
@@ -4095,10 +4095,16 @@ Guidance surfaces when key data is absent. Must always provide an **action link*
 - Chat home empty: single scrollable stack (hero → optional checklist) centered
   in MainChat, with a bottom-reserved composer sibling; task entry starts
   directly in that composer without a starter-card or quick-action layer. The
-  underlined project name in a project hero is a switcher, not a folder
-  picker; extra actions clone a git repository or open another local folder.
-  Opening a project with no session yet shows that same project hero, so the
-  empty home never hides which project a task would join.
+  contextual title contains one inline project/scope selector for project and
+  Temporary contexts, matching the project-in-sentence interaction pattern.
+  The selector lists
+  retained local/remote projects and an explicit “No project” option; choosing
+  a different scope creates/selects an empty session in that scope and never
+  rebinds an existing conversation; selecting the current scope is a no-op.
+  Its menu also supports project search, cloning a git
+  repository, and opening another local folder. Opening a project with no
+  session yet shows that project as the selected location; a path-less
+  Temporary session shows “No project”.
 - Other empty surfaces: text-xl heading + text-sm description + primary action
 - Icon (48px Lucide / brand mark) above heading where applicable
 - Background: bg-primary (transparent, not a card)

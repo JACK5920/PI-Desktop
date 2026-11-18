@@ -753,6 +753,26 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     }
     return result;
   });
+  registrar.handleWithEvent(IPC.invoke.ompRpcReopenWithModel, async (event, input) => {
+    const context = await ompSessionContext(event, input);
+    if (context.sessionId === OMP_SETTINGS_RPC_SESSION_ID) {
+      throw Object.assign(new Error("OMP 设置会话不能切换聊天模型"), { errorCode: ErrorCodes.INVALID_ARGUMENT });
+    }
+    const provider = typeof input?.provider === "string" ? input.provider.trim() : "";
+    const modelId = typeof input?.modelId === "string" ? input.modelId.trim() : "";
+    if (!provider || !modelId) {
+      throw Object.assign(new Error("OMP 模型覆盖需要 provider 与 modelId"), { errorCode: ErrorCodes.INVALID_ARGUMENT });
+    }
+    // Cross-provider migration stays a renderer decision: it asks the user to
+    // confirm that later context goes to the new vendor. Main only executes
+    // the explicit pair and never substitutes a model on its own.
+    await ompRpcRuntime!.openSessionWithModel(context, provider, modelId);
+    logger.app("omp-rpc", "info", "OMP conversation reopened with explicit model", {
+      sessionId: context.sessionId,
+      data: { provider, modelId },
+    });
+    return { ok: true };
+  });
   registrar.handleWithEvent(IPC.invoke.ompRpcForkSession, async (event, input) => {
     const context = await ompSessionContext(event, input);
     const entryId = typeof input?.entryId === "string" ? input.entryId.trim() : "";
@@ -992,6 +1012,7 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
   registerWindowIpc({
     setTraySessionPreferences: traySessions.setPreferences,
     registrar,
+    dataDir,
     getMainWindow,
     getWorkPanelReservationWidth,
     setWorkPanelReservationWidth,

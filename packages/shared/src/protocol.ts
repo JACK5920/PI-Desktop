@@ -4,7 +4,7 @@ export const PROTOCOL_VERSION = 11 as const;
 export const SCHEMA_VERSION = 28 as const;
 export const APP_ID = "net.aiuo.pi-desktop";
 export const APP_NAME = "PI-Desktop";
-export const APP_VERSION = "0.21.0";
+export const APP_VERSION = "0.22.0";
 /** Reserved RPC session for OMP provider management; never maps to a PI chat. */
 export const OMP_SETTINGS_RPC_SESSION_ID = "pi-desktop-omp-provider-settings";
 
@@ -61,6 +61,7 @@ export const WINDOW_CONTROL_ACTIONS = [
   "minimize",
   "toggleMaximize",
   "enterMiniMode",
+  "resetMiniModeSize",
   "exitMiniMode",
   "toggleAlwaysOnTop",
   "close",
@@ -239,6 +240,7 @@ export const IPC = {
     ompManagementStop: "pi-desktop/omp/management/stop",
     ompRpcAttach: "pi-desktop/omp/rpc/attach",
     ompRpcCommand: "pi-desktop/omp/rpc/command",
+    ompRpcReopenWithModel: "pi-desktop/omp/rpc/reopenWithModel",
     ompRpcForkSession: "pi-desktop/omp/rpc/forkSession",
     ompRpcUiResponse: "pi-desktop/omp/rpc/uiResponse",
     ompMicrophoneAcquire: "pi-desktop/omp/microphone/acquire",

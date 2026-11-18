@@ -235,7 +235,7 @@ export function registerSettingsIpc({
   });
   const ompProfileDir = join(dataDir, "managed-engines", "oh-my-pi", "runtime", "profile");
   handle(IPC.invoke.ompProfileSettingsGet, async () => readOmpProfileSettings(ompProfileDir));
-  handle(IPC.invoke.ompProfileSettingsSet, async (input: { defaultThinkingLevel?: unknown }) => {
+  handle(IPC.invoke.ompProfileSettingsSet, async (input: { defaultThinkingLevel?: unknown; worktreeOnExit?: unknown }) => {
     return writeOmpProfileSettings(ompProfileDir, input);
   });
   // One encrypted secret per custom model, keyed by the entry id, so adding a

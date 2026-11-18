@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../lib/api";
+import { createOmpRiskAcknowledgementCancellationResponse, createOmpRiskAcknowledgementResponse, isAuthorizationCodePrompt, isOmpPreAuthRiskAcknowledgementPrompt } from "../lib/omp-rpc-prompts.mjs";
 import { useAppStore } from "../stores/app-store";
 import { normalizeOmpEditorText, ompExtensionRequestNeedsResponse, ompSelectOptionKind, updateOmpStatusMap, updateOmpWidgetMap } from "./omp-extension-state.mjs";
 import { IconX } from "./icons";
@@ -20,15 +21,9 @@ function targetHost(value: unknown): string | null {
   try { return new URL(value).host || null; } catch { return null; }
 }
 
-function isAuthorizationCodePrompt(request: RpcRequest): boolean {
-  const copy = [request.title, request.message, request.placeholder, request.instructions]
-    .filter((part): part is string => typeof part === "string")
-    .join(" ")
-    .toLocaleLowerCase();
-  return /authorization\s+code|auth\s+code|redirect\s+url|callback\s+url|授权码|回跳地址|登录验证码/i.test(copy);
-}
+type OmpRpcInteractionContext = "chat" | "provider-management";
 
-export function OmpRpcInteraction({ sessionId, onPendingChange, resetSignal = 0 }: { sessionId: string | null; onPendingChange?: (pending: boolean) => void; resetSignal?: number }) {
+export function OmpRpcInteraction({ sessionId, onPendingChange, resetSignal = 0, context = "chat" }: { sessionId: string | null; onPendingChange?: (pending: boolean) => void; resetSignal?: number; context?: OmpRpcInteractionContext }) {
   const { t } = useTranslation();
   const showToast = useAppStore((state) => state.showToast);
   // Requests are queued instead of overwritten: two providers signing in at the
@@ -43,6 +38,7 @@ export function OmpRpcInteraction({ sessionId, onPendingChange, resetSignal = 0 
   const [widgets, setWidgets] = useState<Record<string, { key: string; lines: string[]; placement: "aboveEditor" | "belowEditor" }>>({});
   const [editorText, setEditorText] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const authorizationUrlSeen = useRef(false);
   const clearRequests = () => setQueue([]);
   const dropRequest = (id?: string) => setQueue((current) => (id ? current.filter((item) => item.id !== id) : current.slice(1)));
 
@@ -55,6 +51,7 @@ export function OmpRpcInteraction({ sessionId, onPendingChange, resetSignal = 0 
   // command returns, so the prompt must be discarded instead of lingering.
   useEffect(() => {
     if (resetSignal <= 0) return;
+    authorizationUrlSeen.current = false;
     clearRequests();
     setAuthLink(null);
     setValue("");
@@ -74,6 +71,7 @@ export function OmpRpcInteraction({ sessionId, onPendingChange, resetSignal = 0 
   }, [request?.id]);
 
   useEffect(() => {
+    authorizationUrlSeen.current = false;
     clearRequests();
     setAuthLink(null);
     setValue("");
@@ -116,6 +114,7 @@ export function OmpRpcInteraction({ sessionId, onPendingChange, resetSignal = 0 
           return;
         }
         if (method === "open_url") {
+          authorizationUrlSeen.current = true;
           const url = typeof frame.launchUrl === "string" ? frame.launchUrl : frame.url;
           if (typeof url === "string") setAuthLink({ url, instructions: typeof frame.instructions === "string" ? frame.instructions : undefined });
         }
@@ -124,6 +123,7 @@ export function OmpRpcInteraction({ sessionId, onPendingChange, resetSignal = 0 
         }
       }
       if (frame.type === "auth_url" && typeof (frame.url ?? frame.launchUrl) === "string") {
+        authorizationUrlSeen.current = true;
         setAuthLink({
           url: String(frame.url ?? frame.launchUrl),
           instructions: typeof frame.instructions === "string" ? frame.instructions : undefined,
@@ -163,6 +163,7 @@ export function OmpRpcInteraction({ sessionId, onPendingChange, resetSignal = 0 
         // A dead OMP process can no longer answer extension UI requests. Clear
         // the modal immediately instead of leaving an unclosable overlay.
         clearRequests();
+        authorizationUrlSeen.current = false;
         setAuthLink(null);
         setValue("");
         setAnswers({});
@@ -177,6 +178,7 @@ export function OmpRpcInteraction({ sessionId, onPendingChange, resetSignal = 0 
         // the pending code prompt anymore. Clear it; the model picker reports
         // the detailed failure toast from the command response.
         clearRequests();
+        authorizationUrlSeen.current = false;
         setAuthLink(null);
         setValue("");
         setAnswers({});
@@ -195,7 +197,11 @@ export function OmpRpcInteraction({ sessionId, onPendingChange, resetSignal = 0 
   const dismiss = (cancelled = true) => {
     const requestId = request?.id;
     const shouldRespond = ompExtensionRequestNeedsResponse(request?.method);
-    const wasLoginPrompt = request?.method === "input" && isAuthorizationCodePrompt(request);
+    const wasRiskAcknowledgement = context === "provider-management" && isOmpPreAuthRiskAcknowledgementPrompt(request, {
+      providerManagementSession: true,
+      authorizationUrlSeen: authorizationUrlSeen.current,
+    });
+    const wasLoginPrompt = request?.method === "input" && (isAuthorizationCodePrompt(request) || wasRiskAcknowledgement);
     // Close locally first. The backend may already have exited or a submit may
     // still be pending; neither condition should trap the user in this modal.
     dropRequest(requestId);
@@ -207,7 +213,10 @@ export function OmpRpcInteraction({ sessionId, onPendingChange, resetSignal = 0 
     if (!sessionId) return;
     const requestIds = shouldRespond && typeof requestId === "string" ? [requestId] : [];
     if (requestIds.length === 0) return;
-    void Promise.all(requestIds.map((id) => api.respondOmpRpcUi({ sessionId, response: { type: "extension_ui_response", id, ...(cancelled ? { cancelled: true } : {}) } })))
+    const response = (id: string) => cancelled && wasRiskAcknowledgement
+      ? createOmpRiskAcknowledgementCancellationResponse(id)
+      : { type: "extension_ui_response", id, ...(cancelled ? { cancelled: true } : {}) };
+    void Promise.all(requestIds.map((id) => api.respondOmpRpcUi({ sessionId, response: response(id) })))
       .catch((cause) => {
         const message = cause instanceof Error ? cause.message : String(cause);
         // The settings session is short-lived and may already be stopped when
@@ -245,7 +254,11 @@ export function OmpRpcInteraction({ sessionId, onPendingChange, resetSignal = 0 
 
   const answer = async (confirmation?: boolean, selectedValue?: string) => {
     if (!sessionId || !request?.id || busy) return;
-    const wasLoginPrompt = request.method === "input" && isAuthorizationCodePrompt(request);
+    const isRiskAcknowledgement = context === "provider-management" && isOmpPreAuthRiskAcknowledgementPrompt(request, {
+      providerManagementSession: true,
+      authorizationUrlSeen: authorizationUrlSeen.current,
+    });
+    const wasLoginPrompt = request.method === "input" && (isAuthorizationCodePrompt(request) || isRiskAcknowledgement);
     setBusy(true);
     try {
       const method = request.method;
@@ -261,7 +274,9 @@ export function OmpRpcInteraction({ sessionId, onPendingChange, resetSignal = 0 
             return { id: question.id, selectedOptions: answer.selectedOptions, ...(answer.customInput.trim() ? { customInput: answer.customInput.trim() } : {}) };
           }),
         };
-      } else response = { type: "extension_ui_response", id: request.id, value };
+      } else response = isRiskAcknowledgement
+        ? createOmpRiskAcknowledgementResponse(request.id)
+        : { type: "extension_ui_response", id: request.id, value: selectedValue ?? value };
       await api.respondOmpRpcUi({ sessionId, response });
       dropRequest(request.id);
       if (wasLoginPrompt) setAuthLink(null);
@@ -314,14 +329,22 @@ export function OmpRpcInteraction({ sessionId, onPendingChange, resetSignal = 0 
 
   const method = request.method;
   const isLoginPrompt = method === "input" && isAuthorizationCodePrompt(request);
-  const title = isLoginPrompt ? t("settings.omp.loginCodeTitle") : request.title || t("settings.omp.requestInput");
+  const isRiskAcknowledgement = context === "provider-management" && isOmpPreAuthRiskAcknowledgementPrompt(request, {
+    providerManagementSession: true,
+    authorizationUrlSeen: authorizationUrlSeen.current,
+  });
+  const title = isLoginPrompt
+    ? t("settings.omp.loginCodeTitle")
+    : isRiskAcknowledgement
+      ? t("settings.omp.loginRiskTitle")
+      : request.title || t("settings.omp.requestInput");
   const checkboxSelect = method === "select" && request.selectionMarker === "checkbox";
   return (
     <div className="omp-rpc-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) dismiss(); }} onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); dismiss(); } }}>
       <div role="dialog" aria-modal="true" aria-label={title}>
         <Panel className="omp-rpc-dialog">
           <div className="omp-rpc-dialog-header"><div><span className="omp-rpc-source-label">{t("settings.omp.requestSource")}</span><strong>{title}</strong></div><button type="button" className="icon-btn icon-btn-square" aria-label={t("common.cancel")} title={t("common.cancel")} onClick={() => void dismiss()}><IconX size={14} aria-hidden="true" /></button></div>
-          <p className="omp-rpc-request-hint">{isLoginPrompt ? t("settings.omp.loginCodeHint") : t("settings.omp.interactiveRequestHint")}</p>
+          <p className="omp-rpc-request-hint">{isLoginPrompt ? t("settings.omp.loginCodeHint") : isRiskAcknowledgement ? t("settings.omp.loginRiskHint") : t("settings.omp.interactiveRequestHint")}</p>
         {isLoginPrompt && authLink ? (
           <div className="omp-rpc-login-link">
             <span>{t("settings.omp.loginDestination", { host: targetHost(authLink.url) ?? authLink.url })}</span>
@@ -329,7 +352,11 @@ export function OmpRpcInteraction({ sessionId, onPendingChange, resetSignal = 0 
             {authLink.instructions ? <p>{authLink.instructions}</p> : null}
           </div>
         ) : null}
-        {method === "select" ? (
+        {isRiskAcknowledgement ? (
+          <div className="omp-rpc-risk-warning" role="note">
+            <p>{String(request.title ?? request.message ?? request.instructions ?? t("settings.omp.loginRiskWarningFallback"))}</p>
+          </div>
+        ) : method === "select" ? (
           <div className="omp-rpc-options" role={checkboxSelect ? "group" : "radiogroup"} aria-label={title}>
             {(request.options ?? []).map((option: string, index: number) => {
               const label = String(option);
@@ -391,8 +418,8 @@ export function OmpRpcInteraction({ sessionId, onPendingChange, resetSignal = 0 
           <Input value={value} onChange={(event) => setValue(event.target.value)} placeholder={request.placeholder || (isLoginPrompt ? t("settings.omp.loginCodePlaceholder") : undefined)} type={request.secret ? "password" : "text"} autoFocus />
         )}
           <div className="omp-rpc-actions">
-          <Button type="button" variant="secondary" onClick={() => dismiss()}>{isLoginPrompt ? t("settings.omp.cancelLogin") : t("common.cancel")}</Button>
-          {checkboxSelect ? null : <Button type="button" disabled={busy || (method === "select" && !value)} onClick={() => void answer(method === "confirm" ? true : undefined)}>{isLoginPrompt ? t("settings.omp.submitLoginCode") : method === "confirm" ? t("settings.omp.confirm") : t("settings.omp.submit")}</Button>}
+          <Button type="button" variant="secondary" onClick={() => dismiss()}>{isRiskAcknowledgement ? t("settings.omp.loginRiskDecline") : isLoginPrompt ? t("settings.omp.cancelLogin") : t("common.cancel")}</Button>
+          {checkboxSelect ? null : <Button type="button" disabled={busy || (method === "select" && !value)} onClick={() => void answer(method === "confirm" ? true : undefined, isRiskAcknowledgement ? "yes" : undefined)}>{isRiskAcknowledgement ? t("settings.omp.loginRiskAccept") : isLoginPrompt ? t("settings.omp.submitLoginCode") : method === "confirm" ? t("settings.omp.confirm") : t("settings.omp.submit")}</Button>}
         </div>
         </Panel>
       </div>

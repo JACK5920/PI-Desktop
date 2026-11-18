@@ -843,6 +843,7 @@ export function createEventsSlice({
               isRunning: false,
               error: null,
               errorCode: null,
+              errorDetails: null,
               errorRetriable: null,
               messages:
                 aborted || hasErrorMessage

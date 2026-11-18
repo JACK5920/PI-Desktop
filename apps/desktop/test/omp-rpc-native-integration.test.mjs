@@ -10,6 +10,61 @@ import { hasOmpTodoSnapshot, mergeOmpTodoMetadata } from "../src/components/omp-
 
 const read = (path) => readFile(new URL(path, import.meta.url), "utf8");
 
+async function loadOmpModelRecoveryModule(transcriptMapperUrl) {
+  const modelRecovery = await read("../electron/main/omp/session-model-recovery.ts");
+  const recoveryTranscriptImport = /import \{ normalizeOmpTranscriptSnapshot \} from "[^"]*omp-transcript-sync\.mjs";/;
+  assert.match(modelRecovery, recoveryTranscriptImport, "expected the model-recovery transcript mapper import");
+  const modelRecoveryWithTranscriptMapper = modelRecovery.replace(
+    recoveryTranscriptImport,
+    `const { normalizeOmpTranscriptSnapshot } = await import("${transcriptMapperUrl}");`,
+  );
+  const modelRecoveryJavascript = ts.transpileModule(modelRecoveryWithTranscriptMapper, {
+    compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  return `data:text/javascript;base64,${Buffer.from(modelRecoveryJavascript).toString("base64")}`;
+}
+
+function createEventCollector() {
+  const events = [];
+  const waiters = new Set();
+  return {
+    events,
+    emit(event) {
+      events.push(event);
+      for (const waiter of waiters) {
+        if (!waiter.predicate(event)) continue;
+        waiters.delete(waiter);
+        waiter.resolve(event);
+      }
+    },
+    waitFor(predicate, timeoutMs = 5_000) {
+      const existing = events.find(predicate);
+      if (existing) return Promise.resolve(existing);
+      return new Promise((resolve, reject) => {
+        const waiter = { predicate, resolve: (event) => { clearTimeout(timer); resolve(event); } };
+        const timer = setTimeout(() => {
+          waiters.delete(waiter);
+          reject(new Error(`Timed out waiting for OMP event after ${timeoutMs}ms`));
+        }, timeoutMs);
+        waiters.add(waiter);
+      });
+    },
+  };
+}
+
+function isOmpVersionAtLeast(version, minimum) {
+  const actualParts = String(version).match(/(\d+)\.(\d+)\.(\d+)/);
+  const minimumParts = String(minimum).match(/(\d+)\.(\d+)\.(\d+)/);
+  if (!actualParts || !minimumParts) return false;
+  for (let index = 1; index <= 3; index += 1) {
+    const actual = Number(actualParts[index]);
+    const required = Number(minimumParts[index]);
+    if (actual > required) return true;
+    if (actual < required) return false;
+  }
+  return true;
+}
+
 function entriesInTree(tree, output = []) {
   for (const node of Array.isArray(tree) ? tree : []) {
     if (node?.entry && typeof node.entry === "object") output.push(node.entry);
@@ -46,14 +101,35 @@ async function loadOmpRpcRuntime() {
   const profileSettings = await read("../electron/main/omp/profile-settings.mjs");
   const profileSettingsUrl = `data:text/javascript;base64,${Buffer.from(profileSettings).toString("base64")}`;
   source = source.replace(profileSettingsImport, `const { readOmpProfileSettings } = await import("${profileSettingsUrl}");`);
+  const modelRecoveryImport = /import \{\s*buildModelUnavailableError,\s*buildProviderUnavailableError,\s*catalogProviders,\s*extractRestoreModelFailure,\s*isRestoreModelFailure,\s*restoreMappedSessionFile,\s*selectModelCandidates,\s*type OmpModelRef,\s*\} from "\.\/session-model-recovery";/;
+  assert.match(source, modelRecoveryImport, "expected the model-recovery helper import");
+  const modelRecoveryUrl = await loadOmpModelRecoveryModule(transcriptMapperUrl);
+  source = source.replace(modelRecoveryImport, `const {
+    buildModelUnavailableError,
+    buildProviderUnavailableError,
+    catalogProviders,
+    extractRestoreModelFailure,
+    isRestoreModelFailure,
+    restoreMappedSessionFile,
+    selectModelCandidates,
+  } = await import("${modelRecoveryUrl}");`);
+  assert.doesNotMatch(source, /from "\.\/session-model-recovery";/, "the model-recovery dependency must be replaced before data-URL import");
   const javascript = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
   const { OmpRpcRuntime } = await import(`data:text/javascript;base64,${Buffer.from(javascript).toString("base64")}`);
   return OmpRpcRuntime;
 }
 
 async function loadOmpEventAdapter() {
-  const source = await read("../electron/main/omp/rpc-event-adapter.ts");
+  let source = await read("../electron/main/omp/rpc-event-adapter.ts");
+  const modelRecoveryImport = /import \{ classifyOmpFailure \} from "\.\/session-model-recovery";/;
+  assert.match(source, modelRecoveryImport, "expected the native RPC event adapter model-recovery import");
+  const transcriptMapper = await read("../src/lib/omp-transcript-sync.mjs");
+  const transcriptMapperUrl = `data:text/javascript;base64,${Buffer.from(transcriptMapper).toString("base64")}`;
+  const modelRecoveryUrl = await loadOmpModelRecoveryModule(transcriptMapperUrl);
+  source = source.replace(modelRecoveryImport, `const { classifyOmpFailure } = await import("${modelRecoveryUrl}");`);
+  assert.doesNotMatch(source, /from "\.\/session-model-recovery";/, "the event adapter model-recovery dependency must be replaced before data-URL import");
   const javascript = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
+  assert.doesNotMatch(javascript, /session-model-recovery/, "the transpiled event adapter must not retain a relative module reference");
   return import(`data:text/javascript;base64,${Buffer.from(javascript).toString("base64")}`);
 }
 
@@ -208,6 +284,30 @@ test("OMP branch snapshots map complete user, assistant, image and tool history 
   assert.equal(normalizeOmpTranscriptSnapshot([{ role: "user", content: [{ type: "image", mimeType: "image/svg+xml", data: "PHN2Zz4=" }] }]).reason, "unsupported_image");
 });
 
+test("OMP restored Bash tool rows retain only the structured fork outcome needed by the GUI", () => {
+  const snapshot = normalizeOmpTranscriptSnapshot([
+    { role: "assistant", content: [{ type: "toolCall", id: "bash-call", name: "Bash", arguments: { command: "sleep 2 &" } }], timestamp: 1_794_701_830_370 },
+    { role: "toolResult", toolCallId: "bash-call", content: [{ type: "text", text: "job started" }], details: {
+      output: "job started", exitCode: 0, fork: { carried: false, jobs: true },
+      unrelatedInternalData: { mayBeSensitive: "must not be copied wholesale" },
+    }, timestamp: 1_794_701_830_380 },
+  ]);
+  assert.equal(snapshot.ok, true);
+  assert.deepEqual(snapshot.messages[1].toolResult, {
+    details: { exitCode: 0, fork: { carried: false, jobs: true } },
+  });
+  assert.equal(snapshot.messages[1].content, "job started");
+});
+
+test("OMP transcript sync never retains Bash details for a different tool or unknown fields", () => {
+  const snapshot = normalizeOmpTranscriptSnapshot([
+    { role: "assistant", content: [{ type: "toolCall", id: "read-call", name: "Read", arguments: { path: "notes.txt" } }] },
+    { role: "toolResult", toolCallId: "read-call", content: [{ type: "text", text: "contents" }], details: { exitCode: 0, fork: { carried: true, jobs: false } } },
+  ]);
+  assert.equal(snapshot.ok, true);
+  assert.equal(snapshot.messages[1].toolResult, "contents");
+});
+
 test("OMP session tree keeps browsing non-destructive and forks selected entries into separate PI chats", async () => {
   const controls = await read("../src/components/OmpSessionControls.tsx");
   const sessionSlice = await read("../src/stores/slices/session-slice.ts");
@@ -334,6 +434,44 @@ test("OMP retries first-run RPC startup when a non-empty profile has no default 
   }
 });
 
+test("OMP 18.22.2 Kiro provider is discovered by native RPC and the settings list stays data-driven", async (t) => {
+  const binary = process.env.PI_OMP_BINARY;
+  if (!binary) { t.skip("Set PI_OMP_BINARY to verify the latest native provider catalog."); return; }
+  const { stdout } = await new Promise((resolve, reject) => {
+    import("node:child_process").then(({ execFile }) => execFile(binary, ["--version"], { windowsHide: true }, (error, out) => error ? reject(error) : resolve({ stdout: out })));
+  });
+  const version = String(stdout).match(/(\d+)\.(\d+)\.(\d+)/);
+  const isKiroRelease = version && (
+    Number(version[1]) > 18 ||
+    (Number(version[1]) === 18 && Number(version[2]) > 22) ||
+    (Number(version[1]) === 18 && Number(version[2]) === 22 && Number(version[3]) >= 2)
+  );
+  if (!isKiroRelease) { t.skip("Kiro is included in OMP 18.22.2 and newer."); return; }
+
+  const OmpRpcRuntime = await loadOmpRpcRuntime();
+  const rootDir = await mkdtemp(join(tmpdir(), "pi-omp-kiro-catalog-"));
+  const runtime = new OmpRpcRuntime({ rootDir, manager: { getExecutablePath: async () => binary }, emit() {} });
+  try {
+    await runtime.attach({ sessionId: "isolated-kiro-catalog", cwd: rootDir }, { includeMessages: false });
+    const response = await runtime.command("isolated-kiro-catalog", "get_login_providers");
+    const providers = response.data?.providers;
+    assert.ok(Array.isArray(providers));
+    const kiro = providers.find((provider) => provider.id === "kiro");
+    assert.ok(kiro, "OMP's native Kiro provider must be present in its login catalog");
+    assert.equal(typeof kiro.name, "string");
+    assert.equal(typeof kiro.available, "boolean");
+    assert.equal(typeof kiro.authenticated, "boolean");
+
+    const managerUi = await read("../src/components/settings/OmpProviderManager.tsx");
+    assert.match(managerUi, /setProviders\(Array\.isArray\(auth\.data\?\.providers\) \? auth\.data\.providers : \[\]\)/);
+    assert.match(managerUi, /providers\.filter\(\(provider\) => `\$\{provider\.name\} \$\{provider\.id\}`/);
+    assert.doesNotMatch(managerUi, /PROVIDER_IDS|SUPPORTED_PROVIDERS|providerId === "kiro"/);
+  } finally {
+    await runtime.stopAll();
+    await rm(rootDir, { recursive: true, force: true });
+  }
+});
+
 test("native OMP discovers a desktop-managed compatible model using the isolated key environment", async (t) => {
   const binary = process.env.PI_OMP_BINARY;
   if (!binary) { t.skip("Set PI_OMP_BINARY to validate native models.json loading."); return; }
@@ -424,6 +562,84 @@ test("native OMP provider settings attach despite a stale remembered chat model"
   }
 });
 
+test("native OMP 18.22.1+ risk warning is a cancellable pre-auth RPC input", async (t) => {
+  const binary = process.env.PI_OMP_BINARY;
+  if (!binary) { t.skip("Set PI_OMP_BINARY to verify the isolated native OMP login prompt."); return; }
+  const { stdout } = await new Promise((resolve, reject) => {
+    import("node:child_process").then(({ execFile }) => execFile(binary, ["--version"], { windowsHide: true }, (error, out) => error ? reject(error) : resolve({ stdout: out })));
+  });
+  const version = String(stdout).match(/\d+\.\d+\.\d+/)?.[0];
+  if (!isOmpVersionAtLeast(version, "18.22.1")) { t.skip("The RPC risk acknowledgement requires native OMP 18.22.1 or newer."); return; }
+
+  const OmpRpcRuntime = await loadOmpRpcRuntime();
+  const rootDir = await mkdtemp(join(tmpdir(), "pi-omp-risk-acknowledgement-"));
+  const sessionId = "pi-desktop-omp-risk-confirmation";
+  const collector = createEventCollector();
+  const runtime = new OmpRpcRuntime({
+    rootDir,
+    manager: { getExecutablePath: async () => binary },
+    settingsSessionId: sessionId,
+    emit: (event) => collector.emit(event),
+  });
+  try {
+    await runtime.attach({ sessionId, cwd: rootDir }, { includeMessages: false });
+    const providers = await runtime.command(sessionId, "get_login_providers");
+    assert.ok(providers.data?.providers?.some((provider) => provider.id === "antigravity-cli"));
+
+    const login = runtime.command(sessionId, "login", { providerId: "antigravity-cli" });
+    const warning = await collector.waitFor((event) => event.sessionId === sessionId && event.frame.type === "extension_ui_request" && event.frame.method === "input");
+    assert.equal(warning.frame.placeholder, "yes");
+    assert.match(warning.frame.title ?? warning.frame.message ?? "", /at your own risk|risk/i);
+    runtime.respondExtensionUi(sessionId, { type: "extension_ui_response", id: warning.frame.id, value: "no" });
+    await assert.rejects(login, /Login cancelled/i);
+    assert.equal(collector.events.some((event) => event.frame.type === "auth_url" || event.frame.method === "open_url"), false, "rejecting the warning must not open or emit an authorization URL");
+  } finally {
+    await runtime.stopAll();
+    await rm(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("native OMP 18.22.1+ only reveals the provider authorization URL after explicit risk acceptance", async (t) => {
+  const binary = process.env.PI_OMP_BINARY;
+  if (!binary) { t.skip("Set PI_OMP_BINARY to verify the isolated native OMP login prompt."); return; }
+  const { stdout } = await new Promise((resolve, reject) => {
+    import("node:child_process").then(({ execFile }) => execFile(binary, ["--version"], { windowsHide: true }, (error, out) => error ? reject(error) : resolve({ stdout: out })));
+  });
+  const version = String(stdout).match(/\d+\.\d+\.\d+/)?.[0];
+  if (!isOmpVersionAtLeast(version, "18.22.1")) { t.skip("The RPC risk acknowledgement requires native OMP 18.22.1 or newer."); return; }
+
+  const OmpRpcRuntime = await loadOmpRpcRuntime();
+  const rootDir = await mkdtemp(join(tmpdir(), "pi-omp-risk-acceptance-"));
+  const sessionId = "pi-desktop-omp-risk-acceptance";
+  const collector = createEventCollector();
+  const runtime = new OmpRpcRuntime({
+    rootDir,
+    manager: { getExecutablePath: async () => binary },
+    settingsSessionId: sessionId,
+    emit: (event) => collector.emit(event),
+  });
+  try {
+    await runtime.attach({ sessionId, cwd: rootDir }, { includeMessages: false });
+    const login = runtime.command(sessionId, "login", { providerId: "antigravity-cli" });
+    const warning = await collector.waitFor((event) => event.sessionId === sessionId && event.frame.type === "extension_ui_request" && event.frame.method === "input");
+    assert.equal(warning.frame.placeholder, "yes");
+    runtime.respondExtensionUi(sessionId, { type: "extension_ui_response", id: warning.frame.id, value: "yes" });
+
+    const authorization = await collector.waitFor((event) => event.sessionId === sessionId && (
+      event.frame.type === "auth_url" ||
+      (event.frame.type === "extension_ui_request" && event.frame.method === "open_url")
+    ));
+    assert.ok(typeof authorization.frame.url === "string" || typeof authorization.frame.launchUrl === "string");
+    assert.ok(collector.events.indexOf(warning) < collector.events.indexOf(authorization), "the authorization URL must follow explicit risk acceptance");
+    await assert.rejects(login, /sign-in failed|Login cancelled/i, "the isolated test intentionally does not complete the browser OAuth callback");
+  } finally {
+    await runtime.stopAll().catch((error) => {
+      assert.match(String(error), /OMP RPC session closed/, "only tolerate the expected process-close response after the no-browser sign-in test");
+    });
+    await rm(rootDir, { recursive: true, force: true });
+  }
+});
+
 test("native OMP exposes command catalog, BTW history and subagent snapshots in isolated RPC", async (t) => {
   const binary = process.env.PI_OMP_BINARY;
   if (!binary) { t.skip("Set PI_OMP_BINARY to run the native capability smoke check."); return; }
@@ -476,7 +692,7 @@ test("native OMP exposes command catalog, BTW history and subagent snapshots in 
   } finally { await runtime.stopAll(); await rm(rootDir, { recursive: true, force: true }); }
 });
 
-test("native OMP 18.20.2 supports per-session cache warming controls", async (t) => {
+test("native OMP 18.20.2+ supports per-session cache warming controls", async (t) => {
   const binary = process.env.PI_OMP_BINARY;
   if (!binary) { t.skip("Set PI_OMP_BINARY to verify native cache warming controls."); return; }
   const { stdout } = await new Promise((resolve, reject) => {
@@ -493,7 +709,7 @@ test("native OMP 18.20.2 supports per-session cache warming controls", async (t)
   try {
     await runtime.attach({ sessionId: "cache-warming-smoke", cwd: rootDir }, { includeMessages: false });
     const state = await runtime.command("cache-warming-smoke", "get_state");
-    assert.equal(state.data?.desktopRpcCapabilities?.supportsBashExcludeFromContext, true, "OMP 18.20.2 advertises context-excluded native bash");
+    assert.equal(state.data?.desktopRpcCapabilities?.supportsBashExcludeFromContext, true, "OMP 18.20.2 or newer advertises context-excluded native bash");
     const bash = await runtime.command("cache-warming-smoke", "bash", { command: "echo PI_OMP_CONTEXT_EXCLUSION_SMOKE", excludeFromContext: true });
     assert.equal(bash.success, true);
     assert.match(bash.data?.output ?? "", /PI_OMP_CONTEXT_EXCLUSION_SMOKE/);
@@ -502,6 +718,33 @@ test("native OMP 18.20.2 supports per-session cache warming controls", async (t)
       assert.equal(response.success, true, `OMP should accept cache warming mode ${mode}`);
       assert.equal(response.data?.mode, mode);
     }
+  } finally { await runtime.stopAll(); await rm(rootDir, { recursive: true, force: true }); }
+});
+
+test("native OMP 18.22.0 loads the managed force worktree policy without touching a worktree", async (t) => {
+  const binary = process.env.PI_OMP_BINARY;
+  if (!binary) { t.skip("Set PI_OMP_BINARY to verify the managed profile against native OMP 18.22.0."); return; }
+  const { stdout } = await new Promise((resolve, reject) => {
+    import("node:child_process").then(({ execFile }) => execFile(binary, ["--version"], { windowsHide: true }, (error, out) => error ? reject(error) : resolve({ stdout: out })));
+  });
+  const version = String(stdout).match(/(\d+)\.(\d+)\.(\d+)/);
+  if (!version || Number(version[1]) < 18 || (Number(version[1]) === 18 && Number(version[2]) < 22)) {
+    t.skip("The worktree force policy is only available in OMP 18.22.0 or newer.");
+    return;
+  }
+  const OmpRpcRuntime = await loadOmpRpcRuntime();
+  const rootDir = await mkdtemp(join(tmpdir(), "pi-omp-managed-profile-"));
+  const profileDir = join(rootDir, "runtime", "profile");
+  await mkdir(profileDir, { recursive: true });
+  await writeFile(join(profileDir, "pi-desktop-managed.yml"), "# Isolated native compatibility fixture\ndefaultThinkingLevel: high\nworktree:\n  onExit: force\n", "utf8");
+  const runtime = new OmpRpcRuntime({ rootDir, manager: { getExecutablePath: async () => binary }, emit() {} });
+  try {
+    await runtime.attach({ sessionId: "managed-force-policy-smoke", cwd: rootDir }, { includeMessages: false });
+    const state = await runtime.command("managed-force-policy-smoke", "get_state");
+    assert.equal(state.success, true, "OMP must parse the same managed profile file used by the settings UI");
+    assert.equal(typeof state.data?.sessionId, "string");
+    assert.ok(state.data.sessionId.length > 0);
+    // No task or worktree is created: this verifies native config acceptance without exercising removal.
   } finally { await runtime.stopAll(); await rm(rootDir, { recursive: true, force: true }); }
 });
 
@@ -798,10 +1041,20 @@ test("OMP turn completion waits for native session settlement when async work re
   assert.match(register, /event\.frame\.type === "session_settled"/);
 });
 
+test("OMP agent_end terminal flags never settle the PI turn before session_settled", async () => {
+  const { ompFrameToAgentEvent } = await loadOmpEventAdapter();
+  for (const frame of [
+    { type: "agent_end", isTerminal: false, yielded: true, awaitingAsyncWork: true },
+    { type: "agent_end", isTerminal: true, yielded: false, awaitingAsyncWork: false },
+  ]) {
+    assert.equal(ompFrameToAgentEvent({ sessionId: "pi-session", runId: "run-omp", frame, messageIds: new Set() }), null);
+  }
+  const settled = ompFrameToAgentEvent({ sessionId: "pi-session", runId: "run-omp", frame: { type: "session_settled" }, messageIds: new Set() });
+  assert.deepEqual(settled.event, { type: "agent_end", messageIds: [] });
+});
+
 test("OMP event adapter namespaces process-local message IDs and waits for settlement", async () => {
-  const source = await read("../electron/main/omp/rpc-event-adapter.ts");
-  const javascript = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
-  const { ompFrameToAgentEvent } = await import(`data:text/javascript;base64,${Buffer.from(javascript).toString("base64")}`);
+  const { ompFrameToAgentEvent } = await loadOmpEventAdapter();
   const ids = new Set();
   const message = ompFrameToAgentEvent({
     sessionId: "pi-session",
@@ -819,9 +1072,7 @@ test("OMP event adapter namespaces process-local message IDs and waits for settl
 });
 
 test("OMP tool calls carry explicit engine provenance so task rows cannot route to PI delegation transcripts", async () => {
-  const source = await read("../electron/main/omp/rpc-event-adapter.ts");
-  const javascript = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
-  const { ompFrameToAgentEvent } = await import(`data:text/javascript;base64,${Buffer.from(javascript).toString("base64")}`);
+  const { ompFrameToAgentEvent } = await loadOmpEventAdapter();
   const event = ompFrameToAgentEvent({
     sessionId: "pi-session", runId: "run-omp", frame: { type: "tool_execution_start", toolCallId: "batch-15", toolName: "Task", args: { tasks: Array.from({ length: 15 }, (_, index) => ({ name: `agent-${index + 1}` })) } }, messageIds: new Set(),
   });
@@ -896,9 +1147,7 @@ test("OMP native IPC snapshots child transcripts durably and rehydrates archived
 });
 
 test("OMP native command output is persisted as readable transcript text without terminal controls", async () => {
-  const source = await read("../electron/main/omp/rpc-event-adapter.ts");
-  const javascript = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
-  const { ompFrameToAgentEvent } = await import(`data:text/javascript;base64,${Buffer.from(javascript).toString("base64")}`);
+  const { ompFrameToAgentEvent } = await loadOmpEventAdapter();
   const ids = new Set(["omp:run-a:message-1"]);
   const output = ompFrameToAgentEvent({
     sessionId: "pi-session",
@@ -923,7 +1172,8 @@ test("OMP native command output is persisted as readable transcript text without
 
 test("RPC UI confirmation does not race a deferred React state update", async () => {
   const interaction = await read("../src/components/OmpRpcInteraction.tsx");
-  assert.match(interaction, /answer\(method === "confirm" \? true : undefined\)/);
+  const styles = await read("../src/styles/composer-menus.css");
+  assert.match(interaction, /answer\(method === "confirm" \? true : undefined, isRiskAcknowledgement \? "yes" : undefined\)/);
   assert.match(interaction, /confirmed: confirmation \?\? value === "yes"/);
 });
 
@@ -1013,6 +1263,36 @@ test("OMP OAuth code prompts explain the browser callback and resume the login f
   assert.match(interaction, /frame\.type === "login_failed"[\s\S]*?clearRequests\(\)[\s\S]*?setAuthLink\(null\)/);
 });
 
+test("OMP 18.22.1 login risk acknowledgement is isolated to provider settings and cannot be silently accepted", async () => {
+  const providerSettings = await read("../src/components/settings/OmpProviderManager.tsx");
+  const chatSurface = await read("../src/components/ChatSurface.tsx");
+  const interaction = await read("../src/components/OmpRpcInteraction.tsx");
+  const styles = await read("../src/styles/composer-menus.css");
+  const helper = await read("../src/lib/omp-rpc-prompts.mjs");
+  const en = await read("../../../packages/i18n/src/locales/en/index.ts");
+  const zh = await read("../../../packages/i18n/src/locales/zh-CN/index.ts");
+  assert.match(providerSettings, /context="provider-management"/);
+  assert.match(providerSettings, /setAuthPromptReset\(\(value\) => value \+ 1\)[\s\S]*?command: "login"/);
+  assert.match(chatSurface, /<OmpRpcInteraction sessionId=\{activeSessionId\} \/>/);
+  assert.match(helper, /placeholder\.trim\(\)\.toLocaleLowerCase\(\) === "yes"/);
+  assert.match(helper, /at your own risk|risk\.\{0,40\}/);
+  assert.match(interaction, /context === "provider-management" && isOmpPreAuthRiskAcknowledgementPrompt/);
+  assert.match(interaction, /authorizationUrlSeen\.current = true/);
+  assert.match(interaction, /createOmpRiskAcknowledgementResponse\(request\.id\)/);
+  assert.match(interaction, /createOmpRiskAcknowledgementCancellationResponse\(id\)/);
+  assert.match(interaction, /loginRiskWarningFallback/);
+  assert.match(interaction, /isRiskAcknowledgement \? "yes" : undefined/);
+  assert.match(interaction, /loginRiskAccept/);
+  assert.match(interaction, /loginRiskDecline/);
+  assert.match(interaction, /loginRiskTitle/);
+  assert.match(interaction, /loginRiskHint/);
+  assert.match(styles, /\.omp-rpc-risk-warning\s*\{[^}]*var\(--ds-warning\)/);
+  for (const key of ["loginRiskTitle", "loginRiskHint", "loginRiskWarningFallback", "loginRiskAccept", "loginRiskDecline"]) {
+    assert.match(en, new RegExp(`${key}:`));
+    assert.match(zh, new RegExp(`${key}:`));
+  }
+});
+
 test("OMP native voice, dictation and slash command surfaces are exposed without PI runtime fallback", async () => {
   const ipc = await read("../electron/main/ipc/register.ts");
   const runtime = await read("../electron/main/omp/rpc-runtime.ts");
@@ -1050,6 +1330,8 @@ test("OMP model and thinking notifications refresh the picker from native state"
   const picker = await read("../src/features/chat/composer/ComposerOmpModelPicker.tsx");
   assert.match(picker, /event\.frame\.type !== "model_changed" && event\.frame\.type !== "thinking_level_changed" && event\.frame\.type !== "config_update"/);
   assert.match(picker, /command: "get_state"/);
+  assert.match(picker, /const modelChanged =/);
+  assert.match(picker, /readOmpThinkingLevels\(/);
   assert.match(picker, /useAppStore\.getState\(\)\.activeSessionId !== sessionId/);
   assert.match(picker, /patchCache\(\{[\s\S]*?thinkingLevel:[\s\S]*?slowModeSupported:/);
 });

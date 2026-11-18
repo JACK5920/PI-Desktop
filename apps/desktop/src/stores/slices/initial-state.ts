@@ -94,6 +94,7 @@ export function createInitialState(): AppStateData {
     composerPrefill: null,
     error: null,
     errorCode: null,
+    errorDetails: null,
     errorRetriable: null,
   };
 }

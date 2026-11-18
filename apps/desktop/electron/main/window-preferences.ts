@@ -1,7 +1,8 @@
 /**
  * Small JSON preference files the main process keeps in the data directory:
- * the last main-window bounds and the persisted close behavior. Both are
- * best-effort; a missing or malformed file reads as "unset".
+ * normal and compact window geometry plus the persisted close behavior.
+ * Geometry and close preferences are best-effort; missing or malformed files
+ * read as "unset".
  */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
@@ -9,9 +10,14 @@ import { join } from "node:path";
 import type { CloseBehavior } from "@pi-desktop/shared";
 
 export type WindowState = { x: number; y: number; width: number; height: number };
+export type WindowSize = { width: number; height: number };
 
 function windowStatePath(dataDir: string) {
   return join(dataDir, "window-state.json");
+}
+
+function miniWindowStatePath(dataDir: string) {
+  return join(dataDir, "mini-window-state.json");
 }
 
 export async function readWindowState(
@@ -39,6 +45,42 @@ export function writeWindowState(dataDir: string, state: WindowState) {
   try {
     mkdirSync(dataDir, { recursive: true });
     writeFileSync(windowStatePath(dataDir), JSON.stringify(state), "utf8");
+  } catch {
+    // best-effort persistence
+  }
+}
+
+export function readMiniWindowSize(
+  dataDir: string,
+  minWidth: number,
+  minHeight: number,
+): WindowSize | null {
+  try {
+    const raw: unknown = JSON.parse(readFileSync(miniWindowStatePath(dataDir), "utf8"));
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
+    const value = raw as Record<string, unknown>;
+    if (value.version !== 1) return null;
+    if (typeof value.width !== "number" || typeof value.height !== "number") return null;
+    if (!Number.isFinite(value.width) || !Number.isFinite(value.height)) return null;
+    const size = { width: Math.round(value.width), height: Math.round(value.height) };
+    if (size.width < minWidth || size.height < minHeight) return null;
+    return size;
+  } catch {
+    return null;
+  }
+}
+
+export function writeMiniWindowSize(dataDir: string, size: WindowSize) {
+  const width = Math.round(size.width);
+  const height = Math.round(size.height);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width < 1 || height < 1) return;
+  try {
+    mkdirSync(dataDir, { recursive: true });
+    writeFileSync(
+      miniWindowStatePath(dataDir),
+      JSON.stringify({ version: 1, width, height }),
+      "utf8",
+    );
   } catch {
     // best-effort persistence
   }

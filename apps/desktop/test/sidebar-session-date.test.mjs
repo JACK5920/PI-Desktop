@@ -36,8 +36,16 @@ test("invalid timestamps do not render a misleading date", () => {
   assert.equal(formatSessionLastReplyDate("not-a-date"), "");
 });
 
-test("project session rows show the date until hover or focus reveals actions", () => {
-  assert.match(sidebarSource, /sidebarSessionTime === true/);
+test("the session time setting controls dates for every sidebar session group", () => {
+  assert.match(
+    sidebarSource,
+    /const renderSessionRows = \([\s\S]*?\) => items\.map\([\s\S]*?const lastReplyDate = settings\?\.sidebarSessionTime === true\s*\?/,
+  );
+  assert.doesNotMatch(sidebarSource, /showLastReplyDate/);
+  assert.match(sidebarSource, /renderSessionRows\(pinnedSessions, \{ global: true \}\)/);
+  assert.match(sidebarSource, /renderSessionRows\(temporarySessionHistory, \{ temporary: true \}\)/);
+  assert.match(sidebarSource, /renderSessionRows\(sessions, \{\s*projectPath: entry\.path,\s*\}\)/);
+  assert.match(sidebarSource, /renderSessions=\{\(sessions\) => renderSessionRows\(sessions, \{\s*temporary: false,\s*\}\)\}/);
   assert.match(sidebarSource, /className=\{cx\([\s\S]*?"thread-item-meta"[\s\S]*?sessionMenu === session\.id/);
   assert.match(sidebarSource, /className="thread-item-last-reply"/);
   assert.match(

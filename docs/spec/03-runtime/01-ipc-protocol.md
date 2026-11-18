@@ -2145,17 +2145,20 @@ window/control({ action: WindowControlAction }) -> WindowControlState
 ```
 
 `enterMiniMode` is rejected during fullscreen. Otherwise Main snapshots the
-normal bounds and maximized intent, applies a centered 440×640 DIP window
-clamped to the current display work area, and reduces the minimum size for the
-compact surface. `exitMiniMode` restores the captured bounds after clamping
-them to an available work area, restores the regular minimum size, and reapplies
-maximized state when needed. `toggleAlwaysOnTop` updates the native window flag.
-The `windowModeChanged` event publishes the full state after these actions.
-Window geometry persistence and Work panel resize/reservation callbacks ignore
-compact bounds, so closing or moving the compact window cannot overwrite the
-normal window geometry or the saved Work panel context. The compact snapshot is
-owned by the Main process for the lifetime of that window; relaunch always uses
-normal-window preferences.
+normal bounds and maximized intent, reads the last valid compact dimensions from
+`mini-window-state.json` (defaulting to 440×640 DIP), centers the compact window
+on the current display, clamps it to the display work area, and reduces the
+minimum size for the compact surface. Resizes persist the compact dimensions
+separately; `resetMiniModeSize` restores and persists the 440×640 DIP default.
+`exitMiniMode` persists the current compact dimensions and restores the captured
+normal bounds after clamping them to an available work area, restores the regular
+minimum size, and reapplies maximized state when needed.
+`toggleAlwaysOnTop` updates the native window flag. The `windowModeChanged`
+event publishes the full state after these actions. Window geometry persistence
+and Work panel resize/reservation callbacks ignore compact bounds, so closing or
+moving the compact window cannot overwrite the normal window geometry or the
+saved Work panel context. Compact and normal geometry have separate preference
+records.
 
 On Windows/Linux, `minimize` performs the native OS minimize transition so
 the window remains represented in the taskbar and can be restored there. A

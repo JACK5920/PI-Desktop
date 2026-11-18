@@ -17,6 +17,22 @@ function timestampOf(message, index) {
   return new Date(index).toISOString();
 }
 
+function safeBashDetails(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const source = value;
+  const details = {};
+  if (typeof source.exitCode === "number" && Number.isSafeInteger(source.exitCode)) {
+    details.exitCode = source.exitCode;
+  }
+  if (source.fork && typeof source.fork === "object" && !Array.isArray(source.fork)) {
+    const fork = {};
+    if (typeof source.fork.carried === "boolean") fork.carried = source.fork.carried;
+    if (typeof source.fork.jobs === "boolean") fork.jobs = source.fork.jobs;
+    if (Object.keys(fork).length > 0) details.fork = fork;
+  }
+  return Object.keys(details).length > 0 ? details : null;
+}
+
 function imageData(block, budget) {
   if (!block || block.type !== "image" || typeof block.data !== "string") return null;
   const mime = typeof block.mimeType === "string" ? block.mimeType.toLowerCase() : "";
@@ -96,6 +112,7 @@ export function normalizeOmpTranscriptSnapshot(value) {
       const call = toolCalls.get(callId);
       if (callId) pendingToolIds.delete(callId);
       const result = content || blocks.map((block) => block?.text ?? "").filter(Boolean).join("");
+      const bashDetails = call?.name?.toLowerCase() === "bash" ? safeBashDetails(message.details) : null;
       messages.push({
         id: callId || id,
         role: "tool",
@@ -104,7 +121,7 @@ export function normalizeOmpTranscriptSnapshot(value) {
         toolCallId: callId || undefined,
         toolName: typeof message.toolName === "string" ? message.toolName : call?.name,
         toolArgs: call?.args,
-        toolResult: result,
+        toolResult: bashDetails ? { details: bashDetails } : result,
         toolStatus: message.isError === true ? "error" : "success",
         isError: message.isError === true,
         createdAt: timestamp,

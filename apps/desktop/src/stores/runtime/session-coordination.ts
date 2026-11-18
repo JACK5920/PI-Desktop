@@ -189,7 +189,7 @@ export function createSessionCoordination({
           ...current.planningStates,
           [summary.id]: summary.mode === "plan" ? "planning" : "inactive",
         },
-        ...(options.clearError ? { error: null, errorCode: null } : {}),
+        ...(options.clearError ? { error: null, errorCode: null, errorDetails: null } : {}),
       };
       if (!commit.activated) return shared;
       return {

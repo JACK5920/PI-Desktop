@@ -25,6 +25,25 @@ import { APP_NAME } from "@pi-desktop/shared";
 /** `userData` directory of a development installation, beside the shipped one. */
 export const DEVELOPMENT_INSTALLATION_NAME = `${APP_NAME} Dev`;
 
+/** Explicit switch for running a packaged development build from its shortcut. */
+export const DEVELOPMENT_BUILD_SWITCH = "--pi-desktop-dev";
+
+export function resolveDevelopmentBuild({
+  environmentValue,
+  packaged,
+  argv,
+}: {
+  environmentValue: string | undefined;
+  packaged: boolean;
+  argv: readonly string[];
+}): boolean {
+  return (
+    environmentValue === "1" ||
+    argv.includes(DEVELOPMENT_BUILD_SWITCH) ||
+    !packaged
+  );
+}
+
 /** Data directory of a shipped installation, below the user's home. */
 export const INSTALLATION_DATA_DIR_NAME = ".pi-desktop";
 
