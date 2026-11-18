@@ -10,6 +10,20 @@ import { hasOmpTodoSnapshot, mergeOmpTodoMetadata } from "../src/components/omp-
 
 const read = (path) => readFile(new URL(path, import.meta.url), "utf8");
 
+async function loadOmpModelRecoveryModule(transcriptMapperUrl) {
+  const modelRecovery = await read("../electron/main/omp/session-model-recovery.ts");
+  const recoveryTranscriptImport = /import \{ normalizeOmpTranscriptSnapshot \} from "[^"]*omp-transcript-sync\.mjs";/;
+  assert.match(modelRecovery, recoveryTranscriptImport, "expected the model-recovery transcript mapper import");
+  const modelRecoveryWithTranscriptMapper = modelRecovery.replace(
+    recoveryTranscriptImport,
+    `const { normalizeOmpTranscriptSnapshot } = await import("${transcriptMapperUrl}");`,
+  );
+  const modelRecoveryJavascript = ts.transpileModule(modelRecoveryWithTranscriptMapper, {
+    compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  return `data:text/javascript;base64,${Buffer.from(modelRecoveryJavascript).toString("base64")}`;
+}
+
 function createEventCollector() {
   const events = [];
   const waiters = new Set();
@@ -87,14 +101,35 @@ async function loadOmpRpcRuntime() {
   const profileSettings = await read("../electron/main/omp/profile-settings.mjs");
   const profileSettingsUrl = `data:text/javascript;base64,${Buffer.from(profileSettings).toString("base64")}`;
   source = source.replace(profileSettingsImport, `const { readOmpProfileSettings } = await import("${profileSettingsUrl}");`);
+  const modelRecoveryImport = /import \{\s*buildModelUnavailableError,\s*buildProviderUnavailableError,\s*catalogProviders,\s*extractRestoreModelFailure,\s*isRestoreModelFailure,\s*restoreMappedSessionFile,\s*selectModelCandidates,\s*type OmpModelRef,\s*\} from "\.\/session-model-recovery";/;
+  assert.match(source, modelRecoveryImport, "expected the model-recovery helper import");
+  const modelRecoveryUrl = await loadOmpModelRecoveryModule(transcriptMapperUrl);
+  source = source.replace(modelRecoveryImport, `const {
+    buildModelUnavailableError,
+    buildProviderUnavailableError,
+    catalogProviders,
+    extractRestoreModelFailure,
+    isRestoreModelFailure,
+    restoreMappedSessionFile,
+    selectModelCandidates,
+  } = await import("${modelRecoveryUrl}");`);
+  assert.doesNotMatch(source, /from "\.\/session-model-recovery";/, "the model-recovery dependency must be replaced before data-URL import");
   const javascript = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
   const { OmpRpcRuntime } = await import(`data:text/javascript;base64,${Buffer.from(javascript).toString("base64")}`);
   return OmpRpcRuntime;
 }
 
 async function loadOmpEventAdapter() {
-  const source = await read("../electron/main/omp/rpc-event-adapter.ts");
+  let source = await read("../electron/main/omp/rpc-event-adapter.ts");
+  const modelRecoveryImport = /import \{ classifyOmpFailure \} from "\.\/session-model-recovery";/;
+  assert.match(source, modelRecoveryImport, "expected the native RPC event adapter model-recovery import");
+  const transcriptMapper = await read("../src/lib/omp-transcript-sync.mjs");
+  const transcriptMapperUrl = `data:text/javascript;base64,${Buffer.from(transcriptMapper).toString("base64")}`;
+  const modelRecoveryUrl = await loadOmpModelRecoveryModule(transcriptMapperUrl);
+  source = source.replace(modelRecoveryImport, `const { classifyOmpFailure } = await import("${modelRecoveryUrl}");`);
+  assert.doesNotMatch(source, /from "\.\/session-model-recovery";/, "the event adapter model-recovery dependency must be replaced before data-URL import");
   const javascript = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
+  assert.doesNotMatch(javascript, /session-model-recovery/, "the transpiled event adapter must not retain a relative module reference");
   return import(`data:text/javascript;base64,${Buffer.from(javascript).toString("base64")}`);
 }
 
@@ -1007,9 +1042,7 @@ test("OMP turn completion waits for native session settlement when async work re
 });
 
 test("OMP agent_end terminal flags never settle the PI turn before session_settled", async () => {
-  const source = await read("../electron/main/omp/rpc-event-adapter.ts");
-  const javascript = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
-  const { ompFrameToAgentEvent } = await import(`data:text/javascript;base64,${Buffer.from(javascript).toString("base64")}`);
+  const { ompFrameToAgentEvent } = await loadOmpEventAdapter();
   for (const frame of [
     { type: "agent_end", isTerminal: false, yielded: true, awaitingAsyncWork: true },
     { type: "agent_end", isTerminal: true, yielded: false, awaitingAsyncWork: false },
@@ -1021,9 +1054,7 @@ test("OMP agent_end terminal flags never settle the PI turn before session_settl
 });
 
 test("OMP event adapter namespaces process-local message IDs and waits for settlement", async () => {
-  const source = await read("../electron/main/omp/rpc-event-adapter.ts");
-  const javascript = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
-  const { ompFrameToAgentEvent } = await import(`data:text/javascript;base64,${Buffer.from(javascript).toString("base64")}`);
+  const { ompFrameToAgentEvent } = await loadOmpEventAdapter();
   const ids = new Set();
   const message = ompFrameToAgentEvent({
     sessionId: "pi-session",
@@ -1041,9 +1072,7 @@ test("OMP event adapter namespaces process-local message IDs and waits for settl
 });
 
 test("OMP tool calls carry explicit engine provenance so task rows cannot route to PI delegation transcripts", async () => {
-  const source = await read("../electron/main/omp/rpc-event-adapter.ts");
-  const javascript = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
-  const { ompFrameToAgentEvent } = await import(`data:text/javascript;base64,${Buffer.from(javascript).toString("base64")}`);
+  const { ompFrameToAgentEvent } = await loadOmpEventAdapter();
   const event = ompFrameToAgentEvent({
     sessionId: "pi-session", runId: "run-omp", frame: { type: "tool_execution_start", toolCallId: "batch-15", toolName: "Task", args: { tasks: Array.from({ length: 15 }, (_, index) => ({ name: `agent-${index + 1}` })) } }, messageIds: new Set(),
   });
@@ -1118,9 +1147,7 @@ test("OMP native IPC snapshots child transcripts durably and rehydrates archived
 });
 
 test("OMP native command output is persisted as readable transcript text without terminal controls", async () => {
-  const source = await read("../electron/main/omp/rpc-event-adapter.ts");
-  const javascript = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
-  const { ompFrameToAgentEvent } = await import(`data:text/javascript;base64,${Buffer.from(javascript).toString("base64")}`);
+  const { ompFrameToAgentEvent } = await loadOmpEventAdapter();
   const ids = new Set(["omp:run-a:message-1"]);
   const output = ompFrameToAgentEvent({
     sessionId: "pi-session",
