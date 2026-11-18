@@ -553,9 +553,9 @@ shared capability contract:
 
 ### Compact chat window
 
-The window chrome offers a one-click compact mode on macOS, Windows, and Linux. It keeps the existing chat/session and Composer mounted, targets a centered 440×640 DIP footprint clamped to the current display work area, and hides navigation and the Work panel from layout. The hidden panel and sidebar retain their open tabs and local view state. The Composer remains one framed surface; its toolbar has no separator at the input seam.
+The window chrome offers compact mode on macOS, Windows, and Linux. It keeps the existing chat/session and Composer mounted, starts at 440×640 DIP, and remembers the user-resized compact dimensions across launches. Each entry centers the compact window on the display containing the main window and clamps its dimensions to that display work area. A reset-size action restores the 440×640 DIP default. Compact mode hides navigation and the Work panel from layout; the hidden panel and sidebar retain their open tabs and local view state. The Composer remains one framed surface; its toolbar has no separator at the input seam.
 
-The compact titlebar provides always-on-top, restore, and close actions. Restore returns to the pre-compact normal bounds, clamped to an available display, and reapplies the previous maximized state. Entering compact mode from a maximized window remembers the normal bounds first. Settings, search, or a maximized Work panel exit compact mode before showing that surface. Fullscreen windows cannot enter compact mode. Compact bounds never replace the saved normal-window bounds.
+The compact titlebar provides always-on-top, reset-size, restore, and close actions. Restore returns to the pre-compact normal bounds, clamped to an available display, and reapplies the previous maximized state. Entering compact mode from a maximized window remembers the normal bounds first. Settings, search, or a maximized Work panel exit compact mode before showing that surface. Fullscreen windows cannot enter compact mode. Compact dimensions are persisted separately and never replace the saved normal-window bounds.
 
 ## 8. i18n
 

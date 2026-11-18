@@ -276,6 +276,10 @@ current default, so it stops following Settings. The Composer never treats a
 `supportsReasoning: false` or empty thinking-level snapshot as authoritative
 when the selected catalog/binding model exposes levels, so a mid-turn thinking
 or model pick cannot collapse the menu to Off-only.
+The native OMP Composer follows the same per-model rule: after a successful
+`set_model`, it invalidates the previous thinking-level ladder and reads
+`get_available_thinking_levels` for the newly selected model. Empty or missing
+results do not reuse the prior model's cached levels.
 
 ## 5. Capability warnings
 
