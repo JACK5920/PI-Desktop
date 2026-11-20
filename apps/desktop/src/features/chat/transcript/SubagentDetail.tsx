@@ -1,4 +1,4 @@
-import { useCallback, useId, useMemo, useSyncExternalStore } from "react";
+import { useCallback, useId, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "../../../stores/app-store";
 import { buildOmpSubagentTurnGroup, isOmpSubagentTurnBatchItem } from "../../../components/omp-subagent-turn-group.mjs";
@@ -35,6 +35,7 @@ export function SubagentTopology({
   const hasOmpBatch = items.some(({ message }) => isOmpTaskBatch(message.engineOrigin, message.toolName, message.toolArgs));
   const { t } = useTranslation();
   const labelId = useId();
+  const agentsRef = useRef<HTMLDivElement | null>(null);
   const activeSessionId = useAppStore((state) => state.activeSessionId);
   const subscribeOmpRoster = useCallback((listener: () => void) => activeSessionId
     ? hasOmpBatch ? subscribeOmpSubagentRoster(activeSessionId, listener) : () => undefined
@@ -68,6 +69,41 @@ export function SubagentTopology({
     return { ...base, total: base.total - ompBatchToolCallIds.length + observedOrRequested };
   }, [items, delegationStatuses, ompBatchItems, ompTurnGroup]);
 
+  // The trunk must meet the first/last card centers, not a hard-coded inset:
+  // expanded tool details and OMP batch cards can be much taller than 72px.
+  useLayoutEffect(() => {
+    const root = agentsRef.current;
+    if (!root) return;
+
+    const updateTrunk = () => {
+      const cards = Array.from(root.children).filter(
+        (child): child is HTMLElement => child instanceof HTMLElement,
+      );
+      const first = cards[0];
+      const last = cards.at(-1);
+      if (!first || !last) {
+        root.style.removeProperty("--subagent-trunk-top");
+        root.style.removeProperty("--subagent-trunk-bottom");
+        return;
+      }
+
+      const rootBounds = root.getBoundingClientRect();
+      const firstBounds = first.getBoundingClientRect();
+      const lastBounds = last.getBoundingClientRect();
+      const top = Math.max(0, firstBounds.top + firstBounds.height / 2 - rootBounds.top);
+      const bottom = Math.max(0, rootBounds.bottom - (lastBounds.top + lastBounds.height / 2));
+      root.style.setProperty("--subagent-trunk-top", `${top}px`);
+      root.style.setProperty("--subagent-trunk-bottom", `${bottom}px`);
+    };
+
+    updateTrunk();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(updateTrunk);
+    observer.observe(root);
+    for (const child of Array.from(root.children)) observer.observe(child);
+    return () => observer.disconnect();
+  }, [topologyEntries, ompTurnGroup]);
+
   return (
     <section className="subagent-topology" aria-labelledby={labelId}>
       <div className="subagent-topology-root">
@@ -83,6 +119,7 @@ export function SubagentTopology({
       </div>
       <span className="subagent-topology-connector" aria-hidden />
       <div
+        ref={agentsRef}
         className="subagent-topology-agents"
         role="list"
         aria-label={t("chat.subagentTopology")}

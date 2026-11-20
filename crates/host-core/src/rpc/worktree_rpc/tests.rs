@@ -218,6 +218,82 @@ async fn isolated_session_user_path_from_create_to_delete() {
 }
 
 #[tokio::test]
+async fn deleting_a_running_isolated_session_is_rejected_and_keeps_its_worktree() {
+    let dir = tempfile::tempdir().unwrap();
+    let project = init_repo(&dir.path().join("project"));
+    let (state, session_id, root) = isolated_session_of(&project, &dir.path().join("data")).await;
+    let turn_id = {
+        let st = state.lock().await;
+        crate::sessions::begin_turn(&st.db, &session_id, None, None).unwrap()
+    };
+
+    let error = call(&state, "session.delete", json!({ "id": session_id }))
+        .await
+        .unwrap_err();
+    assert_eq!(error["code"], 1008);
+    assert_eq!(error["errorCode"], "AGENT_BUSY");
+    assert!(root.exists(), "the worktree must not be removed first");
+    assert_ne!(session_branches(&project).trim(), "");
+    let listed = call(&state, "session.list", json!({})).await.unwrap();
+    assert!(listed["sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|session| session["id"] == session_id.as_str()));
+
+    call(
+        &state,
+        "session.endTurn",
+        json!({ "turnId": turn_id, "status": "completed" }),
+    )
+    .await
+    .unwrap();
+    let deleted = call(&state, "session.delete", json!({ "id": session_id }))
+        .await
+        .unwrap();
+    assert_eq!(deleted["ok"], true);
+    assert!(!root.exists());
+    assert_eq!(session_branches(&project).trim(), "");
+}
+
+#[tokio::test]
+async fn session_deletion_reservation_blocks_turn_admission_until_released() {
+    let dir = tempfile::tempdir().unwrap();
+    let project = init_repo(&dir.path().join("project"));
+    let (state, session_id, root) = isolated_session_of(&project, &dir.path().join("data")).await;
+    {
+        let mut st = state.lock().await;
+        assert!(st.reserve_session_deletion(&session_id));
+    }
+
+    let error = call(
+        &state,
+        "session.beginTurn",
+        json!({ "sessionId": session_id }),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error["errorCode"], "AGENT_BUSY");
+    assert!(root.exists());
+
+    state.lock().await.release_session_deletion(&session_id);
+    let turn = call(
+        &state,
+        "session.beginTurn",
+        json!({ "sessionId": session_id }),
+    )
+    .await
+    .unwrap();
+    call(
+        &state,
+        "session.endTurn",
+        json!({ "turnId": turn["turnId"], "status": "completed" }),
+    )
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
 async fn an_isolated_session_is_not_created_for_a_project_without_git() {
     let dir = tempfile::tempdir().unwrap();
     let plain = dir.path().join("plain");

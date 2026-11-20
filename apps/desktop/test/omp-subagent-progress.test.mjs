@@ -11,9 +11,16 @@ import { buildOmpSubagentTurnGroup } from "../src/components/omp-subagent-turn-g
 
 async function loadOmpEventAdapter() {
   const source = await readFile(new URL("../electron/main/omp/rpc-event-adapter.ts", import.meta.url), "utf8");
+  const recoverySource = await readFile(new URL("../electron/main/omp/session-model-recovery.ts", import.meta.url), "utf8");
+  const recoveryUrl = new URL(`data:text/javascript;base64,${Buffer.from(ts.transpileModule(recoverySource, {
+    compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
+  }).outputText.replace(
+    '"../../../src/lib/omp-transcript-sync.mjs"',
+    JSON.stringify(new URL("../src/lib/omp-transcript-sync.mjs", import.meta.url).href),
+  )).toString("base64")}`);
   const javascript = ts.transpileModule(source, {
     compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
-  }).outputText;
+  }).outputText.replace('"./session-model-recovery"', JSON.stringify(recoveryUrl.href));
   return import(`data:text/javascript;base64,${Buffer.from(javascript).toString("base64")}`);
 }
 

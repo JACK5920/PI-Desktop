@@ -2844,8 +2844,7 @@
 }
 
 /* Nodes are raised tiles on the group's tile; connectors are tinted 2px bars
-   rather than hairlines, and the dotted canvas is gone (D297). Keep a 72px
-   minimum so the 36px trunk insets still reach the center of short cards. */
+   rather than hairlines, and the dotted canvas is gone (D297). */
 .subagent-topology {
   display: grid;
   min-width: 0;
@@ -2920,8 +2919,8 @@
 
 .subagent-topology-agents::before {
   position: absolute;
-  top: 36px;
-  bottom: 36px;
+  top: var(--subagent-trunk-top, 36px);
+  bottom: var(--subagent-trunk-bottom, 36px);
   left: 0;
   width: 2px;
   border-radius: var(--radius-full);

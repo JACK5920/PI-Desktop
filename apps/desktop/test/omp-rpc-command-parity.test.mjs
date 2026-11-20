@@ -25,7 +25,10 @@ const UPSTREAM_RPC_COMMANDS = [
   "set_subagent_subscription", "set_thinking_level", "set_todos", "steer", "steer_subagent", "switch_session",
 ];
 
-const INTERNAL_COMMANDS = ["negotiate_protocol", "set_host_tools", "set_host_uri_schemes"];
+// navigate_tree is issued only by the controlled native-history adapter after
+// validating the selected OMP tree node; it must not be exposed as arbitrary
+// renderer IPC because that could desynchronize the PI transcript mirror.
+const INTERNAL_COMMANDS = ["navigate_tree", "negotiate_protocol", "set_host_tools", "set_host_uri_schemes"];
 
 test("OMP RPC command parity accounts for every command in the pinned upstream release", async () => {
   const ipc = await readFile(new URL("../electron/main/ipc/register.ts", import.meta.url), "utf8");

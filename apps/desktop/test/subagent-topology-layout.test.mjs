@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const styles = readFileSync(new URL("../src/styles/messages.css", import.meta.url), "utf8");
+const topology = readFileSync(new URL("../src/features/chat/transcript/SubagentDetail.tsx", import.meta.url), "utf8");
 
 test("subagent branches align to variable-height card centers", () => {
   const node = styles.match(/\.subagent-topology-node\s*\{([^}]+)\}/)?.[1] ?? "";
@@ -12,7 +13,10 @@ test("subagent branches align to variable-height card centers", () => {
   assert.match(node, /min-height:\s*72px/);
   assert.match(branch, /top:\s*50%/);
   assert.match(branch, /transform:\s*translateY\(-50%\)/);
-  assert.match(trunk, /top:\s*36px/);
-  assert.match(trunk, /bottom:\s*36px/);
+  assert.match(trunk, /top:\s*var\(--subagent-trunk-top,\s*36px\)/);
+  assert.match(trunk, /bottom:\s*var\(--subagent-trunk-bottom,\s*36px\)/);
+  assert.match(topology, /firstBounds\.top\s*\+\s*firstBounds\.height\s*\/\s*2\s*-\s*rootBounds\.top/);
+  assert.match(topology, /rootBounds\.bottom\s*-\s*\(lastBounds\.top\s*\+\s*lastBounds\.height\s*\/\s*2\)/);
+  assert.match(topology, /new ResizeObserver\(updateTrunk\)/);
   assert.doesNotMatch(branch, /top:\s*35px/);
 });

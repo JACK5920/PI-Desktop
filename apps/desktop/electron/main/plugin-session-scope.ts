@@ -14,6 +14,37 @@ export const SESSION_SCOPED_EVENTS = new Set([
 ]);
 
 /**
+ * Events whose payload can reveal user-message or turn activity. They require
+ * the plugin process's `session.observe` grant and must not be mirrored into
+ * renderer-backed docked views, whose bridge is intentionally not an
+ * authorization boundary.
+ */
+export const SESSION_OBSERVE_PLUGIN_ONLY_EVENTS = new Set([
+  "session:turnStarted",
+  "session:userMessagePersisted",
+]);
+
+export function mayBroadcastSessionEventToPluginView(event: string): boolean {
+  return !SESSION_OBSERVE_PLUGIN_ONLY_EVENTS.has(event);
+}
+
+/** Apply the docked-view authorization boundary at the actual delivery edge. */
+export function broadcastSessionEventToPluginView(
+  event: string,
+  payload: unknown,
+  scopeFilter: ((pluginId: string) => boolean) | undefined,
+  broadcast: (
+    event: string,
+    payload: unknown,
+    scopeFilter?: (pluginId: string) => boolean,
+  ) => void,
+): boolean {
+  if (!mayBroadcastSessionEventToPluginView(event)) return false;
+  broadcast(event, payload, scopeFilter);
+  return true;
+}
+
+/**
  * The recipient filter for a session event, or `undefined` when the event
  * fans out unconditionally.
  */

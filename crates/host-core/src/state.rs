@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{atomic::AtomicBool, Arc};
 use std::time::{Duration, Instant};
 
@@ -42,6 +42,10 @@ pub struct AppState {
     /// Subagent definitions the user owns, alongside the builtin and per-project
     /// ones the runtime discovers itself (D202).
     pub user_subagents: UserSubagentRegistry,
+    /// Session deletions that have reserved the session while isolated
+    /// worktrees are being removed. Turn admission checks this set so a new
+    /// turn cannot begin between the activity check and the final delete.
+    pub(crate) deleting_sessions: HashSet<String>,
     /// One reconciliation worker per local vault. The lock is separate from
     /// the AppState mutex so WebDAV I/O never monopolizes the host state lock.
     pub config_sync_lock: Arc<tokio::sync::Mutex<()>>,
@@ -158,6 +162,7 @@ impl AppState {
             mcp_servers,
             user_skills,
             user_subagents,
+            deleting_sessions: HashSet::new(),
             config_sync_lock: Arc::new(tokio::sync::Mutex::new(())),
             config_sync_in_progress: Arc::new(AtomicBool::new(false)),
             background_tasks: crate::background_tasks::BackgroundTaskRegistry::default(),
@@ -445,6 +450,18 @@ impl AppState {
 
     pub fn uptime_ms(&self) -> u64 {
         self.started_at.elapsed().as_millis() as u64
+    }
+
+    pub(crate) fn reserve_session_deletion(&mut self, session_id: &str) -> bool {
+        self.deleting_sessions.insert(session_id.to_owned())
+    }
+
+    pub(crate) fn session_deletion_reserved(&self, session_id: &str) -> bool {
+        self.deleting_sessions.contains(session_id)
+    }
+
+    pub(crate) fn release_session_deletion(&mut self, session_id: &str) {
+        self.deleting_sessions.remove(session_id);
     }
 }
 

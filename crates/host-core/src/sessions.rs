@@ -1817,7 +1817,9 @@ pub enum ForkSessionResult {
 ///
 /// A running turn owns its project's instructions, tools, and working
 /// directory, so moving or deleting that project is refused while it runs.
-/// A fork may copy a completed prefix without touching that live ownership.
+/// Asynchronous deletion paths must reserve the session before cleanup and
+/// use this check to reject an already-running turn. A fork may copy a
+/// completed prefix without touching that live ownership.
 pub fn session_has_running_turn(db: &Database, id: &str) -> Result<bool> {
     let running: bool = db.conn().query_row(
         "SELECT EXISTS(
@@ -2169,7 +2171,13 @@ pub fn configure_session_with_fast_mode(
 pub fn delete_session(db: &Database, id: &str) -> Result<bool> {
     let n = db
         .conn()
-        .prepare_cached("DELETE FROM sessions WHERE id = ?1")?
+        .prepare_cached(
+            "DELETE FROM sessions
+             WHERE id = ?1
+               AND NOT EXISTS (
+                 SELECT 1 FROM turns WHERE session_id = ?1 AND status = 'running'
+               )",
+        )?
         .execute(params![id])?;
     if n > 0 {
         // Here rather than in the RPC handler so every deletion path (UI,
@@ -6847,6 +6855,31 @@ mod tests {
         assert!(delete_session(&db, &session.id).unwrap());
         assert!(!transcript.exists());
         assert!(!revisions.exists());
+    }
+
+    #[test]
+    fn direct_delete_refuses_a_session_with_a_running_turn() {
+        let db = test_db();
+        let session = create_session(&db, None, None, None, None, None).unwrap();
+        let transcript = transcripts::transcript_path(db.data_dir(), &session.id).unwrap();
+        append_message(
+            &db,
+            &session.id,
+            &user_msg("m1", "keep while running", "2025-05-01T00:00:00Z"),
+            None,
+        )
+        .unwrap();
+        let turn = begin_turn(&db, &session.id, None, None).unwrap();
+
+        assert!(session_has_running_turn(&db, &session.id).unwrap());
+        assert!(!delete_session(&db, &session.id).unwrap());
+        assert!(get_session(&db, &session.id).unwrap().is_some());
+        assert!(transcript.exists());
+
+        end_turn(&db, &turn, "completed", None, None, false).unwrap();
+        assert!(!session_has_running_turn(&db, &session.id).unwrap());
+        assert!(delete_session(&db, &session.id).unwrap());
+        assert!(!transcript.exists());
     }
 
     #[test]

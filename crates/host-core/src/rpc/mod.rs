@@ -3068,12 +3068,41 @@ async fn handle_request(
                 .get("id")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| rpc_err(1002, "id required", "INVALID_PARAMS"))?;
+            // Reserve while holding the host mutex. This is atomic with turn
+            // admission below: either the turn is already running and delete
+            // is rejected, or the reservation wins and new turns are refused
+            // until worktree cleanup and the row delete have completed.
+            {
+                let mut st = state.lock().await;
+                if sessions::session_has_running_turn(&st.db, id)
+                    .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?
+                {
+                    return Err(rpc_err(
+                        1008,
+                        "AGENT_BUSY: cannot delete a session while a turn is running",
+                        "AGENT_BUSY",
+                    ));
+                }
+                if !st.reserve_session_deletion(id) {
+                    return Err(rpc_err(
+                        1008,
+                        "SESSION_DELETE_IN_PROGRESS: this session is already being deleted",
+                        "SESSION_DELETE_IN_PROGRESS",
+                    ));
+                }
+            }
             // Delete = discard for isolated sessions (ADR 0329); a git failure
             // keeps the session.
-            worktree_rpc::remove_before_delete(&state, id).await?;
-            let st = state.lock().await;
-            let ok = sessions::delete_session(&st.db, id)
-                .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?;
+            if let Err(error) = worktree_rpc::remove_before_delete(&state, id).await {
+                state.lock().await.release_session_deletion(id);
+                return Err(error);
+            }
+            let mut st = state.lock().await;
+            let delete_result = sessions::delete_session(&st.db, id);
+            // Always release before returning an error. Keep the reservation
+            // while deleting transcript files as part of the same operation.
+            st.release_session_deletion(id);
+            let ok = delete_result.map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?;
             if ok {
                 drop_session_side_data(&st, id);
             }
@@ -3633,6 +3662,13 @@ async fn handle_request(
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| rpc_err(1002, "sessionId required", "INVALID_PARAMS"))?;
             let st = state.lock().await;
+            if st.session_deletion_reserved(session_id) {
+                return Err(rpc_err(
+                    1008,
+                    "AGENT_BUSY: this session is being deleted",
+                    "AGENT_BUSY",
+                ));
+            }
             let provider = params.get("providerId").and_then(Value::as_str);
             let model = params.get("modelId").and_then(Value::as_str);
             let turn_id = match params.get("sessionMessageId").and_then(Value::as_str) {

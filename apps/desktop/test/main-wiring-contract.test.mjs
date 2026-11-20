@@ -211,7 +211,7 @@ test("a finished turn is announced to every plugin surface", () => {
   );
   assert.match(fanOut, /plugins\.broadcastEvent\(event, \[payload\], scopeFilter\)/);
   assert.match(fanOut, /pluginPanels\.broadcast\(event, payload\)/);
-  assert.match(fanOut, /pluginViews\.broadcast\(event, payload, scopeFilter\)/);
+  assert.match(fanOut, /broadcastSessionEventToPluginView\([\s\S]*?pluginViews\.broadcast\(viewEvent, viewPayload, filter\)/);
   // Each surface owns its failure: one unreachable plugin process, panel or
   // view must not suppress the other two.
   assert.equal(
@@ -235,7 +235,7 @@ test("the selected session is announced to every plugin surface", () => {
   assert.match(context, /announce\("session:activated", next\)/);
   assert.match(services, /plugins\.broadcastEvent\(event, \[payload\], scopeFilter\)/);
   assert.match(services, /pluginPanels\.broadcast\(event, payload\)/);
-  assert.match(services, /pluginViews\.broadcast\(event, payload, scopeFilter\)/);
+  assert.match(services, /broadcastSessionEventToPluginView\([\s\S]*?pluginViews\.broadcast\(viewEvent, viewPayload, filter\)/);
   // Turn identity and start time come from the host, never from the renderer.
   assert.match(
     services,
@@ -258,7 +258,7 @@ test("session activation derives one project filter for process and docked-view 
     /sessionEventScopeFilter\(\s*event,\s*sessionId,\s*sessionProjects,\s*pluginActiveInProject,\s*\)/,
   );
   assert.match(fanOut, /plugins\.broadcastEvent\(event, \[payload\], scopeFilter\)/);
-  assert.match(fanOut, /pluginViews\.broadcast\(event, payload, scopeFilter\)/);
+  assert.match(fanOut, /broadcastSessionEventToPluginView\([\s\S]*?pluginViews\.broadcast\(viewEvent, viewPayload, filter\)/);
   assert.match(
     fanOut,
     /if \(!SESSION_SCOPED_EVENTS\.has\(event\)\) \{[\s\S]*?pluginPanels\.broadcast\(event, payload\)/,

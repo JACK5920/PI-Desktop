@@ -524,7 +524,12 @@ test("capability badges include every declared plugin capability", () => {
 });
 
 test("the session:activated scope filter derives from the announced session's project", async (t) => {
-  const { sessionEventScopeFilter, SESSION_SCOPED_EVENTS } = await import(
+  const {
+    broadcastSessionEventToPluginView,
+    sessionEventScopeFilter,
+    SESSION_OBSERVE_PLUGIN_ONLY_EVENTS,
+    SESSION_SCOPED_EVENTS,
+  } = await import(
     "../electron/main/plugin-session-scope.ts"
   );
   const sessionProjects = new Map([["s-a", "/work/a"]]);
@@ -559,4 +564,28 @@ test("the session:activated scope filter derives from the announced session's pr
     undefined,
   );
   assert.ok(SESSION_SCOPED_EVENTS.has("session:activated"));
+  assert.ok(SESSION_OBSERVE_PLUGIN_ONLY_EVENTS.has("session:turnStarted"));
+  assert.ok(SESSION_OBSERVE_PLUGIN_ONLY_EVENTS.has("session:userMessagePersisted"));
+  const delivered = [];
+  const deliver = (...args) => delivered.push(args);
+  assert.equal(
+    broadcastSessionEventToPluginView("session:turnStarted", { sessionId: "s-a" }, filter, deliver),
+    false,
+  );
+  assert.equal(
+    broadcastSessionEventToPluginView("session:userMessagePersisted", { sessionId: "s-a" }, filter, deliver),
+    false,
+  );
+  assert.deepEqual(delivered, [], "sensitive session observations must not reach docked-view receivers");
+  const activation = { sessionId: "s-a" };
+  assert.equal(
+    broadcastSessionEventToPluginView("session:activated", activation, filter, deliver),
+    true,
+  );
+  assert.deepEqual(delivered, [["session:activated", activation, filter]]);
+  assert.equal(
+    broadcastSessionEventToPluginView("session:turnEnded", { sessionId: "s-a" }, undefined, deliver),
+    true,
+  );
+  assert.equal(delivered.length, 2, "non-sensitive session events retain docked-view delivery");
 });

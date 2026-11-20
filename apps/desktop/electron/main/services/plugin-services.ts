@@ -51,7 +51,11 @@ import { McpOAuthManager } from "../mcp-oauth";
 import { PluginPanelHost } from "../plugin-panel-host";
 import { createManagedAttachmentStore } from "../plugin-managed-attachments";
 import { PluginViewHost } from "../plugin-view-host";
-import { SESSION_SCOPED_EVENTS, sessionEventScopeFilter } from "../plugin-session-scope";
+import {
+  broadcastSessionEventToPluginView,
+  SESSION_SCOPED_EVENTS,
+  sessionEventScopeFilter,
+} from "../plugin-session-scope";
 import { BrowserPane } from "../browser-view";
 import { BrowserBackingHost } from "../browser-backing-host";
 import { BrowserHost, BROWSER_PLUGIN_ID } from "../browser-host";
@@ -757,8 +761,17 @@ export function createPluginServices({
         });
       }
     }
+    // Only the plugin process has the fine-grained `session.observe` grant
+    // check in PluginRuntime.broadcastEvent. A docked view receives events
+    // through a different bridge that only enforces project scope, so never
+    // mirror these two sensitive observations into that surface.
     try {
-      pluginViews.broadcast(event, payload, scopeFilter);
+      broadcastSessionEventToPluginView(
+        event,
+        payload,
+        scopeFilter,
+        (viewEvent, viewPayload, filter) => pluginViews.broadcast(viewEvent, viewPayload, filter),
+      );
     } catch (error) {
       logger.app("plugin", "warn", `${event} view broadcast failed`, {
         sessionId,

@@ -207,7 +207,7 @@ test("a provider or model change invalidates catalogs frozen in live chat sessio
   // invalidate a running process instead of trusting its cached snapshot.
   assert.match(runtime, /if \(type === "get_available_models"\) await this\.reloadStaleCatalog\(sessionId\)/);
   assert.match(runtime, /markCatalogStale\(\): void/);
-  assert.match(runtime, /if \(session\.busy \|\| session\.forking\) return;/);
+  assert.match(runtime, /if \(session\.busy \|\| session\.forking \|\| session\.mappingPrompt\) return;/);
   assert.match(ipc, /command === "login" \|\| command === "logout"\) ompRpcRuntime!\.markCatalogStale\(\)/);
   assert.match(ipc, /onOmpCatalogChanged: \(\) => ompRpcRuntime\?\.markCatalogStale\(\)/);
   assert.match(settingsIpc, /onOmpCatalogChanged\?\.\(\);/);
