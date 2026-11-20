@@ -154,6 +154,8 @@ export type UiMessage = {
   responseOutputTokens?: number;
   /** Structured failure attached to the assistant turn that failed. */
   error?: AppError;
+  /** The visible response contains a bounded partial report after truncation. */
+  outputTruncated?: boolean;
   /** Stable regenerate-family key shared across rewritten user prompts. */
   revisionRootId?: string;
   /** Total regenerate variants for this user root turn. */

@@ -7,7 +7,11 @@
  */
 
 /** Session events whose payload describes the user's current selection. */
-export const SESSION_SCOPED_EVENTS = new Set(["session:activated"]);
+export const SESSION_SCOPED_EVENTS = new Set([
+  "session:activated",
+  "session:turnStarted",
+  "session:userMessagePersisted",
+]);
 
 /**
  * The recipient filter for a session event, or `undefined` when the event

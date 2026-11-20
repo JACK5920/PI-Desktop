@@ -114,6 +114,7 @@ type RuntimeParams = {
   /** Session `/fast` switch AND the model's opt-in, resolved by main (ADR 0334). */
   fastMode?: boolean;
   computerUseEnabled?: boolean;
+  pluginModelContextEnabled?: boolean;
   /** Opt-in TypeSafe classifier credential resolved by Electron main. */
   jevApiKey?: string;
   provider: RuntimeProviderConfig;
@@ -246,6 +247,7 @@ async function runtimeFor(
     subagentModelKeys,
     jevApiKey: params.jevApiKey,
     computerUseEnabled: params.computerUseEnabled === true,
+    pluginModelContextEnabled: params.pluginModelContextEnabled === true,
     projectInstructions: params.projectInstructions,
     customSystemPrompt: params.customSystemPrompt,
     projectMemory: params.projectMemory,
@@ -320,6 +322,7 @@ async function runtimeFor(
     fastMode: params.fastMode === true,
     jevApiKey: params.jevApiKey,
     computerUseEnabled: params.computerUseEnabled === true,
+    pluginModelContextEnabled: params.pluginModelContextEnabled === true,
     history,
     compaction,
     compactionSettings: params.compactionSettings,

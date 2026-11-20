@@ -489,7 +489,7 @@ function setupErrorMessage(
 
 type StreamFactory = (
   options: SimpleStreamOptions,
-) => AssistantMessageEventStream;
+) => AssistantMessageEventStream | Promise<AssistantMessageEventStream>;
 
 /**
  * pi-ai returns setup failures as an error event rather than throwing. This
@@ -524,10 +524,11 @@ export function createProviderRetryStream(
         : outputCeiling !== undefined
           ? withClampedOutputLimit(options, outputCeiling)
           : withoutDerivedOutputLimit(options);
-      const inner = createStream({
+      const opened = createStream({
         ...requestOptions,
         maxRetries: 0,
       });
+      const inner = opened instanceof Promise ? await opened : opened;
       let sawStart = false;
       let retry:
         | { error: ClassifiedAgentError; attempt: number }

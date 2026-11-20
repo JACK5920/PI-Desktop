@@ -37,6 +37,7 @@ export type SidecarRuntimeDependencies = {
   logger: Logger;
   sendToRenderer: (channel: string, payload: unknown) => void;
   persistAgentEvent: (envelope: AgentEventEnvelope) => UiMessage | undefined;
+  readPluginModelContext: (params: Record<string, unknown>) => Promise<unknown>;
   activeTurns: Map<string, string>;
   approvedExecutionIdsBySession: Map<string, string>;
   claimedExecutionSessions: Map<string, string>;
@@ -77,6 +78,7 @@ export function createSidecarRuntime({
   logger,
   sendToRenderer,
   persistAgentEvent,
+  readPluginModelContext,
   activeTurns,
   approvedExecutionIdsBySession,
   claimedExecutionSessions,
@@ -368,6 +370,7 @@ export function createSidecarRuntime({
 
   const s = new AgentSidecar((text) => logger.child("agent", text));
   wireSidecar(s);
+  s.setPluginModelContextReader(readPluginModelContext);
   // The directory a session's file tools work in: its isolated worktree
   // (ADR 0329), resolved by host-core from its own registry, or its project.
   const sessionFileRoot = async (sessionId: string): Promise<string | null> => {

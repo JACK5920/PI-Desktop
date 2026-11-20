@@ -503,7 +503,28 @@ index 3901bfc..60b6376 100644
                  else if (block.type === "toolCall") {
                      const toolCall = block;
                      const [callId, itemIdRaw] = toolCall.id.split("|");
-@@ -458,6 +467,28 @@ export async function processResponsesStream(openaiStream, output, stream, model
+@@ -362,8 +371,6 @@ export function convertResponsesTools(tools, options) {
+             ...(options?.toolSearchResult ? { defer_loading: true } : {}),
+         };
+-        if (supportsStrictMode) {
+-            functionTool.strict = strict;
+-        }
++        functionTool.strict = supportsStrictMode ? strict : false;
+         return functionTool;
+     });
+ }
+@@ -408,5 +415,9 @@ export async function processResponsesStream(openaiStream, output, stream, model, options) {
+         if (item.type === "message") {
+             applyMessagePhaseStopReason(item);
+-            const block = { type: "text", text: "" };
++            const block = {
++                type: "text",
++                text: "",
++                ...(item.phase ? { textSignature: encodeTextSignatureV1(item.id, item.phase) } : {}),
++            };
+             output.content.push(block);
+             const slot = { type: "text", block, contentIndex: output.content.length - 1 };
+@@ -458,6 +469,28 @@ export async function processResponsesStream(openaiStream, output, stream, model
              stream.push({ type: "toolcall_start", contentIndex: slot.contentIndex, partial: output });
              return slot;
          }
@@ -620,7 +641,15 @@ index 3901bfc..60b6376 100644
          }
          else if (event.type === "response.function_call_arguments.done") {
              const slot = getSlot(event.output_index, "toolCall");
-@@ -680,9 +732,25 @@ export async function processResponsesStream(openaiStream, output, stream, model
+@@ -643,5 +697,6 @@ export async function processResponsesStream(openaiStream, output, stream, model, options) {
+             }
+             else if (item.type === "message" && slot?.type === "text") {
+                 slot.block.text = item.content?.map((c) => (c.type === "output_text" ? c.text : c.refusal)).join("") || "";
+-                slot.block.textSignature = encodeTextSignatureV1(item.id, item.phase ?? undefined);
++                const phase = item.phase ?? parseTextSignature(slot.block.textSignature)?.phase;
++                slot.block.textSignature = encodeTextSignatureV1(item.id, phase);
+                 stream.push({
+@@ -680,9 +733,25 @@ export async function processResponsesStream(openaiStream, output, stream, model
                  });
                  outputSlots.delete(event.output_index);
              }

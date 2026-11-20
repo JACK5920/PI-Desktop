@@ -2,6 +2,7 @@ import { IPC } from "@pi-desktop/shared";
 import type { HostProcess } from "../host-process";
 import type { IpcRegistrar } from "./types";
 import { executeScheduledTask } from "../runtime/scheduled-runner";
+import { markAutomationRequest } from "../runtime/user-message-provenance";
 
 export type ScheduledIpcDependencies = {
   registrar: IpcRegistrar;
@@ -46,7 +47,11 @@ export function registerScheduledIpc({
     return executeScheduledTask({
       host, id, automatic, runs: scheduledRunsBySession,
       isCurrent: () => !isQuitting() && getHost() === host,
-      prompt: (sessionId, content) => invoke(IPC.invoke.agentPrompt, [{ sessionId, content }]),
+      prompt: (sessionId, content) => {
+        const request = { sessionId, content };
+        markAutomationRequest(request);
+        return invoke(IPC.invoke.agentPrompt, [request]);
+      },
     });
   });
   const handle = (channel: string, fn: (...args: any[]) => Promise<any>) => {

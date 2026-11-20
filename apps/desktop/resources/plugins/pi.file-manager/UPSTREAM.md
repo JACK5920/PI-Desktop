@@ -16,9 +16,9 @@ unpublished plugin contribution as an official upstream release.
 | Integration source | https://github.com/Seraph-x/pi-desktop-plugin-file-manager/tree/f47ce21fab3c59f3f4b94d30f3e3a0c8124447e1 |
 | Integration commit | `f47ce21fab3c59f3f4b94d30f3e3a0c8124447e1` |
 | Companion upstream proposal | https://github.com/Tioit-Wang/pi-desktop-plugin-file-manager/pull/5 |
-| Bundled version | `0.9.1-pi.1` — Desktop hotfix, not an upstream release |
+| Bundled source version | `0.9.1-pi.2` — Desktop hotfix, not an upstream release |
 | License | MIT; preserve the bundled `LICENSE` and PDF.js notices |
-| Locally packed runtime | `pi.file-manager-0.9.1-pi.1.piplug`, 6921923 bytes, SHA-256 `e8b6041cb5d3d4eab2b68a1e7fa61a8c7089235d9918f4a418541bd60cd109b3` |
+| Previous locally packed runtime | `pi.file-manager-0.9.1-pi.1.piplug`, 6921923 bytes, SHA-256 `e8b6041cb5d3d4eab2b68a1e7fa61a8c7089235d9918f4a418541bd60cd109b3`; this is the prior artifact, not the current `.2` source |
 | Marketplace publication | Not published; no marketplace artifact or accepted upstream tag is claimed for this hotfix |
 
 The released reference tag is retained unchanged. The integration source is a
@@ -46,17 +46,27 @@ so the synthetic filesystem events could reach Node.
    retains the theme-token search-control repair already shipped in Desktop
    by #1861 and proposed upstream in plugin PR #6. No minified JavaScript is
    edited by hand. The patch changes only CodeMirror search fields/buttons.
-2. Set manifest version to `0.9.1-pi.1`, add `license: MIT`, and prefix its
-   changelog with the Desktop hotfix description. Keep all other manifest
-   declarations, permissions and safety notes from the integration source.
-3. Keep Desktop's MIT `LICENSE` and `package.json` CommonJS marker. The latter
+2. Apply `patches/file-manager-runtime.patch` to this plugin's `main.js`. It
+   restores the validated file name before constructing directory entries,
+   rejects invalid and reserved names, and settles timed-out Git requests
+   without waiting for inherited pipes to close.
+3. `remote-workspace.js` has a Desktop-local credential-path filter for remote
+   directory listings. The plugin applies the same deny rules to remote entry
+   names before they reach the file tree; the Host remains the authority for
+   path-scoped reads.
+4. The manifest now identifies the new bundled source as `0.9.1-pi.2` and
+   retains `license: MIT`. The Desktop changelog and README include local
+   integration notes; they are not represented as upstream release notes.
+5. Keep Desktop's MIT `LICENSE` and `package.json` CommonJS marker. The latter
    scopes Node's module interpretation to this plugin; other bundled plugins
    retain their own module format.
 
-`main.js`, `remote-workspace.js`, `README.md`, `CHANGELOG.md`, `views/index.html`
-and `views/assets/pdfjs-LICENSES.txt` are byte-identical to the pinned integration
-commit. Only the manifest and rebuilt view differ. The runtime pack has eight
-files; the two Desktop-local license/module files are added when vendoring.
+The pinned integration commit remains the provenance base, not a claim that
+the current files are byte-identical to it. `main.js`, `remote-workspace.js`,
+`README.md`, `CHANGELOG.md` and `manifest.json` contain the documented local
+changes. `views/assets/index.js` is the checked-in production view rebuilt from
+the integration source plus the theme patch. The runtime pack has eight files;
+the two Desktop-local license/module files are added when vendoring.
 QA dependencies, tests and `views-src/` are not included in the shipped plugin.
 The pinned changelog contains trailing spaces; its narrow `.gitattributes`
 exception preserves those upstream bytes rather than silently rewriting them.
@@ -68,13 +78,13 @@ is recorded here. `UPSTREAM.md` is the provenance record, not a runtime input.
 
 | File | Bytes | SHA-256 |
 | --- | --- | --- |
-| `CHANGELOG.md` | 34520 | `b7a3c06c07b2dbe5ce79577bbc6c6a53ffa00324bd64a27d0d5634493dec48b4` |
+| `CHANGELOG.md` | 36431 | `f97a23f737733e1db348685047cf7dfbd26e31b2ac0e311f6760de01fd6f99be` |
 | `LICENSE` | 1067 | `ebaec3ae096498a39f6b86e3ac8017e39818fb5aaff80b452349f94bc275ec0d` |
-| `README.md` | 38470 | `4ecf6e3afa2051b59b479907c485d156caca54ef6d1f4e3c410805807942a268` |
-| `main.js` | 125236 | `707feec0ecba8eb1a7c6a876a5ecf157ce064f36f14f5f30bafcf5852c5bed72` |
-| `manifest.json` | 39991 | `75c169a9b5f2ce844611874fcac0c24438db8d849355b090b6e52f8af12a5a40` |
+| `README.md` | 42609 | `2a853984ccde5d01cdd2254492d804a848acd96b2671cdf2522c9a1be23c14b0` |
+| `main.js` | 125461 | `dd420b930f4739d502bf80638f26c152e483413653d8b15bed6c170f74d28c60` |
+| `manifest.json` | 39991 | `7b098de7c45b66d0df70e389302b0eb60190406937a392cd047d6e93e83dd35f` |
 | `package.json` | 25 | `8005a3491db7d92f36ac66369861589f9c47123d3a7c71e643fc2c06168cd45a` |
-| `remote-workspace.js` | 3757 | `931a579801fd4b334c3d96231aafc7ff52e0c03e7baebbabaf00b4c5e17cc366` |
+| `remote-workspace.js` | 4150 | `aa8526fcf30220f58f21b278fc2736de9a1d2abedab9d320462a936add77b79c` |
 | `views/assets/index.js` | 6616929 | `0e415df8a14b4414a53ce3e2add8bb2cc155c67de21a43582a4dc217ae1a85e0` |
 | `views/assets/pdfjs-LICENSES.txt` | 61789 | `a8b04e2e9022721482079ee5c85b9f05ae129e6a2cfd59ea67f2629a3fc23640` |
 | `views/index.html` | 345 | `771fd3d8afdea7fca75ed1f1918c1ce93ad1c87babdb321cfb85e910465cd2c1` |

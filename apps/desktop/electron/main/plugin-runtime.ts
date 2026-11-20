@@ -88,6 +88,7 @@ import {
   type PluginComposerSuggestInput,
   type PluginComposerSuggestResult,
   type PluginComposerClearSuggestionInput,
+  type PluginModelContextInput,
   PLUGIN_COMPOSER_SUGGESTION_MAX_CHARS,
   PLUGIN_COMPOSER_SUGGESTION_TTL_MS,
   PLUGIN_COMPOSER_SUGGESTION_TTL_MIN_MS,
@@ -568,6 +569,8 @@ export type PluginHostServices = {
   suggestComposer?: (offer: ComposerSuggestionOffer) => Promise<ComposerSuggestionOutcome>;
   /** `pi.composer.clearSuggestion`: drop this plugin's own line. */
   clearComposerSuggestion?: (pluginId: string, sessionId?: string) => void;
+  getComposerSuggestionTarget?: (pluginId: string, input: unknown) => Promise<string | null>;
+  suggestComposerCandidates?: (pluginId: string, input: unknown) => Promise<PluginComposerSuggestResult>;
   project?: {
     create: (pluginId: string, input: Record<string, unknown>) => Promise<unknown>;
   };
@@ -592,6 +595,7 @@ const HOST_API_ALLOWLIST = new Set([
   "app.getVersion",
   "app.getLocale",
   "app.getAppearance",
+  "app.getCapabilities",
   "app.setTheme",
   "themes.upsert",
   "themes.remove",
@@ -603,6 +607,8 @@ const HOST_API_ALLOWLIST = new Set([
   "ui.revealView",
   "composer.suggest",
   "composer.clearSuggestion",
+  "composer.getSuggestionTarget",
+  "composer.suggestCandidates",
   "ui.openPanel",
   "ui.closePanel",
   "ui.showToast",
@@ -1887,6 +1893,43 @@ export class PluginRuntime {
     return result;
   }
 
+  /** Capture only providers permitted at the first request of a durable turn. */
+  modelContextProviders(inScope: (pluginId: string) => boolean) {
+    return [...this.loaded.values()]
+      .filter((loaded) => loaded.manifest.contributes?.modelContext === true && loaded.child &&
+        !loaded.disposing && loaded.permissions.has("agent.modelContext") && inScope(loaded.manifest.id))
+      .sort((a, b) => a.manifest.id.localeCompare(b.manifest.id))
+      .slice(0, 8)
+      .map((loaded) => {
+        const pluginId = loaded.manifest.id;
+        const eligible = () => this.loaded.get(pluginId) === loaded && Boolean(loaded.child) &&
+          !loaded.disposing && loaded.permissions.has("agent.modelContext") && inScope(pluginId);
+        return {
+          pluginId,
+          eligible,
+          read: async (input: PluginModelContextInput, signal: AbortSignal): Promise<string | undefined> => {
+            if (!eligible() || signal.aborted) return undefined;
+            try {
+              const result = await this.sendToChild(loaded,
+                { t: "call", method: "agent.modelContext", payload: input }, 250, signal);
+              if (!eligible() || signal.aborted || result === null) return undefined;
+              const text = (result as { text?: unknown } | undefined)?.text;
+              if (typeof text !== "string" || text.length > 4096 || Buffer.byteLength(text, "utf8") > 4096) {
+                throw apiError("PLUGIN_INVALID_RESULT", "invalid model context contribution");
+              }
+              return text.trim() || undefined;
+            } catch (error) {
+              if (!signal.aborted) this.services.audit?.({
+                pluginId, api: "agent.modelContext", ok: false,
+                errorCode: (error as PluginApiError)?.code ?? "PLUGIN_CONTEXT_FAILED", ts: Date.now(),
+              });
+              return undefined;
+            }
+          },
+        };
+      });
+  }
+
   /** Invoke only a declared action; the plugin receives the draft text alone. */
   async runComposerTransform(
     input: PluginComposerTransformInput & { pluginId: string },
@@ -2237,6 +2280,8 @@ export class PluginRuntime {
   broadcastEvent(event: string, args: unknown[] = [], filter?: (pluginId: string) => boolean): void {
     for (const loaded of this.loaded.values()) {
       if (filter && !filter(loaded.manifest.id)) continue;
+      if ((event === "session:turnStarted" || event === "session:userMessagePersisted") &&
+          (!filter || loaded.disposing || !loaded.permissions.has("session.observe"))) continue;
       try {
         loaded.child?.postMessage({ t: "event", event, args });
       } catch (error) {
@@ -5786,6 +5831,10 @@ export class PluginRuntime {
       app: {
         getVersion: async () => this.services.getAppVersion?.() ?? "0.2.1",
         getLocale: async () => this.services.getLocale?.() ?? "en",
+        getCapabilities: async () => ({
+          sessionUserMessagePersisted: loaded.permissions.has("session.observe"),
+          composerSuggestionCandidates: true,
+        }),
         getAppearance: async () =>
           this.services.getAppearance?.() ?? {
             theme: "system",
@@ -6030,6 +6079,16 @@ export class PluginRuntime {
          */
         suggest: async (input?: PluginComposerSuggestInput) =>
           this.suggestComposer(loaded, input),
+        getSuggestionTarget: async (input: unknown) => {
+          this.assertPermission(loaded, "composer.suggest");
+          if (!this.services.getComposerSuggestionTarget) throw apiError("UNSUPPORTED", "host api not available: composer.getSuggestionTarget");
+          return this.services.getComposerSuggestionTarget(pluginId, input);
+        },
+        suggestCandidates: async (input: unknown) => {
+          this.assertPermission(loaded, "composer.suggest");
+          if (!this.services.suggestComposerCandidates) throw apiError("UNSUPPORTED", "host api not available: composer.suggestCandidates");
+          return this.services.suggestComposerCandidates(pluginId, input);
+        },
         clearSuggestion: async (input?: PluginComposerClearSuggestionInput) =>
           this.clearComposerSuggestion(loaded, input),
       },

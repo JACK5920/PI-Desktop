@@ -1109,6 +1109,33 @@
   General.
 - **Status:** Documented; run after integration into main.
 
+### E2E-PLUGIN-turn-observation-model-context-and-composer-targets
+
+- **Preconditions:** Two fixture plugins with distinct project scopes; separately
+  grant `session.observe`, `agent.modelContext`, and `composer.suggest`; one
+  schedule-triggered prompt and one direct managed-session turn.
+- **Steps:** Start a turn, inspect the process event sequence and frozen model
+  context; revoke a provider before the next request; switch projects and
+  submit an automation prompt; probe and offer grouped Composer suggestions,
+  then change the draft/session before accepting a stale target.
+- **Expected:** `session:turnStarted` precedes the durable message event, which
+  is emitted only after Host confirms the first insertion. Observation events
+  carry identifiers only and are restricted by the event session's project
+  scope. Automation does not emit a user-submission event. Model context is
+  bounded, lower-trust and request-only; revocation and project changes remove
+  stale contributions. Composer targets expire on draft/session/turn changes;
+  suggestions cannot send and preserve autocomplete/IME key ownership.
+- **Automated coverage:** `apps/desktop/test/plugin-turn-observation-context.test.mjs`,
+  `apps/desktop/test/composer-suggestion-relay.test.mjs`,
+  `apps/desktop/test/composer-suggestion-state.test.mjs`, and the Agent Runtime
+  plugin-context projection test. A packaged desktop journey remains an
+  integration-candidate check.
+- **Specs:** `07-plugins/03-plugin-api.md`,
+  `07-plugins/13-plugin-permissions-matrix.md`, and ADR
+  `plugin-turn-observation-model-context-and-suggestion-targets.md`.
+- **Status:** Automated boundary and state-machine tests are present; the full
+  packaged journey is pending.
+
 
 - Document every user-visible and protocol-visible behavior that MVP must verify.
 - Provide a scenario catalog that maps to acceptance criteria (A–H) and milestones (M1–M6).

@@ -159,8 +159,25 @@ export function applyMessageUpdate(
   else if (event.deltaText) content += event.deltaText;
   if (event.resetThinking) thinking = event.deltaThinking ?? "";
   else if (event.deltaThinking) thinking += event.deltaThinking;
+  // Streaming Responses snapshots establish signed text boundaries once.
+  // Appending grows the trailing block; replacement must not retain stale offsets.
+  let providerReplay = seed.providerReplay;
+  if (providerReplay?.version === 1 && Array.isArray(providerReplay.blocks) && seed.status === "streaming") {
+    const tail = providerReplay.blocks.at(-1);
+    if (event.resetText) providerReplay = undefined;
+    else if (tail?.type === "text" && event.deltaText) {
+      providerReplay = {
+        ...providerReplay,
+        blocks: [
+          ...providerReplay.blocks.slice(0, -1),
+          { ...tail, length: tail.length + event.deltaText.length },
+        ],
+      };
+    }
+  }
   return {
     ...seed,
+    ...(providerReplay !== seed.providerReplay ? { providerReplay } : {}),
     id: event.message.id,
     role: event.message.role,
     createdAt: event.message.createdAt || seed.createdAt,

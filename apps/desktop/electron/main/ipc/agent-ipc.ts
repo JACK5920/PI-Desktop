@@ -17,6 +17,7 @@ import type { ComposerCommandService } from "./composer-ipc";
 import type { IpcRegistrar } from "./types";
 import { getAgentEngine, type AgentEngineId } from "../../../../../packages/shared/src/agent-engine-registry.mjs";
 import type { OmpRpcRuntime } from "../omp/rpc-runtime";
+import { isAutomationRequest } from "../runtime/user-message-provenance";
 
 export type AgentIpcDependencies = {
   registrar: IpcRegistrar;
@@ -32,6 +33,8 @@ export type AgentIpcDependencies = {
   activeTurns: Map<string, string>;
   completionNoticeTurns: Set<string>;
   recordTurnStart: (sessionId: string, turnId: string) => void;
+  /** Publish a metadata-only observation after Host confirms durable insertion. */
+  observePersistedUserMessage: (payload: { sessionId: string; turnId: string; messageId: string }) => void;
   /** Whether the named turn can still start or steer host work. */
   isTurnDispatchable: (sessionId: string, turnId: string | null | undefined) => boolean;
   activeTurnUsages: Map<string, MessageUsage>;
@@ -99,6 +102,7 @@ export function registerAgentIpc({
   activeTurns,
   completionNoticeTurns,
   recordTurnStart,
+  observePersistedUserMessage,
   isTurnDispatchable,
   activeTurnUsages,
   approvedExecutionIdsBySession,
@@ -623,11 +627,18 @@ export function registerAgentIpc({
         : {}),
     };
     const persistUserMessage = async () => {
-      await promptHost.call("session.appendMessage", {
+      const receipt = await promptHost.call<{ insertedUserMessageId?: unknown }>("session.appendMessage", {
         sessionId: req.sessionId,
         message: userMessage,
         turnId: durableTurnId,
       });
+      if (receipt.insertedUserMessageId === userMessage.id && !isAutomationRequest(req)) {
+        observePersistedUserMessage({
+          sessionId: req.sessionId,
+          turnId: durableTurnId,
+          messageId: userMessage.id,
+        });
+      }
       emitAgentEvent({
         sessionId: req.sessionId,
         ts: Date.now(),

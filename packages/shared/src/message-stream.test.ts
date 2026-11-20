@@ -64,6 +64,34 @@ describe("toWireMessageUpdate / applyMessageUpdate", () => {
     expect(applied.id).toBe("m1");
   });
 
+  it("extends the signed trailing text block on deltas and discards stale offsets on reset", () => {
+    const progress = assistant({
+      id: "m1",
+      content: "Checking",
+      providerReplay: { version: 1, blocks: [
+        { type: "text", length: 8, signature: JSON.stringify({ v: 1, id: "msg_progress", phase: "commentary" }) },
+      ] },
+    });
+    const appended = applyMessageUpdate(progress, {
+      type: "message_update",
+      stream: "delta",
+      message: assistant({ id: "m1", content: "Checking now", providerReplay: progress.providerReplay }),
+      deltaText: " now",
+    });
+    expect(appended.providerReplay?.blocks).toEqual([
+      { type: "text", length: 12, signature: JSON.stringify({ v: 1, id: "msg_progress", phase: "commentary" }) },
+    ]);
+    const replaced = applyMessageUpdate(appended, {
+      type: "message_update",
+      stream: "delta",
+      message: assistant({ id: "m1", content: "Answer", providerReplay: appended.providerReplay }),
+      deltaText: "Answer",
+      resetText: true,
+    });
+    expect(replaced.content).toBe("Answer");
+    expect(replaced.providerReplay).toBeUndefined();
+  });
+
   it("keeps snapshot updates as replacements", () => {
     const snapshot = assistant({ id: "m1", content: "replaced" });
     const event = { type: "message_update" as const, message: snapshot };

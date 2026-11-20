@@ -27,6 +27,7 @@
 | `fs.delete.workspace` | 高 | — | 加载时降级为 `fs.delete` + `own: true` | 旧权限名；只有插件自己写过的文件才不用问 |
 | `agent.tool.register` | 高 | 注册代理工具 | 安装时确认 | 工具执行情况单独审核 |
 | `agent.prompt.inject` | 高 | 注入系统提示符；激活 `contributes.skills` | 默认拒绝/强确认 | 容易导致行为劫持 |
+| `agent.modelContext` | 高 | `contributes.modelContext: true` 与 `onModelContext` | 安装时确认 | 为插件项目范围内的活动受管回合提供有界、低信任级别的上下文数据。不读取转录、提示词或草稿；独立补全时永不运行。 |
 | `composer.transform` | 中等 | `contributes.composerTransforms` 与 `onComposerTransform` | 安装时确认 | 仅在用户主动执行 Composer 操作后运行。仅接收草稿和可选模型 key，不接收会话历史或单独的附件/文件引用元数据；输入、结果上限均为 100,000 字符并记入审计 |
 | `composer.suggest` | 中等 | `pi.composer.suggest` / `pi.composer.clearSuggestion` | 安装时确认 | 仅在草稿为空、且插件声明的轮次仍是当前轮次时，向当前可见会话的输入框占位符层写入一条可忽略的建议。用户按 Tab 采用、Esc 忽略；输入、发送、切换会话、新一轮开始、插件停止、页面重载或窗口关闭都会清除。插件既不能直接发送，也不读取草稿。文本折为单行并截断到 200 字符；存活时间默认 120 秒，上限 10 分钟。记入审计；无法展示时返回 `{ shown: false, reason }` 而不是抛错 |
 | `agent.extension` | 高 | 在 agent 进程内运行 `contributes.agentExtensions` 模块 | 显式确认；v1.1 仅限本地导入和开发插件 | 与 agent 自身工具同等权限；插件沙箱不适用（规格 16） |
@@ -51,6 +52,7 @@
 | `models.list` | 中等 | `pi.models.list` | 安装时确认 | 仅已就绪的 provider/model 行；不含密钥 |
 | `project.create` | 高 | `pi.project.create` 及会话导入中的显式 `projectId` | 安装时确认 | 创建或复用持久项目记录但不激活工作区；只有显式传入 id 的导入会绑定项目 |
 | `session.read` | 高 | `pi.session.getLlmContext` | 安装时确认 | 仅限进行中的工具会话；带 compaction 的投影（D019 / D336） |
+| `session.observe` | 中等 | `session:turnStarted`、`session:userMessagePersisted` | 安装时确认 | 仅包含会话、回合和已持久化消息标识符；只发送到插件进程，并受会话所属项目范围约束。不含转录或输入框访问权限。 |
 | `session.autoTitle` | 高 | `pi.session.getAutoTitleContext`、`pi.session.setAutoTitle` | 安装时确认 | 仅限默认标题会话的首条用户提示（≤1,000 字符）和首条助手回复（≤500 字符）；标题通过比较并设置写入；不授予转录读取 |
 | `session.import` | 高 | `pi.session.import`、`pi.session.importBatch` | 安装时确认 | 只能导入插件声明来源；有大小和频率限制 |
 | `session.read.own` | 中等 | `pi.session.list`、`pi.session.get`、`pi.session.listMessages` | 安装时确认 | 只能读取本插件导入的会话；不能跨插件访问 |

@@ -222,6 +222,27 @@ pi.events.on("session:turnEnded", async (event) => {
 });
 ```
 
+对于分组建议，先检查 `await pi.app.getCapabilities?.()` 是否包含
+`composerSuggestionCandidates`。这两个新调用与 `composer.suggest` 共用同一授权。
+生成候选内容前先探测目标，避免非活动、草稿非空或已过期的输入框消耗一次补全。
+探测不会返回草稿文本。
+
+```js
+pi.events.on("session:turnEnded", async ({ sessionId, turnId, reason }) => {
+  if (reason !== "completed") return;
+  const target = await pi.composer.getSuggestionTarget({ sessionId, turnId });
+  if (!target) return;
+  const candidates = await writeFollowUps(sessionId); // 一次调用，最多 3 行
+  if (candidates.length) await pi.composer.suggestCandidates({ target, candidates });
+});
+```
+
+不透明的 target 绑定插件、会话、回合及输入框版本。重新访问会话，或编辑后清空文本，
+都不能恢复旧 target。最多三个折叠、限长且互不重复的候选项共用一个槽位和有效期；
+较新的候选组会替换旧组。存在多个候选项时，可用箭头按钮或 Up/Down 键切换。
+自动补全和 IME 保留按键处理权；Tab 只填入当前选中的文字，Escape 忽略候选组。
+单个候选项不会占用历史导航键。候选项不能发送消息。
+
 ### 语音（`speech.adapter.register`）
 ```ts
 pi.speech.registerAdapter(adapter: {
@@ -1260,6 +1281,17 @@ pi.events.off(event, handler)
   因此插件进程可以像打开的面板一样实时重标文案（ADR 0280）。
 - `session:modelChanged` — `{ sessionId, modelKey, thinkingLevel }`，在成功的
   `session.configure` 改变 provider、模型或 thinking level 之后发送
+- `session:turnStarted` — `{ sessionId, turnId }`，Host 打开可持久化回合后、派发智能体前发送。
+  这是回合生命周期事件，不表示用户发送了消息或模型已被调用。
+- `session:userMessagePersisted` — `{ sessionId, turnId, messageId }`，仅当开启受管回合的用户提交
+  首次被持久化插入后发送。排队输入只有在被接受为新回合并保存时才计入；转向输入、定时或自动化输入、
+  协作和模式通知、导入、插件写入、重放，以及对既有记录的更新均不会触发该事件。
+  原生 Pi 会话不使用这些受管会话事件。
+
+  两个新事件均需要 `session.observe`，只发送到插件进程，并按事件所属会话的项目检查插件激活范围，
+  而不是按当前可见工作区检查。它们不包含文本、附件、草稿、转录、token 或工具数据。
+  投递为尽力而为，不会重放。旧版 Host 可能没有 `pi.app.getCapabilities()`；支持的 Host 会在调用方
+  获得 `session.observe` 授权时将 `sessionUserMessagePersisted` 设为 `true`。`session:turnEnded` 不变。
 - `session:turnEnded` —— 载荷为
   `{ sessionId: string; turnId: string; reason: "completed" | "aborted" | "error" }`，
   在每个宿主回合的拆除结束时发送一次，位于持久化的 `session.endTurn` 尝试之后。
@@ -1286,6 +1318,26 @@ pi.events.off(event, handler)
 处理器抛出的异常会记录到日志，不影响其他监听器或插件。
 
 计划中的事件：无。
+
+### 每回合模型上下文（`agent.modelContext`）
+
+具备 `contributes.modelContext: true` 声明并获得 `agent.modelContext` 授权后，
+已启用且处于适用范围内的插件可以导出：
+
+```ts
+export async function onModelContext(
+  input: { sessionId: string; turnId: string; projectId?: string; modelKey?: string },
+  context: { signal: AbortSignal },
+): Promise<{ text: string } | void> { /* ... */ }
+```
+
+受管会话的首次模型请求会冻结该持久回合的贡献快照。最多并行询问八个符合条件的插件；
+每个答复的截止时间为 250 ms，大小上限为 4,096 个 UTF-8 字节。空值、格式错误、失败或迟到的答复
+都会被忽略。中止信号采用协作式处理。后续步骤和重试会复用同一快照；如果权限、进程或项目范围
+不再有效，相应贡献会被排除。此钩子不会向插件暴露提示词、消息、文件路径、草稿或工具输出。
+
+模型只会在发出的用户消息上收到带标签、信任等级较低的引用文本块。系统指令、持久转录、渲染器及
+子代理都不变。此钩子不会用于 `pi.agent.complete`、原生 Pi 会话、独立请求或压缩摘要。
 
 ## 6. 面板桥 API
 

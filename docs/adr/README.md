@@ -418,3 +418,4 @@ Each ADR includes:
 | 0354 | [Pause Agent tasks at a safe turn boundary](0354-safe-agent-task-pause-and-resume.md) | Accepted for implementation; preserves no-replay for uncertain interrupted work |
 
 | model-reasoning-effort-override | [Model reasoning effort override](model-reasoning-effort-override.md) | Proposed |
+| plugin-turn-observation-model-context-and-suggestion-targets | [Turn observations, scoped model context, and plugin Composer suggestion targets](plugin-turn-observation-model-context-and-suggestion-targets.md) | Accepted for additive plugin platform contract (#2470) |

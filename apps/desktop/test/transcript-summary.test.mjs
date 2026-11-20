@@ -6,9 +6,10 @@ const {
   assistantTurnContent, assistantTurnMessages, assistantTurnUsage,
   assistantTurnResponseDuration, assistantTurnResponseOutputTokens,
   assistantTurnResponseOutputIsEstimated, assistantTurnTools,
+  buildTranscriptEntries,
 } = await import("../src/lib/assistant-turns.ts");
 const { getAssistantTurnSummary, getAssistantTurnContent, messageContentFacts, reuseReferences } = await import("../src/lib/transcript-summary.ts");
-const { projectTurnProcess } = await import("../src/lib/turn-process.ts");
+const { processContainsMessage, projectTurnProcess } = await import("../src/lib/turn-process.ts");
 const { activitySummary, visibleActivityItems } = await import("../src/lib/activity-summary.ts");
 const { cachedActivitySummary, cachedVisibleActivityItems, cachedVisibleProcessSteps, activityTimingInputs } = await import("../src/lib/transcript-activity-summary.ts");
 const { collectDelegationStatuses, collectDelegationTimings, delegationTimingBounds } = await import("../src/lib/subagent-topology.ts");
@@ -18,6 +19,69 @@ const message = (id, content, extra = {}) => ({
   id, role: "assistant", content, createdAt: "2026-09-17T00:00:00.000Z", ...extra,
 });
 const entry = (messages) => ({ kind: "assistant-turn", id: "turn", parts: messages.map((message) => ({ kind: "message", message })) });
+
+const commentarySignature = JSON.stringify({ v: 1, id: "msg_progress", phase: "commentary" });
+const textBlock = (text, signature) => ({ type: "text", length: text.length, ...(signature ? { signature } : {}) });
+
+test("Responses commentary alone is progress, not a visible answer or action target", () => {
+  const content = "Checking the files.";
+  const providerReplay = { version: 1, blocks: [textBlock(content, commentarySignature)] };
+  for (const extra of [
+    { status: "streaming" },
+    { status: "complete" },
+    { status: "error", error: { code: "INTERNAL", message: "Offline" } },
+    { status: "complete", outputTruncated: true },
+  ]) {
+    const row = message("reply", content, { providerReplay, ...extra });
+    const [turn] = buildTranscriptEntries([row]).entries;
+    const summary = getAssistantTurnSummary(turn);
+    assert.deepEqual(summary.process.map((part) => [part.kind, part.message.content]), [["message", content]]);
+    assert.ok(processContainsMessage(summary.process, row.id));
+    assert.deepEqual(summary.responses.map(({ message: reply }) => [reply.content, reply.error, reply.outputTruncated]),
+      row.error || row.outputTruncated ? [["", row.error, row.outputTruncated]] : []);
+    assert.equal(summary.hasContent, false);
+    assert.equal(summary.actionMessage, undefined);
+    assert.equal(getAssistantTurnContent(turn), "");
+    assert.equal(assistantTurnContent(turn), "");
+  }
+});
+
+test("signed Responses blocks move only commentary into progress and do not duplicate metrics", () => {
+  const intro = message("intro", "Unmarked earlier text.");
+  const progress = "Looking up references.";
+  const second = "Checking the result.";
+  const raw = `**A 🔍${progress} and ${second}B**`;
+  const reply = "**A 🔍 and B**";
+  const row = message("reply", raw, {
+    status: "complete",
+    thinking: "Why",
+    responseDurationMs: 17,
+    usage: { inputTokens: 3, outputTokens: 2, totalTokens: 5 },
+    providerReplay: { version: 1, blocks: [
+      textBlock("**A 🔍"),
+      textBlock(progress, commentarySignature),
+      { type: "thinking", length: 3, signature: commentarySignature },
+      textBlock(" and ", "opaque-provider-signature"),
+      textBlock(second, JSON.stringify({ v: 1, id: "msg_progress_2", phase: "commentary" })),
+      textBlock("B**", JSON.stringify({ v: 1, id: "msg_final", phase: "final_answer" })),
+    ] },
+  });
+  const [turn] = buildTranscriptEntries([intro, row]).entries;
+  const { process, responses } = projectTurnProcess(turn);
+  assert.deepEqual(process.filter((part) => part.kind === "message").map((part) => part.message.content),
+    [intro.content, progress, second]);
+  assert.deepEqual(responses.map((part) => part.message.content), [reply]);
+  const summary = getAssistantTurnSummary(turn);
+  assert.equal(summary.actionMessage.id, row.id);
+  assert.equal(summary.actionMessage.content, reply);
+  assert.deepEqual(summary.usage, row.usage);
+  assert.equal(summary.responseDurationMs, 17);
+  assert.equal(summary.responseOutputTokens, row.usage.outputTokens);
+  assert.equal(summary.responseOutputEstimated, false);
+  assert.equal(getAssistantTurnContent(turn), `${intro.content}\n\n${reply}`);
+  assert.equal(assistantTurnContent(turn), `${intro.content}\n\n${reply}`);
+  assert.equal(row.content, raw);
+});
 
 test("tail text updates do not read historical assistant content", () => {
   let reads = 0;

@@ -145,6 +145,8 @@ import {
 } from "./assistant-provider-replay.js";
 import {
   assistantContent,
+  sameCommentaryBoundaries,
+  type CommentaryTranscript,
   isRecord,
   nowIso,
   timestampMs,
@@ -171,6 +173,7 @@ import {
   estimateTokens,
 } from "./pi-runtime-estimates.js";
 import { convertToLlmForProvider } from "./pi-runtime-messages.js";
+import { withPluginModelContext } from "./plugin-model-context.js";
 import type {
   CompactionEntry,
   CompactionPreparation,
@@ -228,6 +231,7 @@ import {
   effectiveModelContextWindow,
   estimateOutputCapInputTokens,
   requestTranscript,
+  supportsMidConversationSystemMessages,
 } from "./output-cap.js";
 import {
   composeSubagentSystemPrompt,
@@ -1021,6 +1025,8 @@ export type AgentRuntimeOptions = {
   jevApiKey?: string;
   /** Host-authoritative opt-in for the native Computer tool. */
   computerUseEnabled?: boolean;
+  /** Host-approved opt-in for process plugin context on provider requests. */
+  pluginModelContextEnabled?: boolean;
   systemPrompt?: string;
   /** pi-compatible SYSTEM.md / APPEND_SYSTEM.md resolved for the session (issue #542). */
   customSystemPrompt?: CustomSystemPrompt;
@@ -1098,6 +1104,7 @@ export type RuntimeMatchConfig = {
   thinkingLevel: SessionThinkingLevel;
   jevApiKey?: string;
   computerUseEnabled?: boolean;
+  pluginModelContextEnabled?: boolean;
   pluginTools?: PluginToolDef[];
   pluginSkills?: PluginSkillDef[];
   trustedExtensions?: TrustedExtensionSpec[];
@@ -1146,8 +1153,10 @@ export function isProgressOnlyAssistantTurn(message: unknown): boolean {
   if (!isRecord(message) || message.role !== "assistant") return false;
   if (messageRequestsTools(message)) return false;
   const content = isRecord(message) ? message.content : undefined;
-  const text = assistantContent(content).text.trim();
-  if (!text || !hasProgressForwardIntent(text)) return false;
+  const assistant = assistantContent(content);
+  const text = assistant.text.trim();
+  if (!text && assistant.transcript?.text.trim()) return true;
+  if (assistant.hasFinalAnswer || !text || !hasProgressForwardIntent(text)) return false;
   if (!PROGRESS_TERMINAL_LEAD.test(text)) return true;
 
   // A report can mention a completed step and still announce the next one.
@@ -1846,6 +1855,7 @@ export class DesktopAgentRuntime {
   private planningState: PlanningState;
   private pendingPlanId?: string;
   private currentAssistant?: UiMessage;
+  private liveCommentary?: CommentaryTranscript;
   private pluginTools: PluginToolDef[];
   private pluginSkills: PluginSkillDef[];
   private trustedExtensionSpecs: TrustedExtensionSpec[];
@@ -2037,6 +2047,7 @@ export class DesktopAgentRuntime {
   private activeCompaction?: ContextCompactionRecord;
   private compactionEnabled: boolean;
   private computerUseEnabled: boolean;
+  private pluginModelContextEnabled: boolean;
   private readonly compactionStrategy: CompactionStrategy;
   private pendingUserMessageId?: string;
   private acceptingSteering = false;
@@ -2100,6 +2111,7 @@ export class DesktopAgentRuntime {
     this.onEvent = (envelope) => this.streamSink.push(envelope);
     this.pluginTools = opts.pluginTools ?? [];
     this.computerUseEnabled = opts.computerUseEnabled === true;
+    this.pluginModelContextEnabled = opts.pluginModelContextEnabled === true;
     this.pluginSkills = [...(opts.pluginSkills ?? [])].sort((left, right) => left.id.localeCompare(right.id));
     this.trustedExtensionSpecs = opts.trustedExtensions ?? [];
     this.subagents = opts.subagents ?? [];
@@ -2346,8 +2358,23 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
             sessionId: this.sessionId, turnId: this.turnId, message,
           });
         });
+        // Convert the runtime transcript first: it may contain UI-only agent
+        // messages that are intentionally absent from the provider wire format.
+        // Plugin context is projected only onto this request copy, after
+        // conversion, so it never enters the persisted transcript.
+        let providerMessages = await convertToLlmForProvider(
+          this.dropDuplicateToolCalls(messages),
+        );
+        if (this.pluginModelContextEnabled && this.turnId) {
+          const pluginContext = await this.host.call<unknown>("plugins.modelContext.read", {
+            sessionId: this.sessionId,
+            turnId: this.turnId,
+            modelKey: `${this.model.provider}/${this.model.id}`,
+          });
+          providerMessages = withPluginModelContext(providerMessages, pluginContext);
+        }
         return alignRetainedReasoningIdentity(
-          await convertToLlmForProvider(this.dropDuplicateToolCalls(messages)),
+          providerMessages,
           this.reasoningReplayIdentity(),
         );
       },
@@ -2795,6 +2822,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
       ["mode", this.mode === config.mode],
       ["jevApiKey", this.jevApiKey === config.jevApiKey],
       ["computerUseEnabled", this.computerUseEnabled === (config.computerUseEnabled === true)],
+      ["pluginModelContextEnabled", this.pluginModelContextEnabled === (config.pluginModelContextEnabled === true)],
       ["thinkingLevel", this.thinkingLevel === clampThinkingLevel(config.provider, config.thinkingLevel)],
       ["pluginTools", current === next],
       ["commandShell", safeJson(this.commandShell) === safeJson(config.commandShell)],
@@ -6691,6 +6719,28 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
   }
 
   private emit(event: AgentEventEnvelope["event"], turnId?: string, ts = Date.now()) {
+    // Runtime/business state keeps answer-only text. The transcript event
+    // carries the signed original so reloads can project progress without
+    // persisting any derived copy or changing model context.
+    if (
+      this.liveCommentary &&
+      (event.type === "message_start" || event.type === "message_update" || event.type === "message_end") &&
+      event.message.id === this.currentAssistant?.id
+    ) {
+      const replay = event.type === "message_end"
+        ? event.message.providerReplay
+        : this.liveCommentary.replay;
+      if (replay?.blocks.length) {
+        event = {
+          ...event,
+          message: {
+            ...event.message,
+            content: this.liveCommentary.text,
+            providerReplay: replay,
+          },
+        };
+      }
+    }
     this.onEvent({
       sessionId: this.sessionId,
       turnId: turnId ?? this.turnId,
@@ -7435,19 +7485,14 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
     const remaining = Math.max(0, budget.hardLimit - budget.tokens);
     const reminder = this.claimContextBudgetReminder(remaining, budget);
     if (!reminder) return context;
-    const legacyContext = context as AgentContext & { systemPrompt?: string };
-    const systemPrompt =
-      typeof legacyContext.systemPrompt === "string"
-        ? `${legacyContext.systemPrompt}\n\n${reminder}`
-        : undefined;
-    return {
-      ...context,
-      ...(systemPrompt ? { systemPrompt } : {}),
-      messages: [
-        ...context.messages,
-        { role: "system", content: "", sections: { [CONTEXT_BUDGET_SECTION]: reminder }, timestamp: Date.now() },
-      ],
-    } as AgentContext;
+    // A changing reminder must not rewrite the request prefix. Keep it as a
+    // replaceable system section only on adapters that preserve mid-run system
+    // messages; otherwise pi-ai folds it into the first system message, so use
+    // a request-only user tail that is never persisted or reused next turn.
+    const message: AgentMessage = supportsMidConversationSystemMessages(this.model)
+      ? { role: "system", content: "", sections: { [CONTEXT_BUDGET_SECTION]: reminder }, timestamp: Date.now() }
+      : { role: "user", content: [{ type: "text", text: reminder }], timestamp: Date.now() };
+    return { ...context, messages: [...context.messages, message] };
   }
 
   private claimContextBudgetReminder(
@@ -8526,6 +8571,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
               : this.progressTurnRerunInProgress || this.overflowRecoveryInProgress
                 ? retryingAssistant?.content ?? ""
                 : content.text;
+          this.liveCommentary = initialText === content.text ? content.transcript : undefined;
           this.currentAssistant = {
             id: retryingAssistant?.id ?? randomUUID(),
             role: "assistant",
@@ -8568,6 +8614,8 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
         if (this.currentAssistant && event.message.role === "assistant") {
           this.applyHostedSearch(event.message);
           const content = assistantContent((event.message as any).content);
+          const previousCommentary = this.liveCommentary;
+          if (content.hasText) this.liveCommentary = content.transcript;
           const previousText = this.currentAssistant.content;
           const previousThinking = this.currentAssistant.thinking ?? "";
           const nextText = content.hasText ? content.text : previousText;
@@ -8575,7 +8623,10 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
             ? content.thinking
             : previousThinking;
           const textDelta = content.hasText
-            ? cumulativeDelta(previousText, content.text)
+            ? cumulativeDelta(
+                previousCommentary?.text ?? previousText,
+                this.liveCommentary?.text ?? content.text,
+              )
             : { delta: "", reset: false };
           const thinkingDelta = content.hasThinking
             ? cumulativeDelta(previousThinking, content.thinking)
@@ -8590,7 +8641,10 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
                 : {}),
             status: "streaming",
           };
-          if (
+          if (!sameCommentaryBoundaries(previousCommentary, this.liveCommentary) ||
+              (this.liveCommentary !== undefined && textDelta.reset)) {
+            this.emit({ type: "message_update", message: this.currentAssistant });
+          } else if (
             textDelta.delta ||
             thinkingDelta.delta ||
             textDelta.reset ||
@@ -8635,6 +8689,10 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
         if (this.currentAssistant && event.message.role === "assistant") {
           const assistantId = this.currentAssistant.id;
           const content = assistantContent((event.message as any).content);
+          const visibleTranscript = content.hasText
+            ? content.transcript?.text
+            : this.liveCommentary?.text;
+          this.liveCommentary = content.transcript;
           // pi-agent-core encodes stream failures in the final message
           // (stopReason "error"/"aborted" + errorMessage) and resolves the
           // prompt normally, so this is where provider/model errors surface.
@@ -8741,6 +8799,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
             !failed &&
             !aborted &&
             responseText.trim().length === 0 &&
+            !content.transcript?.text.trim() &&
             !messageRequestsTools(event.message);
           // A completion notice needs no acknowledgement, so its own reply may
           // stay silent (D446). The exception covers exactly that reply: the
@@ -8898,7 +8957,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
           const responseOutputTokens =
             aborted && (!usage || usage.outputTokens <= 0)
               ? estimateVisibleResponseOutputTokens({
-                  content: nextText,
+                  content: visibleTranscript ?? nextText,
                   thinking: nextThinking,
                 })
               : undefined;
@@ -8944,6 +9003,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
           if (!this.currentAssistant.providerReplay) delete this.currentAssistant.providerReplay;
           if (!this.currentAssistant.responseModelId) delete this.currentAssistant.responseModelId;
           this.emit({ type: "message_end", message: this.currentAssistant });
+          this.liveCommentary = undefined;
           this.activeProviderRetryAttempt = 0;
           this.streamStartedAt = undefined;
           this.currentAssistant = undefined;
@@ -9157,7 +9217,10 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
         (responseDurationMs ?? 0);
       const responseOutputTokens =
         status === "aborted"
-          ? estimateVisibleResponseOutputTokens(this.currentAssistant)
+          ? estimateVisibleResponseOutputTokens({
+              content: this.liveCommentary?.text ?? this.currentAssistant.content,
+              thinking: this.currentAssistant.thinking,
+            })
           : undefined;
       this.currentAssistant = {
         ...this.currentAssistant,
@@ -9177,6 +9240,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
     // burns its retries before giving up shows here as a large providerWaitMs.
     this.streamStartedAt = undefined;
     this.currentAssistant = undefined;
+    this.liveCommentary = undefined;
   }
 
   /** Keep a pre-flight user message in context so a reused runtime and the

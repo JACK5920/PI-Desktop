@@ -7,7 +7,7 @@
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { JsonObject, JsonValue, Usage } from "@earendil-works/pi-ai";
-import type { MessageUsage, UsageProvenance } from "@pi-desktop/shared";
+import { responsesTextPhase, type AssistantProviderReplay, type MessageUsage, type UsageProvenance } from "@pi-desktop/shared";
 
 export function nowIso(): string {
   return new Date().toISOString();
@@ -121,7 +121,26 @@ export type AssistantContent = {
   thinking: string;
   hasText: boolean;
   hasThinking: boolean;
+  hasFinalAnswer?: true;
+  transcript?: CommentaryTranscript;
 };
+
+/** Original Responses text for the transcript; business callers use `text`. */
+export type CommentaryTranscript = { text: string; replay: AssistantProviderReplay };
+
+/** Appends to the trailing block are deltas; changed boundaries need a snapshot. */
+export function sameCommentaryBoundaries(
+  previous?: CommentaryTranscript,
+  next?: CommentaryTranscript,
+): boolean {
+  if (!previous || !next) return previous === next;
+  const before = previous.replay.blocks;
+  const after = next.replay.blocks;
+  return before.length === after.length && before.every((block, index) =>
+    block.signature === after[index].signature &&
+    (index === before.length - 1 || block.length === after[index].length),
+  );
+}
 
 /** Flatten a pi-ai assistant content array into visible text and reasoning. */
 export function assistantContent(content: unknown): AssistantContent {
@@ -136,16 +155,34 @@ export function assistantContent(content: unknown): AssistantContent {
   let thinking = "";
   let hasText = false;
   let hasThinking = false;
-  for (const part of content) {
-    if (!part || typeof part !== "object") continue;
-    const block = part as {
-      type?: string;
-      text?: string;
-      thinking?: string;
-    };
+  let hasFinalAnswer = false;
+  let transcript: CommentaryTranscript | undefined;
+  for (const block of content) {
+    if (!isRecord(block)) continue;
     if (block.type === "text" && typeof block.text === "string") {
       hasText = true;
-      text += block.text;
+      const phase = responsesTextPhase(block.textSignature);
+      if (phase === "commentary" && !transcript) {
+        transcript = {
+          text,
+          replay: {
+            version: 1,
+            blocks: text ? [{ type: "text", length: text.length }] : [],
+          },
+        };
+      }
+      if (transcript) {
+        transcript.text += block.text;
+        transcript.replay.blocks.push({
+          type: "text",
+          length: block.text.length,
+          ...(phase && typeof block.textSignature === "string"
+            ? { signature: block.textSignature }
+            : {}),
+        });
+      }
+      if (phase !== "commentary") text += block.text;
+      if (phase === "final_answer" && block.text.length > 0) hasFinalAnswer = true;
     } else if (block.type === "thinking") {
       hasThinking = true;
       if (typeof block.thinking === "string") {
@@ -156,7 +193,14 @@ export function assistantContent(content: unknown): AssistantContent {
       }
     }
   }
-  return { text, thinking, hasText, hasThinking };
+  return {
+    text,
+    thinking,
+    hasText,
+    hasThinking,
+    ...(hasFinalAnswer ? { hasFinalAnswer: true } : {}),
+    ...(transcript ? { transcript } : {}),
+  };
 }
 
 /**

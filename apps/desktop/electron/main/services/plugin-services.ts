@@ -1,5 +1,5 @@
 import { dialog, globalShortcut, shell, type BrowserWindow } from "electron";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { getActiveRemoteHostsBoot } from "../bootstrap/remote-hosts";
 import { createPluginWorkspaceReader } from "../remote/plugin-workspace-files";
 import {
@@ -62,6 +62,7 @@ import type { HostProcess } from "../host-process";
 import { createPluginSessionContext } from "./plugin-session-context";
 import { createPluginProjectLister } from "./plugin-projects";
 import { createComposerSuggestionRelay } from "./composer-suggestion";
+import { createPluginModelContext } from "../runtime/plugin-model-context";
 import type { Logger } from "../logger";
 import type { PluginAppearance } from "../../shared/plugin-panel-chrome";
 
@@ -91,6 +92,8 @@ export type PluginServicesDependencies = {
   vendorOAuth: VendorOAuth;
   /** The live turn of one session, read from the host's own turn map. */
   getActiveTurn: (sessionId: string) => string | null;
+  /** Guard plugin model-context reads against a stopped or replaced turn. */
+  isTurnDispatchable: (sessionId: string, turnId: string) => boolean;
   /**
    * Whether a plugin's contributions apply to the project the window shows.
    * Scope records live in Main, so this is the one lookup that decides.
@@ -128,6 +131,7 @@ export function createPluginServices({
   resolveAgentRuntimeLaunch,
   vendorOAuth,
   getActiveTurn,
+  isTurnDispatchable,
   isPluginActiveInProject,
   pluginActiveInProject,
 }: PluginServicesDependencies) {
@@ -765,6 +769,7 @@ export function createPluginServices({
   const announceTurnEnded = (payload: TurnEndedPayload): void => {
     plugins.deliverTurnEnded(payload);
     broadcastSessionEvent("session:turnEnded", payload);
+    pluginModelContext.end(payload.sessionId, payload.turnId);
     // The snapshot also carries the running turn, so a surface that subscribes
     // to `session:activated` learns the selected session went idle from the
     // same event stream it learns a switch from.
@@ -791,6 +796,35 @@ export function createPluginServices({
     sendToRenderer,
     getActiveSession: () => pluginSession.snapshot(),
     log: (message, data) => logger.app("plugin", "warn", message, { data }),
+  });
+  const pluginModelContext = createPluginModelContext({
+    isDispatchable: isTurnDispatchable,
+    projectFor: (sessionId) => sessionProjects.get(sessionId) ?? null,
+    inProject: pluginActiveInProject,
+    providers: (inScope) => plugins.modelContextProviders(inScope),
+    projectId: async (projectPath) => {
+      const host = getHost();
+      if (!host?.isAvailable()) return undefined;
+      try {
+        const result = await host.call<{
+          projects?: Array<{ id?: string | number; path?: string }>;
+        }>("projects.list", undefined, 5_000);
+        const expected = resolve(projectPath);
+        const project = result.projects?.find((item) => {
+          if (typeof item.path !== "string" || item.id === undefined || item.id === null) return false;
+          const candidate = resolve(item.path);
+          return process.platform === "win32"
+            ? candidate.toLocaleLowerCase("en-US") === expected.toLocaleLowerCase("en-US")
+            : candidate === expected;
+        });
+        return project?.id === undefined || project.id === null ? undefined : String(project.id);
+      } catch (error) {
+        logger.app("plugin", "warn", "plugin model-context project lookup failed", {
+          data: String(error),
+        });
+        return undefined;
+      }
+    },
   });
   const pluginViews = new PluginViewHost(({ pluginId, url }) => {
     logger.app("plugin", "warn", "plugin.api", {
@@ -899,6 +933,8 @@ export function createPluginServices({
      * composer.
      */
     suggestComposer: (offer) => composerSuggestion.offer(offer),
+    getComposerSuggestionTarget: (pluginId, input) => composerSuggestion.getTarget(pluginId, input),
+    suggestComposerCandidates: (pluginId, input) => composerSuggestion.offerCandidates(pluginId, input),
     /** `pi.composer.clearSuggestion`: drop this plugin's own line. */
     clearComposerSuggestion: (pluginId, sessionId) =>
       composerSuggestion.clearSuggestion(pluginId, sessionId),
@@ -941,6 +977,10 @@ export function createPluginServices({
     sessionProjects,
     emitBrowserState,
     announceTurnEnded,
+    announceObservedSession: broadcastSessionEvent,
+    observePersistedUserMessage: (payload: { sessionId: string; turnId: string; messageId: string }) =>
+      broadcastSessionEvent("session:userMessagePersisted", payload),
+    readPluginModelContext: (params: Record<string, unknown>) => pluginModelContext.read(params),
     pluginPanels,
     pluginViews,
     browserHost,
