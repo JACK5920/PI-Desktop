@@ -242,6 +242,7 @@ export const IPC = {
     ompRpcCommand: "pi-desktop/omp/rpc/command",
     ompRpcReopenWithModel: "pi-desktop/omp/rpc/reopenWithModel",
     ompRpcForkSession: "pi-desktop/omp/rpc/forkSession",
+    ompRpcNavigateTree: "pi-desktop/omp/rpc/navigateTree",
     ompRpcUiResponse: "pi-desktop/omp/rpc/uiResponse",
     ompMicrophoneAcquire: "pi-desktop/omp/microphone/acquire",
     ompMicrophoneRelease: "pi-desktop/omp/microphone/release",

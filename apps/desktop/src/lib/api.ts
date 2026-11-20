@@ -1145,6 +1145,15 @@ export const api = {
   forkOmpSession: (input: { sessionId: string; entryId: string }) =>
     invoke<{ session: SessionSummary; parentMessages: UiMessage[] }>(IPC.invoke.ompRpcForkSession, input)
       .then((result) => ({ ...result, session: normalizeSession(result.session) })),
+  navigateOmpTree: (input: { sessionId: string; entryId: string }) =>
+    invoke<{
+      cancelled: boolean;
+      leafId: string | null;
+      previousLeafId: string | null;
+      messages: UiMessage[];
+      editorText?: string;
+      editorImages?: Array<{ dataUrl: string; mimeType: string }>;
+    }>(IPC.invoke.ompRpcNavigateTree, input),
   ompRpcCommand: (input: { sessionId: string; command: string; fields?: Record<string, unknown> }) =>
     invoke<unknown>(IPC.invoke.ompRpcCommand, input),
   reopenOmpRpcWithModel: (input: { sessionId: string; provider: string; modelId: string }) =>

@@ -46,6 +46,7 @@ import {
 import { conversationMenuItems, hasConversationToCopy } from "./menu-items";
 import { browserPluginTab } from "../../../lib/work-panel-tabs";
 import { isRemoteSession, sessionAllows } from "../../../lib/remote-session-safety";
+import { getTranscriptHistoryCapabilities } from "../../../lib/transcript-history-capabilities.mjs";
 import {
   RADIAL_MENU_ACTION_LABEL_KEYS,
   RADIAL_MENU_DIRECTIONS,
@@ -584,6 +585,7 @@ function TranscriptBody({
         onAskInSideChat={
           allowSideChatSelection &&
           sessionSummary &&
+          getTranscriptHistoryCapabilities(sessionSummary.agentEngine).canCreateGenericFork &&
           sessionAllows(sessionSummary, "canEditMessages") &&
           sessionAllows(sessionSummary, "canPrompt")
             ? (selection) => {

@@ -16,6 +16,7 @@ import {
 import { optimisticUserMessage } from "../../lib/session-transcript";
 import { withReviewChangeState } from "../../lib/workspace-review";
 import { settleStoppedAssistantMetrics } from "../../lib/context-usage";
+import { getTranscriptHistoryCapabilities } from "../../lib/transcript-history-capabilities.mjs";
 import type { AppState } from "../app-state";
 import type { SessionRuntime } from "../runtime/session-runtime";
 import { prepareTranscriptAction } from "../runtime/transcript-action";
@@ -61,6 +62,11 @@ export function createTranscriptSlice({
     return sessionAllows(state.sessions.find((session) => session.id === state.activeSessionId)
       ?? { id: state.activeSessionId ?? "" }, "canEditMessages");
   };
+  const historyCapabilities = () => {
+    const state = get();
+    const session = state.sessions.find((item) => item.id === state.activeSessionId);
+    return getTranscriptHistoryCapabilities(session?.agentEngine);
+  };
   return {
     compactContext: async () => {
       const state = get();
@@ -96,7 +102,8 @@ export function createTranscriptSlice({
     },
 
     retryAssistantMessage: async (messageId) => {
-      if (!canEdit()) return;
+      const capabilities = historyCapabilities();
+      if (!canEdit() || (!capabilities.canRegenerateAssistant && !capabilities.canRegenerateAssistantInNativeBranch)) return;
       const prepared = await prepareTranscriptAction({ get, set }, runtime, messageId);
       const state = get();
       if (!prepared || state.activeSessionId !== prepared.activeSessionId || state.isRunning) return;
@@ -121,7 +128,8 @@ export function createTranscriptSlice({
     },
 
     prepareUserMessageEdit: async (messageId, signal) => {
-      if (!canEdit()) return null;
+      const capabilities = historyCapabilities();
+      if (!canEdit() || (!capabilities.canEditUserMessage && !capabilities.canEditUserMessageInNativeBranch)) return null;
       const prepared = await prepareTranscriptAction({ get, set }, runtime, messageId, signal);
       const state = get();
       if (!prepared || state.activeSessionId !== prepared.activeSessionId || state.isRunning) return null;
@@ -130,7 +138,8 @@ export function createTranscriptSlice({
     },
 
     editUserMessage: async (messageId, content, attachments) => {
-      if (!canEdit()) return false;
+      const capabilities = historyCapabilities();
+      if (!canEdit() || (!capabilities.canEditUserMessage && !capabilities.canEditUserMessageInNativeBranch)) return false;
       const prepared = await prepareTranscriptAction({ get, set }, runtime, messageId);
       const state = get();
       if (!prepared || state.activeSessionId !== prepared.activeSessionId || state.isRunning) return false;
@@ -138,13 +147,15 @@ export function createTranscriptSlice({
       if (!sessionId) return false;
       if (state.pendingPlans[sessionId]?.status === "pending") return false;
       const prompt = content.trim();
+      const nativeEdit = capabilities.canEditUserMessageInNativeBranch;
       const userIndex = state.messages.findIndex(
         (message) => message.id === messageId,
       );
       if (userIndex < 0 || state.messages[userIndex].role !== "user") return false;
       if (
         !prompt &&
-        !(attachments ?? state.messages[userIndex].attachments)?.length
+        !(attachments ?? state.messages[userIndex].attachments)?.length &&
+        !state.messages[userIndex].inlineImages?.length
       ) {
         return false;
       }
@@ -187,61 +198,100 @@ export function createTranscriptSlice({
           messageId: optimisticMessage.id,
           viewingSessionId: viewingSessionIdForPrompt(get(), sessionId),
           attachments: promptAttachments,
-          truncateFromMessageId,
+          ...(nativeEdit ? {
+            ompNativeEdit: {
+              messageId,
+            },
+          } : { truncateFromMessageId }),
         });
         // A successful edit supersedes the failed local attempt that occupied
         // this message ID; do not re-inject it on the next transcript refresh.
         runtime.clearPendingPromptAttempt(sessionId, messageId);
         return true;
       } catch (error) {
+        const errorCode = (error as { code?: string; errorCode?: string } | null)?.code ??
+          (error as { errorCode?: string } | null)?.errorCode;
+        const nativeHistoryConflict = nativeEdit && errorCode === "OMP_HISTORY_STALE";
         try {
           const detail = await api.getSession(sessionId);
-          set((current) => ({
-            messages:
-              current.activeSessionId === sessionId
-                ? detail.session?.messages ?? kept
-                : current.messages,
-            isRunning:
-              current.activeSessionId === sessionId ? false : current.isRunning,
-            runningSessions: { ...current.runningSessions, [sessionId]: false },
-            latestTurnResults: {
-              ...current.latestTurnResults,
-              [sessionId]: {
-                status: "failed",
-                turnId: `${sessionId}:${Date.now()}`,
-                finishedAt: Date.now(),
-                errorCode: (error as { code?: string })?.code,
-              },
-            },
-            sessionOutcomes: { ...current.sessionOutcomes, [sessionId]: "failed" },
-            error: error instanceof Error ? error.message : String(error),
-            errorCode: (error as { code?: string })?.code ?? null,
-          }));
+          set((current) => nativeHistoryConflict
+            ? {
+                messages:
+                  current.activeSessionId === sessionId
+                    ? detail.session?.messages ?? current.messages
+                    : current.messages,
+                isRunning:
+                  current.activeSessionId === sessionId ? false : current.isRunning,
+                runningSessions: { ...current.runningSessions, [sessionId]: false },
+                latestTurnResults: withoutRecordKey(current.latestTurnResults, sessionId),
+                sessionOutcomes: withoutRecordKey(current.sessionOutcomes, sessionId),
+                error: null,
+                errorCode: null,
+                errorDetails: null,
+                errorRetriable: null,
+              }
+            : {
+                messages:
+                  current.activeSessionId === sessionId
+                    ? detail.session?.messages ?? kept
+                    : current.messages,
+                isRunning:
+                  current.activeSessionId === sessionId ? false : current.isRunning,
+                runningSessions: { ...current.runningSessions, [sessionId]: false },
+                latestTurnResults: {
+                  ...current.latestTurnResults,
+                  [sessionId]: {
+                    status: "failed",
+                    turnId: `${sessionId}:${Date.now()}`,
+                    finishedAt: Date.now(),
+                    errorCode,
+                  },
+                },
+                sessionOutcomes: { ...current.sessionOutcomes, [sessionId]: "failed" },
+                error: error instanceof Error ? error.message : String(error),
+                errorCode: errorCode ?? null,
+              });
         } catch {
-          set((current) => ({
-            isRunning:
-              current.activeSessionId === sessionId ? false : current.isRunning,
-            runningSessions: { ...current.runningSessions, [sessionId]: false },
-            latestTurnResults: {
-              ...current.latestTurnResults,
-              [sessionId]: {
-                status: "failed",
-                turnId: `${sessionId}:${Date.now()}`,
-                finishedAt: Date.now(),
-                errorCode: (error as { code?: string })?.code,
-              },
-            },
-            sessionOutcomes: { ...current.sessionOutcomes, [sessionId]: "failed" },
-            error: error instanceof Error ? error.message : String(error),
-            errorCode: (error as { code?: string })?.code ?? null,
-          }));
+          set((current) => nativeHistoryConflict
+            ? {
+                isRunning:
+                  current.activeSessionId === sessionId ? false : current.isRunning,
+                runningSessions: { ...current.runningSessions, [sessionId]: false },
+                latestTurnResults: withoutRecordKey(current.latestTurnResults, sessionId),
+                sessionOutcomes: withoutRecordKey(current.sessionOutcomes, sessionId),
+                error: null,
+                errorCode: null,
+                errorDetails: null,
+                errorRetriable: null,
+              }
+            : {
+                isRunning:
+                  current.activeSessionId === sessionId ? false : current.isRunning,
+                runningSessions: { ...current.runningSessions, [sessionId]: false },
+                latestTurnResults: {
+                  ...current.latestTurnResults,
+                  [sessionId]: {
+                    status: "failed",
+                    turnId: `${sessionId}:${Date.now()}`,
+                    finishedAt: Date.now(),
+                    errorCode,
+                  },
+                },
+                sessionOutcomes: { ...current.sessionOutcomes, [sessionId]: "failed" },
+                error: error instanceof Error ? error.message : String(error),
+                errorCode: errorCode ?? null,
+              });
+        }
+        if (nativeHistoryConflict) {
+          get().showToast(error instanceof Error ? error.message : String(error), { variant: "warning" });
         }
         return false;
       }
     },
 
     retryLastPrompt: async (messageId) => {
-      if (!canEdit()) return;
+      const capabilities = historyCapabilities();
+      if (!canEdit() || (!capabilities.canRetryPrompt && !capabilities.canRetryPromptInNativeBranch)) return;
       const state = get();
       if (state.isRunning) return;
       const sessionId = state.activeSessionId;
@@ -252,6 +302,21 @@ export function createTranscriptSlice({
           (message) => message.id === messageId && message.role === "user" && message.status === "error",
         );
         if (!attempt) return;
+        if (capabilities.canRetryPromptInNativeBranch) {
+          // OMP retry is a new prompt on the current native leaf, not a PI
+          // transcript truncate. Use a fresh message ID so an earlier failed
+          // Host mirror row cannot be mistaken for a late successful receipt.
+          const fileReferences = (attempt.attachments ?? [])
+            .filter(isRenderableAttachment)
+            .map((attachment) => ({
+              path: attachment.ref,
+              name: attachment.name,
+              kind: attachment.kind,
+              mimeType: attachment.mimeType,
+            }));
+          await get().sendPrompt(attempt.content, { text: attempt.content, fileReferences }, sessionId);
+          return;
+        }
         set((current) => ({
           isRunning: current.activeSessionId === sessionId ? true : current.isRunning,
           runningSessions: { ...current.runningSessions, [sessionId]: true },
@@ -413,7 +478,7 @@ export function createTranscriptSlice({
     clearError: () => set({ error: null, errorCode: null, errorDetails: null, errorRetriable: null }),
 
     activateMessageRevision: async (rootUserId, revisionIndex) => {
-      if (!canEdit()) return;
+      if (!canEdit() || !historyCapabilities().canUseRevisions) return;
       let state = get();
       if (state.isRunning) return;
       const sessionId = state.activeSessionId;
@@ -470,7 +535,7 @@ export function createTranscriptSlice({
     },
 
     deleteMessage: async (messageId) => {
-      if (!canEdit()) return;
+      if (!canEdit() || !historyCapabilities().canDeleteMessage) return;
       const sessionId = get().activeSessionId;
       if (!sessionId || get().isRunning) return;
       const previousDelete = pendingMessageDeletes.get(sessionId);

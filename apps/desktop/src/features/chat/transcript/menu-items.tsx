@@ -46,6 +46,9 @@ export function userMessageMenuItems({
   text,
   selectTarget,
   editable,
+  canEdit = editable,
+  canDelete = editable,
+  editLabel = t("chat.editMessage"),
   running,
   revision,
   actions,
@@ -58,6 +61,10 @@ export function userMessageMenuItems({
   selectTarget: HTMLElement | null;
   /** Session-relayed turns are not human input, so they cannot be edited. */
   editable: boolean;
+  /** Separate native-history edit from destructive delete permission. */
+  canEdit?: boolean;
+  canDelete?: boolean;
+  editLabel?: string;
   running: boolean;
   /** Present only while a regenerate left more than one version behind. */
   revision: { count: number; active: number } | null;
@@ -81,10 +88,10 @@ export function userMessageMenuItems({
       onSelect: () => actions.selectText(selectTarget),
     });
   }
-  if (editable) {
+  if (canEdit) {
     items.push({
       id: "edit",
-      label: t("chat.editMessage"),
+      label: editLabel,
       icon: pencilIcon(),
       disabled: running,
       separatorBefore: items.length > 0,
@@ -109,7 +116,7 @@ export function userMessageMenuItems({
         onActivateRevision(Math.min(revision.count, revision.active + 1)),
     });
   }
-  if (editable) {
+  if (canDelete) {
     items.push({
       id: "delete",
       label: t("chat.deleteMessage"),
@@ -135,6 +142,9 @@ export function assistantTurnMenuItems({
   answer,
   selectTarget,
   complete,
+  canRegenerate = complete,
+  canBranch = complete,
+  canAskAboutSelection = complete,
   actions,
   onRegenerate,
   onBranch,
@@ -145,6 +155,10 @@ export function assistantTurnMenuItems({
   selectTarget: HTMLElement | null;
   /** Idle, error-free, and backed by an answer message. */
   complete: boolean;
+  /** Engine-specific history operations; default to the settled-turn behavior. */
+  canRegenerate?: boolean;
+  canBranch?: boolean;
+  canAskAboutSelection?: boolean;
   actions: MenuItemActions;
   onRegenerate: () => void;
   onBranch: () => void;
@@ -164,7 +178,7 @@ export function assistantTurnMenuItems({
       icon: selectIcon(),
       onSelect: () => actions.selectText(selectTarget),
     });
-    if (complete) {
+    if (complete && canAskAboutSelection) {
       items.push({
         id: "ask-about-selection",
         label: t("chat.askAboutSelection"),
@@ -174,7 +188,7 @@ export function assistantTurnMenuItems({
       });
     }
   }
-  if (complete) {
+  if (complete && canRegenerate) {
     items.push({
       id: "regenerate",
       label: t("chat.retry"),
@@ -182,6 +196,8 @@ export function assistantTurnMenuItems({
       separatorBefore: items.length > 0,
       onSelect: onRegenerate,
     });
+  }
+  if (complete && canBranch) {
     items.push({
       id: "branch",
       label: t("chat.forkResponse"),

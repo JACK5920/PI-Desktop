@@ -9,6 +9,7 @@ import { splitInlineContent } from "@pi-desktop/shared";
 import ts from "typescript";
 import { getExtraMessageAttachments } from "../src/features/chat/transcript/extra-attachments.ts";
 import { isRemoteSession, safeSessionSummary, sessionAllows } from "../src/lib/remote-session-safety.ts";
+import { getTranscriptHistoryCapabilities } from "../src/lib/transcript-history-capabilities.mjs";
 
 register(new URL("./helpers/ts-import-hooks.mjs", import.meta.url));
 const {
@@ -32,6 +33,7 @@ const store = {
 };
 const useAppStore = (selector) => selector(store);
 const Icon = () => React.createElement("svg", { "aria-hidden": true });
+const Button = ({ children, ...props }) => React.createElement("button", props, children);
 const TooltipButton = ({ children, ariaLabel, tooltip, ...props }) =>
   React.createElement("button", { ...props, "aria-label": ariaLabel ?? tooltip }, children);
 const shared = {
@@ -56,6 +58,7 @@ function loadComponent(name, extras = {}) {
     "react-i18next": { useTranslation: () => ({ t }) },
     "../../../stores/app-store": { useAppStore },
     "../../../lib/remote-session-safety": { isRemoteSession, safeSessionSummary, sessionAllows },
+    "../../../lib/transcript-history-capabilities.mjs": { getTranscriptHistoryCapabilities },
     "../../../lib/response-annotations": {
       annotationsForAssistantMessage: () => [],
       buildAnnotatedPrompt,
@@ -72,7 +75,7 @@ function loadComponent(name, extras = {}) {
     "../../../lib/chat-links": { splitChatText: () => [] },
     "../../../components/Markdown": { Markdown: ({ source: text }) => text },
     "../../../components/icons": new Proxy({}, { get: () => Icon }),
-    "../../../components/ui": { TooltipButton },
+    "../../../components/ui": { Button, TooltipButton },
     "./shared": shared,
     "./menu-items": { userMessageMenuItems: () => [] },
     "./TranscriptMenu": {
@@ -114,6 +117,10 @@ const userMessage = {
   revisionCount: 3,
   activeRevision: 2,
 };
+const messageRowSource = readFileSync(
+  new URL("../src/features/chat/transcript/MessageRow.tsx", import.meta.url),
+  "utf8",
+);
 const provenance = {
   messageId: "delivery-id",
   sourceSessionId: "source-session-id",
@@ -121,9 +128,10 @@ const provenance = {
   targetSessionId: "worker-session-id",
   kind: "task",
 };
-const render = (message, { sessionId = "local-session", allowHistoryMutations = true } = {}) => {
+const render = (message, { sessionId = "local-session", allowHistoryMutations = true, agentEngine } = {}) => {
   paneSessionId = sessionId;
   historyActionsAllowed = allowHistoryMutations;
+  store.sessions = agentEngine ? [{ id: sessionId, agentEngine }] : [];
   return renderToStaticMarkup(React.createElement(MessageRow, { message, isRunning: false }));
 };
 
@@ -133,6 +141,25 @@ test("a human message keeps editing, deletion and regenerate navigation", () => 
   assert.match(html, /aria-label="chat.editMessage"/);
   assert.match(html, /aria-label="chat.deleteMessage"/);
   assert.match(html, /aria-label="chat.revisions"/);
+});
+
+test("OMP human messages expose native edit/retry but hide PI-only deletes and revisions", () => {
+  const html = render({ ...userMessage, status: "error" }, { agentEngine: "omp" });
+  assert.match(html, /aria-label="chat.copy"/);
+  assert.match(html, /data-selection-eligible="true"/);
+  assert.match(html, /aria-label="chat.editMessage"/);
+  assert.match(html, /aria-label="errors.action.retry"/);
+  assert.doesNotMatch(html, /chat.deleteMessage|chat.revisions/);
+});
+
+test("OMP edit form is gated by native edit availability while the action row stays hidden", () => {
+  // OMP can edit only through its native branch capability; do not gate its
+  // editor on PI's separate in-place transcript mutation capability.
+  assert.match(messageRowSource, /\{editing && editUserMessageAvailable \? \(/);
+  assert.match(messageRowSource, /const cancelEdit = \(\) => \{[\s\S]*?setEditing\(false\);/);
+  assert.match(messageRowSource, /onClick=\{cancelEdit\}/);
+  assert.match(messageRowSource, /onSubmit=\{\(event\) => \{[\s\S]*?void retryEdit\(\);/);
+  assert.match(messageRowSource, /!editing && \(hasAnswer \|\| showRevisionPager \|\| failedUserAttempt\)/);
 });
 
 test("an explicitly mentioned agent is shown inline in the typed transcript command", () => {

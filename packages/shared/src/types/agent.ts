@@ -31,6 +31,14 @@ export type AgentPromptRequest = {
    */
   truncateFromMessageId?: string;
   /**
+   * OMP-native edit of an existing user prompt. Electron resolves this
+   * synthetic transcript id against the live OMP tree, navigates to the
+   * prompt's parent, and submits a new sibling without editing PI history.
+   */
+  ompNativeEdit?: {
+    messageId: string;
+  };
+  /**
    * Renderer-chosen id for the new user message (D288). The renderer inserts
    * the row under this id before the host round trip, and the host persists
    * and echoes the durable row under the same id so the echo replaces the

@@ -143,6 +143,11 @@ function startsHttpUrl(text: string, index: number): boolean {
   return text.slice(index + offset, index + offset + 3) === "://";
 }
 
+function startsOmpLocalSpillUrl(text: string, index: number): boolean {
+  const candidate = text.slice(index, index + 11).toLowerCase();
+  return candidate.startsWith("local://") || candidate.startsWith("artifact://");
+}
+
 function urlBreak(code: number): boolean {
   return (
     isWhitespace(code) || code === 0x3c || code === 0x3e || code === 0x22 ||
@@ -442,6 +447,32 @@ export function scanChatLinkCandidates<T>(
     budget.links < CHAT_LINK_SCAN_LIMITS.maxLinks
   ) {
     const start = index;
+    if (isCandidateBoundary(text, index) && startsOmpLocalSpillUrl(text, index)) {
+      const scanned = scanUrlEnd(text, start, budget, stats);
+      if (scanned.exhausted) break;
+      if (scanned.overflow) {
+        index = scanned.end;
+        while (index < text.length && !urlBreak(text.charCodeAt(index))) {
+          const width = codePointWidth(text, index);
+          if (!spend(budget, stats, width, "scan")) break;
+          index += width;
+        }
+        if (budget.workCodeUnits >= CHAT_LINK_SCAN_LIMITS.maxScanWorkCodeUnits) break;
+        continue;
+      }
+      const scannedValue = text.slice(start, scanned.end);
+      const raw = scannedValue.length <= 256 ? trimUrlPunctuation(scannedValue) : "";
+      const target = raw ? resolve(raw) : null;
+      if (target) {
+        candidates.push({ start, end: start + raw.length, raw, target });
+        budget.links += 1;
+        stats.linkCount += 1;
+        index = start + raw.length;
+      } else {
+        index = Math.max(scanned.end, start + 1);
+      }
+      continue;
+    }
     if (startsHttpUrl(text, index)) {
       const scanned = scanUrlEnd(text, start, budget, stats);
       if (scanned.exhausted) break;

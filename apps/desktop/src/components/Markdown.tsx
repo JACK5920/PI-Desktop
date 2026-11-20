@@ -87,7 +87,9 @@ import {
   type ChatFileMenuTarget,
 } from "../hooks/use-chat-file-menu";
 import {
+  hasOmpLocalSpillScheme,
   handleMarkdownFileLinkClick,
+  isOmpLocalSpillRefToken,
   remarkChatFileLinks,
   resolvePreviewTarget,
   safeDecodeUri,
@@ -787,8 +789,14 @@ function Anchor({
 
   const onClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
     if (!localToolsAllowed) { e.preventDefault(); return; }
-    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
     if (!href) return;
+    const decoded = safeDecodeUri(href);
+    if (hasOmpLocalSpillScheme(decoded)) {
+      e.preventDefault();
+      if (isOmpLocalSpillRefToken(decoded)) openFileRef(decoded, baseDir);
+      return;
+    }
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
     if (/^https?:\/\//i.test(href)) {
       e.preventDefault();
       openHttpUrl(href);
@@ -971,7 +979,7 @@ const sanitizeSchema = {
   ...defaultSchema,
   protocols: {
     ...defaultSchema.protocols,
-    href: [...(defaultSchema.protocols?.href ?? []), "pi-annotation"],
+    href: [...(defaultSchema.protocols?.href ?? []), "pi-annotation", "local", "artifact"],
   },
   attributes: {
     ...defaultSchema.attributes,
@@ -1074,7 +1082,9 @@ const Block = memo(function MarkdownBlock({
           rehypePlugins={positionedRehypePlugins}
           components={markdownComponents}
           urlTransform={(url) =>
-            /^pi-annotation:[1-9]\d*$/.test(url) ? url : defaultUrlTransform(url)
+            /^pi-annotation:[1-9]\d*$/.test(url) || isOmpLocalSpillRefToken(url)
+              ? url
+              : defaultUrlTransform(url)
           }
         >
           {raw}

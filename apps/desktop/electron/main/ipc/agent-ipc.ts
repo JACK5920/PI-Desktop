@@ -176,7 +176,7 @@ export function registerAgentIpc({
       dataDir, req.sessionId, localProjectPath, req.attachments ?? [],
       context.supportsVision, steerContent,
     );
-    const session = await host.call<{ session?: { messages?: UiMessage[] } }>("session.get", {
+    const session = await host.call<{ session?: { messages?: UiMessage[]; projectPath?: string } }>("session.get", {
       id: req.sessionId, messageLimit: 1,
     });
     const message: UiMessage = {
@@ -195,18 +195,17 @@ export function registerAgentIpc({
     if (ompOwnsSession) {
       const images = prepared.filter((attachment) => attachment.inlineData && attachment.message.kind === "image")
         .map((attachment) => ({ data: attachment.inlineData!, mimeType: attachment.message.mimeType ?? "image/png" }));
-      if (req.streamingBehavior === "followUp") {
-        await ompRpcRuntime!.command(req.sessionId, "prompt", {
-          message: appendPromptFallbackPaths(steerContent, prepared),
-          ...(images.length ? { images } : {}),
-          streamingBehavior: "followUp",
-        });
-      } else {
-        await ompRpcRuntime!.command(req.sessionId, "steer", {
-          message: appendPromptFallbackPaths(steerContent, prepared),
-          ...(images.length ? { images } : {}),
-        });
-      }
+      const projectPath = typeof session.session?.projectPath === "string" ? session.session.projectPath.trim() : "";
+      await ompRpcRuntime!.prompt({
+        sessionId: req.sessionId,
+        cwd: projectPath || process.env.USERPROFILE || process.env.HOME || ".",
+        ...(projectPath ? { workspaceRoot: projectPath } : {}),
+        message: appendPromptFallbackPaths(steerContent, prepared),
+        messageId: message.id,
+        commandType: req.streamingBehavior === "followUp" ? "prompt" : "steer",
+        ...(images.length ? { images } : {}),
+        ...(req.streamingBehavior === "followUp" ? { streamingBehavior: "followUp" as const } : {}),
+      });
       // OMP owns its native conversation, while Host keeps PI's durable mirror
       // for the app transcript and restart recovery. Persist only after OMP has
       // accepted the control message, so a rejected steer cannot leave a ghost.
@@ -265,6 +264,7 @@ export function registerAgentIpc({
       });
     }
     if (!host) throw new Error("host unavailable");
+    const promptHost = host;
     const releaseSessionOperation = await acquireSessionOperation(req.sessionId);
     try {
     if (compactingSessions.has(req.sessionId)) {
@@ -303,8 +303,39 @@ export function registerAgentIpc({
       typeof session.agentEngine === "string" ? session.agentEngine : settings.agentEngine ?? "pi";
     const selectedEngine = getAgentEngine(engineId);
     if (!selectedEngine) throw new Error(`Unknown Agent engine: ${String(engineId)}`);
+    const ompNativeEditMessageId = req.ompNativeEdit && typeof req.ompNativeEdit === "object" && !Array.isArray(req.ompNativeEdit)
+      ? typeof req.ompNativeEdit.messageId === "string" ? req.ompNativeEdit.messageId.trim() : ""
+      : "";
+    if (req.ompNativeEdit !== undefined && (!ompNativeEditMessageId || ompNativeEditMessageId.length > 160)) {
+      throw Object.assign(new Error("OMP 原生编辑目标无效"), { errorCode: ErrorCodes.INVALID_ARGUMENT });
+    }
+    if (ompNativeEditMessageId && selectedEngine.id !== "omp") {
+      throw Object.assign(new Error("OMP 原生编辑标记只能用于 OMP 会话"), { errorCode: ErrorCodes.INVALID_ARGUMENT });
+    }
+    let ompNativeEditOriginalText: string | undefined;
+    let ompNativeEditOriginalTimestamp: number | undefined;
+    if (ompNativeEditMessageId) {
+      // Read the source row from Host by its stable ID. Renderer attachment
+      // state is already the edited draft and must never be used to identify
+      // the old native OMP prompt.
+      const sourceResult = await promptHost.call<{ session?: { messages?: UiMessage[] } }>("session.get", {
+        id: req.sessionId,
+        messageAround: ompNativeEditMessageId,
+        messageLimit: 1,
+      });
+      const sourceMessage = sourceResult.session?.messages?.find((message) => message.id === ompNativeEditMessageId);
+      if (!sourceMessage || sourceMessage.role !== "user") {
+        throw Object.assign(new Error("要编辑的原消息已不在当前会话记录中；请刷新对话后重试。"), {
+          errorCode: "OMP_HISTORY_STALE",
+        });
+      }
+      // Only used to rebuild a missing native mapping; never sent to OMP.
+      ompNativeEditOriginalText = typeof sourceMessage.content === "string" ? sourceMessage.content : undefined;
+      const parsedTimestamp = typeof sourceMessage.createdAt === "string" ? Date.parse(sourceMessage.createdAt) : Number.NaN;
+      ompNativeEditOriginalTimestamp = Number.isFinite(parsedTimestamp) ? parsedTimestamp : undefined;
+    }
     if (selectedEngine.id === "omp" && (sessionMessage || req.sessionMessageId || req.truncateFromMessageId || req.truncateBefore !== undefined)) {
-      throw Object.assign(new Error("OMP 原生会话当前不支持编辑旧消息或回退 PI 历史；为避免两套会话分支错位，本次操作未修改历史。"), {
+      throw Object.assign(new Error("OMP 会话只支持通过原生历史树编辑消息，不支持改写 PI 镜像历史。"), {
         errorCode: ErrorCodes.INVALID_ARGUMENT,
       });
     }
@@ -511,14 +542,15 @@ export function registerAgentIpc({
     // The binding's image override already shaped this modelConfig, so the
     // transport gate and the settings switch cannot disagree.
     const supportsVision = selectedEngine.id === "omp" || visionFromModelConfig(launch.sidecarParams.provider.modelConfig);
+    const promptProjectPath = !session.remoteWorkspace && typeof session.projectPath === "string" && session.projectPath.trim()
+      ? session.projectPath.trim()
+      : undefined;
     let preparedAttachments: PreparedPromptAttachment[];
     try {
       preparedAttachments = await preparePromptAttachments(
         dataDir,
         req.sessionId,
-        !session.remoteWorkspace && typeof session.projectPath === "string" && session.projectPath.trim()
-          ? session.projectPath.trim()
-          : undefined,
+        promptProjectPath,
         req.attachments ?? [],
         supportsVision,
         // The text the durable message will hold: an image chip the Composer
@@ -590,35 +622,44 @@ export function registerAgentIpc({
           }
         : {}),
     };
-    try {
-      await host.call("session.appendMessage", {
+    const persistUserMessage = async () => {
+      await promptHost.call("session.appendMessage", {
         sessionId: req.sessionId,
         message: userMessage,
         turnId: durableTurnId,
       });
-    } catch (error) {
-      await finishTurn(
-        req.sessionId,
-        "error",
-        (error as { data?: { errorCode?: string }; errorCode?: string })?.data
-          ?.errorCode ??
-          (error as { errorCode?: string })?.errorCode,
-        { turnId: durableTurnId },
-      );
-      // A turn whose user message could not be appended must not be started:
-      // restarting it here would run a prompt the transcript does not contain.
-      throw error;
+      emitAgentEvent({
+        sessionId: req.sessionId,
+        ts: Date.now(),
+        event: { type: "message_start", message: userMessage },
+      } satisfies AgentEventEnvelope);
+      emitAgentEvent({
+        sessionId: req.sessionId,
+        ts: Date.now(),
+        event: { type: "message_end", message: userMessage },
+      } satisfies AgentEventEnvelope);
+    };
+    // For an OMP historical edit, the native tree must move first so that the
+    // Host mirror can be replaced with the selected branch before the edited
+    // user row is appended. The RPC runtime invokes this callback only after
+    // it has verified and navigated the exact native message.
+    if (!ompNativeEditMessageId) {
+      try {
+        await persistUserMessage();
+      } catch (error) {
+        await finishTurn(
+          req.sessionId,
+          "error",
+          (error as { data?: { errorCode?: string }; errorCode?: string })?.data
+            ?.errorCode ??
+            (error as { errorCode?: string })?.errorCode,
+          { turnId: durableTurnId },
+        );
+        // A turn whose user message could not be appended must not be started:
+        // restarting it here would run a prompt the transcript does not contain.
+        throw error;
+      }
     }
-    emitAgentEvent({
-      sessionId: req.sessionId,
-      ts: Date.now(),
-      event: { type: "message_start", message: userMessage },
-    } satisfies AgentEventEnvelope);
-    emitAgentEvent({
-      sessionId: req.sessionId,
-      ts: Date.now(),
-      event: { type: "message_end", message: userMessage },
-    } satisfies AgentEventEnvelope);
 
     let result: { accepted: boolean; turnId: string };
     const isTrustedCompletionNotice =
@@ -675,11 +716,30 @@ export function registerAgentIpc({
           if (!ompRpcRuntime) throw new Error("当前系统不支持 OMP RPC 引擎");
           const images = preparedAttachments.filter((attachment) => attachment.inlineData && attachment.message.kind === "image")
             .map((attachment) => ({ data: attachment.inlineData!, mimeType: attachment.message.mimeType ?? "image/png" }));
+          if (ompNativeEditMessageId) {
+            return ompRpcRuntime.promptFromMessage({
+              sessionId: req.sessionId,
+              cwd: ompCwd,
+              ...(typeof session.projectPath === "string" && session.projectPath.trim() ? { workspaceRoot: session.projectPath.trim() } : {}),
+              messageId: ompNativeEditMessageId,
+              newMessageId: userMessage.id,
+              ...(ompNativeEditOriginalText ? { originalText: ompNativeEditOriginalText } : {}),
+              ...(ompNativeEditOriginalTimestamp !== undefined ? { originalTimestamp: ompNativeEditOriginalTimestamp } : {}),
+              message: modelContent,
+              images,
+              replaceTranscript: async (sessionId, messages) => {
+                await persistenceOutbox.prepareSessionReplacement(sessionId, () => promptHost);
+                await promptHost.call("session.replaceMessages", { sessionId, messages });
+              },
+              persistUserMessage,
+            });
+          }
           return ompRpcRuntime.prompt({
             sessionId: req.sessionId,
             cwd: ompCwd,
             ...(typeof session.projectPath === "string" && session.projectPath.trim() ? { workspaceRoot: session.projectPath.trim() } : {}),
             message: modelContent,
+            messageId: userMessage.id,
             images,
           });
         },
@@ -687,8 +747,12 @@ export function registerAgentIpc({
       result = await dispatchers[selectedEngine.id]();
     } catch (e) {
       completionNoticeTurns.delete(durableTurnId);
-      await finishTurn(req.sessionId, "error", (e as any)?.errorCode, {
+      const errorCode = (e as { errorCode?: string; code?: string } | null)?.errorCode ??
+        (e as { code?: string } | null)?.code;
+      const nativeHistoryConflict = selectedEngine.id === "omp" && errorCode === "OMP_HISTORY_STALE";
+      await finishTurn(req.sessionId, nativeHistoryConflict ? "aborted" : "error", errorCode, {
         turnId: durableTurnId,
+        ...(nativeHistoryConflict ? { createNotification: false } : {}),
       });
       throw e;
     }

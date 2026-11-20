@@ -97,6 +97,8 @@ export function ComposerInput({
   const predictionSequence = useRef(0);
   const shownPrediction = useRef<{ text: string; cursor: number; suggestion: string; sessionId: string } | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
+  const dragSelectionRef = useRef<Range | null>(null);
+  const selectionDragPointerIdRef = useRef<number | null>(null);
   const sendPredictionFeedback = (accepted: boolean) => {
     const shown = shownPrediction.current;
     if (!shown) return;
@@ -144,6 +146,87 @@ export function ComposerInput({
   useLayoutEffect(() => {
     const editor = inputRef.current;
     return editor ? installComposerDeletionGuard(editor) : undefined;
+  }, [inputRef]);
+  useEffect(() => {
+    const editor = inputRef.current;
+    if (!editor) return;
+
+    const selectionRangeInEditor = (): Range | null => {
+      const selection = window.getSelection();
+      if (
+        !selection ||
+        selection.isCollapsed ||
+        selection.rangeCount === 0 ||
+        selection.toString().length === 0
+      ) return null;
+      const range = selection.getRangeAt(0);
+      return editor.contains(range.startContainer) && editor.contains(range.endContainer)
+        ? range.cloneRange()
+        : null;
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      const startedInEditor = event.button === 0 &&
+        event.target instanceof Node && editor.contains(event.target);
+      selectionDragPointerIdRef.current = startedInEditor ? event.pointerId : null;
+      dragSelectionRef.current = startedInEditor ? selectionRangeInEditor() : null;
+    };
+    const onSelectionChange = () => {
+      if (selectionDragPointerIdRef.current === null) return;
+      const range = selectionRangeInEditor();
+      if (range) dragSelectionRef.current = range;
+    };
+    const onDragStart = (event: DragEvent) => {
+      const range = selectionRangeInEditor();
+      if (range) dragSelectionRef.current = range;
+      if (selectionDragPointerIdRef.current !== null && dragSelectionRef.current) event.preventDefault();
+    };
+    // Chromium may collapse a contenteditable range when its selected text is
+    // dragged outside, even after dragstart is cancelled. Restore only if that
+    // native gesture actually collapsed the selection, never over a new range.
+    const restoreSelectionIfCollapsed = (range: Range | null) => {
+      if (!range) return;
+      requestAnimationFrame(() => {
+        if (
+          !editor.isConnected ||
+          !range.startContainer.isConnected ||
+          !range.endContainer.isConnected ||
+          !editor.contains(range.startContainer) ||
+          !editor.contains(range.endContainer)
+        ) return;
+        const selection = window.getSelection();
+        if (!selection || !selection.isCollapsed) return;
+        selection.removeAllRanges();
+        selection.addRange(range);
+      });
+    };
+    const onPointerUp = (event: PointerEvent) => {
+      if (selectionDragPointerIdRef.current !== event.pointerId) return;
+      selectionDragPointerIdRef.current = null;
+      const endedOutsideEditor = !(event.target instanceof Node && editor.contains(event.target));
+      const range = dragSelectionRef.current;
+      dragSelectionRef.current = null;
+      if (endedOutsideEditor) restoreSelectionIfCollapsed(range);
+    };
+    const onPointerCancel = (event: PointerEvent) => {
+      if (selectionDragPointerIdRef.current !== event.pointerId) return;
+      selectionDragPointerIdRef.current = null;
+      const range = dragSelectionRef.current;
+      dragSelectionRef.current = null;
+      restoreSelectionIfCollapsed(range);
+    };
+
+    editor.addEventListener("dragstart", onDragStart);
+    document.addEventListener("pointerdown", onPointerDown, true);
+    document.addEventListener("selectionchange", onSelectionChange);
+    document.addEventListener("pointerup", onPointerUp, true);
+    document.addEventListener("pointercancel", onPointerCancel, true);
+    return () => {
+      editor.removeEventListener("dragstart", onDragStart);
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      document.removeEventListener("selectionchange", onSelectionChange);
+      document.removeEventListener("pointerup", onPointerUp, true);
+      document.removeEventListener("pointercancel", onPointerCancel, true);
+    };
   }, [inputRef]);
   return (
     <div className="composer-input-wrap">

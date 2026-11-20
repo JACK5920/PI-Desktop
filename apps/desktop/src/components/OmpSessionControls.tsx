@@ -43,6 +43,22 @@ type OmpStats = {
   contextUsage?: { tokens?: number | null; contextWindow?: number; percent?: number | null };
 };
 
+async function stageOmpTreeImages(sessionId: string, images: Array<{ dataUrl: string; mimeType: string }>) {
+  if (!images.length) return [];
+  const payload = images.map((image, index) => {
+    const match = /^data:(image\/(?:png|jpeg|gif|webp));base64,([a-z0-9+/]+=*)$/i.exec(image.dataUrl);
+    if (!match || match[1].toLowerCase() !== image.mimeType.toLowerCase()) throw new Error("OMP 图片无法安全恢复到输入框");
+    const binary = atob(match[2]);
+    const bytes = new Uint8Array(binary.length);
+    for (let offset = 0; offset < binary.length; offset += 1) bytes[offset] = binary.charCodeAt(offset);
+    const ext = image.mimeType === "image/jpeg" ? "jpg" : image.mimeType.slice("image/".length);
+    return { name: `omp-tree-input-${index + 1}.${ext}`, mimeType: image.mimeType, data: bytes.buffer };
+  });
+  const saved = await api.pasteFiles(sessionId, payload);
+  if (saved.files.length !== images.length) throw new Error("OMP 图片没有全部恢复到输入框");
+  return saved.files.map((file) => ({ path: file.path, name: file.name, kind: "image" as const, mimeType: file.mimeType }));
+}
+
 /** OMP-owned session controls. Queue/settings/status are read from and mutated
  * through OMP RPC; this panel never uses PI's queue or permission state. */
 export function OmpSessionControls({ sessionId, t }: { sessionId: string | null; t: TFunction }) {
@@ -172,6 +188,33 @@ export function OmpSessionControls({ sessionId, t }: { sessionId: string | null;
       await useAppStore.getState().refreshSessions();
       await useAppStore.getState().selectSession(result.session.id);
       showToast(t("settings.omp.sessionForkCreated"), { variant: "success" });
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), { variant: "error" });
+    } finally { setBusy(false); }
+  };
+
+  const navigateSelectedEntry = async () => {
+    if (!sessionId || !selectedTreeEntry || busy || isBusy || state.hasPendingAsyncWork === true || !selectedTreeRow || !["user", "assistant"].includes(selectedTreeRow.role ?? "")) return;
+    setBusy(true);
+    try {
+      const result = await api.navigateOmpTree({ sessionId, entryId: selectedTreeEntry });
+      if (result.cancelled) return;
+      useAppStore.getState().syncNativeSessionTranscript(sessionId, result.messages);
+      if (typeof result.editorText === "string") {
+        let fileReferences: Array<{ path: string; name: string; kind: "image"; mimeType: string }> = [];
+        try {
+          fileReferences = await stageOmpTreeImages(sessionId, result.editorImages ?? []);
+        } catch (error) {
+          if (result.previousLeafId) {
+            const rollback = await api.navigateOmpTree({ sessionId, entryId: result.previousLeafId });
+            if (!rollback.cancelled) useAppStore.getState().syncNativeSessionTranscript(sessionId, rollback.messages);
+          }
+          throw error;
+        }
+        useAppStore.setState({ composerPrefill: { sessionId, text: result.editorText, fileReferences } });
+      }
+      await Promise.all([refresh(sessionId), refreshTree(sessionId)]);
+      showToast(t("settings.omp.branchNavigationSaved"), { variant: "success" });
     } catch (error) {
       showToast(error instanceof Error ? error.message : String(error), { variant: "error" });
     } finally { setBusy(false); }
@@ -315,6 +358,7 @@ export function OmpSessionControls({ sessionId, t }: { sessionId: string | null;
         {selectedTreeEntry ? <>
           <span className="omp-session-inline"><input aria-label={t("settings.omp.branchLabel")} value={branchLabel} onChange={(event) => setBranchLabel(event.target.value)} maxLength={120} placeholder={t("settings.omp.branchLabelPlaceholder")} /><button type="button" disabled={busy} onClick={() => void saveBranchLabel()}>{t("common.save")}</button></span>
           <span className="omp-session-inline omp-session-tree-actions">
+            <button type="button" disabled={busy || treeLoading || isBusy || state.hasPendingAsyncWork === true || selectedTreeRow?.active === true || !canForkSelectedTreeRow} title={!canForkSelectedTreeRow ? t("settings.omp.sessionTreeActionsUnavailable") : undefined} onClick={() => void navigateSelectedEntry()}>{t("settings.omp.navigateToEntry")}</button>
             <button type="button" disabled={busy || treeLoading || isBusy || state.hasPendingAsyncWork === true || !canForkSelectedTreeRow} title={!canForkSelectedTreeRow ? t("settings.omp.sessionForkUnavailable") : undefined} onClick={() => void forkSelectedEntry()}>{t("settings.omp.forkFromEntry")}</button>
           </span>
         </> : null}

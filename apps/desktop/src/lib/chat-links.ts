@@ -77,6 +77,33 @@ function leafName(path: string): string {
   return normalized.slice(normalized.lastIndexOf("/") + 1) || path;
 }
 
+const OMP_LOCAL_SPILL_RE = /^(?:local:\/\/(\d+)\.log|artifact:\/\/(\d+)(?:\.log)?)(?::(?:raw:)?(?:\d+(?:-\d*)?|-\d+)(?:,:?(?:\d+(?:-\d*)?|-\d+))*)?$/i;
+
+function ompLocalSpillId(value: string): number | null {
+  if (value.length > 256) return null;
+  const match = OMP_LOCAL_SPILL_RE.exec(value.trim());
+  if (!match) return null;
+  const id = Number(match[1] ?? match[2]);
+  return Number.isSafeInteger(id) && id >= 0 ? id : null;
+}
+
+function isOmpLocalSpillScheme(value: string): boolean {
+  return /^(?:local|artifact):\/\//i.test(value.trim());
+}
+
+export function hasOmpLocalSpillScheme(value: string): boolean {
+  return isOmpLocalSpillScheme(value);
+}
+
+export function isOmpLocalSpillRefToken(value: string): boolean {
+  return ompLocalSpillId(value) !== null;
+}
+
+function chatFileLabel(path: string): string {
+  const id = ompLocalSpillId(path);
+  return id === null ? leafName(path) : `${id}.log`;
+}
+
 function isLikelyFilePath(path: string): boolean {
   const normalized = path.replaceAll("\\", "/");
   const base = normalized.split("/").pop() ?? "";
@@ -263,6 +290,9 @@ export function resolvePreviewTarget(
   baseDir?: string | null,
 ): ChatPreviewTarget | null {
   const trimmed = text.trim();
+  const spillId = ompLocalSpillId(trimmed);
+  if (spillId !== null) return { kind: "file", path: trimmed };
+  if (hasOmpLocalSpillScheme(trimmed)) return null;
   const sessionId = parseSessionLinkToken(trimmed);
   if (sessionId) return { kind: "session", sessionId };
   if (isHttpUrl(trimmed)) return { kind: "url", url: trimmed };
@@ -409,8 +439,7 @@ function splitChatTextWithBudget(
   for (const { start, end, raw, target } of candidates) {
     if (start < last) continue;
     if (start > last) segments.push({ kind: "text", text: text.slice(last, start) });
-    const label =
-      target.kind === "file" ? leafName(target.path) : raw;
+    const label = target.kind === "file" ? chatFileLabel(target.path) : raw;
     segments.push({ kind: "target", text: raw, label, target });
     last = end;
   }

@@ -10,6 +10,19 @@ import { hasOmpTodoSnapshot, mergeOmpTodoMetadata } from "../src/components/omp-
 
 const read = (path) => readFile(new URL(path, import.meta.url), "utf8");
 
+async function removeTestDirectoryWithRetries(directory) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await rm(directory, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      const retryable = process.platform === "win32" && ["EBUSY", "EPERM", "ENOTEMPTY"].includes(error?.code);
+      if (!retryable || attempt >= 8) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
+    }
+  }
+}
+
 async function loadOmpModelRecoveryModule(transcriptMapperUrl) {
   const modelRecovery = await read("../electron/main/omp/session-model-recovery.ts");
   const recoveryTranscriptImport = /import \{ normalizeOmpTranscriptSnapshot \} from "[^"]*omp-transcript-sync\.mjs";/;
@@ -91,6 +104,11 @@ async function loadOmpRpcRuntime() {
   const transcriptMapper = await read("../src/lib/omp-transcript-sync.mjs");
   const transcriptMapperUrl = `data:text/javascript;base64,${Buffer.from(transcriptMapper).toString("base64")}`;
   source = source.replace(transcriptImport, `const { normalizeOmpTranscriptSnapshot } = await import("${transcriptMapperUrl}");`);
+  const historyEntryImport = /import \{ describeOmpNativeLegacyLookup, describeOmpNativePromptMappingSkip, findNewOmpNativeUserEntryId, findOmpNativeTreeEntry, resolveOmpNativeMessageEntryId \} from "\.\/history-entry\.mjs";/;
+  assert.match(source, historyEntryImport, "expected the native OMP history entry resolver import");
+  const historyEntryModule = await read("../electron/main/omp/history-entry.mjs");
+  const historyEntryUrl = `data:text/javascript;base64,${Buffer.from(historyEntryModule).toString("base64")}`;
+  source = source.replace(historyEntryImport, `const { describeOmpNativeLegacyLookup, describeOmpNativePromptMappingSkip, findNewOmpNativeUserEntryId, findOmpNativeTreeEntry, resolveOmpNativeMessageEntryId } = await import("${historyEntryUrl}");`);
   const guardImport = /import \{ OMP_TASK_TOOLS_GUARD_EXTENSION \} from "\.\/task-tools-guard\.mjs";/;
   assert.match(source, guardImport, "expected the managed Task tools guard extension import");
   const guardModule = await read("../electron/main/omp/task-tools-guard.mjs");
@@ -101,6 +119,16 @@ async function loadOmpRpcRuntime() {
   const profileSettings = await read("../electron/main/omp/profile-settings.mjs");
   const profileSettingsUrl = `data:text/javascript;base64,${Buffer.from(profileSettings).toString("base64")}`;
   source = source.replace(profileSettingsImport, `const { readOmpProfileSettings } = await import("${profileSettingsUrl}");`);
+  const localSpillImport = /import \{\s*parseOmpLocalSpillRef,\s*readOmpNativeSessionId,\s*resolveOmpLocalSpillFile,\s*resolveOmpLocalSpillRoot,\s*\} from "\.\/local-spill-ref\.mjs";/;
+  assert.match(source, localSpillImport, "expected the session-scoped OMP local spill resolver import");
+  const localSpillModule = await read("../electron/main/omp/local-spill-ref.mjs");
+  const localSpillUrl = `data:text/javascript;base64,${Buffer.from(localSpillModule).toString("base64")}`;
+  source = source.replace(localSpillImport, `const {
+    parseOmpLocalSpillRef,
+    readOmpNativeSessionId,
+    resolveOmpLocalSpillFile,
+    resolveOmpLocalSpillRoot,
+  } = await import("${localSpillUrl}");`);
   const modelRecoveryImport = /import \{\s*buildModelUnavailableError,\s*buildProviderUnavailableError,\s*catalogProviders,\s*extractRestoreModelFailure,\s*isRestoreModelFailure,\s*restoreMappedSessionFile,\s*selectModelCandidates,\s*type OmpModelRef,\s*\} from "\.\/session-model-recovery";/;
   assert.match(source, modelRecoveryImport, "expected the model-recovery helper import");
   const modelRecoveryUrl = await loadOmpModelRecoveryModule(transcriptMapperUrl);
@@ -118,6 +146,79 @@ async function loadOmpRpcRuntime() {
   const { OmpRpcRuntime } = await import(`data:text/javascript;base64,${Buffer.from(javascript).toString("base64")}`);
   return OmpRpcRuntime;
 }
+
+test("OMP prompt admission serializes per chat and releases the next operation", async () => {
+  const OmpRpcRuntime = await loadOmpRpcRuntime();
+  const runtime = new OmpRpcRuntime({ rootDir: tmpdir(), manager: { getExecutablePath: async () => null }, emit() {} });
+  let releaseFirst;
+  const firstGate = new Promise((resolve) => { releaseFirst = resolve; });
+  const order = [];
+  const first = runtime.withPromptAdmission("same-chat", async () => {
+    order.push("first-start");
+    await firstGate;
+    order.push("first-end");
+  });
+  const second = runtime.withPromptAdmission("same-chat", async () => { order.push("second"); });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(order, ["first-start"], "second request must not capture the same native tree baseline concurrently");
+  releaseFirst();
+  await Promise.all([first, second]);
+  assert.deepEqual(order, ["first-start", "first-end", "second"]);
+});
+
+test("OMP tree navigation and fork refuse to overlap native message identity capture", async () => {
+  const OmpRpcRuntime = await loadOmpRpcRuntime();
+  const rootDir = await mkdtemp(join(tmpdir(), "omp-native-identity-lock-"));
+  try {
+    const runtime = new OmpRpcRuntime({ rootDir, manager: { getExecutablePath: async () => null }, emit() {} });
+    runtime.sessions.set("chat", {
+      sessionId: "chat",
+      runId: "run",
+      child: {},
+      stderrBuffer: "",
+      bootstrapModelAttempt: false,
+      bootstrapFallbackRequested: false,
+      decoder: null,
+      stdoutBuffer: "",
+      pending: new Map(),
+      ready: Promise.resolve(),
+      resolveReady() {},
+      rejectReady() {},
+      nextId: 1,
+      chunks: null,
+      closing: false,
+      cwd: rootDir,
+      workspaceRoot: null,
+      busy: false,
+      forking: false,
+      mappingPrompt: true,
+      supportsBashExcludeFromContext: false,
+      cancelledHostRequestIds: new Set(),
+      hostRequestControllers: new Map(),
+    });
+    await assert.rejects(runtime.navigateTreeAndSync({ sessionId: "chat", entryId: "node", replaceTranscript: async () => {} }), /另一项原生历史操作/);
+    await assert.rejects(runtime.forkToSession({ sessionId: "chat", targetSessionId: "child", cwd: rootDir, entryId: "node" }), /正在同步新消息的原生关联/);
+  } finally {
+    await removeTestDirectoryWithRetries(rootDir);
+  }
+});
+
+test("OMP native user message mappings are one-to-one and cannot point two Host UUIDs at one node", async () => {
+  const OmpRpcRuntime = await loadOmpRpcRuntime();
+  const rootDir = await mkdtemp(join(tmpdir(), "omp-native-identity-unique-"));
+  try {
+    const runtime = new OmpRpcRuntime({ rootDir, manager: { getExecutablePath: async () => null }, emit() {} });
+    await runtime.updateNativeMessageEntryId("chat", "b5f9407f-cdb2-48f8-8afc-e221c493ac58", "native-entry-1");
+    await assert.rejects(
+      runtime.updateNativeMessageEntryId("chat", "d17e7335-0704-4d4c-b603-a0f5717b7496", "native-entry-1"),
+      /mapping must be one-to-one/,
+    );
+    const mappings = JSON.parse(await readFile(join(rootDir, "runtime", "native-message-mappings.json"), "utf8"));
+    assert.deepEqual(Object.values(mappings.sessions), [{ "b5f9407f-cdb2-48f8-8afc-e221c493ac58": "native-entry-1" }]);
+  } finally {
+    await removeTestDirectoryWithRetries(rootDir);
+  }
+});
 
 async function loadOmpEventAdapter() {
   let source = await read("../electron/main/omp/rpc-event-adapter.ts");
@@ -170,6 +271,27 @@ test("OMP fork recovery records and restores the exact parent file if pair mappi
     await runtime.restoreForkParentMapping("parent-session", parentFile);
     assert.equal(await runtime.hasMappedSession("parent-session"), true);
     assert.equal((await runtime.pendingForkTranscriptSync("parent-session")).parentSessionFile, parentFile);
+  } finally {
+    await rm(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("OMP session mappings accept native profile branches but reject files outside the isolated runtime", async () => {
+  const OmpRpcRuntime = await loadOmpRpcRuntime();
+  const rootDir = await mkdtemp(join(tmpdir(), "omp-managed-session-roots-"));
+  try {
+    const options = { rootDir, manager: { getExecutablePath: async () => null }, emit() {} };
+    const runtime = new OmpRpcRuntime(options);
+    const nativeProfileSession = join(rootDir, "runtime", "profile", "sessions", "branch.jsonl");
+    await mkdir(join(rootDir, "runtime", "profile", "sessions"), { recursive: true });
+    await writeFile(nativeProfileSession, "{}\n", "utf8");
+    await runtime.restoreForkParentMapping("profile-branch", nativeProfileSession);
+    assert.equal(await runtime.hasMappedSession("profile-branch"), true);
+
+    const outsideSession = join(rootDir, "outside.jsonl");
+    await writeFile(outsideSession, "{}\n", "utf8");
+    await assert.rejects(runtime.restoreForkParentMapping("outside-branch", outsideSession), /escaped its managed session store/);
+    assert.equal(await runtime.hasMappedSession("outside-branch"), false);
   } finally {
     await rm(rootDir, { recursive: true, force: true });
   }
@@ -322,9 +444,10 @@ test("OMP session tree keeps browsing non-destructive and forks selected entries
   assert.match(ipc, /restoreForkParentMapping\(pending\.parentSessionId, pending\.parentSessionFile\)/);
   assert.doesNotMatch(controls, /command: "navigate_tree"/);
   assert.doesNotMatch(controls, /replaceSessionMessages\(sessionId/);
-  assert.match(runtime, /if \(source\.forking\) throw new Error\("OMP conversation is already being forked"\)/);
+  assert.match(runtime, /if \(source\.mappingPrompt\) throw new Error\("OMP 正在同步新消息的原生关联，暂不能分叉"\)/);
+  assert.match(runtime, /if \(session\.forking \|\| session\.mappingPrompt\) throw new Error\("OMP 会话正在执行另一项原生历史操作"\)/);
   assert.match(runtime, /session\.forking && !internalForkCommand && !READ_ONLY_DURING_FORK\.has\(type\)/);
-  assert.match(runtime, /finally \{\s*source\.forking = false;/);
+  assert.match(runtime, /finally \{\s*if \(ownsHistoryLock\) source\.forking = false;/);
   assert.match(runtime, /if \(forkAttempted && originalFile && sourceSessionDir/);
   assert.match(ipc, /const selectedEntry = findEntry\(treeData\?\.tree\);[\s\S]*?if \(!selectedEntry \|\| !\["user", "assistant"\]/);
   assert.ok(ipc.indexOf("const selectedEntry = findEntry(treeData?.tree)") < ipc.indexOf("const created = await host.call", ipc.indexOf("ompRpcForkSession")), "IPC must validate the OMP tree entry before creating the child PI chat");
@@ -804,7 +927,9 @@ test("native OMP historical entry fork preserves the parent and restores both ma
     await runtime.prompt({ sessionId, cwd: rootDir, message: "First user request" });
     await waitForSettlement();
     const firstTree = await runtime.command(sessionId, "get_tree");
+    const firstUserEntry = treeEntries(firstTree.data?.tree ?? []).find((entry) => entry.message?.role === "user");
     const firstAssistantEntry = treeEntries(firstTree.data?.tree ?? []).find((entry) => entry.message?.role === "assistant");
+    assert.ok(firstUserEntry?.id, "expected a stable native user entry to branch before");
     assert.ok(firstAssistantEntry?.id, "expected a stable native assistant entry to navigate to");
     await runtime.prompt({ sessionId, cwd: rootDir, message: "Second user request" });
     await waitForSettlement();
@@ -816,9 +941,27 @@ test("native OMP historical entry fork preserves the parent and restores both ma
       : value && typeof value === "object"
         ? Object.fromEntries(Object.entries(value).filter(([key, field]) => !(key === "errorId" && field === 0)).map(([key, field]) => [key, withoutRpcDefaults(field)]))
         : value;
-    const moved = await runtime.command(sessionId, "navigate_tree", { entryId: firstAssistantEntry.id });
-    assert.equal(moved.success, true);
-    assert.equal(moved.data?.cancelled, false);
+    const beforeTree = await runtime.command(sessionId, "get_tree");
+    const previousLeafId = beforeTree.data?.leafId;
+    let rejectedMirrorWrite = false;
+    await assert.rejects(runtime.navigateTreeAndSync({
+      sessionId,
+      entryId: firstAssistantEntry.id,
+      replaceTranscript: async () => { rejectedMirrorWrite = true; throw new Error("injected transcript mirror write failure"); },
+    }), /injected transcript mirror write failure/);
+    assert.equal(rejectedMirrorWrite, true);
+    assert.equal((await runtime.command(sessionId, "get_tree")).data?.leafId, previousLeafId, "failed PI mirror write must restore the original OMP leaf");
+    assert.deepEqual(withoutRpcDefaults((await runtime.command(sessionId, "get_messages")).data), withoutRpcDefaults(canonicalParentMessages));
+
+    let synchronizedMessages = null;
+    const moved = await runtime.navigateTreeAndSync({
+      sessionId,
+      entryId: firstAssistantEntry.id,
+      replaceTranscript: async (_id, messages) => { synchronizedMessages = messages; },
+    });
+    assert.equal(moved.cancelled, false);
+    assert.equal(moved.previousLeafId, previousLeafId);
+    assert.deepEqual(synchronizedMessages, moved.messages, "successful native navigation must persist the exact PI mirror snapshot");
     const [afterTree, afterMessages] = await Promise.all([
       runtime.command(sessionId, "get_tree"),
       runtime.command(sessionId, "get_messages"),
@@ -830,6 +973,21 @@ test("native OMP historical entry fork preserves the parent and restores both ma
     assert.match(activeTranscript, /First user request/);
     assert.match(activeTranscript, /First isolated reply/);
     assert.doesNotMatch(activeTranscript, /Second user request|Second isolated reply/);
+
+    const oldSecondPromptId = normalizeOmpTranscriptSnapshot(beforeMessages.data).messages.find((message) => message.content === "Second user request")?.id;
+    assert.ok(oldSecondPromptId, "expected the old branch's second prompt snapshot id");
+    let stalePromptPersisted = false;
+    let staleMirrorReplacementCount = 0;
+    await assert.rejects(runtime.promptFromMessage({
+      sessionId,
+      cwd: rootDir,
+      messageId: oldSecondPromptId,
+      message: "Stale edit must not be sent",
+      replaceTranscript: async () => { staleMirrorReplacementCount += 1; },
+      persistUserMessage: async () => { stalePromptPersisted = true; },
+    }), (error) => error?.errorCode === "OMP_HISTORY_STALE");
+    assert.equal(stalePromptPersisted, false, "stale UI actions must not append or send a prompt");
+    assert.equal(staleMirrorReplacementCount, 0, "rejecting a stale action must not rewrite Host's richer transcript mirror");
 
     // Fork into a distinct PI identity, then restart both runtime processes.
     // The source must reopen the parent file while the child opens the OMP
@@ -899,10 +1057,280 @@ test("native OMP historical entry fork preserves the parent and restores both ma
     assert.deepEqual(withoutRpcDefaults(parentAfterRestartMessages.data), withoutRpcDefaults(canonicalParentMessages));
     assert.match(JSON.stringify(parentAfterRestartMessages.data), /Second user request|Second isolated reply/);
     assert.match(JSON.stringify((await runtime.command(targetSessionId, "get_messages")).data), /First isolated reply/);
+
   } finally {
     await runtime.stopAll();
     await new Promise((resolve) => apiServer.close(resolve));
-    await rm(rootDir, { recursive: true, force: true });
+    // Windows can keep SQLite/session handles busy briefly after the OMP child
+    // exits; retry so integration results do not fail solely during cleanup.
+    await removeTestDirectoryWithRetries(rootDir);
+  }
+});
+
+test("native OMP historical edit creates a durable sibling in the same session", async (t) => {
+  const binary = process.env.PI_OMP_BINARY;
+  if (!binary) { t.skip("Set PI_OMP_BINARY to verify native edit branches across a restart."); return; }
+  const OmpRpcRuntime = await loadOmpRpcRuntime();
+  const rootDir = await mkdtemp(join(tmpdir(), "pi-omp-in-place-edit-"));
+  const profileDir = join(rootDir, "runtime", "profile");
+  await mkdir(profileDir, { recursive: true });
+  const responses = ["First native reply", "Original version reply", "Edited version reply", "Duplicate prompt reply", "Image-only reply", "Edited image-only reply"];
+  const apiRequestBodies = [];
+  let responseIndex = 0;
+  const apiServer = createServer((request, response) => {
+    const chunks = [];
+    request.on("data", (chunk) => chunks.push(chunk));
+    request.on("end", () => {
+      apiRequestBodies.push(Buffer.concat(chunks).toString("utf8"));
+      const content = responses[Math.min(responseIndex++, responses.length - 1)];
+      response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "close" });
+      response.write(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content } }] })}\n\n`);
+      response.write(`data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\n`);
+      response.end("data: [DONE]\n\n");
+    });
+  });
+  await new Promise((resolve, reject) => apiServer.once("error", reject).listen(0, "127.0.0.1", resolve));
+  const address = apiServer.address();
+  assert.ok(address && typeof address === "object");
+  await writeFile(join(profileDir, "models.json"), JSON.stringify({ providers: {
+    pi_in_place_edit_test: {
+      baseUrl: `http://127.0.0.1:${address.port}/v1`, api: "openai-completions", apiKey: "PI_OMP_IN_PLACE_EDIT_KEY", authHeader: true,
+      models: [{ id: "in-place-edit-model", name: "In-place edit model", contextWindow: 32000, maxTokens: 4096, input: ["text", "image"], reasoning: false }],
+    },
+  } }));
+  const sessionId = "native-in-place-edit";
+  const events = [];
+  let runtime = new OmpRpcRuntime({
+    rootDir,
+    manager: { getExecutablePath: async () => binary },
+    emit: (event) => events.push(event),
+    getCustomModelApiKeys: async () => ({ PI_OMP_IN_PLACE_EDIT_KEY: "isolated-in-place-edit-key" }),
+  });
+  const settledCount = () => events.filter((event) => event.sessionId === sessionId && event.frame.type === "session_settled").length;
+  const waitForSettlement = async (previousSettledCount) => {
+    const deadline = Date.now() + 20_000;
+    while (Date.now() < deadline) {
+      if (events.some((event) => event.sessionId === sessionId && event.frame.type === "runtime_error")) {
+        assert.fail(`OMP runtime error: ${events.find((event) => event.sessionId === sessionId && event.frame.type === "runtime_error")?.frame.message}`);
+      }
+      const state = await runtime.command(sessionId, "get_state");
+      if (settledCount() > previousSettledCount &&
+        state.data?.isStreaming !== true && state.data?.isCompacting !== true && state.data?.hasPendingAsyncWork !== true) return;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    assert.fail(`expected edited native session to settle; saw ${events.map((event) => event.frame.type).join(", ")}`);
+  };
+  try {
+    await runtime.attach({ sessionId, cwd: rootDir }, { includeMessages: false });
+    await runtime.command(sessionId, "set_model", { provider: "pi_in_place_edit_test", modelId: "in-place-edit-model" });
+    let previousSettledCount = settledCount();
+    await runtime.prompt({ sessionId, cwd: rootDir, message: "First user request" });
+    await waitForSettlement(previousSettledCount);
+    previousSettledCount = settledCount();
+    const originalImage = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==";
+    const livePiMessageId = "a1c0f938-4147-4753-bbda-018d24cb5f11";
+    await runtime.prompt({
+      sessionId,
+      cwd: rootDir,
+      message: "Original version",
+      messageId: livePiMessageId,
+      images: [{ data: originalImage, mimeType: "image/png" }],
+    });
+    await waitForSettlement(previousSettledCount);
+
+    const beforeTree = await runtime.command(sessionId, "get_tree");
+    const entries = entriesInTree(beforeTree.data?.tree);
+    const entryText = (entry) => (Array.isArray(entry?.message?.content)
+      ? entry.message.content.flatMap((block) => typeof block?.text === "string" ? [block.text] : []).join("")
+      : typeof entry?.message?.content === "string" ? entry.message.content : "");
+    const originalUser = entries.find((entry) => entry.type === "message" && entry.message?.role === "user" && entryText(entry) === "Original version");
+    const originalAssistant = entries.find((entry) => entry.type === "message" && entry.message?.role === "assistant" && entryText(entry) === "Original version reply");
+    const parentId = originalUser?.parentId;
+    assert.ok(originalUser?.id && typeof parentId === "string");
+    assert.ok(originalAssistant?.id);
+    const originalSnapshot = normalizeOmpTranscriptSnapshot(await runtime.command(sessionId, "get_messages").then((result) => result.data));
+    assert.ok(originalSnapshot.ok);
+    const originalPrompt = originalSnapshot.messages.find((message) => message.content === "Original version");
+    assert.ok(originalPrompt?.id);
+    let mirrorSnapshots = [];
+    let ambiguousMirrorAttempts = 0;
+    const ambiguousMirrorSnapshots = [];
+    await assert.rejects(runtime.promptFromMessage({
+      sessionId,
+      cwd: rootDir,
+      messageId: livePiMessageId,
+      message: "Must not be sent after an ambiguous mirror write",
+      replaceTranscript: async (_id, messages) => {
+        ambiguousMirrorSnapshots.push(messages);
+        ambiguousMirrorAttempts += 1;
+        if (ambiguousMirrorAttempts === 1) throw new Error("injected lost Host mirror acknowledgement");
+      },
+      persistUserMessage: async () => assert.fail("the prompt must not be admitted when mirror replacement fails"),
+    }), /injected lost Host mirror acknowledgement/);
+    assert.equal((await runtime.command(sessionId, "get_tree")).data?.leafId, beforeTree.data?.leafId, "ambiguous PI mirror failure must restore the original OMP leaf");
+    assert.ok(ambiguousMirrorSnapshots.length >= 2, "rollback must retry the mirror with OMP's restored canonical snapshot");
+    assert.match(JSON.stringify(ambiguousMirrorSnapshots.at(-1)), /Original version reply/);
+    assert.doesNotMatch(JSON.stringify(ambiguousMirrorSnapshots), /Must not be sent/);
+
+    await assert.rejects(runtime.promptFromMessage({
+      sessionId,
+      cwd: rootDir,
+      messageId: livePiMessageId,
+      message: "Must not be sent when Host mirror admission fails",
+      replaceTranscript: async (_id, messages) => { mirrorSnapshots.push(messages); },
+      persistUserMessage: async () => { throw new Error("injected edited prompt persistence failure"); },
+    }), /injected edited prompt persistence failure/);
+    assert.equal((await runtime.command(sessionId, "get_tree")).data?.leafId, beforeTree.data?.leafId, "failed Host append must restore the original native leaf");
+    assert.match(JSON.stringify((await runtime.command(sessionId, "get_messages")).data), /Original version reply/);
+    assert.doesNotMatch(JSON.stringify((await runtime.command(sessionId, "get_messages")).data), /Must not be sent/);
+    assert.ok(mirrorSnapshots.length >= 2, "rollback must restore the PI mirror after the branch snapshot was written");
+
+    previousSettledCount = settledCount();
+    const editedPiMessageId = "a7c5c5f7-f43a-45ab-99fb-1a230c7c1187";
+    const submitted = await runtime.promptFromMessage({
+      sessionId,
+      cwd: rootDir,
+      messageId: livePiMessageId,
+      newMessageId: editedPiMessageId,
+      message: "Edited version",
+      images: [
+        { data: originalImage, mimeType: "image/png" },
+        { data: originalImage, mimeType: "image/png" },
+      ],
+      replaceTranscript: async (_id, messages) => { mirrorSnapshots.push(messages); },
+      persistUserMessage: async () => {
+        const branchMirror = mirrorSnapshots.at(-1);
+        assert.doesNotMatch(JSON.stringify(branchMirror), /Original version/);
+      },
+    });
+    assert.equal(submitted.accepted, true);
+    await waitForSettlement(previousSettledCount);
+    const editedRequest = JSON.parse(apiRequestBodies.at(-1) ?? "{}");
+    const editedUserContent = editedRequest.messages?.filter((message) => message.role === "user").at(-1)?.content;
+    assert.match(JSON.stringify(editedUserContent), /data:image\/(?:png|webp);base64,/, `editing without replacing attachments must keep an inline image; original native content: ${JSON.stringify(originalUser?.message?.content)}`);
+    assert.doesNotMatch(JSON.stringify(editedUserContent), /image omitted:/, "the preserved image must remain decodable through OMP's native preparation path");
+
+    previousSettledCount = settledCount();
+    await runtime.prompt({
+      sessionId,
+      cwd: rootDir,
+      message: "Original version",
+      images: [{ data: originalImage, mimeType: "image/png" }],
+    });
+    await waitForSettlement(previousSettledCount);
+
+    const apiRequestsBeforeStaleUuid = apiRequestBodies.length;
+    let staleUuidPromptPersisted = false;
+    let staleUuidMirrorReplacementCount = 0;
+    let staleMappedError;
+    await assert.rejects(runtime.promptFromMessage({
+      sessionId,
+      cwd: rootDir,
+      messageId: livePiMessageId,
+      message: "Stale UUID edit must not be sent",
+      replaceTranscript: async () => { staleUuidMirrorReplacementCount += 1; },
+      persistUserMessage: async () => { staleUuidPromptPersisted = true; },
+    }), (error) => { staleMappedError = error; return error?.errorCode === "OMP_HISTORY_STALE"; });
+    assert.match(staleMappedError.message, /当前活动分支/, "a known native mapping outside the active branch gets the branch-conflict explanation");
+    assert.equal(staleUuidPromptPersisted, false, "a stale live UUID must not persist an optimistic prompt");
+    assert.equal(apiRequestBodies.length, apiRequestsBeforeStaleUuid, "a stale live UUID must not issue a model request");
+    assert.equal(staleUuidMirrorReplacementCount, 0, "a stale live UUID must not overwrite Host transcript ids or attachment metadata");
+
+    let legacyUuidPromptPersisted = false;
+    let legacyUuidMirrorReplacementCount = 0;
+    await assert.rejects(runtime.promptFromMessage({
+      sessionId,
+      cwd: rootDir,
+      messageId: "f4c2c989-cd71-4b5d-b72a-e1c74d7467f5",
+      message: "Legacy unmapped edit must not be sent",
+      replaceTranscript: async () => { legacyUuidMirrorReplacementCount += 1; },
+      persistUserMessage: async () => { legacyUuidPromptPersisted = true; },
+    }), (error) => error?.errorCode === "OMP_HISTORY_STALE" && /可靠关联到 OMP 原生历史/.test(error.message));
+    assert.equal(legacyUuidPromptPersisted, false, "an unmapped legacy UUID must not persist a speculative edit");
+    assert.equal(legacyUuidMirrorReplacementCount, 0, "an unmapped legacy UUID must not rewrite the transcript mirror");
+    assert.equal(apiRequestBodies.length, apiRequestsBeforeStaleUuid, "an unmapped legacy UUID must not issue a model request");
+
+    const afterTree = await runtime.command(sessionId, "get_tree");
+    const afterEntries = entriesInTree(afterTree.data?.tree);
+    const editedUser = afterEntries.find((entry) => entry.type === "message" && entry.message?.role === "user" && entryText(entry) === "Edited version");
+    assert.ok(afterEntries.some((entry) => entry.id === originalUser.id), "the old user entry must remain in the native history tree");
+    assert.ok(afterEntries.some((entry) => entry.id === originalAssistant.id), "the old assistant response must remain in the native history tree");
+    assert.equal(editedUser?.parentId, parentId, "the edited prompt must become a sibling of the original prompt");
+    assert.notEqual(editedUser?.id, originalUser.id);
+    const activeMessages = await runtime.command(sessionId, "get_messages");
+    assert.match(JSON.stringify(activeMessages.data), /Edited version|Edited version reply/);
+    assert.doesNotMatch(JSON.stringify(activeMessages.data), /Original version reply/);
+
+    previousSettledCount = settledCount();
+    await runtime.prompt({ sessionId, cwd: rootDir, message: "", images: [{ data: originalImage, mimeType: "image/png" }] });
+    await waitForSettlement(previousSettledCount);
+    const imageOnlySnapshot = normalizeOmpTranscriptSnapshot((await runtime.command(sessionId, "get_messages")).data);
+    assert.equal(imageOnlySnapshot.ok, true);
+    const imageOnlyPrompt = imageOnlySnapshot.messages.find((message) => message.role === "user" && !message.content && message.inlineImages?.length);
+    assert.ok(imageOnlyPrompt?.id, "expected a native image-only user prompt");
+    const imageOnlyTree = await runtime.command(sessionId, "get_tree");
+    const imageOnlyEntry = entriesInTree(imageOnlyTree.data?.tree).find((entry) =>
+      entry.type === "message" && entry.message?.role === "user" && entryText(entry) === "" &&
+      Array.isArray(entry.message?.content) && entry.message.content.some((block) => block?.type === "image"));
+    const imageOnlyParentId = imageOnlyEntry?.parentId;
+    assert.ok(imageOnlyEntry?.id && typeof imageOnlyParentId === "string");
+
+    previousSettledCount = settledCount();
+    const editedImageOnly = await runtime.promptFromMessage({
+      sessionId,
+      cwd: rootDir,
+      messageId: imageOnlyPrompt.id,
+      message: "",
+      replaceTranscript: async () => {},
+      persistUserMessage: async () => {},
+    });
+    assert.equal(editedImageOnly.accepted, true);
+    await waitForSettlement(previousSettledCount);
+    const imageOnlyEditRequest = JSON.parse(apiRequestBodies.at(-1) ?? "{}");
+    const imageOnlyEditedContent = imageOnlyEditRequest.messages?.filter((message) => message.role === "user").at(-1)?.content;
+    assert.match(JSON.stringify(imageOnlyEditedContent), /data:image\/(?:png|webp);base64,/);
+    assert.doesNotMatch(JSON.stringify(imageOnlyEditedContent), /image omitted:/);
+    const imageOnlyEditedTree = await runtime.command(sessionId, "get_tree");
+    const afterImageEntries = entriesInTree(imageOnlyEditedTree.data?.tree);
+    const editedImageEntry = afterImageEntries.find((entry) =>
+      entry.type === "message" && entry.message?.role === "user" && entryText(entry) === "" &&
+      Array.isArray(entry.message?.content) && entry.message.content.some((block) => block?.type === "image") &&
+      entry.parentId === imageOnlyParentId && entry.id !== imageOnlyEntry.id);
+    assert.ok(editedImageEntry?.id, "image-only edit must create a sibling under the same native parent");
+
+    const nativeSessionFile = await realpath((await runtime.command(sessionId, "get_state")).data?.sessionFile);
+    await runtime.stopAll();
+    runtime = new OmpRpcRuntime({ rootDir, manager: { getExecutablePath: async () => binary }, emit: (event) => events.push(event) });
+    await runtime.connect({ sessionId, cwd: rootDir });
+    const [restartedTree, restartedMessages, restartedState] = await Promise.all([
+      runtime.command(sessionId, "get_tree"),
+      runtime.command(sessionId, "get_messages"),
+      runtime.command(sessionId, "get_state"),
+    ]);
+    assert.equal(await realpath(restartedState.data?.sessionFile), nativeSessionFile, "same PI chat must reopen the same native OMP file");
+    const restartedEntries = entriesInTree(restartedTree.data?.tree);
+    assert.ok(restartedEntries.some((entry) => entry.id === originalUser.id), "restart must retain the original sibling");
+    assert.ok(restartedEntries.some((entry) => entry.id === editedUser.id), "restart must retain the edited sibling");
+    assert.ok(restartedEntries.some((entry) => entry.id === editedImageEntry.id), "restart must retain the image-only edit sibling");
+    assert.match(JSON.stringify(restartedMessages.data), /Edited version/);
+    assert.doesNotMatch(JSON.stringify(restartedMessages.data), /Original version reply/);
+
+    previousSettledCount = settledCount();
+    const editedAgainAfterRestart = await runtime.promptFromMessage({
+      sessionId,
+      cwd: rootDir,
+      messageId: editedPiMessageId,
+      newMessageId: "e93e3072-56f8-4e0b-bd9b-c71aa438af36",
+      message: "Edited after runtime restart",
+      replaceTranscript: async () => {},
+      persistUserMessage: async () => {},
+    });
+    assert.equal(editedAgainAfterRestart.accepted, true, "stable Host-to-native identity mappings survive runtime restart");
+    await waitForSettlement(previousSettledCount);
+  } finally {
+    await runtime.stopAll();
+    await new Promise((resolve) => apiServer.close(resolve));
+    await removeTestDirectoryWithRetries(rootDir);
   }
 });
 
@@ -1025,12 +1453,23 @@ test("native OMP RPC routes bounded project read/write/edit and URI requests thr
   }
 });
 
-test("OMP history edits are refused before PI's transcript branch is truncated", async () => {
+test("OMP history edits use persisted native message ids and reject PI transcript truncation", async () => {
   const ipc = await read("../electron/main/ipc/agent-ipc.ts");
-  const refusal = ipc.indexOf("OMP 原生会话当前不支持编辑旧消息或回退 PI 历史");
-  const truncate = ipc.indexOf('"session.truncateFrom"');
-  assert.ok(refusal >= 0 && truncate > refusal);
-  assert.match(ipc.slice(refusal - 180, truncate), /selectedEngine\.id === "omp"/);
+  const runtime = await read("../electron/main/omp/rpc-runtime.ts");
+  assert.match(ipc, /req\.ompNativeEdit\.messageId/);
+  assert.match(ipc, /if \(ompNativeEditMessageId\) \{[\s\S]*?return ompRpcRuntime\.promptFromMessage/);
+  assert.match(ipc, /messageAround:\s*ompNativeEditMessageId/);
+  assert.match(ipc, /newMessageId:\s*userMessage\.id/);
+  assert.match(runtime, /readNativeMessageEntryId\(input\.sessionId, messageId\)/);
+  assert.match(runtime, /nativeEntryId:\s*mappedNativeEntryId/);
+  assert.match(runtime, /findNewOmpNativeUserEntryId/);
+  assert.doesNotMatch(ipc, /appendPromptFallbackPaths\(sourceContent,\s*preparedAttachments\)/);
+  assert.match(ipc, /replaceTranscript: async \(sessionId, messages\) => \{[\s\S]*?session\.replaceMessages/);
+  assert.match(ipc, /if \(!ompNativeEditMessageId\) \{[\s\S]*?persistUserMessage\(\)/);
+  assert.match(runtime, /navigate_tree[\s\S]*?branchSnapshot\.messages[\s\S]*?persistUserMessage\(\)[\s\S]*?"prompt"/);
+  assert.match(runtime, /originalLeafId[\s\S]*?OMP 原生分支叶节点未恢复/);
+  assert.match(ipc, /OMP 会话只支持通过原生历史树编辑消息/);
+  assert.match(ipc, /req\.truncateFromMessageId/);
 });
 
 test("OMP turn completion waits for native session settlement when async work remains", async () => {

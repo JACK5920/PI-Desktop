@@ -488,6 +488,17 @@ sit in a footer below the list. Discovery enriches exact
 configured IDs without adding unconfigured choices. Model and reasoning changes
 retain the existing session configuration and permission boundaries.
 
+### OMP custom-provider display identity
+
+The OMP model picker resolves a custom provider's native `providerId` to its
+saved Settings `providerName` for source-rail labels, grouped search results,
+option titles, and cross-provider confirmation text. Search matches that display
+name as well as the native provider ID, model name, and model ID. This is
+presentation metadata only: filtering, selection, recent-model identity, and all
+OMP `set_model` / reopen requests continue to use the exact native
+`(providerId, modelId)` pair. If the Settings lookup is unavailable, the picker
+falls back to OMP's provider ID and keeps the catalog usable.
+
 ## 11. Capability gating
 
 | mode/feature | required capability |

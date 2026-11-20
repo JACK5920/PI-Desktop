@@ -13,6 +13,7 @@ import { splitComposerDirectoryPrompt, splitInlineContent } from "@pi-desktop/sh
 import { DirectoryReferenceCard } from "../DirectoryReferenceCard";
 import { useOpenChatFileRef } from "../../../hooks/use-preview-target";
 import { sessionAllows } from "../../../lib/remote-session-safety";
+import { getTranscriptHistoryCapabilities } from "../../../lib/transcript-history-capabilities.mjs";
 import { useSlotSessionId } from "../../../plugins/renderer-slots/use-slots";
 import { useAppStore } from "../../../stores/app-store";
 import { Markdown } from "../../../components/Markdown";
@@ -110,6 +111,7 @@ export const MessageRow = memo(function MessageRow({
   const activateMessageRevision = useAppStore((s) => s.activateMessageRevision);
   const deleteMessage = useAppStore((s) => s.deleteMessage);
   const retryLastPrompt = useAppStore((s) => s.retryLastPrompt);
+  const enterToSend = useAppStore((s) => s.settings?.enterToSend ?? true);
   const paneSessionId = useSlotSessionId();
   const historyActionsAllowed = useTranscriptHistoryActionsAllowed();
   const isUser = message.role === "user";
@@ -140,9 +142,13 @@ export const MessageRow = memo(function MessageRow({
   );
   const session = useAppStore((s) => s.sessions.find((item) => item.id === paneSessionId));
   const canEditMessages = sessionAllows(session ?? (paneSessionId.startsWith("remote:") ? { id: paneSessionId } : undefined), "canEditMessages");
-  const canMutateHistory = canEditMessages && historyActionsAllowed;
+  const historyCapabilities = getTranscriptHistoryCapabilities(message.engineOrigin ?? session?.agentEngine);
+  const canMutateHistory = canEditMessages && historyActionsAllowed && historyCapabilities.canEditUserMessage;
   const isSessionMessage = Boolean(message.sessionMessage);
   const editableUserMessage = isUser && !isSessionMessage && !message.id.startsWith("plugin:") && canMutateHistory;
+  const editUserMessageAvailable = isUser && !isSessionMessage && !message.id.startsWith("plugin:") &&
+    canEditMessages && historyActionsAllowed && (historyCapabilities.canEditUserMessage || historyCapabilities.canEditUserMessageInNativeBranch);
+  const editActionLabel = t("chat.editMessage");
   const selectionRole = !isSessionMessage &&
     !message.id.startsWith("plugin:") &&
     (message.role === "user" || message.role === "assistant")
@@ -183,7 +189,7 @@ export const MessageRow = memo(function MessageRow({
   const hasAnswer = Boolean(directoryPrompt.text.trim());
   const revisionCount = message.revisionCount ?? 0;
   const activeRevision = message.activeRevision ?? revisionCount;
-  const showRevisionPager = editableUserMessage && revisionCount > 1;
+  const showRevisionPager = editableUserMessage && historyCapabilities.canUseRevisions && revisionCount > 1;
   const failedUserAttempt = isUser && message.status === "error";
   const extraAttachments = useMemo(() => {
     return getExtraMessageAttachments(
@@ -248,7 +254,7 @@ export const MessageRow = memo(function MessageRow({
     </span>
   ) : null;
   const beginEdit = async () => {
-    if (!editableUserMessage || isRunning || loadingEdit) return;
+    if (!editUserMessageAvailable || isRunning || loadingEdit) return;
     const request = new AbortController();
     editRequest.current?.abort();
     editRequest.current = request;
@@ -284,7 +290,7 @@ export const MessageRow = memo(function MessageRow({
   };
   const retryEdit = async () => {
     const requestText = editValue.trim();
-    if (!editableUserMessage || retryingEdit || (!requestText && !message.attachments?.length)) return;
+    if (!editUserMessageAvailable || retryingEdit || (!requestText && !message.attachments?.length && !message.inlineImages?.length)) return;
     setRetryingEdit(true);
     const saved = await editUserMessage(
       message.id,
@@ -314,12 +320,17 @@ export const MessageRow = memo(function MessageRow({
           editing ? ".message-edit-input" : ".message-bubble",
         ),
         editable: editableUserMessage && !editing && !loadingEdit,
+        canEdit: editUserMessageAvailable && !editing && !loadingEdit,
+        canDelete: editableUserMessage && !editing && !loadingEdit && historyCapabilities.canDeleteMessage,
+        editLabel: editActionLabel,
         running: isRunning,
         revision: !editing && showRevisionPager
           ? { count: revisionCount, active: activeRevision }
           : null,
         actions: { copyText, selectText },
-        onEdit: () => void beginEdit(),
+        onEdit: () => {
+          void beginEdit();
+        },
         onDelete: () => void deleteMessage(message.id),
         onActivateRevision: (index) =>
           void activateMessageRevision(message.id, index),
@@ -345,7 +356,7 @@ export const MessageRow = memo(function MessageRow({
         {message.sessionMessage ? <SessionMessageOrigin origin={message.sessionMessage} /> : null}
         {isUser || displayed ? (
           <div className="message-bubble" ref={isUser ? undefined : setAnnotationHost}>
-            {editing && editableUserMessage ? (
+            {editing && editUserMessageAvailable ? (
               <form
                 className="message-edit"
                 aria-busy={retryingEdit || undefined}
@@ -369,7 +380,11 @@ export const MessageRow = memo(function MessageRow({
                     if (event.nativeEvent.isComposing || event.keyCode === 229) return;
                     if (event.key === "Escape") {
                       cancelEdit();
-                    } else if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                    } else if (
+                      event.key === "Enter" &&
+                      !event.shiftKey &&
+                      (enterToSend || event.metaKey || event.ctrlKey)
+                    ) {
                       event.preventDefault();
                       void retryEdit();
                     }
@@ -389,7 +404,7 @@ export const MessageRow = memo(function MessageRow({
                     className="send-btn message-edit-submit"
                     disabled={retryingEdit || (!editValue.trim() && !message.attachments?.length)}
                   >
-                    {retryingEdit ? t("chat.retryingEdit") : t("chat.retryEdit")}
+                    {retryingEdit ? t("chat.sendingEdit") : t("chat.sendEdit")}
                   </button>
                 </div>
               </form>
@@ -473,11 +488,11 @@ export const MessageRow = memo(function MessageRow({
         {!editing && (hasAnswer || showRevisionPager || failedUserAttempt) ? (
           <div className="message-actions">
             <MessageTimestamp createdAt={message.createdAt} />
-            {failedUserAttempt ? (
+            {failedUserAttempt && (historyCapabilities.canRetryPrompt || historyCapabilities.canRetryPromptInNativeBranch) ? (
               <Button
                 size="sm"
                 variant="ghost"
-                disabled={isRunning || !canMutateHistory}
+                disabled={isRunning || !canEditMessages || !historyActionsAllowed}
                 onClick={() => void retryLastPrompt(message.id)}
                 aria-label={t("errors.action.retry")}
               >
@@ -521,18 +536,18 @@ export const MessageRow = memo(function MessageRow({
               </div>
             ) : null}
             {hasAnswer ? <CopyButton text={displayed} label={copyLabel} /> : null}
-            {editableUserMessage ? (
+            {editUserMessageAvailable ? (
               <TooltipButton
                 className="copy-btn icon"
-                tooltip={editLabel}
-                ariaLabel={editLabel}
+                tooltip={editActionLabel}
+                ariaLabel={editActionLabel}
                 disabled={isRunning || loadingEdit}
                 onClick={() => void beginEdit()}
               >
                 <IconPencil size={13} />
               </TooltipButton>
             ) : null}
-            {editableUserMessage ? (
+            {editableUserMessage && historyCapabilities.canDeleteMessage ? (
               <TooltipButton
                 className="copy-btn icon danger"
                 tooltip={deleteLabel}

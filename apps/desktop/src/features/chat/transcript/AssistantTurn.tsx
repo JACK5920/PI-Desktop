@@ -24,6 +24,7 @@ import {
   type TurnProcessRunSegment,
 } from "../../../lib/turn-process";
 import { sessionAllows } from "../../../lib/remote-session-safety";
+import { getTranscriptHistoryCapabilities } from "../../../lib/transcript-history-capabilities.mjs";
 import { resolveShowThinking } from "../../../lib/thinking-visibility";
 import { resolveTranscriptDisplayMode } from "../../../lib/transcript-display-mode";
 import { reviewChangeFromMessage } from "../../../lib/workspace-review";
@@ -288,7 +289,6 @@ export const AssistantTurn = memo(function AssistantTurn({
   const historyActionsAllowed = useTranscriptHistoryActionsAllowed();
   const session = useAppStore((s) => s.sessions.find((item) => item.id === paneSessionId));
   const canEditMessages = sessionAllows(session ?? (paneSessionId.startsWith("remote:") ? { id: paneSessionId } : undefined), "canEditMessages");
-  const canMutateHistory = canEditMessages && historyActionsAllowed;
   const summary = getAssistantTurnSummary(entry);
   const { actionMessage, metaMessage, latestUsageMessage, usage, responseDurationMs, responseOutputTokens } = summary;
   // New replies carry their own provenance; rows written before the engine was
@@ -298,6 +298,10 @@ export const AssistantTurn = memo(function AssistantTurn({
     (session?.agentEngine === "pi" || session?.agentEngine === "omp"
       ? session.agentEngine
       : undefined);
+  const historyCapabilities = getTranscriptHistoryCapabilities(engine ?? session?.agentEngine);
+  const canMutateHistory = canEditMessages && historyActionsAllowed;
+  const canRegenerate = canMutateHistory && (historyCapabilities.canRegenerateAssistant || historyCapabilities.canRegenerateAssistantInNativeBranch);
+  const canBranch = canMutateHistory && historyCapabilities.canCreateGenericFork;
   const modelSource = metaMessage?.modelId ? metaMessage : latestUsageMessage;
   const modelId = modelSource?.modelId;
   const responseModelId = modelSource?.responseModelId;
@@ -333,10 +337,14 @@ export const AssistantTurn = memo(function AssistantTurn({
               ".message-bubble",
             ),
           ].at(-1) ?? null,
-        complete: complete && Boolean(actionMessage) && canMutateHistory,
+        complete: complete && Boolean(actionMessage),
+        canRegenerate,
+        canBranch,
+        canAskAboutSelection: canBranch,
         actions: { copyText, selectText },
         onRegenerate: () => {
-          if (actionMessage) void retryAssistantMessage(actionMessage.id);
+          if (!actionMessage) return;
+          void retryAssistantMessage(actionMessage.id);
         },
         onBranch: () => {
           if (actionMessage) void forkAssistantMessage(actionMessage.id);
@@ -461,7 +469,7 @@ export const AssistantTurn = memo(function AssistantTurn({
             <MessageTimestamp createdAt={actionMessage.createdAt} />
             <ActionSlotSide slot="assistantAction" side="left" message={slotReply} />
             <CopyButton text={content} label={t("chat.copy")} />
-            {canMutateHistory ? <TooltipButton
+            {canBranch ? <TooltipButton
               className="copy-btn icon"
               tooltip={t("chat.forkResponse")}
               ariaLabel={t("chat.forkResponse")}
@@ -469,7 +477,7 @@ export const AssistantTurn = memo(function AssistantTurn({
             >
               <IconBranch size={13} />
             </TooltipButton> : null}
-            {canMutateHistory ? <TooltipButton
+            {canRegenerate ? <TooltipButton
               className="copy-btn icon"
               tooltip={t("chat.retry")}
               ariaLabel={t("chat.retry")}

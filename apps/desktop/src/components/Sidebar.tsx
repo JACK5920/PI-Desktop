@@ -2,6 +2,7 @@ import { IconClock } from "./icons";
 import { RemoteProjectGroups } from "./remote/RemoteProjectGroups";
 import { groupRemoteProjectSessions } from "../lib/remote-project-catalog";
 import { isRemoteSession, sessionAllows } from "../lib/remote-session-safety";
+import { getTranscriptHistoryCapabilities } from "../lib/transcript-history-capabilities.mjs";
 import { PluginNavigationSections } from "../plugins/renderer-slots/ShellSlots";
 import {
   useCallback,
@@ -1686,7 +1687,7 @@ export function Sidebar({
       const pinned = sessionPinned(session, meta);
       const native = session.source === "pi-native";
       const gitItems = [
-        ...(native || !sessionAllows(session, "canEditMessages")
+        ...(native || !getTranscriptHistoryCapabilities(session.agentEngine).canCreateGenericFork || !sessionAllows(session, "canEditMessages")
           ? []
           : [
               sidebarMenuAction({

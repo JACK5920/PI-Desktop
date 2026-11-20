@@ -671,7 +671,7 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
       "get_available_commands", "get_available_models", "get_available_thinking_levels", "set_model", "cycle_model", "set_thinking_level", "cycle_thinking_level",
       "set_fast_mode", "set_slow_mode", "set_steering_mode", "set_follow_up_mode", "set_interrupt_mode", "set_auto_compaction", "set_auto_retry", "set_cache_warming",
       "prompt", "steer", "follow_up", "abort", "abort_and_prompt", "abort_and_restore_queue", "remove_queued_message", "promote_queued_message",
-      "new_session", "switch_session", "branch", "fork", "open_session", "navigate_tree", "abort_branch_summary", "set_label", "set_session_name", "export_html", "handoff",
+      "new_session", "switch_session", "branch", "fork", "open_session", "abort_branch_summary", "set_label", "set_session_name", "export_html", "handoff",
       "goal", "set_todos", "compact", "bash", "get_subagents", "get_subagent_messages", "cancel_subagent", "steer_subagent",
       "get_login_providers", "login", "get_logout_accounts", "logout", "set_ask_dialog", "get_btw_history", "btw", "btw_cancel",
       // Public OMP RPC-UI surfaces used by the native GUI controls and session management.
@@ -861,6 +861,23 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     const { providers, defaults } = await sessionCapabilityContext();
     if (typeof source.projectPath === "string") sessionProjects.set(targetSessionId, source.projectPath);
     return { session: enrichSession(created.session!, providers, defaults), parentMessages: forked.parentMessages };
+  });
+  registrar.handleWithEvent(IPC.invoke.ompRpcNavigateTree, async (event, input) => {
+    const context = await ompSessionContext(event, input);
+    const entryId = typeof input?.entryId === "string" ? input.entryId.trim() : "";
+    if (!entryId || entryId.length > 512) throw new Error("OMP tree entry is invalid");
+    const host = getHost();
+    if (!host) throw new Error("Host 不可用");
+    const sourceResult = await host.call<{ session?: Record<string, any> | null }>("session.get", { id: context.sessionId, messageLimit: 1 });
+    const source = sourceResult.session;
+    if (!source || source.agentEngine !== "omp") throw new Error("只能导航 OMP 原生会话树");
+    if (source.remoteWorkspace) throw new Error("OMP 原生树导航目前仅支持本机工作区会话");
+    await ompRpcRuntime!.connect(context);
+    return ompRpcRuntime!.navigateTreeAndSync({
+      sessionId: context.sessionId,
+      entryId,
+      replaceTranscript: (id, messages) => host.call("session.replaceMessages", { sessionId: id, messages }),
+    });
   });
   registrar.handleWithEvent(IPC.invoke.ompRpcUiResponse, async (event, input) => {
     const context = await ompSessionContext(event, input);
@@ -1053,6 +1070,19 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     setCurrentWorkspacePath,
     withGitBranch,
     stripWinLongPrefix,
+    resolveOmpLocalSpill: async ({ sessionId, ref }) => {
+      if (!sessionId || sessionId === OMP_SETTINGS_RPC_SESSION_ID || !ompRpcRuntime) return null;
+      try {
+        const context = await resolveOmpSessionContext(sessionId);
+        return await ompRpcRuntime.resolveLocalSpill({
+          ...context,
+          ...(ref !== undefined ? { ref } : {}),
+        });
+      } catch {
+        // Local spill links are valid only for a local OMP conversation.
+        return null;
+      }
+    },
   });
 
   registerAgentExtensionIpc({

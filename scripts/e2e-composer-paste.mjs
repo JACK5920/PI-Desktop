@@ -158,7 +158,14 @@ app.whenReady().then(async () => {
       window.webContents.on("console-message", (event) => {
         if (!event.message.startsWith("PI_PREVIEW_KEY:")) return;
         const key = event.message.slice("PI_PREVIEW_KEY:".length);
-        assert(["Escape", "Tab", "ArrowUp", "ArrowDown", "Enter"].includes(key));
+        assert(["Escape", "Tab", "ArrowUp", "ArrowDown", "Enter", "Control+C"].includes(key));
+        if (key === "Control+C") {
+          window.webContents.sendInputEvent({ type: "keyDown", keyCode: "Control" });
+          window.webContents.sendInputEvent({ type: "keyDown", keyCode: "C", modifiers: ["control"] });
+          window.webContents.sendInputEvent({ type: "keyUp", keyCode: "C", modifiers: ["control"] });
+          window.webContents.sendInputEvent({ type: "keyUp", keyCode: "Control" });
+          return;
+        }
         const keyCode = key === "ArrowUp" ? "Up" : key === "ArrowDown" ? "Down" : key;
         window.webContents.sendInputEvent({ type: "keyDown", keyCode });
         window.webContents.sendInputEvent({ type: "keyUp", keyCode });
@@ -194,7 +201,14 @@ app.whenReady().then(async () => {
     window.webContents.on("console-message", async (event) => {
       if (!event.message.startsWith("PI_PREVIEW_KEY:")) return;
       const key = event.message.slice("PI_PREVIEW_KEY:".length);
-      assert(["Escape", "Tab", "ArrowUp", "ArrowDown", "Enter"].includes(key));
+      assert(["Escape", "Tab", "ArrowUp", "ArrowDown", "Enter", "Control+C"].includes(key));
+      if (key === "Control+C") {
+        window.webContents.sendInputEvent({ type: "keyDown", keyCode: "Control" });
+        window.webContents.sendInputEvent({ type: "keyDown", keyCode: "C", modifiers: ["control"] });
+        window.webContents.sendInputEvent({ type: "keyUp", keyCode: "C", modifiers: ["control"] });
+        window.webContents.sendInputEvent({ type: "keyUp", keyCode: "Control" });
+        return;
+      }
       const keyCode = key === "ArrowUp" ? "Up" : key === "ArrowDown" ? "Down" : key;
       window.webContents.sendInputEvent({ type: "keyDown", keyCode });
       window.webContents.sendInputEvent({ type: "keyUp", keyCode });
@@ -248,6 +262,10 @@ app.whenReady().then(async () => {
     assert.equal(mimeSets.filter((mimes) => mimes === "video/mp4").length, 1);
     assert(history.some(text => text.includes("Word paragraph")), "short text missing from clipboard history");
     console.log("COMPOSER_PASTE_PROBE " + JSON.stringify({ ...result, scratchBytesVerified: true }));
+    if (process.argv.includes("--paste-only")) {
+      app.exit(0);
+      return;
+    }
     const historyResult = await window.webContents.executeJavaScript('globalThis.composerHistoryProbe("prepare")');
     assert.equal(historyResult.ok, true, JSON.stringify(historyResult));
     console.log("COMPOSER_HISTORY_PREPARE " + JSON.stringify(historyResult));
@@ -283,7 +301,8 @@ app.whenReady().then(async () => {
     }
     return { code, output };
   };
-  const firstRun = await runElectron();
+  const pasteOnly = process.argv.includes("--paste-only");
+  const firstRun = await runElectron(pasteOnly ? ["--paste-only"] : []);
   const pasteLine = firstRun.output
     .split(/\r?\n/)
     .find((line) => line.startsWith("COMPOSER_PASTE_PROBE "));
@@ -296,18 +315,20 @@ app.whenReady().then(async () => {
   assert.equal(firstRun.code, 0, firstRun.output.slice(-4000));
   assert.equal(pasteResult.ok, true);
 
-  const restartRun = await runElectron(["--history-check"]);
-  const restartLine = restartRun.output
-    .split(/\r?\n/)
-    .find((line) => line.startsWith("COMPOSER_HISTORY_RESTART "));
-  assert(
-    restartLine,
-    `renderer returned no restart result (exit=${restartRun.code}): ${restartRun.output.slice(-3000)}`,
-  );
-  const restartResult = JSON.parse(restartLine.slice("COMPOSER_HISTORY_RESTART ".length));
-  console.log("COMPOSER_HISTORY_RESTART " + JSON.stringify(restartResult));
-  assert.equal(restartRun.code, 0, restartRun.output.slice(-4000));
-  assert.equal(restartResult.ok, true);
+  if (!pasteOnly) {
+    const restartRun = await runElectron(["--history-check"]);
+    const restartLine = restartRun.output
+      .split(/\r?\n/)
+      .find((line) => line.startsWith("COMPOSER_HISTORY_RESTART "));
+    assert(
+      restartLine,
+      `renderer returned no restart result (exit=${restartRun.code}): ${restartRun.output.slice(-3000)}`,
+    );
+    const restartResult = JSON.parse(restartLine.slice("COMPOSER_HISTORY_RESTART ".length));
+    console.log("COMPOSER_HISTORY_RESTART " + JSON.stringify(restartResult));
+    assert.equal(restartRun.code, 0, restartRun.output.slice(-4000));
+    assert.equal(restartResult.ok, true);
+  }
 } finally {
   await rm(temp, { recursive: true, force: true });
 }

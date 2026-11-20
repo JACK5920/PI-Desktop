@@ -2,12 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import rehypeRaw from "rehype-raw";
-import rehypeSanitize from "rehype-sanitize";
+import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
 import {
   fileDirOf,
+  isOmpLocalSpillRefToken,
   getToolPreviewTarget,
   handleMarkdownFileLinkClick,
   isHttpUrl,
@@ -21,12 +22,20 @@ import {
 } from "../src/lib/chat-links.ts";
 
 const ROOT = "/Users/dev/project";
+const chatLinkSanitizeSchema = {
+  ...defaultSchema,
+  protocols: {
+    ...defaultSchema.protocols,
+    href: [...(defaultSchema.protocols?.href ?? []), "local", "artifact"],
+  },
+};
 
 function renderSanitizedMarkdown(source, root = "D:\\person") {
   return renderToStaticMarkup(
     React.createElement(ReactMarkdown, {
       remarkPlugins: [remarkGfm, remarkChatFileLinks(root)],
-      rehypePlugins: [rehypeRaw, rehypeSanitize],
+      rehypePlugins: [rehypeRaw, [rehypeSanitize, chatLinkSanitizeSchema]],
+      urlTransform: (url) => isOmpLocalSpillRefToken(url) ? url : defaultUrlTransform(url),
       children: source,
     }),
   );
@@ -963,4 +972,39 @@ test("session links segment as their own target", () => {
   // A remote id and a bare scheme are not local conversations.
   assert.equal(resolvePreviewTarget("pi-desktop://session/remote:abc", ROOT), null);
   assert.equal(resolvePreviewTarget("pi-desktop://session/", ROOT), null);
+});
+
+test("OMP local spills are recognized in prose, inline code, and Markdown links without opening arbitrary schemes", () => {
+  const spill = "local://19.log:raw:5-9";
+  assert.deepEqual(resolvePreviewTarget(spill, ROOT), { kind: "file", path: spill });
+  assert.deepEqual(resolvePreviewTarget("artifact://19.log", ROOT), { kind: "file", path: "artifact://19.log" });
+  assert.equal(resolvePreviewTarget("local://../outside.log", ROOT), null);
+  assert.equal(resolvePreviewTarget("local://19.log?path=outside", ROOT), null);
+
+  const segments = splitChatText(`Large output: ${spill} is available.`, ROOT);
+  assert.equal(segments.find((item) => item.kind === "target")?.text, spill);
+  assert.equal(segments.find((item) => item.kind === "target")?.label, "19.log");
+
+  const inlineCode = { type: "paragraph", children: [{ type: "inlineCode", value: "local://19.log" }] };
+  linkifyMdastTree(inlineCode, ROOT);
+  assert.equal(inlineCode.children[0].type, "link");
+  assert.equal(inlineCode.children[0].url, "local://19.log");
+
+  let prevented = false;
+  let opened = null;
+  assert.equal(handleMarkdownFileLinkClick(
+    { preventDefault: () => { prevented = true; } },
+    "local://19.log:1-10",
+    ROOT,
+    undefined,
+    (path) => { opened = path; },
+  ), true);
+  assert.equal(prevented, true);
+  assert.equal(opened, "local://19.log:1-10");
+
+  const sanitizedMarkup = renderSanitizedMarkdown(`[spill](${spill})`);
+  assert.match(sanitizedMarkup, /<a href="local:\/\/19\.log:raw:5-9">spill<\/a>/);
+  assertMarkdownLinkClick(sanitizedMarkup, spill);
+  const unsafeSchemeMarkup = renderSanitizedMarkdown("[unsafe](local://../outside.log)");
+  assert.doesNotMatch(unsafeSchemeMarkup, /href="local:\/\//);
 });

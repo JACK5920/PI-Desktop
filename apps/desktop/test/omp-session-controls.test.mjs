@@ -107,14 +107,17 @@ test("OMP session panel routes mutations through native RPC and clearly separate
   assert.match(picker, /command: "set_slow_mode"/);
   assert.match(picker, /slowModeSupported/);
   assert.match(component, /flattenOmpSessionTree/);
-  assert.match(component, /Read-only|sessionTreeReadOnly/);
+  assert.match(component, /sessionTreeReadOnly/);
   assert.match(component, /forkSelectedEntry/);
   assert.match(component, /api\.forkOmpSession\(\{ sessionId, entryId: selectedTreeEntry \}\)/);
   assert.match(component, /syncNativeSessionTranscript\(sessionId, result\.parentMessages\)/);
   assert.match(component, /selectSession\(result\.session\.id\)/);
-  // Historical navigation is intentionally represented as a durable fork,
-  // never as a mutation of the active PI conversation's message list.
-  assert.doesNotMatch(component, /command: "navigate_tree"|navigateToSelectedEntry|replaceSessionMessages\(sessionId/);
+  // Temporary native navigation is a dedicated transaction that keeps the PI
+  // transcript mirror aligned; it is not exposed through the generic RPC pipe.
+  assert.match(component, /api\.navigateOmpTree\(\{ sessionId, entryId: selectedTreeEntry \}\)/);
+  assert.match(component, /syncNativeSessionTranscript\(sessionId, result\.messages\)/);
+  assert.match(component, /settings\.omp\.navigateToEntry/);
+  assert.match(component, /stageOmpTreeImages/);
   assert.match(component, /settings\.omp\.forkFromEntry/);
   assert.match(component, /cacheWarmingMode/);
   assert.match(component, /cache_warming_start/);

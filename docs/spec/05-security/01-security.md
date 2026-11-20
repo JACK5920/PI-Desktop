@@ -39,6 +39,14 @@ Required (all **implemented**):
   render, without a click. This is a deliberate readability trade-off: a
   reply can therefore reveal the user's IP to the host it names. Links never
   navigate in-app and always route through the external-open path.
+- The transcript sanitizer admits OMP's `local://N.log` and legacy numeric
+  `artifact://N[.log]` schemes only for the strict spill-reference parser. Main
+  resolves them against the owning local OMP session's validated native
+  session file, then checks the existing non-symlink local root and final file
+  with `lstat`/`realpath` containment. These are file references handled by the
+  existing preview/open/reveal/copy flow, never external URLs. Malformed,
+  missing, remote, non-OMP, and cross-session references fail closed; all
+  other custom URI schemes remain blocked.
 
 ### Embedded Browser local files
 
@@ -370,6 +378,9 @@ host-core. They do not change the loopback-only rule above.
 10. Local MCP control is loopback-only, bearer-authenticated, opt-in, bounded,
     excludes secret writes and native pickers, and requires confirmation for
     session permission-mode changes
+11. OMP local spill references resolve only within their owning local OMP
+    session; malformed IDs, symlinks, missing files, remote sessions and
+    cross-session paths cannot be previewed or opened
 
 ## 12. Native Pi session boundary (ADR 0254)
 

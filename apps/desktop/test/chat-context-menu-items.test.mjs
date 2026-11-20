@@ -78,6 +78,26 @@ test("a session-relayed user message cannot be edited or deleted", () => {
   assert.deepEqual(ids(items), ["copy", "select-text"]);
 });
 
+test("an OMP user message can edit into a native branch without exposing delete", () => {
+  const items = userMessageMenuItems({
+    t,
+    text: "Keep the original native branch",
+    selectTarget: null,
+    editable: false,
+    canEdit: true,
+    canDelete: false,
+    editLabel: "chat.editInBranch",
+    running: false,
+    revision: null,
+    actions,
+    onEdit: noop,
+    onDelete: noop,
+    onActivateRevision: noop,
+  });
+  assert.deepEqual(ids(items), ["copy", "select-text", "edit"]);
+  assert.equal(items.find((item) => item.id === "edit").label, "chat.editInBranch");
+});
+
 test("a running turn disables edit, delete, and revision navigation", () => {
   const items = userMessageMenuItems({
     t,
@@ -121,6 +141,23 @@ test("a completed assistant turn offers copy, select, regenerate, and branch", (
   assert.equal(items.find((item) => item.id === "regenerate").separatorBefore, true);
   items.find((item) => item.id === "ask-about-selection").onSelect("selected excerpt");
   assert.deepEqual(selected, ["selected excerpt"]);
+});
+
+test("an OMP turn menu can remain readable without advertising PI-owned history mutations", () => {
+  const items = assistantTurnMenuItems({
+    t,
+    answer: "Native OMP answer.",
+    selectTarget: null,
+    complete: true,
+    canRegenerate: false,
+    canBranch: false,
+    canAskAboutSelection: false,
+    actions,
+    onRegenerate: noop,
+    onBranch: noop,
+    onAskAboutSelection: noop,
+  });
+  assert.deepEqual(ids(items), ["copy", "select-text"]);
 });
 
 test("a streaming assistant turn without a settled answer offers no items", () => {

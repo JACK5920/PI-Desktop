@@ -6,8 +6,15 @@ import { StringDecoder } from "node:string_decoder";
 import { applyProxyToChildEnv } from "../network-proxy";
 import { normalizeOmpHostToolRequest, workspacePathFromOmpUri } from "./host-bridge.mjs";
 import { normalizeOmpTranscriptSnapshot } from "../../../src/lib/omp-transcript-sync.mjs";
+import { describeOmpNativeLegacyLookup, describeOmpNativePromptMappingSkip, findNewOmpNativeUserEntryId, findOmpNativeTreeEntry, resolveOmpNativeMessageEntryId } from "./history-entry.mjs";
 import { OMP_TASK_TOOLS_GUARD_EXTENSION } from "./task-tools-guard.mjs";
 import { readOmpProfileSettings } from "./profile-settings.mjs";
+import {
+  parseOmpLocalSpillRef,
+  readOmpNativeSessionId,
+  resolveOmpLocalSpillFile,
+  resolveOmpLocalSpillRoot,
+} from "./local-spill-ref.mjs";
 import {
   buildModelUnavailableError,
   buildProviderUnavailableError,
@@ -62,6 +69,8 @@ type RpcSession = {
   busy: boolean;
   /** Serializes native session-file switching during a PI-mapped fork. */
   forking: boolean;
+  /** Short-lived lock while an idle prompt is paired with its native tree entry. */
+  mappingPrompt: boolean;
   /** Per-process features explicitly advertised by the native RPC ready frame. */
   supportsBashExcludeFromContext: boolean;
   cancelledHostRequestIds: Set<string>;
@@ -135,12 +144,15 @@ export class OmpRpcRuntime {
   private readonly starting = new Map<string, Promise<RpcSession>>();
   /** Serializes whole reopen transactions so two picks cannot race the child. */
   private readonly reopening = new Map<string, Promise<void>>();
+  /** Serializes prompt admission and native-message identity capture per chat. */
+  private readonly promptAdmissions = new Map<string, Promise<void>>();
   /** Desired per-session subagent event level survives OMP RPC process restarts. */
   private readonly subagentSubscriptions = new Map<string, "off" | "events" | "messages">();
   private stopping = false;
   /** Sessions whose model catalog predates a provider/model config change. */
   private readonly staleCatalogs = new Set<string>();
   private mappingWrites: Promise<void> = Promise.resolve();
+  private nativeMessageMappingWrites: Promise<void> = Promise.resolve();
   private forkSyncWrites: Promise<void> = Promise.resolve();
 
   constructor(private readonly options: {
@@ -162,6 +174,21 @@ export class OmpRpcRuntime {
       signal: AbortSignal;
     }) => Promise<unknown>;
   }) {}
+
+  private async withPromptAdmission<T>(sessionId: string, operation: () => Promise<T>): Promise<T> {
+    const previous = this.promptAdmissions.get(sessionId) ?? Promise.resolve();
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => { release = resolve; });
+    const tail = previous.catch(() => undefined).then(() => current);
+    this.promptAdmissions.set(sessionId, tail);
+    await previous.catch(() => undefined);
+    try {
+      return await operation();
+    } finally {
+      release();
+      if (this.promptAdmissions.get(sessionId) === tail) this.promptAdmissions.delete(sessionId);
+    }
+  }
 
   /**
    * Ensure a persisted OMP chat session is connected before a GUI control
@@ -227,11 +254,40 @@ export class OmpRpcRuntime {
     return { runId: session.runId, state: state.data, messages: messages.data };
   }
 
+  /** Resolve OMP's session-owned local spill store without accepting a renderer path. */
+  async resolveLocalSpill(input: {
+    sessionId: string;
+    cwd: string;
+    workspaceRoot?: string;
+    ref?: string;
+  }): Promise<{ root: string; absolutePath?: string; relativePath?: string; id?: number } | null> {
+    if (input.ref !== undefined && parseOmpLocalSpillRef(input.ref) === null) return null;
+    await this.ensureSession(input);
+    const state = await this.command(input.sessionId, "get_state");
+    const stateData = state.data && typeof state.data === "object" && !Array.isArray(state.data)
+      ? state.data as Record<string, unknown>
+      : {};
+    const mappedSessionFile = await this.readSessionMapping(input.sessionId);
+    const expectedSessionDir = mappedSessionFile
+      ? dirname(mappedSessionFile)
+      : join(this.options.rootDir, "runtime", "sessions", sessionKey(input.sessionId));
+    const sessionFile = await this.resolveSessionFile(stateData.sessionFile, expectedSessionDir);
+    const nativeSessionId = await readOmpNativeSessionId(sessionFile);
+    const root = await resolveOmpLocalSpillRoot({ sessionFile, nativeSessionId });
+    if (!root) return null;
+    if (input.ref === undefined) return { root };
+    const file = await resolveOmpLocalSpillFile({ sessionFile, nativeSessionId, ref: input.ref });
+    return file ? file : null;
+  }
+
   async command(sessionId: string, type: string, fields: Record<string, unknown> = {}, timeoutMs = type === "login" ? LOGIN_TIMEOUT_MS : type === "dictation_start" || type === "dictation_stop" ? NATIVE_AUDIO_TIMEOUT_MS : type === "live_start" || type === "live_connect" ? 2 * 60_000 : type === "predict_word" ? 155_000 : REQUEST_TIMEOUT_MS, internalForkCommand = false): Promise<OmpRpcFrame> {
     let session = this.sessions.get(sessionId);
     if (!session || session.closing) throw new Error("OMP 会话尚未连接");
     if (session.forking && !internalForkCommand && !READ_ONLY_DURING_FORK.has(type)) {
       throw new Error("OMP conversation is being forked; try again after it completes");
+    }
+    if (session.mappingPrompt && !internalForkCommand && !READ_ONLY_DURING_FORK.has(type)) {
+      throw new Error("OMP prompt identity is being synchronized; try again after it completes");
     }
     // The engine snapshots provider availability when its process starts and
     // never watches models.json or credentials, so a read after a login or a new
@@ -291,6 +347,175 @@ export class OmpRpcRuntime {
 
   private sessionMappingsPath(): string {
     return join(this.options.rootDir, "runtime", "session-mappings.json");
+  }
+
+  private nativeMessageMappingsPath(): string {
+    return join(this.options.rootDir, "runtime", "native-message-mappings.json");
+  }
+
+  private async readNativeMessageMappings(): Promise<Record<string, Record<string, string>>> {
+    try {
+      const raw = JSON.parse(await readFile(this.nativeMessageMappingsPath(), "utf8"));
+      if (!raw || raw.version !== 1 || !raw.sessions || typeof raw.sessions !== "object" || Array.isArray(raw.sessions)) {
+        throw new Error("OMP native message mapping file has an unsupported format");
+      }
+      const sessions: Record<string, Record<string, string>> = {};
+      for (const [key, value] of Object.entries(raw.sessions)) {
+        if (!/^[a-f0-9]{32}$/.test(key) || !value || typeof value !== "object" || Array.isArray(value)) continue;
+        const messages: Record<string, string> = {};
+        for (const [messageId, entryId] of Object.entries(value)) {
+          if (typeof messageId === "string" && messageId.length > 0 && messageId.length <= 160 &&
+            typeof entryId === "string" && entryId.length > 0 && entryId.length <= 512) {
+            messages[messageId] = entryId;
+          }
+        }
+        sessions[key] = messages;
+      }
+      return sessions;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
+      throw error;
+    }
+  }
+
+  private async readNativeMessageEntryId(sessionId: string, messageId: string): Promise<string | null> {
+    const sessions = await this.readNativeMessageMappings();
+    return sessions[sessionKey(sessionId)]?.[messageId] ?? null;
+  }
+
+  private async updateNativeMessageEntryId(sessionId: string, messageId: string, entryId: string): Promise<void> {
+    if (!sessionId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(messageId) ||
+      !entryId || entryId.length > 512) {
+      throw new Error("OMP native message mapping identity is invalid");
+    }
+    const operation = this.nativeMessageMappingWrites.then(async () => {
+      const sessions = await this.readNativeMessageMappings();
+      const key = sessionKey(sessionId);
+      const messages = sessions[key] ?? {};
+      const existing = messages[messageId];
+      if (existing && existing !== entryId) throw new Error("OMP native message mapping cannot be reassigned");
+      const conflictingMessageId = Object.entries(messages).find(([candidateMessageId, candidateEntryId]) =>
+        candidateMessageId !== messageId && candidateEntryId === entryId,
+      )?.[0];
+      if (conflictingMessageId) throw new Error("OMP native message mapping must be one-to-one");
+      messages[messageId] = entryId;
+      const messageIds = Object.keys(messages);
+      if (messageIds.length > 50_000) {
+        for (const expired of messageIds.slice(0, messageIds.length - 50_000)) delete messages[expired];
+      }
+      sessions[key] = messages;
+      const destination = this.nativeMessageMappingsPath();
+      await mkdir(dirname(destination), { recursive: true });
+      const temporary = `${destination}.${randomUUID()}.tmp`;
+      try {
+        await writeFile(temporary, JSON.stringify({ version: 1, sessions }), { encoding: "utf8", mode: 0o600, flag: "wx" });
+        await rename(temporary, destination);
+      } catch (error) {
+        await rm(temporary, { force: true }).catch(() => undefined);
+        throw error;
+      }
+    });
+    this.nativeMessageMappingWrites = operation.catch(() => undefined);
+    await operation;
+  }
+
+  private async readTreeForMessageMapping(sessionId: string): Promise<unknown | null> {
+    try {
+      const result = await this.command(sessionId, "get_tree");
+      return result.data ?? null;
+    } catch (error) {
+      this.options.log?.("warn", "OMP prompt baseline tree could not be read; this message will not get a native edit mapping", {
+        sessionId,
+        data: String(error),
+      });
+      return null;
+    }
+  }
+
+  private async rememberAcceptedNativeUserMessage(input: {
+    sessionId: string;
+    messageId: string;
+    message: string;
+    imageCount: number;
+    beforeTreeSnapshot: unknown;
+  }): Promise<void> {
+    if (!input.beforeTreeSnapshot || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input.messageId)) return;
+    try {
+      // OMP appends the user node only when it builds the provider request;
+      // measured cold-start trails the accepted RPC by 3-4s, so a ~1s poll
+      // missed every turn. Back off up to ~21s and keep the last snapshot for
+      // logs. Stop early once the turn settled: a settled turn necessarily
+      // already contains its user node, so further polling cannot succeed.
+      const retryDelaysMs = [50, 100, 200, 300, 500, 800, 1200, 1800, 2500, 3500, 4500, 6000];
+      const session = this.sessions.get(input.sessionId);
+      let lastTree: unknown = null;
+      let sawBusy = false;
+      let attempts = 0;
+      for (let attempt = 0; attempt < retryDelaysMs.length; attempt += 1) {
+        const after = await this.command(input.sessionId, "get_tree");
+        lastTree = after.data ?? null;
+        attempts = attempt + 1;
+        const entryId = findNewOmpNativeUserEntryId({
+          beforeTreeSnapshot: input.beforeTreeSnapshot,
+          afterTreeSnapshot: after.data,
+          expectedText: input.message,
+          expectedImageCount: input.imageCount,
+        });
+        if (entryId) {
+          await this.updateNativeMessageEntryId(input.sessionId, input.messageId, entryId);
+          return;
+        }
+        if (session) {
+          if (session.busy) sawBusy = true;
+          else if (sawBusy) break;
+        }
+        if (attempt < retryDelaysMs.length - 1) await new Promise((resolve) => setTimeout(resolve, retryDelaysMs[attempt]));
+      }
+      const beforeIds = new Set<string>();
+      const collectUserEntries = (nodes: unknown, out: Array<Record<string, unknown>>) => {
+        if (!Array.isArray(nodes)) return;
+        for (const node of nodes) {
+          const entry = (node as Record<string, unknown> | null)?.entry as Record<string, unknown> | undefined;
+          if (entry && typeof entry.id === "string") {
+            const message = entry.message as Record<string, unknown> | undefined;
+            const textLength = typeof message?.content === "string"
+              ? message.content.length
+              : Array.isArray(message?.content)
+                ? (message.content as Array<Record<string, unknown>>)
+                  .filter((block) => block?.type === "text")
+                  .reduce((sum, block) => sum + String(block.text ?? "").length, 0)
+                : -1;
+            out.push({ id: entry.id, textLength });
+          }
+          collectUserEntries((node as Record<string, unknown> | null)?.children, out);
+        }
+      };
+      const beforeEntries: Array<Record<string, unknown>> = [];
+      collectUserEntries((input.beforeTreeSnapshot as Record<string, unknown> | null)?.tree, beforeEntries);
+      for (const entry of beforeEntries) beforeIds.add(String(entry.id));
+      const afterEntries: Array<Record<string, unknown>> = [];
+      collectUserEntries((lastTree as Record<string, unknown> | null)?.tree, afterEntries);
+      // Only the delta is useful: it shows whether OMP appended a node at all
+      // and whether its stored text length diverges from the submitted prompt.
+      const newEntries = afterEntries.filter((entry) => !beforeIds.has(String(entry.id))).slice(-5);
+      this.options.log?.("warn", "OMP accepted a user prompt but its new native entry could not be uniquely mapped; historical editing will fail closed", {
+        sessionId: input.sessionId,
+        messageId: input.messageId,
+        data: JSON.stringify({
+          textLength: input.message.length,
+          imageCount: input.imageCount,
+          attempts,
+          leafId: (lastTree as Record<string, unknown> | null)?.leafId ?? null,
+          newEntries,
+        }),
+      });
+    } catch (error) {
+      this.options.log?.("warn", "OMP user prompt was accepted but its native message mapping could not be persisted", {
+        sessionId: input.sessionId,
+        messageId: input.messageId,
+        data: String(error),
+      });
+    }
   }
 
   private forkTranscriptSyncPath(): string {
@@ -375,12 +600,22 @@ export class OmpRpcRuntime {
 
   private async validateMappedSessionFile(value: string): Promise<string> {
     if (!isAbsolute(value) || !value.toLowerCase().endsWith(".jsonl")) throw new Error("OMP mapped session path is invalid");
-    const sessionsRoot = join(this.options.rootDir, "runtime", "sessions");
-    await mkdir(sessionsRoot, { recursive: true });
-    const root = await realpath(sessionsRoot);
+    // OMP's native `branch` command can place a newly-created branch under
+    // its profile-owned `sessions` tree, even when the active chat was opened
+    // from PI's per-chat session directory. Both locations remain inside the
+    // isolated OMP runtime; arbitrary profile files and external paths do not.
+    const managedSessionRoots = [
+      join(this.options.rootDir, "runtime", "sessions"),
+      join(this.options.rootDir, "runtime", "profile", "sessions"),
+    ];
+    await Promise.all(managedSessionRoots.map((root) => mkdir(root, { recursive: true })));
+    const roots = await Promise.all(managedSessionRoots.map((root) => realpath(root)));
     const file = await realpath(value);
-    const rel = relative(root, file);
-    if (!rel || rel === ".." || rel.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) || isAbsolute(rel)) {
+    const isInsideManagedRoot = roots.some((root) => {
+      const rel = relative(root, file);
+      return Boolean(rel) && rel !== ".." && !rel.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) && !isAbsolute(rel);
+    });
+    if (!isInsideManagedRoot) {
       throw new Error("OMP mapped session escaped its managed session store");
     }
     if (!(await stat(file)).isFile()) throw new Error("OMP mapped session is not a regular file");
@@ -392,6 +627,27 @@ export class OmpRpcRuntime {
     const file = await this.validateMappedSessionFile(value);
     const directory = await realpath(expectedSessionDir);
     if (dirname(file).toLowerCase() !== directory.toLowerCase()) throw new Error("OMP native session file is outside the current PI session folder");
+    return file;
+  }
+
+  private async resolveTransitionSessionFile(value: unknown, expectedSessionDir: string): Promise<string> {
+    if (typeof value !== "string" || !isAbsolute(value)) throw new Error("OMP did not report a valid native session file");
+    const file = await this.validateMappedSessionFile(value);
+    const directory = await realpath(expectedSessionDir);
+    if (dirname(file).toLowerCase() === directory.toLowerCase()) return file;
+
+    // OMP owns the destination of its native branch operation. Permit the
+    // alternate profile session store only for this transition result, then
+    // pin the exact file in PI's durable session map. Reconnects still require
+    // the mapped file's exact parent directory and all paths remain below the
+    // managed runtime roots checked above.
+    const profileSessionsRoot = join(this.options.rootDir, "runtime", "profile", "sessions");
+    await mkdir(profileSessionsRoot, { recursive: true });
+    const root = await realpath(profileSessionsRoot);
+    const rel = relative(root, file);
+    if (!rel || rel === ".." || rel.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) || isAbsolute(rel)) {
+      throw new Error("OMP native session transition is outside the current PI session folder");
+    }
     return file;
   }
 
@@ -455,20 +711,374 @@ export class OmpRpcRuntime {
     });
   }
 
-  async prompt(input: { sessionId: string; cwd: string; workspaceRoot?: string; message: string; images?: Array<{ data: string; mimeType: string }>; streamingBehavior?: "steer" | "followUp" }): Promise<{ accepted: boolean; turnId: string }> {
-    const session = await this.ensureSession({ sessionId: input.sessionId, cwd: input.cwd, ...(input.workspaceRoot ? { workspaceRoot: input.workspaceRoot } : {}) });
-    const images = input.images?.map((image) => ({ type: "image", data: image.data, mimeType: image.mimeType }));
-    await this.command(input.sessionId, "prompt", {
-      message: input.message,
-      ...(images?.length ? { images } : {}),
-      ...(input.streamingBehavior ? { streamingBehavior: input.streamingBehavior } : {}),
+  async prompt(input: {
+    sessionId: string;
+    cwd: string;
+    workspaceRoot?: string;
+    message: string;
+    messageId?: string;
+    commandType?: "prompt" | "steer";
+    images?: Array<{ data: string; mimeType: string }>;
+    streamingBehavior?: "steer" | "followUp";
+  }): Promise<{ accepted: boolean; turnId: string }> {
+    return this.withPromptAdmission(input.sessionId, async () => {
+      const session = await this.ensureSession({ sessionId: input.sessionId, cwd: input.cwd, ...(input.workspaceRoot ? { workspaceRoot: input.workspaceRoot } : {}) });
+      if (session.forking) throw new Error("OMP conversation history is being edited; try again after it settles");
+      const commandType = input.commandType ?? "prompt";
+      const images = input.images?.map((image) => ({ type: "image", data: image.data, mimeType: image.mimeType }));
+      let beforeTreeSnapshot: unknown = null;
+      let ownsMappingLock = false;
+      if (input.messageId && commandType === "prompt") {
+        const baseSkipReason = describeOmpNativePromptMappingSkip({
+          messageId: input.messageId,
+          commandType,
+          streamingBehavior: input.streamingBehavior,
+          sessionBusy: session.busy,
+          pendingCommandCount: session.pending.size,
+        });
+        if (baseSkipReason) {
+          this.options.log?.("info", "OMP native prompt mapping skipped", {
+            sessionId: input.sessionId,
+            messageId: input.messageId,
+            data: baseSkipReason,
+          });
+        } else {
+          try {
+            const stateResult = await this.command(input.sessionId, "get_state");
+            if (session.forking) throw new Error("OMP conversation history is being edited; try again after it settles");
+            if (!stateResult.data || typeof stateResult.data !== "object") {
+              this.options.log?.("warn", "OMP native prompt mapping skipped", {
+                sessionId: input.sessionId,
+                messageId: input.messageId,
+                data: "native-state-unreadable",
+              });
+            } else {
+              const nativeState = stateResult.data as Record<string, unknown>;
+              const skipReason = describeOmpNativePromptMappingSkip({
+                messageId: input.messageId,
+                commandType,
+                streamingBehavior: input.streamingBehavior,
+                sessionBusy: session.busy,
+                pendingCommandCount: session.pending.size,
+                nativeState,
+              });
+              if (!skipReason) {
+                // Block other history-changing RPC commands until this immediate
+                // prompt's native entry is captured (or proven unavailable).
+                session.mappingPrompt = true;
+                ownsMappingLock = true;
+                beforeTreeSnapshot = await this.readTreeForMessageMapping(input.sessionId);
+              } else {
+                this.options.log?.("info", "OMP native prompt mapping skipped", {
+                  sessionId: input.sessionId,
+                  messageId: input.messageId,
+                  data: skipReason,
+                });
+              }
+            }
+          } catch (error) {
+            this.options.log?.("warn", "OMP prompt identity capture was skipped because idle state could not be confirmed", {
+              sessionId: input.sessionId,
+              messageId: input.messageId,
+              data: String(error),
+            });
+          }
+        }
+      }
+      try {
+        await this.command(input.sessionId, commandType, {
+          message: input.message,
+          ...(images?.length ? { images } : {}),
+          ...(input.streamingBehavior ? { streamingBehavior: input.streamingBehavior } : {}),
+        }, REQUEST_TIMEOUT_MS, ownsMappingLock);
+        if (input.messageId && beforeTreeSnapshot) {
+          await this.rememberAcceptedNativeUserMessage({
+            sessionId: input.sessionId,
+            messageId: input.messageId,
+            message: input.message,
+            imageCount: images?.length ?? 0,
+            beforeTreeSnapshot,
+          });
+        }
+        return { accepted: true, turnId: session.runId };
+      } finally {
+        if (ownsMappingLock) session.mappingPrompt = false;
+      }
     });
-    return { accepted: true, turnId: session.runId };
+  }
+
+  /**
+   * Replace an OMP user prompt in the same native session by navigating to its
+   * parent and submitting the edited prompt. OMP retains the old node as a
+   * sibling; the PI transcript mirror follows the new active branch. The
+   * caller supplies Host persistence callbacks so the branch snapshot and new
+   * user message are written in the same main-process turn admission.
+   */
+  async promptFromMessage(input: {
+    sessionId: string;
+    cwd: string;
+    workspaceRoot?: string;
+    messageId: string;
+    newMessageId?: string;
+    /** Original text and timestamp of the row being edited, used only to rebuild a missing native mapping. */
+    originalText?: string;
+    originalTimestamp?: number;
+    message: string;
+    images?: Array<{ data: string; mimeType: string }>;
+    replaceTranscript: (sessionId: string, messages: unknown[]) => Promise<unknown>;
+    persistUserMessage: () => Promise<void>;
+  }): Promise<{ accepted: boolean; turnId: string }> {
+    const messageId = input.messageId.trim();
+    if (!input.sessionId || !messageId || messageId.length > 160 || typeof input.message !== "string" ||
+      (input.newMessageId !== undefined && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input.newMessageId)) ||
+      typeof input.replaceTranscript !== "function" || typeof input.persistUserMessage !== "function") {
+      throw new Error("Invalid OMP historical prompt edit request");
+    }
+    return this.withPromptAdmission(input.sessionId, async () => {
+      const session = await this.ensureSession({
+        sessionId: input.sessionId,
+        cwd: input.cwd,
+        ...(input.workspaceRoot ? { workspaceRoot: input.workspaceRoot } : {}),
+      });
+      if (session.forking) throw new Error("OMP conversation is already changing history");
+      session.forking = true;
+      let originalLeafId: string | null = null;
+      let originalMessages: unknown[] | null = null;
+      let selectedParentId: string | null = null;
+      let navigationMayHaveStarted = false;
+      let transcriptReplacementStarted = false;
+      let userMessagePersistenceStarted = false;
+      let promptWasSent = false;
+      let promptBaselineTree: unknown = null;
+      let promptImageCount = 0;
+      try {
+      if (session.busy || session.pending.size > 0) {
+        throw Object.assign(new Error("OMP 会话仍有未完成工作，暂不能编辑旧消息"), { errorCode: "AGENT_BUSY" });
+      }
+      const stateResult = await this.command(input.sessionId, "get_state");
+      const state = stateResult.data && typeof stateResult.data === "object" ? stateResult.data as Record<string, unknown> : {};
+      if (state.isStreaming === true || state.isCompacting === true || state.hasPendingAsyncWork === true) {
+        throw Object.assign(new Error("OMP 会话仍有未完成工作，暂不能编辑旧消息"), { errorCode: "AGENT_BUSY" });
+      }
+      const [messagesResult, treeResult] = await Promise.all([
+        this.command(input.sessionId, "get_messages"),
+        this.command(input.sessionId, "get_tree"),
+      ]);
+      const mappedNativeEntryId = /^omp:snapshot:\d+:\d+$/.test(messageId)
+        ? null
+        : await this.readNativeMessageEntryId(input.sessionId, messageId).catch((error) => {
+            this.options.log?.("warn", "OMP native message identity could not be read", { sessionId: input.sessionId, data: String(error) });
+            return null;
+          });
+      let resolvedEntryId = resolveOmpNativeMessageEntryId({
+        messageId,
+        messagesSnapshot: messagesResult.data,
+        treeSnapshot: treeResult.data,
+        requiredRole: "user",
+        nativeEntryId: mappedNativeEntryId,
+      });
+      const isLegacyHostId = !/^omp:snapshot:\d+:\d+$/.test(messageId) && !mappedNativeEntryId;
+      let legacyDiagnosis: ReturnType<typeof describeOmpNativeLegacyLookup> | null = null;
+      if (!resolvedEntryId && isLegacyHostId && typeof input.originalText === "string" && input.originalText) {
+        // Mapping capture predates this row (or was skipped). Rebuild it once
+        // from unambiguous content and timestamp evidence, then persist so the
+        // next edit stays on the fast path. Ambiguity still fails closed.
+        legacyDiagnosis = describeOmpNativeLegacyLookup({
+          messagesSnapshot: messagesResult.data,
+          treeSnapshot: treeResult.data,
+          text: input.originalText,
+          timestampMs: input.originalTimestamp,
+        });
+        const inferredEntryId = legacyDiagnosis.entryId;
+        if (inferredEntryId) {
+          try {
+            // Persist first: a conflicting one-to-one mapping means the
+            // inferred node already belongs to another row, so the edit must
+            // stay rejected instead of proceeding on a guess.
+            await this.updateNativeMessageEntryId(input.sessionId, messageId, inferredEntryId);
+            resolvedEntryId = inferredEntryId;
+          } catch (error) {
+            this.options.log?.("warn", "OMP native message mapping could not be backfilled", {
+              sessionId: input.sessionId,
+              messageId,
+              data: String(error),
+            });
+          }
+        } else {
+          // No prompt text in logs: the reason plus both sequence sizes is
+          // enough to tell "native history is empty" from "alignment shifted".
+          this.options.log?.("warn", "OMP legacy message could not be re-associated with a native entry", {
+            sessionId: input.sessionId,
+            messageId,
+            data: JSON.stringify({
+              reason: legacyDiagnosis.reason,
+              messageCount: legacyDiagnosis.messageCount,
+              pathMessageCount: legacyDiagnosis.pathMessageCount,
+            }),
+          });
+        }
+      }
+      if (!resolvedEntryId) {
+        // A rejected stale action is read-only. Do not rewrite Host's richer
+        // mirror from a synthetic OMP snapshot just to report the conflict.
+        throw Object.assign(
+          new Error(isLegacyHostId
+            ? legacyDiagnosis?.reason === "native-history-empty"
+              ? "这条旧消息无法关联到 OMP 原生历史：该会话在 OMP 侧还没有任何原生消息，历史可能来自 PI 引擎或尚未同步到 OMP。本次没有修改会话；旧消息在 OMP 下不能编辑，发送新消息只对之后的消息生效。"
+              : "无法将这条旧消息可靠关联到 OMP 原生历史（可能是稳定关联记录启用前的消息）。为避免改错内容，本次没有修改会话；请在当前分支发送的新消息上编辑。"
+            : "这条消息已不在 OMP 当前活动分支中；本次没有修改会话，请刷新对话后重新选择当前分支里的消息。"),
+          { errorCode: "OMP_HISTORY_STALE" },
+        );
+      }
+      const tree = treeResult.data && typeof treeResult.data === "object" ? treeResult.data as Record<string, unknown> : {};
+      const selected = findOmpNativeTreeEntry(tree, resolvedEntryId) as {
+        id?: unknown;
+        type?: unknown;
+        parentId?: unknown;
+        message?: { role?: unknown; content?: unknown };
+      } | null;
+      if (!selected || selected.type !== "message" || selected.message?.role !== "user") {
+        throw new Error("要编辑的提示不再是 OMP 当前分支中的用户消息");
+      }
+      const nativeImages = input.images?.length
+        ? input.images
+        : this.ompUserMessageImages(selected.message.content);
+      promptImageCount = nativeImages.length;
+      if (!input.message.trim() && nativeImages.length === 0) {
+        throw new Error("编辑后的提示不能为空；请保留文字或图片");
+      }
+      originalLeafId = typeof tree.leafId === "string" ? tree.leafId : null;
+      if (!originalLeafId) throw new Error("OMP 当前没有可恢复的原生分支叶节点");
+      selectedParentId = typeof selected.parentId === "string" ? selected.parentId : null;
+      const originalSnapshot = normalizeOmpTranscriptSnapshot(messagesResult.data);
+      if (!originalSnapshot.ok) throw new Error(`OMP 当前历史无法安全恢复：${originalSnapshot.reason}`);
+      originalMessages = originalSnapshot.messages;
+
+      // `navigate_tree` accepts the selected user entry and moves the active
+      // cursor to its parent. Set the flag before the call: an RPC timeout can
+      // arrive after OMP has already moved the cursor.
+      navigationMayHaveStarted = true;
+      const navigation = await this.command(input.sessionId, "navigate_tree", { entryId: resolvedEntryId }, REQUEST_TIMEOUT_MS, true);
+      if (navigation.data && typeof navigation.data === "object" && (navigation.data as Record<string, unknown>).cancelled === true) {
+        throw new Error("OMP 已取消这次历史编辑");
+      }
+      const [branchTreeResult, branchMessagesResult] = await Promise.all([
+        this.command(input.sessionId, "get_tree"),
+        this.command(input.sessionId, "get_messages"),
+      ]);
+      const branchTree = branchTreeResult.data && typeof branchTreeResult.data === "object" ? branchTreeResult.data as Record<string, unknown> : {};
+      if ((typeof branchTree.leafId === "string" ? branchTree.leafId : null) !== selectedParentId) {
+        throw new Error("OMP 没有移动到目标提示之前，已取消编辑以免改错分支");
+      }
+      const branchSnapshot = normalizeOmpTranscriptSnapshot(branchMessagesResult.data);
+      if (!branchSnapshot.ok) throw new Error(`OMP 编辑分支无法安全同步到 PI：${branchSnapshot.reason}`);
+      promptBaselineTree = branchTree;
+      // Treat a lost/failed Host acknowledgement as an ambiguous commit and
+      // restore from OMP's canonical snapshot in the catch path.
+      transcriptReplacementStarted = true;
+      await input.replaceTranscript(input.sessionId, branchSnapshot.messages);
+
+      userMessagePersistenceStarted = true;
+      await input.persistUserMessage();
+      const images = nativeImages.map((image) => ({ type: "image", data: image.data, mimeType: image.mimeType }));
+      promptWasSent = true;
+      await this.command(input.sessionId, "prompt", {
+        message: input.message,
+        ...(images.length ? { images } : {}),
+      }, REQUEST_TIMEOUT_MS, true);
+      if (input.newMessageId) {
+        await this.rememberAcceptedNativeUserMessage({
+          sessionId: input.sessionId,
+          messageId: input.newMessageId,
+          message: input.message,
+          imageCount: images.length,
+          beforeTreeSnapshot: promptBaselineTree,
+        });
+      }
+      return { accepted: true, turnId: session.runId };
+    } catch (error) {
+      if (promptWasSent && await this.ompEditPromptWasAccepted(input.sessionId, input.message, selectedParentId)) {
+        // RPC transport errors can arrive after OMP has durably accepted the
+        // prompt. Returning success prevents the UI from asking the user to
+        // resend a turn that is already running or present in the native tree.
+        if (input.newMessageId) {
+          await this.rememberAcceptedNativeUserMessage({
+            sessionId: input.sessionId,
+            messageId: input.newMessageId,
+            message: input.message,
+            imageCount: promptImageCount,
+            beforeTreeSnapshot: promptBaselineTree,
+          });
+        }
+        return { accepted: true, turnId: session.runId };
+      }
+      if (navigationMayHaveStarted && originalLeafId && originalMessages) {
+        try {
+          const currentTreeResult = await this.command(input.sessionId, "get_tree");
+          const currentTree = currentTreeResult.data && typeof currentTreeResult.data === "object" ? currentTreeResult.data as Record<string, unknown> : {};
+          if (currentTree.leafId !== originalLeafId) {
+            await this.command(input.sessionId, "navigate_tree", { entryId: originalLeafId }, REQUEST_TIMEOUT_MS, true);
+            const restoredTreeResult = await this.command(input.sessionId, "get_tree");
+            const restoredTree = restoredTreeResult.data && typeof restoredTreeResult.data === "object" ? restoredTreeResult.data as Record<string, unknown> : {};
+            if (restoredTree.leafId !== originalLeafId) throw new Error("OMP 原生分支叶节点未恢复");
+          }
+          if (transcriptReplacementStarted || userMessagePersistenceStarted) {
+            const restoredMessages = await this.command(input.sessionId, "get_messages");
+            const restoredSnapshot = normalizeOmpTranscriptSnapshot(restoredMessages.data);
+            if (!restoredSnapshot.ok) throw new Error(`恢复后的 OMP 历史无法安全同步：${restoredSnapshot.reason}`);
+            await input.replaceTranscript(input.sessionId, restoredSnapshot.messages);
+          }
+        } catch (rollbackError) {
+          throw new Error(`OMP 编辑失败，且无法完整恢复原分支/对话镜像：${String(rollbackError)}`, { cause: error });
+        }
+      }
+        throw error;
+      } finally {
+        session.forking = false;
+      }
+    });
+  }
+
+  private ompUserMessageImages(content: unknown): Array<{ data: string; mimeType: string }> {
+    const prompt = normalizeOmpTranscriptSnapshot([{ role: "user", content }]);
+    if (!prompt.ok || prompt.messages.length !== 1) return [];
+    const message = prompt.messages[0] as { inlineImages?: Array<{ dataUrl: string; mimeType: string }> };
+    return (message.inlineImages ?? []).flatMap((image) => {
+      const match = /^data:([^;,]+);base64,([A-Za-z0-9+/]+={0,2})$/.exec(image.dataUrl);
+      return match ? [{ data: match[2], mimeType: image.mimeType || match[1] }] : [];
+    });
+  }
+
+  private async ompEditPromptWasAccepted(sessionId: string, message: string, expectedParentId: string | null): Promise<boolean> {
+    try {
+      const [stateResult, treeResult, messagesResult] = await Promise.all([
+        this.command(sessionId, "get_state"),
+        this.command(sessionId, "get_tree"),
+        this.command(sessionId, "get_messages"),
+      ]);
+      const state = stateResult.data && typeof stateResult.data === "object" ? stateResult.data as Record<string, unknown> : {};
+      if (state.isStreaming === true || state.hasPendingAsyncWork === true) return true;
+      const tree = treeResult.data && typeof treeResult.data === "object" ? treeResult.data as Record<string, unknown> : {};
+      if (tree.leafId === expectedParentId) return false;
+      const snapshot = normalizeOmpTranscriptSnapshot(messagesResult.data);
+      if (!snapshot.ok) return false;
+      for (let index = snapshot.messages.length - 1; index >= 0; index -= 1) {
+        const candidate = snapshot.messages[index] as { role?: unknown; content?: unknown };
+        if (candidate.role !== "user") continue;
+        return typeof candidate.content === "string" && candidate.content === message;
+      }
+      return false;
+    } catch {
+      return false;
+    }
   }
 
   async abort(sessionId: string): Promise<void> {
     if (!this.sessions.has(sessionId)) return;
-    await this.command(sessionId, "abort");
+    await this.withPromptAdmission(sessionId, async () => {
+      if (!this.sessions.has(sessionId)) return;
+      await this.command(sessionId, "abort");
+    });
   }
 
   /**
@@ -479,6 +1089,18 @@ export class OmpRpcRuntime {
    * silently attaching the parent PI chat to the newest forked file.
    */
   async forkToSession(input: { sessionId: string; targetSessionId: string; cwd: string; workspaceRoot?: string; entryId: string }): Promise<{ messages: unknown[]; parentMessages: unknown[] }> {
+    return this.branchOrForkToSession(input, "fork");
+  }
+
+  private async branchOrForkToSession(
+    input: { sessionId: string; targetSessionId: string; cwd: string; workspaceRoot?: string; entryId: string },
+    operation: "fork" | "branch",
+    lockedSource?: RpcSession,
+  ): Promise<{
+    messages: unknown[];
+    parentMessages: unknown[];
+    prompt?: { text: string; images: Array<{ dataUrl: string; mimeType: string }> };
+  }> {
     const sourceId = input.sessionId;
     const targetId = input.targetSessionId;
     const entryId = input.entryId.trim();
@@ -486,8 +1108,13 @@ export class OmpRpcRuntime {
       throw new Error("Invalid OMP fork request");
     }
     const source = await this.ensureSession({ sessionId: sourceId, cwd: input.cwd, ...(input.workspaceRoot ? { workspaceRoot: input.workspaceRoot } : {}) });
-    if (source.forking) throw new Error("OMP conversation is already being forked");
-    source.forking = true;
+    const ownsHistoryLock = lockedSource === undefined;
+    if (source.mappingPrompt) throw new Error("OMP 正在同步新消息的原生关联，暂不能分叉");
+    if (lockedSource && lockedSource !== source) throw new Error("OMP history operation lost its session lock");
+    if (ownsHistoryLock) {
+      if (source.forking) throw new Error("OMP conversation is already being forked");
+      source.forking = true;
+    }
     let childFile: string | null = null;
     let originalFile: string | null = null;
     let sourceSessionDir: string | null = null;
@@ -520,16 +1147,37 @@ export class OmpRpcRuntime {
 
       await this.beginForkTranscriptSync(sourceId, targetId, originalFile);
       forkAttempted = true;
-      const fork = await this.command(sourceId, "fork", { entryId }, REQUEST_TIMEOUT_MS, true);
-      const forkData = fork.data as Record<string, unknown> | undefined;
-      if (forkData?.cancelled === true) throw new Error("OMP 已取消本次分叉");
+      const transition = await this.command(sourceId, operation, { entryId }, REQUEST_TIMEOUT_MS, true);
+      const transitionData = transition.data as Record<string, unknown> | undefined;
+      if (transitionData?.cancelled === true) throw new Error("OMP 已取消本次分支");
       const forkState = await this.command(sourceId, "get_state");
       const forkStateData = forkState.data as Record<string, unknown> | undefined;
-      childFile = await this.resolveSessionFile(forkStateData?.sessionFile, sourceSessionDir);
+      childFile = await this.resolveTransitionSessionFile(forkStateData?.sessionFile, sourceSessionDir);
       if (sameNativePath(childFile, originalFile)) throw new Error("OMP 分叉没有生成独立会话文件");
       const childSnapshot = await this.command(sourceId, "get_messages");
       const normalizedChild = normalizeOmpTranscriptSnapshot(childSnapshot.data);
-      if (!normalizedChild.ok) throw new Error(`OMP 分叉内容无法安全同步到 PI：${normalizedChild.reason}`);
+      if (!normalizedChild.ok) throw new Error(`OMP 分支内容无法安全同步到 PI：${normalizedChild.reason}`);
+
+      let prompt: { text: string; images: Array<{ dataUrl: string; mimeType: string }> } | undefined;
+      if (operation === "branch") {
+        const text = typeof transitionData?.text === "string" ? transitionData.text : "";
+        const rawImages = Array.isArray(transitionData?.images) ? transitionData.images : [];
+        const promptContent = [
+          ...(text ? [{ type: "text", text }] : []),
+          ...rawImages,
+        ];
+        const normalizedPrompt = normalizeOmpTranscriptSnapshot([
+          { role: "user", content: promptContent },
+        ]);
+        if (!normalizedPrompt.ok || normalizedPrompt.messages.length !== 1) {
+          throw new Error(`OMP 原生分支返回的原提示无法安全恢复：${normalizedPrompt.reason}`);
+        }
+        const message = normalizedPrompt.messages[0] as { content?: unknown; inlineImages?: Array<{ dataUrl: string; mimeType: string }> };
+        const promptText = typeof message.content === "string" ? message.content : "";
+        const images = Array.isArray(message.inlineImages) ? message.inlineImages : [];
+        if (!promptText.trim() && images.length === 0) throw new Error("OMP 原生分支没有返回可恢复的用户输入");
+        prompt = { text: promptText, images };
+      }
 
       // Persist both sides in one atomic map update before reconnecting. The
       // fork file and its session-scoped artifact directory stay together in
@@ -542,7 +1190,7 @@ export class OmpRpcRuntime {
       // Read the parent after switching back: `fork` flushes before it splits,
       // so a pre-fork copy could miss the last flushed writes or a hook edit.
       const parentMessages = await this.restoreMappedSession(sourceId, originalFile, liveModel);
-      return { messages: normalizedChild.messages, parentMessages };
+      return { messages: normalizedChild.messages, parentMessages, ...(prompt ? { prompt } : {}) };
     } catch (error) {
       if (mappingsPinned && originalFile) {
         await this.updateSessionMappings({ [sourceId]: originalFile, [targetId]: null }).catch(() => undefined);
@@ -568,14 +1216,128 @@ export class OmpRpcRuntime {
             const stateData = state.data as Record<string, unknown> | undefined;
             if (!sameNativePath(await this.resolveSessionFile(stateData?.sessionFile, sourceSessionDir), originalFile)) throw new Error("restart restored wrong parent");
           } catch (recoveryError) {
-            throw new Error(`OMP 分叉失败，且无法自动恢复原会话：${String(recoveryError)}`, { cause: error });
+            throw new Error(`OMP 原生分支失败，且无法自动恢复原会话：${String(recoveryError)}`, { cause: error });
           }
         }
       }
       await this.completeForkTranscriptSync(sourceId, targetId).catch(() => undefined);
       throw error;
     } finally {
-      source.forking = false;
+      if (ownsHistoryLock) source.forking = false;
+    }
+  }
+
+  /**
+   * Navigate OMP's temporary active tree cursor and persist the matching PI
+   * transcript mirror as one guarded transition. If the mirror write fails,
+   * restore the old native leaf and old mirror before releasing the session.
+   */
+  async navigateTreeAndSync(input: {
+    sessionId: string;
+    entryId: string;
+    replaceTranscript: (sessionId: string, messages: unknown[]) => Promise<unknown>;
+  }): Promise<{
+    cancelled: boolean;
+    leafId: string | null;
+    previousLeafId: string | null;
+    messages: unknown[];
+    editorText?: string;
+    editorImages?: Array<{ dataUrl: string; mimeType: string }>;
+  }> {
+    const sessionId = input.sessionId;
+    const entryId = input.entryId.trim();
+    if (!sessionId || !entryId || entryId.length > 512 || typeof input.replaceTranscript !== "function") {
+      throw new Error("Invalid OMP tree navigation request");
+    }
+    const session = this.sessions.get(sessionId);
+    if (!session || session.closing) throw new Error("OMP RPC 会话尚未连接");
+    if (session.forking || session.mappingPrompt) throw new Error("OMP 会话正在执行另一项原生历史操作");
+    session.forking = true;
+    let originalLeafId: string | null = null;
+    let originalMessages: unknown[] | null = null;
+    let navigationStarted = false;
+    try {
+      if (session.busy || session.pending.size > 0) throw new Error("OMP 会话仍有未完成工作，暂不能跳转");
+      const stateResult = await this.command(sessionId, "get_state");
+      const state = stateResult.data && typeof stateResult.data === "object" ? stateResult.data as Record<string, unknown> : {};
+      if (state.isStreaming === true || state.isCompacting === true || state.hasPendingAsyncWork === true) {
+        throw new Error("OMP 会话仍有未完成工作，暂不能跳转");
+      }
+      const treeResult = await this.command(sessionId, "get_tree");
+      const tree = treeResult.data && typeof treeResult.data === "object" ? treeResult.data as Record<string, unknown> : {};
+      const selected = findOmpNativeTreeEntry(tree, entryId) as { id?: unknown; type?: unknown; parentId?: unknown; message?: { role?: unknown; content?: unknown } } | null;
+      if (!selected || selected.type !== "message" || !["user", "assistant"].includes(String(selected.message?.role))) {
+        throw new Error("只能跳转到 OMP 原生树中的用户或 assistant 消息");
+      }
+      originalLeafId = typeof tree.leafId === "string" ? tree.leafId : null;
+      if (!originalLeafId) throw new Error("OMP 当前没有可恢复的原生分支叶节点");
+      const before = await this.command(sessionId, "get_messages");
+      const beforeSnapshot = normalizeOmpTranscriptSnapshot(before.data);
+      if (!beforeSnapshot.ok) throw new Error(`OMP 当前历史无法安全同步到 PI：${beforeSnapshot.reason}`);
+      originalMessages = beforeSnapshot.messages;
+
+      navigationStarted = true;
+      const transition = await this.command(sessionId, "navigate_tree", { entryId }, REQUEST_TIMEOUT_MS, true);
+      const transitionData = transition.data && typeof transition.data === "object" ? transition.data as Record<string, unknown> : {};
+      if (transitionData.cancelled === true) {
+        return { cancelled: true, leafId: originalLeafId, previousLeafId: originalLeafId, messages: originalMessages };
+      }
+      const [afterTreeResult, afterMessagesResult] = await Promise.all([
+        this.command(sessionId, "get_tree"),
+        this.command(sessionId, "get_messages"),
+      ]);
+      const afterTree = afterTreeResult.data && typeof afterTreeResult.data === "object" ? afterTreeResult.data as Record<string, unknown> : {};
+      const afterLeafId = typeof afterTree.leafId === "string" ? afterTree.leafId : null;
+      const expectedLeaf = selected.message?.role === "user"
+        ? (typeof selected.parentId === "string" ? selected.parentId : null)
+        : entryId;
+      if (afterLeafId !== expectedLeaf) throw new Error("OMP 跳转后的活动分支与选中节点不一致");
+      const afterSnapshot = normalizeOmpTranscriptSnapshot(afterMessagesResult.data);
+      if (!afterSnapshot.ok) throw new Error(`OMP 跳转后的历史无法安全同步到 PI：${afterSnapshot.reason}`);
+
+      let editorText: string | undefined;
+      let editorImages: Array<{ dataUrl: string; mimeType: string }> | undefined;
+      if (selected.message?.role === "user") {
+        const prompt = normalizeOmpTranscriptSnapshot([{ role: "user", content: selected.message.content }]);
+        if (!prompt.ok || prompt.messages.length !== 1) throw new Error(`OMP 原生输入无法安全恢复到编辑框：${prompt.reason}`);
+        const normalizedPrompt = prompt.messages[0] as { content?: unknown; inlineImages?: Array<{ dataUrl: string; mimeType: string }> };
+        const blocks = Array.isArray(selected.message.content) ? selected.message.content : [];
+        const textFromTree = typeof selected.message.content === "string"
+          ? selected.message.content
+          : blocks.filter((block: any) => block?.type === "text" && typeof block.text === "string").map((block: any) => block.text).join("");
+        editorText = typeof transitionData.editorText === "string" ? transitionData.editorText : textFromTree;
+        editorImages = Array.isArray(normalizedPrompt.inlineImages) ? normalizedPrompt.inlineImages : [];
+      }
+
+      await input.replaceTranscript(sessionId, afterSnapshot.messages);
+      return {
+        cancelled: false,
+        leafId: afterLeafId,
+        previousLeafId: originalLeafId,
+        messages: afterSnapshot.messages,
+        ...(editorText !== undefined ? { editorText } : {}),
+        ...(editorImages ? { editorImages } : {}),
+      };
+    } catch (error) {
+      if (navigationStarted && originalLeafId && originalMessages) {
+        try {
+          const rollbackTreeResult = await this.command(sessionId, "get_tree");
+          const rollbackTree = rollbackTreeResult.data && typeof rollbackTreeResult.data === "object" ? rollbackTreeResult.data as Record<string, unknown> : {};
+          const nativeMoved = rollbackTree.leafId !== originalLeafId;
+          if (nativeMoved) {
+            await this.command(sessionId, "navigate_tree", { entryId: originalLeafId }, REQUEST_TIMEOUT_MS, true);
+            const restoredTreeResult = await this.command(sessionId, "get_tree");
+            const restoredTree = restoredTreeResult.data && typeof restoredTreeResult.data === "object" ? restoredTreeResult.data as Record<string, unknown> : {};
+            if (restoredTree.leafId !== originalLeafId) throw new Error("OMP 原生分支叶节点未恢复");
+            await input.replaceTranscript(sessionId, originalMessages);
+          }
+        } catch (rollbackError) {
+          throw new Error(`OMP 树跳转失败，且无法完整恢复原分支/对话镜像：${String(rollbackError)}`, { cause: error });
+        }
+      }
+      throw error;
+    } finally {
+      session.forking = false;
     }
   }
 
@@ -619,7 +1381,7 @@ export class OmpRpcRuntime {
     }
     // Restarting mid-turn would abort the answer the user is waiting for; keep
     // the marker so the next idle catalog read refreshes.
-    if (session.busy || session.forking) return;
+    if (session.busy || session.forking || session.mappingPrompt) return;
     // Provider login/logout holds an in-flight request on the settings session;
     // restarting now would kill the flow the user is in the middle of.
     if (sessionId === this.options.settingsSessionId && session.pending.size > 0) return;
@@ -796,6 +1558,7 @@ export class OmpRpcRuntime {
       workspaceRoot: input.workspaceRoot ? resolve(input.workspaceRoot) : null,
       busy: false,
       forking: false,
+      mappingPrompt: false,
       supportsBashExcludeFromContext: false,
       cancelledHostRequestIds: new Set(),
       hostRequestControllers: new Map(),

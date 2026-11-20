@@ -43,6 +43,7 @@ import {
 import { openableMp4Path } from "../open-attachment-video";
 import { isChatRefOutsideRoots, resolveChatFileRef } from "../chat-ref-resolve";
 import { resolveOmpCwdFileRef } from "../omp/chat-file-ref.mjs";
+import { hasOmpLocalSpillScheme } from "../omp/local-spill-ref.mjs";
 import { rebaseWorktreeRef, type WorktreeRefContext } from "../worktree-ref";
 import { getWorkspaceFileIndex, searchWorkspaceFiles } from "../fs-index";
 import {
@@ -91,6 +92,12 @@ async function userClickedAbsoluteRef(raw: string): Promise<FsChatRefMatch | nul
   }
 }
 
+function isPotentialOmpLocalSpillPath(value: string): boolean {
+  const parts = value.replaceAll("\\", "/").split("/").filter(Boolean);
+  if (!/^\d+\.log$/i.test(parts.at(-1) ?? "")) return false;
+  return parts.at(-2)?.toLowerCase() === "local" || parts.at(-3)?.toLowerCase() === "omp-local";
+}
+
 export function createComposerTemplateLoader(
   logger: Pick<Logger, "app">,
 ): (root: string | null) => Promise<ComposerTemplate[]> {
@@ -125,6 +132,10 @@ export type WorkspaceIpcDependencies = {
   setCurrentWorkspacePath: (path: string | null) => void;
   withGitBranch: (workspace: WorkspaceRecord | null) => Promise<unknown>;
   stripWinLongPrefix: (path: string) => string;
+  resolveOmpLocalSpill?: (input: {
+    sessionId: string;
+    ref?: string;
+  }) => Promise<{ root: string; absolutePath?: string; relativePath?: string } | null>;
 };
 
 export function registerWorkspaceIpc({
@@ -142,6 +153,7 @@ export function registerWorkspaceIpc({
   setCurrentWorkspacePath,
   withGitBranch,
   stripWinLongPrefix,
+  resolveOmpLocalSpill,
 }: WorkspaceIpcDependencies): void {
   let host: HostProcess | null = null;
   const handle = (channel: string, fn: (...args: any[]) => Promise<any>) => {
@@ -921,10 +933,23 @@ export function registerWorkspaceIpc({
    * or synced folder). The two entries name the same directory, and every
    * candidate is still re-checked through `realpath` before a read is allowed.
    */
-  const fsExtraRoots = async (workspaceRoot: string | null): Promise<string[]> => {
+  const fsExtraRoots = async (
+    workspaceRoot: string | null,
+    sessionId?: string,
+    requestedPath?: string,
+  ): Promise<string[]> => {
+    let ompLocalRoot: string | null = null;
+    if (sessionId && resolveOmpLocalSpill && isPotentialOmpLocalSpillPath(String(requestedPath ?? ""))) {
+      try {
+        ompLocalRoot = (await resolveOmpLocalSpill({ sessionId }))?.root ?? null;
+      } catch {
+        // A failed/stopped OMP runtime must not break ordinary workspace reads.
+      }
+    }
     const roots = [
       join(dataDir, "scratch"),
       join(dataDir, "attachments"),
+      ...(ompLocalRoot ? [ompLocalRoot] : []),
       ...projectFolderPaths(workspaceRoot).filter((path) => path !== workspaceRoot),
     ];
     const canonical = await Promise.all(
@@ -1037,7 +1062,7 @@ export function registerWorkspaceIpc({
       return readOpenableFile(
         requested,
         workspaceRoot,
-        await fsExtraRoots(workspaceRoot),
+        await fsExtraRoots(workspaceRoot, input.sessionId, requested),
         input.mimeType,
         // The path came from a click in the transcript, not from a tool call.
         { allowAnyAbsolute: true },
@@ -1059,7 +1084,7 @@ export function registerWorkspaceIpc({
       return readOpenableImage(
         requested,
         workspaceRoot,
-        await fsExtraRoots(workspaceRoot),
+        await fsExtraRoots(workspaceRoot, input.sessionId, ref),
         input.mimeType,
         { allowAnyAbsolute: true },
       );
@@ -1096,7 +1121,7 @@ export function registerWorkspaceIpc({
     const target = await resolveRealOpenablePath(
       requested,
       workspaceRoot,
-      await fsExtraRoots(workspaceRoot),
+      await fsExtraRoots(workspaceRoot, input.sessionId, requested),
       // Reveal is a user action on a path the user just clicked.
       { allowAnyAbsolute: true },
     );
@@ -1117,7 +1142,7 @@ export function registerWorkspaceIpc({
     const target = await resolveRealOpenablePath(
       requested,
       workspaceRoot,
-      await fsExtraRoots(workspaceRoot),
+      await fsExtraRoots(workspaceRoot, input.sessionId, requested),
       { allowAnyAbsolute: true },
     );
     if (!target) {
@@ -1168,6 +1193,22 @@ export function registerWorkspaceIpc({
     ): Promise<FsChatRefResolveResult> => {
       const rawRef = String(input.ref ?? "").trim();
       if (!rawRef) return { match: null };
+      // OMP's local:// and legacy artifact:// references are session-owned
+      // native spills, never generic paths or external protocols.
+      if (hasOmpLocalSpillScheme(rawRef)) {
+        if (!input.sessionId || !resolveOmpLocalSpill) return { match: null };
+        const spill = await resolveOmpLocalSpill({ sessionId: input.sessionId, ref: rawRef });
+        if (!spill?.absolutePath) return { match: null };
+        return {
+          match: {
+            root: "scratch",
+            sessionScratch: true,
+            relativePath: spill.relativePath ?? basename(spill.absolutePath),
+            absolutePath: spill.absolutePath,
+            matchedBy: "exact-relative",
+          },
+        };
+      }
       const remote = await remoteFileWorkspace(input.sessionId);
       if (remote && !(await isLocalStoredFile(rawRef))) return await readRemoteFiles(remote, "resolve", rawRef) as FsChatRefResolveResult;
       // A reference captured from the parent checkout names the same relative

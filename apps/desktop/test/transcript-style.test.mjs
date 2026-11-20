@@ -467,9 +467,11 @@ test("delete remains on user turns and is removed from assistant toolbar", async
   assert.match(transcriptSource, /chat\.deleteMessage/);
   assert.match(
     transcriptSource,
-    /const canMutateHistory = canEditMessages && historyActionsAllowed;[\s\S]*?const editableUserMessage = isUser && !isSessionMessage && !message\.id\.startsWith\("plugin:"\) && canMutateHistory;/,
+    /const historyCapabilities = getTranscriptHistoryCapabilities\(message\.engineOrigin \?\? session\?\.agentEngine\);[\s\S]*?const canMutateHistory = canEditMessages && historyActionsAllowed && historyCapabilities\.canEditUserMessage;[\s\S]*?const editableUserMessage = isUser && !isSessionMessage && !message\.id\.startsWith\("plugin:"\) && canMutateHistory;/,
   );
-  assert.match(transcriptSource, /\{editableUserMessage \? \(/);
+  assert.match(transcriptSource, /const editUserMessageAvailable = isUser &&[\s\S]*?historyCapabilities\.canEditUserMessageInNativeBranch/);
+  assert.match(transcriptSource, /canDelete: editableUserMessage && !editing && !loadingEdit && historyCapabilities\.canDeleteMessage/);
+  assert.match(transcriptSource, /\{editableUserMessage && historyCapabilities\.canDeleteMessage \? \(/);
   assert.match(stylesSource, /\.copy-btn\.danger:hover/);
 });
 
@@ -487,8 +489,9 @@ test("editing a user prompt regenerates it and keeps the old branch reachable", 
   assert.match(transcriptSource, /chat\.editMessage/);
   assert.match(transcriptSource, /const retryEdit = async \(\)/);
   assert.match(transcriptSource, /void retryEdit\(\)/);
-  assert.match(transcriptSource, /chat\.retryEdit/);
-  assert.match(transcriptSource, /chat\.retryingEdit/);
+  assert.match(transcriptSource, /chat\.sendEdit/);
+  assert.match(transcriptSource, /chat\.sendingEdit/);
+  assert.match(transcriptSource, /event\.key === "Enter" &&[\s\S]*?!event\.shiftKey &&[\s\S]*?enterToSend \|\| event\.metaKey \|\| event\.ctrlKey/);
   assert.doesNotMatch(transcriptSource, /next === editSeed\.trim\(\)/);
   assert.doesNotMatch(transcriptSource, /editAssistantMessage/);
   assert.doesNotMatch(storeSource, /editAssistantMessage/);
@@ -517,11 +520,15 @@ test("editing a user prompt regenerates it and keeps the old branch reachable", 
   );
   assert.match(
     stylesSource,
-    /\.message-edit \{[\s\S]*?background:\s*var\(--ds-tile-deep\);[\s\S]*?box-shadow:\s*none;/,
+    /\.message-edit \{[\s\S]*?border:\s*1px solid transparent;[\s\S]*?border-radius:\s*var\(--ds-composer-radius,[\s\S]*?overflow:\s*hidden;[\s\S]*?background:\s*var\(--ds-tile-deep\);[\s\S]*?box-shadow:\s*none;/,
   );
   assert.match(
     stylesSource,
-    /\.message-edit:focus-within \{[\s\S]*?box-shadow:\s*inset/,
+    /\.message-edit:focus-within \{[\s\S]*?border-color:\s*color-mix\(/,
+  );
+  assert.match(
+    stylesSource,
+    /\.message-row\.user \.message-bubble:has\(\.message-edit\) \{[\s\S]*?border-radius:\s*0;[\s\S]*?background:\s*transparent;[\s\S]*?box-shadow:\s*none;[\s\S]*?padding:\s*0;/,
   );
   assert.match(transcriptSource, /className="icon-btn message-edit-cancel"/);
   assert.match(transcriptSource, /className="send-btn message-edit-submit"/);
@@ -533,7 +540,7 @@ test("message toolbars are icon-only with hover tooltips", () => {
     transcriptSource,
     /<span>\{(?:forkLabel|retryLabel|editLabel|copyLabel)\}<\/span>/,
   );
-  for (const label of ["editLabel", "deleteLabel"]) {
+  for (const label of ["editActionLabel", "deleteLabel"]) {
     assert.ok(
       transcriptSource.includes(`ariaLabel={${label}}`),
       `${label} needs an aria-label`,
@@ -743,7 +750,7 @@ test("regenerate history pager and stable revision family are wired", async () =
   assert.match(transcriptSource, /chat\.revisionPager/);
   assert.match(
     transcriptSource,
-    /const showRevisionPager = editableUserMessage && revisionCount > 1;/,
+    /const showRevisionPager = editableUserMessage && historyCapabilities\.canUseRevisions && revisionCount > 1;/,
   );
   assert.match(
     transcriptSource,

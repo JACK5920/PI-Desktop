@@ -2114,6 +2114,15 @@ Single message render — either user (plaintext) or assistant (markdown streami
   the parent session lists them as reopenable entries using the durable child
   transcript and excerpt. “Open as a conversation” persists promotion before
   navigating to the child. Existing ordinary forks are not reclassified.
+  These history actions are selected from the owning engine, not merely from
+  session edit permission. PI sessions retain user-message edit/delete,
+  regenerate, and revision navigation. OMP's PI transcript mirror remains
+  copyable/selectable, but does not expose PI-owned edit, delete, retry,
+  regenerate, revision, generic fork, or side-chat fork actions: those would
+  rewrite or fork only the Host mirror while OMP's canonical tree stayed put.
+  OMP's native session-tree controls remain the supported fork surface and
+  create a separately mapped OMP conversation. Main-process IPC and store
+  actions enforce the same boundary even if invoked without the UI.
   Opening a user-message editor must hydrate canonical history before seeding the
   draft when the loaded transcript is partial or display-limited. Never seed an
   editable draft from clipped display text. Failed reads keep the editor closed

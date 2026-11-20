@@ -43,6 +43,7 @@ import { isRemoteSession, safeSessionSummary, sessionAllows } from "../../lib/re
 import { createRefreshCoordinator } from "../../lib/refresh-coordinator";
 import { openRemoteProjectSession, remoteProjectForSession } from "../../lib/remote-project-session";
 import { resolveAgentEngine } from "../../lib/session-agent-engine";
+import { getTranscriptHistoryCapabilities } from "../../lib/transcript-history-capabilities.mjs";
 import {
   applyOptimisticSessionConfiguration,
 } from "../../lib/session-thinking";
@@ -775,6 +776,7 @@ export function createSessionSlice({
       const source = state.sessions.find((session) => session.id === id);
       if (!source) throw new Error(i18n.t("errors.sessionNotFound"));
       if (!sessionAllows(source, "canEditMessages")) return;
+      if (!getTranscriptHistoryCapabilities(source.agentEngine).canCreateGenericFork) return;
 
       if (source.projectPath) {
         if (
@@ -815,6 +817,7 @@ export function createSessionSlice({
       const source = state.sessions.find((session) => session.id === sessionId);
       if (!message || message.role !== "assistant" || !source) return;
       if (!sessionAllows(source, "canEditMessages")) return;
+      if (!getTranscriptHistoryCapabilities(source.agentEngine).canCreateGenericFork) return;
 
       try {
         const sourceTitle = source.title.trim() || i18n.t("chat.untitledTask");
@@ -853,6 +856,7 @@ export function createSessionSlice({
       const source = state.sessions.find((session) => session.id === sessionId);
       if (!source || !sessionAllows(source, "canEditMessages") ||
         !sessionAllows(source, "canPrompt")) return null;
+      if (!getTranscriptHistoryCapabilities(source.agentEngine).canCreateGenericFork) return null;
       const transcript = state.activeSessionId === sessionId
         ? state.messages
         : state.retainedTranscripts[sessionId] ?? runtime.sessionTranscriptCache.get(sessionId) ?? [];

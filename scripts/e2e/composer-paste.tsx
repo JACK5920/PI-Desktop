@@ -237,6 +237,7 @@ globalThis.composerPasteProbe = async () => {
     selection.removeAllRanges();
     selection.addRange(range);
   };
+  let composerSelectionBoundaryDrag = false;
   try {
     // Settings replaces ChatSurface, then remounts the composer in the same
     // workspace. Exercise the real draft hook and DOM across that lifecycle.
@@ -979,6 +980,79 @@ globalThis.composerPasteProbe = async () => {
     await new Promise(requestAnimationFrame);
     assert(controller.fileReferences.length === 0,
       "undo resurrected a reference after a batched workspace round-trip");
+
+    // Dragging selected text out of a contenteditable must not start a native
+    // text drag that collapses the range before Ctrl+C can copy it.
+    const boundaryText = "keep this selection active";
+    const selectionEditor = await reset(boundaryText, 0, 0);
+    await new Promise(requestAnimationFrame);
+    selectionEditor.scrollIntoView({ block: "center" });
+    selectionEditor.focus();
+    const textNode = selectionEditor.firstChild;
+    assert(textNode?.nodeType === Node.TEXT_NODE, "selection fixture did not render as plain editor text");
+    const selectedText = "selection";
+    const selectionStart = boundaryText.indexOf(selectedText);
+    assert(selectionStart >= 0, "selection fixture text missing its target phrase");
+    const selectedRange = document.createRange();
+    selectedRange.setStart(textNode!, selectionStart);
+    selectedRange.setEnd(textNode!, selectionStart + selectedText.length);
+    const nativeSelection = window.getSelection()!;
+    nativeSelection.removeAllRanges();
+    nativeSelection.addRange(selectedRange);
+
+    let dragStartSeen = false;
+    let dragStartPrevented = false;
+    const onDragStart = (event: DragEvent) => {
+      dragStartSeen = true;
+      dragStartPrevented = event.defaultPrevented;
+    };
+    selectionEditor.addEventListener("dragstart", onDragStart);
+    const selectedRect = selectedRange.getBoundingClientRect();
+    const editorRect = selectionEditor.getBoundingClientRect();
+    const dragX = Math.min(window.innerWidth - 2, editorRect.right + 32);
+    const dragY = Math.min(editorRect.bottom - 2, Math.max(editorRect.top + 2, selectedRect.top + selectedRect.height / 2));
+    assert(dragX > editorRect.right, "selection fixture has no visible area outside the editor");
+    await globalThis.composerPreviewPointer({
+      type: "mousePressed",
+      x: selectedRect.left + selectedRect.width / 2,
+      y: selectedRect.top + selectedRect.height / 2,
+    });
+    await globalThis.composerPreviewPointer({ type: "mouseMoved", x: dragX, y: dragY });
+    await globalThis.composerPreviewPointer({ type: "mouseReleased", x: dragX, y: dragY });
+    await new Promise(requestAnimationFrame);
+    selectionEditor.removeEventListener("dragstart", onDragStart);
+    assert(dragStartSeen, "dragging selected text beyond the editor did not exercise native dragstart");
+    assert(dragStartPrevented, "selected-text drag was not cancelled before it could collapse the range");
+    assert(window.getSelection()?.toString() === selectedText, "selection was lost after the pointer left the editor");
+
+    let copiedText: string | null = null;
+    const onCopy = (event: ClipboardEvent) => {
+      copiedText = window.getSelection()?.toString() ?? "";
+      event.clipboardData?.setData("text/plain", copiedText);
+      event.preventDefault();
+    };
+    document.addEventListener("copy", onCopy, true);
+    await globalThis.composerPreviewPressKey("Control+C");
+    document.removeEventListener("copy", onCopy, true);
+    assert(copiedText === selectedText, "Ctrl+C did not copy the preserved editor selection");
+
+    // The selection fix only handles native text dragstart; file drop must
+    // continue bubbling to the composer drop target with its File payload.
+    const dropTarget = selectionEditor.closest<HTMLElement>(".composer-shell");
+    assert(dropTarget, "composer drop target missing from selection fixture");
+    let droppedFileCount = 0;
+    const onDrop = (event: DragEvent) => { droppedFileCount = event.dataTransfer?.files.length ?? 0; };
+    dropTarget!.addEventListener("drop", onDrop, { once: true });
+    const fileTransfer = new DataTransfer();
+    fileTransfer.items.add(new File(["boundary-drop"], "boundary-drop.txt", { type: "text/plain" }));
+    selectionEditor.dispatchEvent(new DragEvent("drop", {
+      bubbles: true,
+      cancelable: true,
+      dataTransfer: fileTransfer,
+    }));
+    assert(droppedFileCount === 1, "file drop no longer reaches the composer drop target");
+    composerSelectionBoundaryDrag = true;
+
     flushSync(() => root.render(null));
     resetComposerDraftCache();
 
@@ -986,6 +1060,7 @@ globalThis.composerPasteProbe = async () => {
     return {
       ok: true,
       fullComposerSubmissionAndOverflow: true,
+      composerSelectionBoundaryDrag,
       mixedShortText: true,
       multilineAndUndoRedo: true,
       fileReferenceUndoRedo: true,

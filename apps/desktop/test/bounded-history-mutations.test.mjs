@@ -11,6 +11,7 @@ const transcript = await import("../src/lib/session-transcript.ts");
 const safety = await import("../src/lib/remote-session-safety.ts");
 const permissions = await import("../src/lib/pending-permissions.ts");
 const smartStop = await import("../src/lib/composer-smart-stop.ts");
+const historyCapabilities = await import("../src/lib/transcript-history-capabilities.mjs");
 function load(relative, imports, globals = {}) {
   const source = fs.readFileSync(new URL(relative, import.meta.url), "utf8");
   const { outputText } = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } });
@@ -24,9 +25,10 @@ function load(relative, imports, globals = {}) {
 const row = (id, role) => ({ id, role, content: id, status: "complete" });
 const previous = [row("u1", "user"), row("t1", "tool"), row("a1", "assistant"), row("u2", "user"), row("a2", "assistant")];
 function harness(overrides = {}) {
-  let state = { activeSessionId: "s", isRunning: false, messages: [...previous], sessions: [{ id: "s", source: "desktop" }], sessionHistory: {}, retainedTranscripts: {}, pendingPermissions: {}, runningSessions: {}, ...overrides.state };
+  let state = { activeSessionId: "s", isRunning: false, messages: [...previous], sessions: [{ id: "s", source: "desktop" }], sessionHistory: {}, retainedTranscripts: {}, pendingPermissions: {}, pendingPlans: {}, runningSessions: {}, latestTurnResults: {}, sessionOutcomes: {}, ...overrides.state };
   const calls = [];
   const api = {
+    prompt: async (input) => { calls.push(["prompt", input]); return { accepted: true, turnId: "turn-1" }; },
     deleteSessionMessage: async (input) => { calls.push(["delete", input]); return { ok: true, deleted: true, deletedCount: 3 }; },
     activateSessionRevision: async (input) => { calls.push(["activate", input]); return { messages: previous }; },
     retractPendingSessionPrompt: async (input) => { calls.push(["retract", input]); return { ok: true, retracted: true, removedCount: 1 }; },
@@ -35,12 +37,17 @@ function harness(overrides = {}) {
   const runtime = { loadFullSessionMessages: async () => previous, cacheSessionTranscript() {}, clearPendingPromptAttempt() {}, sessionTranscriptCache: new Map(), submittedComposerDrafts: new Map(), ...overrides.runtime };
   const { createTranscriptSlice } = load("../src/stores/slices/transcript-slice.ts", {
     i18next: { default: { t: (key) => key } }, "../../lib/api": { api },
-    "../../lib/remote-session-safety": safety, "@pi-desktop/shared": {},
+    "../../lib/remote-session-safety": safety, "@pi-desktop/shared": { isRenderableAttachment: () => true },
     "../../lib/composer-smart-stop": smartStop, "../../lib/pending-permissions": permissions,
+    "../../lib/transcript-history-capabilities.mjs": historyCapabilities,
     "../../lib/session-transcript": transcript, "../../lib/workspace-review": {},
-    "../../lib/context-usage": { settleStoppedAssistantMetrics: (message) => message }, "../runtime/transcript-action": {},
+    "../../lib/context-usage": { settleStoppedAssistantMetrics: (message) => message },
+    "../runtime/transcript-action": { prepareTranscriptAction: async ({ get }) => get() },
   });
-  const actions = createTranscriptSlice({ get: () => state, set: (update) => { state = { ...state, ...(typeof update === "function" ? update(state) : update) }; }, runtime, flushPendingSessionConfiguration: async () => {} });
+  let actions;
+  actions = createTranscriptSlice({ get: () => ({ ...state, ...actions }), set: (update) => { state = { ...state, ...(typeof update === "function" ? update(state) : update) }; }, runtime,
+    promptAttachmentsFromMessage: (attachments = []) => attachments, viewingSessionIdForPrompt: () => null,
+    flushPendingSessionConfiguration: async () => {} });
   return { actions, calls, runtime, state: () => state, update: (next) => { state = { ...state, ...next }; } };
 }
 test("delete uses only the durable id and removes the entire user turn", async () => {
@@ -55,6 +62,24 @@ test("failed delete rolls back and exposes the durable error", async () => {
 test("activation requests canonical prefix with no historical messages", async () => {
   const h = harness(); await h.actions.activateMessageRevision("u2", 1);
   assert.deepEqual(h.calls, [["activate", { sessionId: "s", rootUserId: "u2", revisionIndex: 1, requireCanonicalPrefix: true }]]);
+});
+test("OMP edits and regenerates through native prompt branches without PI transcript mutations", async () => {
+  const h = harness({ state: { sessions: [{ id: "s", source: "desktop", agentEngine: "omp" }] } });
+  assert.equal((await h.actions.prepareUserMessageEdit("u2"))?.id, "u2");
+  assert.equal(await h.actions.editUserMessage("u2", "edited", []), true);
+  assert.equal(h.calls[0][0], "prompt");
+  assert.deepEqual(h.calls[0][1].ompNativeEdit, { messageId: "u2" });
+  assert.equal(h.calls[0][1].truncateFromMessageId, undefined);
+  assert.notEqual(h.calls[0][1].messageId, "u2", "the edited turn gets a new durable message identity");
+
+  h.update({ isRunning: false, messages: previous });
+  await h.actions.retryAssistantMessage("a1");
+  await h.actions.retryLastPrompt("u2");
+  await h.actions.activateMessageRevision("u2", 1);
+  await h.actions.deleteMessage("u2");
+  assert.equal(h.calls.length, 2, "regeneration creates one native edit prompt; delete, PI revision, and non-failed retry remain unavailable");
+  assert.deepEqual(h.calls[1][1].ompNativeEdit, { messageId: "u1" });
+  assert.equal(h.calls[1][1].truncateFromMessageId, undefined);
 });
 for (const outcome of ["success", "exception", "reply_started"]) {
   test(`smart stop preserves durable state and drafts on ${outcome}`, async () => {
@@ -75,10 +100,11 @@ for (const outcome of ["success", "exception", "reply_started"]) {
 const { registerSessionIpc } = load("../electron/main/ipc/session-ipc.ts", {
   electron: { shell: {} }, "node:fs": fs, "node:path": path, "@pi-desktop/shared": { ErrorCodes, IPC }, "../importers": {}, "../services/session-collaboration": {}, "../bootstrap/remote-hosts.js": {}, "../services/session-search": {},
 });
-function ipcHarness(pending = false, result = { ok: true }, managedPluginId = null, activeTurns = new Map()) {
+function ipcHarness(pending = false, result = { ok: true }, managedPluginId = null, activeTurns = new Map(), engineId = "pi") {
   const handlers = new Map(); const events = [];
   const host = { call: async (method, input) => {
     events.push([method, input]);
+    if (method === "session.get") return { session: { agentEngine: engineId } };
     if (method === "session.managedOwner") return { pluginId: managedPluginId };
     return typeof result === "function" ? result(method) : result;
   } };
@@ -88,6 +114,8 @@ function ipcHarness(pending = false, result = { ok: true }, managedPluginId = nu
     acquireSessionOperation: async () => { events.push(["lock"]); return () => events.push(["release"]); },
     beginTranscriptRewrite: () => { events.push(["fence"]); return { commit: () => events.push(["commit"]), rollback: () => events.push(["rollback"]) }; }, sessionProjects: new Map(), logger: {}, plugins: {},
     forgetTranscriptRewriteHistory: (id) => events.push(["forget", id]),
+    sessionCapabilityContext: async () => ({ providers: {}, defaults: {} }),
+    enrichSession: (session) => session,
   });
   return { events, invoke: (channel, input) => { assert.equal(typeof handlers.get(IPC.invoke[channel]), "function"); return handlers.get(IPC.invoke[channel])(input); } };
 }
@@ -106,17 +134,36 @@ for (const [channel, method, input] of [
     const h = ipcHarness(); assert.ok(IPC_WHITELIST.has(IPC.invoke[channel])); await h.invoke(channel, input);
     assert.deepEqual(h.events, [
       ...(channel === "sessionActivateRevision" ? [["session.managedOwner", { sessionId: "s" }]] : []),
-      ["lock"], ["fence"], ["strict-drain", "s"], ["dispose"], [method, input], ["commit"], ["release"],
+      ["lock"], ["session.get", { id: "s", messageLimit: 1 }], ["fence"], ["strict-drain", "s"], ["dispose"], [method, input], ["commit"], ["release"],
     ]);
   });
   test(`${channel} refuses mutation on strict drain failure`, async () => {
     const h = ipcHarness(true); await assert.rejects(h.invoke(channel, input), /pending write/);
     assert.deepEqual(h.events, [
       ...(channel === "sessionActivateRevision" ? [["session.managedOwner", { sessionId: "s" }]] : []),
-      ["lock"], ["fence"], ["strict-drain", "s"], ["rollback"], ["release"],
+      ["lock"], ["session.get", { id: "s", messageLimit: 1 }], ["fence"], ["strict-drain", "s"], ["rollback"], ["release"],
     ]);
   });
 }
+test("OMP mirror mutations are rejected in main before Host rewrite and native history stays untouched", async () => {
+  for (const channel of ["sessionDeleteMessage", "sessionRetractPendingPrompt", "sessionActivateRevision", "sessionReplaceMessages"]) {
+    const h = ipcHarness(false, { ok: true }, null, new Map(), "omp");
+    await assert.rejects(h.invoke(channel, { sessionId: "s", messageId: "u1", rootUserId: "u1", revisionIndex: 1, messages: previous }), {
+      errorCode: ErrorCodes.INVALID_ARGUMENT,
+    });
+    assert.equal(h.events.some(([method]) => method === "session.deleteMessage" || method === "session.retractPendingPrompt" || method === "session.activateRevision" || method === "session.replaceMessages"), false);
+    assert.equal(h.events.some(([method]) => method === "fence" || method === "strict-drain"), false);
+  }
+  const save = ipcHarness(false, { ok: true }, null, new Map(), "omp");
+  await assert.rejects(save.invoke("sessionSaveRevision", { sessionId: "s", rootUserId: "u1", messages: previous }), { errorCode: ErrorCodes.INVALID_ARGUMENT });
+  assert.deepEqual(save.events, [["session.get", { id: "s", messageLimit: 1 }]]);
+});
+
+test("generic PI fork IPC refuses OMP sessions instead of creating an unsynchronized mirror child", async () => {
+  const h = ipcHarness(false, { ok: true }, null, new Map(), "omp");
+  await assert.rejects(h.invoke("sessionFork", { sessionId: "s", throughMessageId: "a1" }), { errorCode: ErrorCodes.INVALID_ARGUMENT });
+  assert.deepEqual(h.events, [["session.get", { id: "s", messageLimit: 1 }]]);
+});
 test("a plugin-managed transcript cannot activate a local revision", async () => {
   const h = ipcHarness(false, { ok: true }, "example.group-plugin");
   await assert.rejects(

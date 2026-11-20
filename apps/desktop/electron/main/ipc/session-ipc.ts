@@ -77,6 +77,19 @@ function rejectNativeMutation(sessionId: unknown, action: string): void {
   }
 }
 
+async function rejectOmpHistoryMutation(host: HostProcess, sessionId: string, action: string): Promise<void> {
+  const result = await host.call<{ session?: { agentEngine?: string } | null }>("session.get", {
+    id: sessionId,
+    messageLimit: 1,
+  });
+  if (result.session?.agentEngine === "omp") {
+    throw Object.assign(
+      new Error(`OMP 原生历史不支持 PI Host 的${action}；请使用 OMP 会话树创建原生分支。`),
+      { errorCode: ErrorCodes.INVALID_ARGUMENT },
+    );
+  }
+}
+
 function modelConfigSelectionKey(value: unknown): string | null {
   if (!value || typeof value !== "object") return null;
   const source = Reflect.get(value, "source");
@@ -164,6 +177,7 @@ export function registerSessionIpc({
     const releaseSessionOperation = await acquireSessionOperation(sessionId);
     let rewriteFence: ReturnType<typeof beginTranscriptRewrite> | undefined;
     try {
+      await rejectOmpHistoryMutation(currentHost, sessionId, purpose);
       if (activeTurns.has(sessionId)) {
         throw Object.assign(
           new Error("Cannot rewrite the transcript of a running session"),
@@ -287,6 +301,7 @@ export function registerSessionIpc({
           errorCode: ErrorCodes.INVALID_ARGUMENT,
         });
       }
+      await rejectOmpHistoryMutation(host, sessionId, "通用分叉");
       if (activeTurns.has(sessionId) && !String(input.throughMessageId ?? "").trim()) {
         throw Object.assign(new Error("Cannot fork a running session"), {
           errorCode: ErrorCodes.AGENT_BUSY,
@@ -622,9 +637,12 @@ export function registerSessionIpc({
     }) => {
       if (!host) throw new Error("host unavailable");
       rejectNativeMutation(input?.sessionId, "revision save");
+      const sessionId = String(input?.sessionId ?? "").trim();
+      if (!sessionId) throw new Error("sessionId required");
+      await rejectOmpHistoryMutation(host, sessionId, "修订保存");
       await rejectManagedMutation(host, input.sessionId);
       return host.call("session.saveRevision", {
-        sessionId: String(input?.sessionId || ""),
+        sessionId,
         rootUserId: String(input?.rootUserId || ""),
         messages: input?.messages ?? [],
         makeActive: input?.makeActive === true,

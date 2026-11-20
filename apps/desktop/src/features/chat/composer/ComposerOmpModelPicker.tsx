@@ -1,15 +1,24 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import type { TFunction } from "i18next";
 import { OMP_SETTINGS_RPC_SESSION_ID } from "@pi-desktop/shared";
-import { api, type OmpModelOverride } from "../../../lib/api";
-import { useAppStore } from "../../../stores/app-store";
+import type { TFunction } from "i18next";
+import { type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { IconBot, IconCheck, IconChevronDown, IconSearch, IconX } from "../../../components/icons";
 import { AnchoredMenu } from "../../../components/settings/AnchoredMenu";
 import { TooltipButton } from "../../../components/ui";
-import { readOmpThinkingLevels, selectOmpModelAndRefreshThinkingLevels } from "./omp-model-selection.mjs";
-import { readOmpModelRecovery, type OmpModelRecoveryInfo, type OmpRecoveryCandidate } from "../../../lib/omp-model-recovery";
+import { api, type OmpModelOverride } from "../../../lib/api";
+import { type OmpModelRecoveryInfo, type OmpRecoveryCandidate, readOmpModelRecovery } from "../../../lib/omp-model-recovery";
+import { useAppStore } from "../../../stores/app-store";
+import {
+  filterOmpModelsBySearch,
+  groupOmpModelsByProvider,
+  mapOmpProviderDisplayNames,
+  type OmpModelOption,
+  ompProviderDisplayName,
+  readOmpThinkingLevels,
+  selectOmpModelAndRefreshThinkingLevels,
+  toOmpRpcModelIdentity,
+} from "./omp-model-selection.mjs";
 
-type OmpModel = { provider: string; id: string; name?: string; contextWindow?: number };
+type OmpModel = OmpModelOption;
 type OmpThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 function modelVisibilityKey(provider: string, id: string): string {
@@ -249,17 +258,23 @@ export function ComposerOmpModelPicker({
       // model changed provider config after this session booted, so it has to
       // finish before anything else targets the same child process.
       const result = await api.ompRpcCommand({ sessionId: rpcSessionId, command: "get_available_models" }) as { data?: { models?: OmpModel[] } };
-      const [levels, visibility, overrideState] = await Promise.all([
+      const [levels, visibility, overrideState, customModelState] = await Promise.all([
         api.ompRpcCommand({ sessionId: rpcSessionId, command: "get_available_thinking_levels" }) as Promise<{ data?: { levels?: OmpThinkingLevel[] } }>,
         api.getOmpHiddenModels(),
         api.getOmpModelOverrides(),
+        api.getOmpCustomModels().catch(() => ({ providers: [] })),
       ]);
       const hidden = new Set(visibility.hiddenModels);
       const overrides = overrideState.overrides ?? {};
       overridesRef.current = overrides;
-      const nextModels = (Array.isArray(result.data?.models) ? result.data.models : [])
+      const namedModels = mapOmpProviderDisplayNames(
+        Array.isArray(result.data?.models) ? result.data.models : [],
+        customModelState.providers,
+      );
+      const nextModels = namedModels
         .filter((candidate) => !hidden.has(modelVisibilityKey(candidate.provider, candidate.id)))
-        // Aliases from the settings page are what the user expects to see here.
+        // Model aliases and provider names from Settings are the user-facing labels;
+        // their OMP IDs remain untouched for selection and RPC identity.
         .map((candidate) => {
           const displayName = overrides[modelVisibilityKey(candidate.provider, candidate.id)]?.displayName;
           return displayName ? { ...candidate, name: displayName } : candidate;
@@ -385,29 +400,23 @@ export function ComposerOmpModelPicker({
   }, [cacheKey, hydrate, draft]);
 
   const normalizedModelQuery = modelQuery.trim().toLocaleLowerCase();
-  const filteredModels = normalizedModelQuery
-    ? models.filter((candidate) => `${candidate.name ?? ""} ${candidate.provider} ${candidate.id}`.toLocaleLowerCase().includes(normalizedModelQuery))
-    : models;
+  const filteredModels = filterOmpModelsBySearch(models, normalizedModelQuery);
   const searching = normalizedModelQuery.length > 0;
 
   // The native picker groups by source: one "recent" rail entry plus one per
   // provider, so a long catalog never turns into an endless single list.
   const sections = useMemo(() => {
-    const byProvider = new Map<string, OmpModel[]>();
-    for (const candidate of models) {
-      const list = byProvider.get(candidate.provider) ?? [];
-      list.push(candidate);
-      byProvider.set(candidate.provider, list);
-    }
+    const providerGroups = groupOmpModelsByProvider(models);
     const recentModels = recent
       .map((entry) => models.find((candidate) => candidate.provider === entry.provider && candidate.id === entry.id))
       .filter((candidate): candidate is OmpModel => Boolean(candidate));
     return [
-      { id: "recent", kind: "recent" as const, label: t("chat.recentModels"), models: recentModels },
-      ...[...byProvider.entries()].map(([provider, providerModels]) => ({
+      { id: "recent", kind: "recent" as const, provider: "", label: t("chat.recentModels"), models: recentModels },
+      ...providerGroups.map(({ provider, displayName, models: providerModels }) => ({
         id: `provider:${provider}`,
         kind: "provider" as const,
-        label: provider,
+        provider,
+        label: displayName,
         models: providerModels,
       })),
     ];
@@ -421,15 +430,13 @@ export function ComposerOmpModelPicker({
   // grouped by provider instead of hiding what the rail is not pointing at.
   const paneGroups = useMemo(() => {
     if (!searching) {
-      return currentSection ? [{ provider: currentSection.kind === "provider" ? currentSection.label : "", models: currentSection.models }] : [];
+      return currentSection ? [{
+        provider: currentSection.provider,
+        displayName: currentSection.kind === "provider" ? currentSection.label : "",
+        models: currentSection.models,
+      }] : [];
     }
-    const byProvider = new Map<string, OmpModel[]>();
-    for (const candidate of filteredModels) {
-      const list = byProvider.get(candidate.provider) ?? [];
-      list.push(candidate);
-      byProvider.set(candidate.provider, list);
-    }
-    return [...byProvider.entries()].map(([provider, providerModels]) => ({ provider, models: providerModels }));
+    return groupOmpModelsByProvider(filteredModels);
   }, [currentSection, filteredModels, searching]);
 
   const paneEmpty = paneGroups.every((group) => group.models.length === 0);
@@ -522,11 +529,8 @@ export function ComposerOmpModelPicker({
   const reopenWithCandidate = async (candidate: OmpRecoveryCandidate) => {
     setLoading(true);
     try {
-      await api.reopenOmpRpcWithModel({
-        sessionId: rpcSessionId,
-        provider: candidate.provider,
-        modelId: candidate.id,
-      });
+      const identity = toOmpRpcModelIdentity(candidate);
+      await api.reopenOmpRpcWithModel({ sessionId: rpcSessionId, ...identity });
       setRecovery(null);
       setError(null);
       setModel(candidate);
@@ -543,7 +547,7 @@ export function ComposerOmpModelPicker({
     // Moving a live conversation to another vendor sends its context there;
     // that is a decision the user must confirm explicitly.
     if (!draft && model && candidate.provider !== model.provider) {
-      if (!window.confirm(t("errors.crossProviderConfirm", { provider: candidate.provider }))) return;
+      if (!window.confirm(t("errors.crossProviderConfirm", { provider: ompProviderDisplayName(candidate) }))) return;
     }
     setLoading(true);
     try {
@@ -553,8 +557,7 @@ export function ComposerOmpModelPicker({
       await selectOmpModelAndRefreshThinkingLevels({
         rpcCommand: api.ompRpcCommand,
         sessionId: rpcSessionId,
-        provider: candidate.provider,
-        modelId: candidate.id,
+        ...toOmpRpcModelIdentity(candidate),
         onModelApplied: () => {
           setModel(candidate);
           writeStoredModel(cacheKey, candidate);
@@ -796,8 +799,8 @@ export function ComposerOmpModelPicker({
               <div className="composer-model-empty" role="status">{t("settings.omp.modelsLoading")}</div>
             ) : null}
             {paneGroups.map((group) => (
-              <div key={group.provider || "recent"} className="composer-model-group" role="group" aria-label={group.provider || undefined}>
-                {searching && group.provider ? <div className="composer-model-group-label">{group.provider}</div> : null}
+              <div key={group.provider || "recent"} className="composer-model-group" role="group" aria-label={group.displayName || undefined}>
+                {searching && group.displayName ? <div className="composer-model-group-label">{group.displayName}</div> : null}
                 {group.models.map((candidate) => {
                   const selected = model?.provider === candidate.provider && model?.id === candidate.id;
                   // One dense line per model: the rail already names the source,
@@ -808,7 +811,7 @@ export function ComposerOmpModelPicker({
                       type="button"
                       role="menuitemradio"
                       aria-checked={selected}
-                      title={`${candidate.provider} · ${candidate.id}`}
+                      title={`${ompProviderDisplayName(candidate)} · ${candidate.id}`}
                       className={`composer-plus-item ${selected ? "active" : ""}`}
                       disabled={loading}
                       onClick={() => void choose(candidate)}

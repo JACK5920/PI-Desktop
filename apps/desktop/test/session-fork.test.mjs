@@ -66,6 +66,44 @@ test("session fork labels are localized", () => {
   assert.match(chinese, /branchTitle:\s*"\{\{title\}\}（分支）"/);
 });
 
+test("OMP message edits stay in the same chat and create a native sibling branch", async () => {
+  const { getTranscriptHistoryCapabilities } = await import("../src/lib/transcript-history-capabilities.mjs");
+  const pi = getTranscriptHistoryCapabilities("pi");
+  const omp = getTranscriptHistoryCapabilities("omp");
+  assert.equal(pi.canEditUserMessage && pi.canDeleteMessage && pi.canUseRevisions && pi.canCreateGenericFork, true);
+  assert.equal(omp.canEditUserMessage || omp.canDeleteMessage || omp.canRetryPrompt || omp.canRegenerateAssistant || omp.canUseRevisions || omp.canCreateGenericFork, false);
+  assert.equal(omp.canEditUserMessageInNativeBranch && omp.canRetryPromptInNativeBranch && omp.canRegenerateAssistantInNativeBranch, true);
+  assert.equal(omp.canUseNativeSessionTree, true);
+
+  const transcriptSlice = readStoreModuleSync("slices/transcript-slice.ts");
+  const main = readMainSourceSync();
+  const transcript = readTranscriptSourceSync();
+  const messageRow = read("../src/features/chat/transcript/MessageRow.tsx");
+  const assistantTurn = read("../src/features/chat/transcript/AssistantTurn.tsx");
+  const sessionSlice = readStoreModuleSync("slices/session-slice.ts");
+  const sessionIpc = read("../electron/main/ipc/session-ipc.ts");
+  assert.match(messageRow, /canEditUserMessageInNativeBranch/);
+  assert.match(messageRow, /prepareUserMessageEdit/);
+  assert.match(transcriptSlice, /capabilities\.canEditUserMessageInNativeBranch/);
+  assert.match(transcriptSlice, /ompNativeEdit:\s*\{\s*messageId,\s*\}/);
+  assert.match(main, /messageAround:\s*ompNativeEditMessageId[\s\S]*?errorCode:\s*"OMP_HISTORY_STALE"/);
+  assert.match(transcriptSlice, /retryAssistantMessage:[\s\S]*?editUserMessage\(root\.id, root\.content, root\.attachments\)/);
+  assert.match(transcriptSlice, /canRetryPromptInNativeBranch/);
+  assert.match(assistantTurn, /retryAssistantMessage\(actionMessage\.id\)/);
+  assert.match(main, /promptFromMessage\(/);
+  assert.match(main, /resolveOmpNativeMessageEntryId/);
+  assert.match(main, /OMP_HISTORY_STALE/);
+  assert.match(main, /nativeHistoryConflict \? "aborted" : "error"/);
+  assert.match(transcriptSlice, /nativeHistoryConflict = nativeEdit && errorCode === "OMP_HISTORY_STALE"/);
+  assert.match(main, /navigationMayHaveStarted/);
+  assert.match(main, /persistUserMessage\(\)/);
+  assert.match(main, /OMP 编辑失败，且无法完整恢复原分支\/对话镜像/);
+  assert.doesNotMatch(main, /branchPromptFromMessage/);
+  assert.doesNotMatch(sessionSlice, /branchOmpPrompt|branchOmpAssistantMessage|api\.branchOmpPrompt/);
+  assert.match(sessionIpc, /rejectOmpHistoryMutation\(host, sessionId, "通用分叉"\)/);
+  assert.match(sessionIpc, /OMP 原生历史不支持 PI Host/);
+});
+
 test("a fork is recorded even when a newer navigation took over (D-fork-msg-loss)", async () => {
   const { commitForkedSessionState, FORKED_SESSION_WINDOW, forkedSessionMessages } =
     await import("../src/lib/session-fork.ts");

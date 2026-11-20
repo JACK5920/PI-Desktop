@@ -20571,3 +20571,66 @@ permission-request UI below has isolated fixture automation.
 - **Specs:** [OMP RPC-UI parity](../../project/omp-rpc-gui-parity.md).
 - **Acceptance:** Automated protocol and isolated binary acceptance only; no live credentials, OAuth completion, external model call, audio device qualification, or terminal-TUI parity is inferred.
 - **Milestone:** Maintenance. **Status:** Automated; external-account/device qualification remains manual.
+
+
+### E2E-OMP-custom-provider-display-name
+
+- **Preconditions:** An isolated OMP profile with a custom service whose saved
+  display name differs from its native provider ID, plus a model under that
+  provider. No live provider request or user profile is required.
+- **Path:** Open the OMP model picker and verify the source rail and grouped
+  search heading use the saved service name. Search by that name, inspect the
+  option title, then select the model. Repeat with the custom-settings lookup
+  returning an error.
+- **Expected:** The saved service name is visible and searchable. OMP model
+  selection and recovery continue to send the original provider/model IDs. A
+  failed Settings lookup falls back to the native provider ID without failing
+  catalog loading or selection.
+- **Coverage:** `apps/desktop/test/omp-provider-display-name.test.mjs`,
+  `apps/desktop/test/omp-thinking-level-refresh.test.mjs`, and Desktop
+  TypeScript check. No credentials or external model call are used.
+
+### E2E-OMP-session-local-spill-links
+
+- **Preconditions:** Isolated OMP 19 RPC profile with a native session JSONL
+  header and a synthetic `local/N.log` spill; a second OMP session has no such
+  spill. No provider credentials or model request are used.
+- **Path:** Render `local://N.log` and supported line selectors in plain text,
+  inline code, and Markdown links. Resolve the link through the owning OMP
+  session, preview the exact spill, invoke the existing open/reveal/copy-path
+  menu actions, then repeat after switching the active conversation. Exercise
+  the Windows short-path fallback and the numeric legacy `artifact://N[.log]`
+  alias. Attempt malformed IDs, path/query injection, missing files, symlinks,
+  a different session, a remote/non-OMP session, and unknown custom protocols.
+- **Expected:** Only strict numeric spill IDs resolve under the current local
+  OMP session's verified native session file or OMP's verified long-Windows-path
+  fallback. The menu actions receive the resolved absolute path and keep the
+  existing file-view behavior. Missing, malformed, symlinked, remote, or
+  cross-session targets fail closed; arbitrary custom schemes never reach the
+  system opener. Existing `artifact://` numeric links remain usable.
+- **Coverage:** `apps/desktop/test/omp-local-spill-ref.test.mjs`,
+  `apps/desktop/test/chat-links.test.mjs`, OMP RPC integration harness, and
+  Desktop TypeScript check. No user conversation, credential, or OMP binary is
+  modified.
+
+
+### E2E-OMP-history-actions-follow-engine-capabilities
+
+- **Preconditions:** Isolated local PI and OMP sessions with at least one
+  completed user/assistant exchange; no provider request is required.
+- **Path:** In PI, verify the existing user edit/delete, retry/regenerate,
+  revision pager, and generic fork actions remain available. In OMP, inspect
+  the same transcript rows, floating actions, context menus, sidebar session
+  menu, selection toolbar, and native session-tree controls. Then directly
+  invoke the OMP transcript mutation IPCs and generic PI fork IPC against the
+  isolated OMP session.
+- **Expected:** PI behavior is unchanged. OMP transcript remains readable and
+  selectable, but PI-owned edit/delete/retry/regenerate/revision/generic-fork
+  actions are absent; the native OMP session tree remains the supported fork
+  path. Direct store actions are no-ops and main-process mirror rewrites or
+  generic forks fail with `INVALID_ARGUMENT` before Host mutation, persistence
+  fencing, or OMP history changes. A PI generic fork continues to work.
+- **Coverage:** `session-message-presentation.test.mjs`,
+  `chat-context-menu-items.test.mjs`, `bounded-history-mutations.test.mjs`,
+  `omp-rpc-native-integration.test.mjs`, Desktop TypeScript check, and
+  `git diff --check`. No user transcript or engine mapping is modified.
