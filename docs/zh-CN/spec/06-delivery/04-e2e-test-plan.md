@@ -5990,6 +5990,16 @@ eleven-tool-round desktop paths are verified by
 - **自动化：** `pnpm test:e2e:todos` 从生产 Agent 的 ToolSearch/TodoWrite 路径进入，使用生产渲染器、真实 Host/SQLite 和隔离 Electron 配置验证清单旅程；仅替换外部模型流和 preload 传输，不使用真实 Provider 或用户配置。覆盖 Unicode 截断及警告重放、单一活动项归一化、全量清单渲染与 dock 内滚动、首次读取失败后不切换会话的主机恢复、已缓存快照重新同步及旧事件拒绝。运行时 `runtime-todos.test.ts` 使用确定性 Provider 验证 Agent 工具校验、超长内容归一化和续跑。
 - **状态：** 构建 Desktop 和 Host 后，在确切的请求候选中执行。Host-core 和渲染器定向测试是辅助检查，不能替代 Electron 用户旅程。
 
+### E2E-PLUGIN-pi-bot-delete-transaction-rollback
+
+- **前置条件：** 隔离的 Mini App 数据目录中有一个 Bot、一个仅含该 Bot 的群组、会话指针，以及非空的私聊和群聊记录。不需要提供商凭据或真实模型请求。
+- **步骤：** 重置会话时分别注入聊天记录写入失败和状态写入失败；删除 Bot 及其单成员群组时，让后续聊天记录写入失败；删除群组时让状态提交失败。分别使用 `prepared` 和 `committed` 事务日志重新打开 Store，然后重试失败的重置操作。
+- **预期：** 每次提交前失败都会恢复原 Bot/群组列表、群成员、定时任务、会话指针、状态文件和所有受影响的聊天记录；操作可重试。启动时会回滚中断的 `prepared` 事务、保留已提交删除并清理日志和备份。若回滚本身失败，事务日志仍是权威记录，Store 写队列会保持封锁，直到启动恢复成功。
+- **覆盖：** `apps/desktop/resources/plugins/pi.bot/tests/storage-reliability.test.mjs` 覆盖隔离的 Store/Team 持久化路径，包括回滚、重试、重启恢复和 Bot/群组批量删除；不会触碰真实用户数据。
+- **关联规范：** `apps/desktop/resources/plugins/pi.bot/README.md`、`07-plugins/11-plugin-storage-isolation.md`（插件私有数据仍由插件拥有；事务实现属于此 Mini App 内部）。
+- **验收：** F / G / Quality — 删除失败时不丢数据且可以恢复。
+- **里程碑：** Maintenance。**状态：** 隔离持久化集成测试自动覆盖；现有删除/重置控件未改动，无需为本次数据路径修复做视觉确认。
+
 ## 8. 可追溯性矩阵
 | 验收 | 应用场景 |
 |---|---|
@@ -6030,6 +6040,7 @@ eleven-tool-round desktop paths are verified by
 | E——工具和权限 | E2E-008a、E2E-014、E2E-015、E2E-016、E2E-017、E2E-018、E2E-019、E2E-024I、E2E-024K、E2E-040、E2E-049、E2E-074、E2E-093、E2E-097、 E2E-099、E2E-100、E2E-101、E2E-102、E2E-103、E2E-105、E2E-106、E2E-107、E2E-111、E2E-112、E2E-113、E2E-114、E2E-115、E2E-116、 E2E-119、E2E-121、E2E-122、E2E-123、E2E-142、E2E-145、E2E-147、E2E-PLUGIN-imported-pi-package-skills、E2E-166 |
 | F——坚持 | E2E-020、E2E-021、E2E-038、E2E-SETTINGS-inline-capability-imports、E2E-040、E2E-042、E2E-047、E2E-048、E2E-048c、E2E-051、E2E-054、E2E-056、E2E-061、E2E-062、 E2E-064、E2E-066、E2E-068、E2E-071、E2E-072、E2E-073、E2E-082、E2E-084、E2E-096、E2E-098、E2E-102、E2E-102b、E2E-103、E2E-代理-001、 E2E-061a、E2E-073a、E2E-104、E2E-106、E2E-107、E2E-108、E2E-109、E2E-110、E2E-112、E2E-118、E2E-119、E2E-120、E2E-121、E2E-123、E2E-142、E2E-146、E2E-148、E2E-151、E2E-171、E2E-005J |
 | F——持久化（项目排序） | E2E-253 |
+| F / G / Quality — Mini App 事务式删除 | E2E-PLUGIN-pi-bot-delete-transaction-rollback |
 | G / Security — Fetch redirect policy | E2E-PLUGIN-fetch-redirect-policy |
 | G——插件 | E2E-022、E2E-022A、E2E-022B、E2E-022C、E2E-023、E2E-024、E2E-024B、E2E-024C、E2E-024D、E2E-024AA、E2E-024E、E2E-024W、E2E-024F、E2E-024G、E2E-024H、 E2E-024I、E2E-024J、E2E-024K、E2E-024L、E2E-024M、E2E-024N、E2E-024O、E2E-024P、E2E-025、E2E-026、E2E-105、E2E-117、E2E-120、E2E-122、E2E-123、E2E-148、E2E-153、E2E-PLUGIN-imported-pi-package-skills、E2E-PLUGIN-imported-pi-package-wrapper、E2E-PLUGIN-import-extension-installs-dependencies、E2E-PLUGIN-import-extension-reports-missing-dependency、E2E-PLUGIN-global-shortcut-owns-only-its-own-command、E2E-PLUGIN-permission-gate-for-real-time-capabilities、E2E-PLUGIN-background-audio-and-realtime-connection |
 | H——诊断 | E2E-027、E2E-031、E2E-034、E2E-042、E2E-096、E2E-098、E2E-104、E2E-107、E2E-108、E2E-109、E2E-110、E2E-113、E2E-115、E2E-116、 E2E-118、E2E-121、E2E-146、E2E-194、E2E-195 |
