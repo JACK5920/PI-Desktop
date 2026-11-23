@@ -351,6 +351,56 @@ async function startHttpServer(t, { slowToolDelayMs } = {}) {
   return { url: `http://127.0.0.1:${server.address().port}/mcp`, requests };
 }
 
+function legacySseFixture({ initializeStatus = 405, endpoint = "/messages?session=old", omitEndpoint = false, rejectEndpoint, extraStreamMessages = 0 } = {}) {
+  const calls = [];
+  const checkedUrls = [];
+  let streamController;
+  let streamAborted = false;
+  const emit = (event, data) => {
+    streamController?.enqueue(new TextEncoder().encode(`event: ${event}\ndata: ${data}\n\n`));
+  };
+  const fetchImpl = async (rawUrl, options) => {
+    const url = new URL(rawUrl);
+    const message = options.method === "POST" ? JSON.parse(options.body) : undefined;
+    calls.push({ url: url.toString(), method: options.method, headers: options.headers, message });
+    if (url.pathname === "/mcp" && options.method === "POST" && message?.method === "initialize") {
+      return new Response("legacy only", { status: initializeStatus });
+    }
+    if (url.pathname === "/mcp" && options.method === "GET") {
+      const body = new ReadableStream({
+        start(controller) {
+          streamController = controller;
+          if (!omitEndpoint) emit("endpoint", endpoint);
+          for (let index = 0; index < extraStreamMessages; index += 1) {
+            emit("message", JSON.stringify({ jsonrpc: "2.0", id: -1, result: { padding: "x".repeat(1024 * 1024) } }));
+          }
+          options.signal.addEventListener("abort", () => {
+            streamAborted = true;
+            try { controller.close(); } catch { /* The test stream already ended. */ }
+          }, { once: true });
+        },
+      });
+      return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
+    }
+    if (url.pathname === "/messages") {
+      if (message.method === "initialize") {
+        emit("message", JSON.stringify({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: MCP_PROTOCOL_VERSION, capabilities: {} } }));
+      } else if (message.method === "tools/list") {
+        emit("message", JSON.stringify({ jsonrpc: "2.0", id: message.id, result: { tools: [{ name: "legacy" }] } }));
+      } else if (message.method === "tools/call") {
+        emit("message", JSON.stringify({ jsonrpc: "2.0", id: message.id, result: { content: [{ type: "text", text: "legacy result" }] } }));
+      }
+      return new Response(null, { status: 202 });
+    }
+    return new Response(null, { status: 404 });
+  };
+  const assertUrlAllowed = (url) => {
+    checkedUrls.push(url);
+    if (rejectEndpoint && url.includes(rejectEndpoint)) throw Object.assign(new Error("endpoint rejected"), { code: "URL_REJECTED" });
+  };
+  return { calls, checkedUrls, fetchImpl, assertUrlAllowed, closeStream: () => streamController?.close(), wasAborted: () => streamAborted };
+}
+
 test("a remote mcp server negotiates over http and keeps its session", async (t) => {
   const { url, requests } = await startHttpServer(t);
   const client = new McpServerClient({
@@ -376,6 +426,134 @@ test("a remote mcp server negotiates over http and keeps its session", async (t)
   assert.equal(requests[0].headers["mcp-session-id"], undefined);
   assert.equal(requests[0].headers["x-api-key"], "sk-test");
   assert.equal(requests.at(-1).headers["mcp-session-id"], "sess-42");
+});
+
+test("legacy MCP HTTP+SSE fallback is limited to initialize 400/404/405", async (t) => {
+  for (const status of [400, 404, 405]) {
+    await t.test(String(status), async (t) => {
+      const fixture = legacySseFixture({ initializeStatus: status });
+      const client = new McpServerClient({
+        rootPath: mkdtempSync(join(tmpdir(), "pi-mcp-legacy-")),
+        server: { id: `legacy-${status}`, transport: "http", url: "https://legacy.example/mcp" },
+        values: { authorization: "Bearer test-secret" },
+        fetchImpl: fixture.fetchImpl,
+        assertUrlAllowed: fixture.assertUrlAllowed,
+        connectTimeoutMs: 500,
+        callTimeoutMs: 500,
+      });
+      t.after(() => client.close());
+
+      assert.deepEqual((await client.connect()).map((tool) => tool.name), ["legacy"]);
+      assert.equal(describeMcpContent((await client.callTool("legacy", {})).content), "legacy result");
+      assert.deepEqual(fixture.calls.map((call) => [call.method, call.message?.method ?? ""]), [
+        ["POST", "initialize"], ["GET", ""], ["POST", "initialize"],
+        ["POST", "notifications/initialized"], ["POST", "tools/list"], ["POST", "tools/call"],
+      ]);
+      const endpointCall = fixture.calls.find((call) => call.url.includes("/messages?session=old"));
+      assert.equal(endpointCall.headers.authorization, "Bearer test-secret");
+      assert.ok(fixture.checkedUrls.includes("https://legacy.example/messages?session=old"), "endpoint URL is revalidated");
+      client.close();
+      assert.equal(fixture.wasAborted(), true, "closing the client closes the legacy event stream");
+    });
+  }
+});
+
+test("legacy MCP event streams allow long sessions while bounding each event", async (t) => {
+  const fixture = legacySseFixture({ extraStreamMessages: 5 });
+  const client = new McpServerClient({
+    rootPath: mkdtempSync(join(tmpdir(), "pi-mcp-legacy-long-stream-")),
+    server: { id: "legacy-long-stream", transport: "http", url: "https://legacy.example/mcp" },
+    values: {}, fetchImpl: fixture.fetchImpl, connectTimeoutMs: 1_000, callTimeoutMs: 1_000,
+  });
+  t.after(() => client.close());
+  assert.deepEqual((await client.connect()).map((tool) => tool.name), ["legacy"]);
+  assert.ok(fixture.calls.some((call) => call.message?.method === "tools/list"));
+});
+
+test("a closed legacy MCP event stream is discarded and reconnected on the next tool call", async (t) => {
+  const fixture = legacySseFixture();
+  const client = new McpServerClient({
+    rootPath: mkdtempSync(join(tmpdir(), "pi-mcp-legacy-reconnect-")),
+    server: { id: "legacy-reconnect", transport: "http", url: "https://legacy.example/mcp" },
+    values: {}, fetchImpl: fixture.fetchImpl, connectTimeoutMs: 500, callTimeoutMs: 500,
+  });
+  t.after(() => client.close());
+  await client.connect();
+  fixture.closeStream();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(describeMcpContent((await client.callTool("legacy", {})).content), "legacy result");
+  assert.equal(fixture.calls.filter((call) => call.method === "GET").length, 2);
+});
+
+test("legacy MCP fallback does not run for authentication, server, or non-initialize failures", async (t) => {
+  for (const status of [401, 403, 500]) {
+    await t.test(`initialize ${status}`, async (t) => {
+      const fixture = legacySseFixture({ initializeStatus: status });
+      const client = new McpServerClient({
+        rootPath: mkdtempSync(join(tmpdir(), "pi-mcp-no-fallback-")),
+        server: { id: `no-fallback-${status}`, transport: "http", url: "https://legacy.example/mcp" },
+        values: {}, fetchImpl: fixture.fetchImpl, connectTimeoutMs: 200,
+      });
+      t.after(() => client.close());
+      await assert.rejects(client.connect(), { status });
+      assert.equal(fixture.calls.some((call) => call.method === "GET"), false);
+    });
+  }
+
+  const calls = [];
+  const fetchImpl = async (_url, options) => {
+    const message = JSON.parse(options.body);
+    calls.push(message.method);
+    if (message.method === "initialize") return new Response(JSON.stringify({
+      jsonrpc: "2.0", id: message.id, result: { protocolVersion: MCP_PROTOCOL_VERSION, capabilities: {} },
+    }), { status: 200, headers: { "content-type": "application/json" } });
+    if (message.method === "notifications/initialized") return new Response(null, { status: 202 });
+    return new Response("not supported", { status: 400 });
+  };
+  const client = new McpServerClient({
+    rootPath: mkdtempSync(join(tmpdir(), "pi-mcp-no-list-fallback-")),
+    server: { id: "no-list-fallback", transport: "http", url: "https://legacy.example/mcp" },
+    values: {}, fetchImpl, connectTimeoutMs: 200,
+  });
+  t.after(() => client.close());
+  await assert.rejects(client.connect());
+  assert.deepEqual(calls, ["initialize", "notifications/initialized", "tools/list"]);
+});
+
+test("legacy MCP message endpoints must be same-origin and pass URL policy again", async (t) => {
+  const crossOrigin = legacySseFixture({ endpoint: "https://attacker.example/messages" });
+  const client = new McpServerClient({
+    rootPath: mkdtempSync(join(tmpdir(), "pi-mcp-cross-origin-")),
+    server: { id: "legacy-cross-origin", transport: "http", url: "https://legacy.example/mcp" },
+    values: { authorization: "Bearer secret" }, fetchImpl: crossOrigin.fetchImpl, connectTimeoutMs: 300,
+  });
+  t.after(() => client.close());
+  await assert.rejects(client.connect(), { code: "HTTP_REDIRECT" });
+  assert.equal(crossOrigin.calls.some((call) => call.url.startsWith("https://attacker.example/")), false);
+
+  const rejected = legacySseFixture({ endpoint: "/blocked" , rejectEndpoint: "/blocked" });
+  const rejectedClient = new McpServerClient({
+    rootPath: mkdtempSync(join(tmpdir(), "pi-mcp-url-rejected-")),
+    server: { id: "legacy-url-policy", transport: "http", url: "https://legacy.example/mcp" },
+    values: {}, fetchImpl: rejected.fetchImpl, assertUrlAllowed: rejected.assertUrlAllowed, connectTimeoutMs: 300,
+  });
+  t.after(() => rejectedClient.close());
+  await assert.rejects(rejectedClient.connect(), { code: "URL_REJECTED" });
+  assert.ok(rejected.checkedUrls.includes("https://legacy.example/blocked"));
+  assert.equal(rejected.calls.some((call) => call.url.includes("/blocked")), false);
+});
+
+test("legacy MCP endpoint discovery has a bounded timeout and closes on failure", async (t) => {
+  const fixture = legacySseFixture({ omitEndpoint: true });
+  const client = new McpServerClient({
+    rootPath: mkdtempSync(join(tmpdir(), "pi-mcp-no-endpoint-")),
+    server: { id: "legacy-no-endpoint", transport: "http", url: "https://legacy.example/mcp" },
+    values: {}, fetchImpl: fixture.fetchImpl, connectTimeoutMs: 30,
+  });
+  t.after(() => client.close());
+  await assert.rejects(client.connect(), { code: "TIMEOUT" });
+  assert.equal(fixture.wasAborted(), true);
+  assert.equal(fixture.calls.some((call) => call.url.includes("/messages")), false);
 });
 
 test("a remote MCP tool can run longer than the connection timeout", async (t) => {
