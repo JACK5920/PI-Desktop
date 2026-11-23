@@ -36,6 +36,7 @@ import {
 } from "../work-panel-window";
 import { readWindowState, writeMiniWindowSize, writeWindowState } from "../window-preferences";
 import { suppressLinuxFramelessSystemMenu } from "../frameless-system-menu";
+import { installEditableContextMenu } from "../application-menu";
 import { isWindowFullScreen } from "../window-fullscreen";
 import { isMiniWindowMode, MINI_WINDOW_MINIMUM_SIZE } from "../mini-window-mode";
 import { DEFAULT_WINDOW_CORNER_RADIUS, installWindowShape } from "../window-shape";
@@ -246,6 +247,7 @@ export async function createWindow({
     },
   });
   const window = windowState.mainWindow;
+  installEditableContextMenu(window);
   if (process.platform === "win32") {
     if (windows11NativeCorners) {
       await installWindows11CornerController(
