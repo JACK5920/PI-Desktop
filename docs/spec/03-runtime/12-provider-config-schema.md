@@ -442,10 +442,16 @@ Zhipu AI / Coding Plan, SiliconFlow (`siliconflow-cn`), Volcengine Ark,
 MiniMax (`anthropic_messages` at `https://api.minimaxi.com/anthropic/v1`),
 MiniMax (OpenAI) (`chat_completions` at `https://api.minimaxi.com/v1`, aliases
 `minimax-openai` / `minimax-compatible`), Kimi For Coding (`anthropic_messages`),
-Qwen Token Plan (`alibaba-token-plan`, aliases `qwen-token-plan` /
-`qwen-token-plan-individual`), Qwen Token Plan (China)
-(`alibaba-token-plan-cn`, alias `qwen-token-plan-cn`), Xiaomi Token Plan
-(`xiaomi-token-plan-cn` / `-ams` / `-sgp`).
+Qwen Token Plan Team (`alibaba-token-plan`, endpoint
+`https://token-plan.maas.qwencloudapi.com/compatible-mode/v1`, aliases
+`qwen-token-plan` / `qwen-token-plan-individual`), Qwen Token Plan Team CN
+(`alibaba-token-plan-cn`, endpoint
+`https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1`, alias
+`qwen-token-plan-cn`), Xiaomi Token Plan (`xiaomi-token-plan-cn` / `-ams` /
+`-sgp`). Previously saved Qwen Token Plan rows using the old
+`aliyuncs.com` endpoints are recognized for preset display/classification but
+their stored endpoints and credentials are not rewritten by this preset
+catalog update.
 
 StepFun Plan uses the `stepfun-plan` preset with catalog vendor key
 `stepfun-step-plan`, Base URL `https://api.stepfun.com/step_plan/v1`, and

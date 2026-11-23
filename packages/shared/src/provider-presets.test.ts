@@ -317,6 +317,41 @@ describe("pi-ai built-in API-key services", () => {
       expect(matchNamedPreset({ vendorKey: id })?.apiStyle).toBe("chat_completions");
     }
   });
+
+  it("uses current Qwen Token Plan Team endpoints while recognizing saved legacy endpoints", () => {
+    const plans = [
+      {
+        vendorKey: "alibaba-token-plan",
+        id: "alibaba-token-plan",
+        currentUrl: "https://token-plan.maas.qwencloudapi.com/compatible-mode/v1",
+        legacyUrl:
+          "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1",
+        name: "Qwen Token Plan Team",
+      },
+      {
+        vendorKey: "alibaba-token-plan-cn",
+        id: "alibaba-token-plan-cn",
+        currentUrl: "https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1",
+        legacyUrl:
+          "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+        name: "Qwen Token Plan Team CN",
+      },
+    ] as const;
+
+    for (const plan of plans) {
+      expect(matchNamedPreset({ vendorKey: plan.vendorKey })).toMatchObject({
+        id: plan.id,
+        name: plan.name,
+        baseUrl: plan.currentUrl,
+      });
+      expect(matchNamedPreset({ baseUrl: plan.legacyUrl })).toMatchObject({
+        id: plan.id,
+        baseUrl: plan.currentUrl,
+      });
+      expect(addressesPublishedVendorHost(plan.currentUrl)).toBe(true);
+      expect(addressesPublishedVendorHost(plan.legacyUrl)).toBe(true);
+    }
+  });
 });
 
 describe("addressesPublishedVendorHost", () => {

@@ -23,6 +23,40 @@
 - **Specs:** `03-runtime/08-error-codes.md` §3.2.
 
 
+## E2E-PROVIDER-provider-specific-account-exhaustion
+
+- **Preconditions:** Isolated Agent runtime and synthetic error messages; no
+  real provider credentials, paid requests, or user history.
+- **Steps:** Exercise DeepSeek/SiliconFlow/MiniMax insufficient-balance wording,
+  Anthropic low-credit wording, DashScope `Arrearage`, Volcengine overdue
+  account wording/code, and an OpenAI SDK `Error code: NNN` prefix. Repeat
+  exhaustion cases with missing status and HTTP 429. Include near-miss generic
+  text (`balance`, `Access denied`, `account is in good standing`) and a
+  business code such as `30001`.
+- **Expected:** Explicit account exhaustion ends as terminal
+  `PROVIDER_ERROR`; it never consumes the retry budget, including if wrapped
+  as HTTP 429. Generic near-miss text remains eligible for the normal status
+  policy. OpenAI SDK prefixes expose the leading three-digit HTTP status, while
+  longer business codes are not treated as statuses.
+- **Automated coverage:** `agent-errors.test.ts`.
+- **Specs:** `03-runtime/02-agent-runtime.md`, `03-runtime/08-error-codes.md`.
+
+
+## E2E-PROVIDER-qwen-token-plan-current-and-legacy-endpoints
+
+- **Preconditions:** Provider preset table only; no API key or network request.
+- **Steps:** Resolve both Qwen Token Plan Team presets by vendor key and current
+  endpoint; resolve their previous `aliyuncs.com` endpoint URLs; inspect vendor
+  host recognition for current and legacy hosts.
+- **Expected:** New preset selections use the published Qwen Team endpoints
+  and names. Existing rows using the prior endpoints still resolve to the same
+  provider identity and host classification; stored endpoint and credential
+  values are not migrated or rewritten.
+- **Automated coverage:** `provider-presets.test.ts`.
+- **Specs:** `03-runtime/12-provider-config-schema.md`,
+  `03-runtime/13-model-catalog-and-selection.md`.
+
+
 ## E2E-TASK-DOCK-tab-content-isolation
 
 - **Preconditions:** Isolated Electron renderer with synthetic todos and a running
