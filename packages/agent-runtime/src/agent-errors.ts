@@ -603,7 +603,15 @@ export function classifyAgentError(err: unknown): ClassifiedAgentError {
     return result("TURN_ABORTED", false);
   }
   if (/CONTEXT_COMPACTION_FAILED/i.test(rawMessage)) {
-    return result("CONTEXT_COMPACTION_FAILED", false);
+    // This guard fails before a provider request is sent; any status or code on
+    // the wrapper can belong to the previous stream and must not be reported as
+    // the cause of the local checkpoint failure.
+    return {
+      code: "CONTEXT_COMPACTION_FAILED",
+      message,
+      retriable: false,
+      details: { origin: "local" },
+    };
   }
   // Network failures never carry an HTTP status; probe before status logic so
   // "fetch failed" causes don't fall through to the generic bucket. The cause

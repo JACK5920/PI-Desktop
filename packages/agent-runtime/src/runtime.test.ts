@@ -8348,8 +8348,8 @@ describe("DesktopAgentRuntime per-turn context protection", () => {
       (runtime as any).entriesWithCompaction(checkpoint),
     ).messages;
     expect(compacted.map((message: any) => message.role)).toEqual([
-      "compactionSummary",
       "user",
+      "compactionSummary",
     ]);
     // No assistant message means no toolCall block, so no orphaned tool call can
     // reach a provider.
@@ -13090,6 +13090,55 @@ describe("compaction fallback retention (#827)", () => {
         .filter((message: any) => message.role === "toolResult")
         .map((message: any) => message.content[0].text),
     ).toEqual(["CREATE TABLE projects (id TEXT)"]);
+    await runtime.dispose();
+  });
+
+  it("shrinks a retained-tail fallback until the calibrated context estimate fits", async () => {
+    const host = { call: vi.fn().mockResolvedValue(undefined) };
+    const runtime = createRuntime({ host });
+    const largeRequest = userNote("x".repeat(10_000), 1);
+    const preparation = {
+      messagesToSummarize: [largeRequest],
+      previousSummary: "older work",
+      tokensBefore: 8_000,
+      firstKeptEntryId: "large-user",
+      fileOps: { read: new Set<string>(), written: new Set<string>(), edited: new Set<string>() },
+    };
+    (runtime as any).fullEntries = [messageEntry("large-user", null, largeRequest, 0)];
+    vi.spyOn(runtime as any, "fallbackPreparation").mockReturnValue(preparation);
+    const attemptedTokens: number[] = [];
+    vi.spyOn(runtime as any, "contextBudget").mockImplementation((input: unknown) => {
+      const messages = input as any[];
+      const content = messages.map((message) => {
+        if (message.role === "compactionSummary") return message.summary;
+        if (message.role !== "user") return "";
+        if (typeof message.content === "string") return message.content;
+        return Array.isArray(message.content)
+          ? message.content.map((block: any) => block.type === "text" ? block.text : "").join("")
+          : "";
+      }).join("");
+      const tokens = content.length * 3;
+      attemptedTokens.push(tokens);
+      return { tokens, hardLimit: 2_000, requestHeadroom: 100, keepRecentTokens: 400 };
+    });
+
+    await expect((runtime as any).recoverCompactionFailure(
+      (runtime as any).fullEntries,
+      { tokens: 8_000, hardLimit: 2_000, requestHeadroom: 100, keepRecentTokens: 400 },
+      "threshold",
+      false,
+      undefined,
+      "summary generation failed",
+      "completed_turn",
+      "summary_provider",
+    )).resolves.toBe(true);
+
+    expect(attemptedTokens.length).toBeGreaterThan(1);
+    expect(attemptedTokens.slice(0, -1).every((tokens) => tokens >= 2_000)).toBe(true);
+    expect(attemptedTokens.at(-1)).toBeLessThan(2_000);
+    const checkpoint = appendedCheckpoint(host);
+    expect(checkpoint.details).toMatchObject({ fallback: "retained_tail" });
+    expect(checkpoint.retainedTail[0].content[0].text.length).toBeLessThan(10_000);
     await runtime.dispose();
   });
 

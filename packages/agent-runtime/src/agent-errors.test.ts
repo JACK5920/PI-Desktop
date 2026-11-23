@@ -797,6 +797,21 @@ describe("classifyAgentError", () => {
     });
   });
 
+  it("classifies checkpoint guard failures as local and drops stale provider fields", () => {
+    const error = Object.assign(
+      new Error("CONTEXT_COMPACTION_FAILED: unable to fit the retained context"),
+      { status: 503, code: "ECONNRESET" },
+    );
+    const classified = classifyAgentError(error);
+    expect(classified).toMatchObject({
+      code: "CONTEXT_COMPACTION_FAILED",
+      retriable: false,
+      details: { origin: "local" },
+    });
+    expect(classified.details).not.toHaveProperty("providerStatus");
+    expect(classified.details).not.toHaveProperty("providerCode");
+  });
+
   it("classifies network failures via the cause chain", () => {
     const err = new Error("fetch failed");
     (err as any).cause = Object.assign(new Error("connect ECONNREFUSED"), {

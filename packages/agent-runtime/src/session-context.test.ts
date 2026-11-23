@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type {
   AgentMessage,
 } from "@earendil-works/pi-agent-core";
+import { convertToLlm, textFromContent } from "./pi-runtime-messages.js";
 import type { CompactionEntry, MessageEntry } from "./pi-runtime-types.js";
 import { buildSessionContext } from "./session-context.js";
 
@@ -159,6 +160,58 @@ describe("buildSessionContext", () => {
       "user",
     ]);
     expect(JSON.stringify(messages)).not.toContain("prior DeepSeek plan");
+  });
+
+  it("places a successful active-turn checkpoint after its original request", () => {
+    const entry = compaction("active", 2, [user("u1", "finish the migration", 1).message]);
+    entry.details = { retainedTailMode: "active_turn" };
+    const messages = buildSessionContext([entry]).messages;
+    expect(messages.map((message) => message.role)).toEqual([
+      "user",
+      "compactionSummary",
+    ]);
+    expect(messages[1]).toMatchObject({ role: "compactionSummary", resumeActiveTurn: true });
+    const providerMessages = convertToLlm(messages);
+    expect(textFromContent(providerMessages[1]?.content)).toContain(
+      "checkpoint is newer than the original request above",
+    );
+  });
+
+  it("keeps fallback checkpoints in summary-first order", () => {
+    const entry = compaction("fallback", 2, [user("u1", "continue", 1).message]);
+    entry.details = {
+      retainedTailMode: "active_turn",
+      fallback: "retained_tail",
+    };
+    const messages = buildSessionContext([entry]).messages;
+    expect(messages.map((message) => message.role)).toEqual([
+      "compactionSummary",
+      "user",
+    ]);
+    expect(messages[0]).not.toHaveProperty("resumeActiveTurn");
+    expect(textFromContent(convertToLlm(messages)[0]?.content)).toContain(
+      "conversation history before this point was compacted",
+    );
+  });
+
+  it("keeps summary-first order when retained reasoning must be replayed", () => {
+    const entry = compaction("reasoning", 2, [user("u1", "continue", 1).message]);
+    entry.details = {
+      retainedTailMode: "active_turn",
+      retainedReasoning: [{ thinking: "prior reasoning", text: "prior answer" }],
+    };
+    const messages = buildSessionContext([entry], {
+      api: "openai-completions",
+      provider: "deepseek",
+      model: "deepseek-reasoner",
+      requiresCompletionsReasoningReplay: true,
+    }).messages;
+    expect(messages.map((message) => message.role)).toEqual([
+      "compactionSummary",
+      "assistant",
+      "user",
+    ]);
+    expect(messages[0]).not.toHaveProperty("resumeActiveTurn");
   });
 
 });

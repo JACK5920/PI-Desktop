@@ -725,6 +725,8 @@ const COMPACTION_FALLBACK_NOTICE_TOKENS = 512;
  * history than a successful checkpoint would (`fallbackRetainedTail`).
  */
 const COMPACTION_FALLBACK_KEEP_RECENT_RATIO = 0.25;
+/** Smallest retained-tail scale attempted before an automatic recovery fails. */
+const COMPACTION_FALLBACK_MIN_TAIL_SCALE = 1 / 128;
 export const COMPACTION_FALLBACK_MARKER =
   "[automatic context recovery: older context was omitted after summary generation failed]";
 /** Stored in place of a carried-forward summary when a fallback had none. */
@@ -2063,6 +2065,8 @@ export class DesktopAgentRuntime {
   private turnEpoch = 0;
   private compactionAbort?: AbortController;
   private compactionInProgress = false;
+  /** Why the latest automatic checkpoint failed, for the blocked turn error. */
+  private lastCompactionFailure?: string;
   /** Runtime operations that own a durable turn until their async cleanup ends. */
   private readonly activeTurnSettlements = new Map<string, Promise<void>>();
   /** The in-flight checkpoint was cut short by Stop/dispose, not by a failure. */
@@ -7464,14 +7468,14 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
       // guard exists to prevent. The Agent wrapper converts this failure to
       // the normal error/agent_end event sequence.
       throw new Error(
-        "CONTEXT_COMPACTION_FAILED: unable to create a checkpoint before the next model request",
+        `CONTEXT_COMPACTION_FAILED: unable to create a checkpoint before the next model request${this.lastCompactionFailure ? `: ${this.lastCompactionFailure}` : ""}`,
       );
     }
     context = this.rebuiltAgentContext();
     const postCompactionBudget = this.contextBudget(context.messages);
     if (postCompactionBudget.tokens >= postCompactionBudget.hardLimit) {
       throw new Error(
-        "CONTEXT_COMPACTION_FAILED: checkpoint remained above the safe model context budget",
+        `CONTEXT_COMPACTION_FAILED: checkpoint remained above the safe model context budget${this.lastCompactionFailure ? `: ${this.lastCompactionFailure}` : ""}`,
       );
     }
     return { context };
@@ -7528,6 +7532,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
     if (this.compactionInProgress) return false;
     this.compactionInProgress = true;
     this.compactionAborted = false;
+    this.lastCompactionFailure = undefined;
     const previous = this.agentActivity;
     this.setAgentActivity({
       phase: "compacting",
@@ -7574,6 +7579,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
     // A checkpoint cut short by the user's Stop is not a failed compaction;
     // it reports under the abort code so the turn reads as stopped.
     const aborted = this.compactionAborted;
+    if (!aborted) this.lastCompactionFailure = message;
     this.emit({
       type: "compaction_end",
       reason,
@@ -7750,6 +7756,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
     retentionMode: CompactionRetentionMode,
     budget: ContextBudget,
     failureReason: CompactionFailureReason,
+    tailScale = 1,
   ): ContextCompactionRecord {
     const previousSummary = preparation.previousSummary
       ? boundedText(
@@ -7772,6 +7779,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
       budget,
       maxSummaryChars,
       retentionMode,
+      tailScale,
     );
     return this.createCheckpoint(
       {
@@ -7809,6 +7817,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
     budget: ContextBudget,
     maxSummaryChars: number,
     retentionMode: CompactionRetentionMode,
+    tailScale = 1,
   ): AgentMessage[] {
     const summaryTokens = Math.ceil(maxSummaryChars / 4);
     const available = Math.max(
@@ -7824,7 +7833,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
     );
     return selectRecentTail(
       preparation.messagesToSummarize,
-      Math.min(target, available),
+      Math.max(1, Math.floor(Math.min(target, available) * tailScale)),
       { latestUserGoal: retentionMode === "active_turn" },
     );
   }
@@ -8069,36 +8078,41 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
       return false;
     }
 
-    const checkpoint = this.createFallbackCheckpoint(
-      fallbackPreparation,
-      throughMessageId,
-      Math.max(
-        256,
-        Math.min(
-          COMPACTION_FALLBACK_MAX_SUMMARY_CHARS,
-          Math.floor(budget.hardLimit * 0.75),
-        ),
+    const maxSummaryChars = Math.max(
+      256,
+      Math.min(
+        COMPACTION_FALLBACK_MAX_SUMMARY_CHARS,
+        Math.floor(budget.hardLimit * 0.75),
       ),
-      retentionMode,
-      budget,
-      failureReason,
     );
-    const persisted = await this.persistCheckpoint(
-      checkpoint,
-      reason,
-      willRetry,
-      true,
-      "retained_tail",
-    );
-    if (persisted === "persisted") return true;
-    if (persisted === "oversized") {
-      this.emitCompactionFailure(
-        reason,
-        checkpoint.tokensBefore,
-        "Automatic context recovery could not reduce the retained context below the safe model budget",
+    for (let tailScale = 1; ; tailScale /= 2) {
+      const checkpoint = this.createFallbackCheckpoint(
+        fallbackPreparation,
+        throughMessageId,
+        maxSummaryChars,
+        retentionMode,
+        budget,
+        failureReason,
+        tailScale,
       );
+      const persisted = await this.persistCheckpoint(
+        checkpoint,
+        reason,
+        willRetry,
+        true,
+        "retained_tail",
+      );
+      if (persisted === "persisted") return true;
+      if (persisted === "failed") return false;
+      if (tailScale <= COMPACTION_FALLBACK_MIN_TAIL_SCALE) {
+        this.emitCompactionFailure(
+          reason,
+          checkpoint.tokensBefore,
+          "Automatic context recovery could not reduce the retained context below the safe model budget",
+        );
+        return false;
+      }
     }
-    return false;
   }
 
   private async generateCompaction(

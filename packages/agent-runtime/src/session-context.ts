@@ -14,6 +14,7 @@ import { recoverMalformedToolCalls } from "./tool-call-recovery.js";
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import { checkpointFallback } from "@pi-desktop/shared";
 import {
   createBranchSummaryMessage,
   createCompactionSummaryMessage,
@@ -58,25 +59,29 @@ export function sessionEntryToContextMessages(
   switch (entry.type) {
     case "message":
       return isContextMessage(entry.message) ? [entry.message] : [];
-    case "compaction":
-      return [
-        ...(entry.details && typeof entry.details === "object" && "systemMessageJson" in entry.details
-          ? [readSystemMessage(entry.details.systemMessageJson)] : []),
-        createCompactionSummaryMessage(
-          entry.summary,
-          entry.tokensBefore,
-          entry.timestamp,
-        ),
-        ...(identity?.requiresCompletionsReasoningReplay === false
-          ? []
-          : retainedReasoningToMessages(
-              retainedReasoningFromDetails(entry.details),
-              entry.timestamp,
-              identity,
-            )),
-        ...entry.retainedTail.filter((message) => isContextMessage(message) &&
-          !(message.role === "system" && entry.details && typeof entry.details === "object" && "systemMessageJson" in entry.details)),
-      ];
+    case "compaction": {
+      const details = entry.details;
+      const system = details && typeof details === "object" && "systemMessageJson" in details
+        ? [readSystemMessage(details.systemMessageJson)] : [];
+      const reasoning = identity?.requiresCompletionsReasoningReplay === false
+        ? []
+        : retainedReasoningToMessages(
+            retainedReasoningFromDetails(details), entry.timestamp, identity,
+          );
+      const tail = entry.retainedTail.filter((message) => isContextMessage(message) &&
+        !(message.role === "system" && system.length > 0));
+      const resume = details && typeof details === "object" &&
+        "retainedTailMode" in details && details.retainedTailMode === "active_turn" &&
+        checkpointFallback(details) === undefined &&
+        entry.summary.trim().length > 0 && reasoning.length === 0 &&
+        tail.length === 1 && tail[0]?.role === "user";
+      const summary = createCompactionSummaryMessage(
+        entry.summary, entry.tokensBefore, entry.timestamp, Boolean(resume),
+      );
+      return resume
+        ? [...system, ...tail, summary]
+        : [...system, summary, ...reasoning, ...tail];
+    }
     case "branch_summary":
       return entry.summary
         ? [
