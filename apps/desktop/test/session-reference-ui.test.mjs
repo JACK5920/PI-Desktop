@@ -159,6 +159,9 @@ const { MessageRow } = load(new URL("../src/features/chat/transcript/MessageRow.
     safeSessionSummary,
     sessionAllows,
   },
+  "../../../lib/transcript-history-capabilities.mjs": {
+    getTranscriptHistoryCapabilities: () => ({ canEditUserMessage: true }),
+  },
   "../../../plugins/renderer-slots/use-slots": { useSlotSessionId: () => "local-session" },
   "../../../lib/response-annotations": {
     annotationsForAssistantMessage: () => [],

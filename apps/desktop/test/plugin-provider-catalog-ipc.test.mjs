@@ -43,6 +43,14 @@ function loadPluginUiIpc({ gateFactory = () => () => ({ ignored: false }) } = {}
   return module.exports.registerPluginUiIpc;
 }
 
+function testRegistrar(handlers) {
+  return {
+    handle: (channel, handler) => handlers.set(channel, handler),
+    handleWithEvent: (channel, handler) => handlers.set(channel, handler),
+    assertMainWindowSender: () => {},
+  };
+}
+
 test("the plugin Add Service IPC returns declared categories through the Host handler", async () => {
   const handlers = new Map();
   const plugin = (id, name, permissions, category) => ({
@@ -64,7 +72,7 @@ test("the plugin Add Service IPC returns declared categories through the Host ha
   });
 
   loadPluginUiIpc()({
-    registrar: { handle: (channel, handler) => handlers.set(channel, handler) },
+    registrar: testRegistrar(handlers),
     plugins: {
       listLoaded: () => [
         plugin("community.sites", "Community Sites", ["provider.register"], {
@@ -98,7 +106,7 @@ test("the plugin session IPC resets ordering on renderer reload and rejects stal
   const handlers = new Map();
   const activeSessions = [];
   loadPluginUiIpc({ gateFactory: createSessionPushGate })({
-    registrar: { handle: (channel, handler) => handlers.set(channel, handler) },
+    registrar: testRegistrar(handlers),
     plugins: { listLoaded: () => [] },
     browserHost: {},
     pluginViews: {},

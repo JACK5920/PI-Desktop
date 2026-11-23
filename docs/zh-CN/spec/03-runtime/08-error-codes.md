@@ -58,6 +58,7 @@ type AppError = {
 | `NOT_FOUND` | 不 | 未找到实体 |
 | `SESSION_NOT_FOUND` | 不 | 会话作用域的 RPC（包括 `tools.execute`）点名了主机没有的会话；未知 id 永远不会继承全局工作区 |
 | `CONFLICT` | 也许 | 状态冲突/资源繁忙 |
+| `SESSION_DELETE_IN_PROGRESS` | 是 | 同一会话已有删除操作正在进行；当前删除完成后再重试 |
 | `UNSUPPORTED` | 不 | 该操作在此界面上没有实现，例如没有桌面窗口时的受信任扩展提示（规格 16 §9） |
 | `FORBIDDEN` | 不 | RACP：主体的角色不允许该方法（规格 19 §13） |
 | `METHOD_NOT_FOUND` | 不 | RACP：此 Host 上未知的方法，例如没有 Gateway 时的 `host/list` |
