@@ -328,24 +328,25 @@ export class Team {
     // engine also re-checks that the Bot still exists right before running a turn.
     this.engine.cancelBot(bot.id);
     this.engine.cancelChat(`bot:${bot.id}`);
-    const state = this.store.state;
-    state.bots = state.bots.filter((b) => b.id !== bot.id);
-    for (const group of [...state.groups]) {
-      if (!group.memberIds.includes(bot.id)) continue;
-      group.memberIds = group.memberIds.filter((id) => id !== bot.id);
-      if (state.sessions[`group:${group.id}`]) delete state.sessions[`group:${group.id}`][bot.id];
-      if (group.memberIds.length === 0) {
-        state.groups = state.groups.filter((g) => g.id !== group.id);
-        await this.store.deleteChat(`group:${group.id}`);
-      } else if (group.adminId === bot.id) {
-        group.adminId = group.memberIds[0];
+    const removedGroupChats = this.store.state.groups
+      .filter((group) => group.memberIds.includes(bot.id) && group.memberIds.every((memberId) => memberId === bot.id))
+      .map((group) => `group:${group.id}`);
+    await this.store.deleteChats([`bot:${bot.id}`, ...removedGroupChats], (state) => {
+      state.bots = state.bots.filter((item) => item.id !== bot.id);
+      for (const group of [...state.groups]) {
+        if (!group.memberIds.includes(bot.id)) continue;
+        group.memberIds = group.memberIds.filter((memberId) => memberId !== bot.id);
+        if (state.sessions[`group:${group.id}`]) delete state.sessions[`group:${group.id}`][bot.id];
+        if (group.memberIds.length === 0) {
+          state.groups = state.groups.filter((item) => item.id !== group.id);
+        } else if (group.adminId === bot.id) {
+          group.adminId = group.memberIds[0];
+        }
       }
-    }
-    state.schedules = state.schedules.filter((s) => s.botId !== bot.id);
-    this.store.bumpRoster();
-    await this.store.deleteChat(`bot:${bot.id}`);
+      state.schedules = state.schedules.filter((schedule) => schedule.botId !== bot.id);
+      state.rosterRev = (state.rosterRev ?? 1) + 1;
+    });
     await this.memory.archive(bot.id);
-    await this.store.save();
     this.changed();
     return { deleted: bot.name };
   }
@@ -454,10 +455,10 @@ export class Team {
     this.requireMain(caller, 'deleteGroup');
     const group = this.resolveGroup(ref);
     this.engine.cancelChat(`group:${group.id}`);
-    this.store.state.groups = this.store.state.groups.filter((g) => g.id !== group.id);
-    this.store.bumpRoster();
-    await this.store.deleteChat(`group:${group.id}`);
-    await this.store.save();
+    await this.store.deleteChats([`group:${group.id}`], (state) => {
+      state.groups = state.groups.filter((item) => item.id !== group.id);
+      state.rosterRev = (state.rosterRev ?? 1) + 1;
+    });
     this.changed();
     return { deleted: group.name };
   }

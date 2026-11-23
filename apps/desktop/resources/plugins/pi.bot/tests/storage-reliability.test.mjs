@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { appendFile, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../miniapp/node/store.mjs';
 import { MemoryStore } from '../miniapp/node/memory.mjs';
+import { Team } from '../miniapp/node/team.mjs';
 
 async function fixture(t) {
   const dir = await mkdtemp(join(tmpdir(), 'bot-storage-'));
@@ -18,6 +19,30 @@ async function fixture(t) {
 
 const journalRows = async (memory) => (await readFile(memory.journal, 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
 const unavailable = () => Object.assign(new Error('storage unavailable'), { code: 'EIO' });
+const assertMissing = async (path) => assert.rejects(readFile(path), { code: 'ENOENT' });
+
+async function stageInterruptedDeletion(store, chatId, phase) {
+  const id = 'a'.repeat(32);
+  const stateBackup = `.pi-bot-delete-${id}-state.bak`;
+  const messageBackup = `.pi-bot-delete-${id}-message-0.bak`;
+  const messagePath = store.messagePath(chatId);
+  await copyFile(store.statePath, join(store.dir, stateBackup));
+  await copyFile(messagePath, join(store.dir, messageBackup));
+
+  const deletedState = structuredClone(store.state);
+  delete deletedState.sessions[chatId];
+  await writeFile(store.statePath, JSON.stringify(deletedState, null, 2));
+  await writeFile(messagePath, '[]');
+  await writeFile(store.deleteTransactionPath, JSON.stringify({
+    version: 1,
+    id,
+    phase,
+    stateBackup,
+    stateExisted: true,
+    messages: [{ chatId, backup: messageBackup, existed: true }],
+  }));
+  return { stateBackupPath: join(store.dir, stateBackup), messageBackupPath: join(store.dir, messageBackup) };
+}
 
 test('history beyond 600 messages survives append/restart and stable pages do not skip concurrent arrivals', async (t) => {
   const { dir, store, chat } = await fixture(t);
@@ -95,10 +120,214 @@ test('a reset that cannot be saved leaves the transcript on disk instead of empt
   await mkdir(statePath, { recursive: true });
 
   await assert.rejects(store.deleteChat(chat));
+  assert.ok(store.chatIds().includes(chat), 'a refused reset keeps the chat listed');
   // The chat is still listed because its state never reached disk, so its history has to survive
   // too: emptying the transcript first is what made a failed reset destroy the conversation.
   const onDisk = JSON.parse(await readFile(store.messagePath(chat), 'utf8'));
   assert.equal(onDisk.filter((message) => message.id === kept.id).length, 1);
+});
+
+test('a failed state commit restores transcripts and leaves reset retryable', async (t) => {
+  const { store, chat } = await fixture(t);
+  const kept = await store.appendMessage(chat, { role: 'user', text: 'Keep this on a failed reset' });
+  await store.writeChain;
+  const beforeState = structuredClone(store.state);
+  const beforeStateBytes = await readFile(store.statePath, 'utf8');
+  const beforeMessages = structuredClone(await store.getMessages(chat));
+  const messagePath = store.messagePath(chat);
+  const persist = store.persistDeleteJson.bind(store);
+  let failStateCommit = true;
+  store.persistDeleteJson = async (path, value) => {
+    if (path === store.statePath && failStateCommit) {
+      failStateCommit = false;
+      throw unavailable();
+    }
+    return persist(path, value);
+  };
+
+  await assert.rejects(store.deleteChat(chat), { code: 'EIO' });
+  assert.deepEqual(store.state, beforeState);
+  assert.deepEqual(await readFile(messagePath, 'utf8').then(JSON.parse), beforeMessages);
+  assert.equal(await readFile(store.statePath, 'utf8'), beforeStateBytes);
+  assert.ok((await store.getMessages(chat)).some((message) => message.id === kept.id));
+
+  store.persistDeleteJson = persist;
+  await store.deleteChat(chat);
+  assert.deepEqual(await store.getMessages(chat), []);
+  assert.equal(store.state.sessions[chat], undefined);
+});
+
+test('a failed transcript write does not remove the chat state', async (t) => {
+  const { store, chat } = await fixture(t);
+  const message = await store.appendMessage(chat, { role: 'user', text: 'Keep after transcript failure' });
+  await store.writeChain;
+  const beforeState = structuredClone(store.state);
+  const beforeStateBytes = await readFile(store.statePath, 'utf8');
+  const beforeMessages = structuredClone(await store.getMessages(chat));
+  const messagePath = store.messagePath(chat);
+  const persist = store.persistDeleteJson.bind(store);
+  let failTranscript = true;
+  store.persistDeleteJson = async (path, value) => {
+    if (path === messagePath && Array.isArray(value) && value.length === 0 && failTranscript) {
+      failTranscript = false;
+      throw unavailable();
+    }
+    return persist(path, value);
+  };
+
+  await assert.rejects(store.deleteChat(chat), { code: 'EIO' });
+  assert.deepEqual(store.state, beforeState);
+  assert.deepEqual(await readFile(messagePath, 'utf8').then(JSON.parse), beforeMessages);
+  assert.ok((await store.getMessages(chat)).some((item) => item.id === message.id));
+  assert.equal(await readFile(store.statePath, 'utf8'), beforeStateBytes);
+});
+
+test('Bot and group deletion leave every entity and transcript intact when a batch write fails', async (t) => {
+  const { dir, store, memory } = await fixture(t);
+  const chief = store.state.bots.find((bot) => bot.isMain);
+  const bot = { id: 'bot_delete-test', name: 'Researcher', isMain: false, createdAt: Date.now() };
+  const group = { id: 'grp_delete-test', name: 'Research', memberIds: [bot.id], adminId: bot.id, createdAt: Date.now() };
+  store.state.bots.push(bot);
+  store.state.groups.push(group);
+  store.state.schedules.push({ id: 'schedule_delete-test', botId: bot.id, prompt: 'Remove with Bot' });
+  await store.save();
+  await store.appendMessage(`bot:${bot.id}`, { role: 'user', text: 'Private history' });
+  await store.appendMessage(`group:${group.id}`, { role: 'user', text: 'Group history' });
+  await store.setSession(`bot:${bot.id}`, bot.id, { sessionId: 'bot-session' });
+  await store.setSession(`group:${group.id}`, bot.id, { sessionId: 'group-session' });
+  const beforeState = structuredClone(store.state);
+  const beforeBotMessages = structuredClone(await store.getMessages(`bot:${bot.id}`));
+  const beforeGroupMessages = structuredClone(await store.getMessages(`group:${group.id}`));
+  let archiveCalls = 0;
+  const team = new Team({
+    store,
+    memory: { archive: async () => { archiveCalls += 1; } },
+    engine: { cancelBot() {}, cancelChat() {} },
+    broadcast() {},
+  });
+  const persist = store.persistDeleteJson.bind(store);
+  const groupMessagePath = store.messagePath(`group:${group.id}`);
+  let failSecondTranscript = true;
+  store.persistDeleteJson = async (path, value) => {
+    if (path === store.messagePath(`bot:${bot.id}`) && Array.isArray(value) && value.length === 0) {
+      return persist(path, value);
+    }
+    if (path === groupMessagePath && Array.isArray(value) && value.length === 0 && failSecondTranscript) {
+      failSecondTranscript = false;
+      throw unavailable();
+    }
+    return persist(path, value);
+  };
+
+  await assert.rejects(team.deleteBot(undefined, bot.id), { code: 'EIO' });
+  assert.deepEqual(store.state, beforeState);
+  assert.ok(store.state.bots.some((item) => item.id === bot.id));
+  assert.ok(store.state.groups.some((item) => item.id === group.id));
+  assert.deepEqual(await readFile(store.messagePath(`bot:${bot.id}`), 'utf8').then(JSON.parse), beforeBotMessages);
+  assert.deepEqual(await readFile(groupMessagePath, 'utf8').then(JSON.parse), beforeGroupMessages);
+  assert.equal(archiveCalls, 0);
+
+  store.persistDeleteJson = persist;
+  await team.deleteBot(undefined, bot.id);
+  assert.equal(store.state.bots.some((item) => item.id === bot.id), false);
+  assert.equal(store.state.groups.some((item) => item.id === group.id), false);
+  assert.equal(store.state.schedules.some((item) => item.botId === bot.id), false);
+  assert.equal(store.getSession(`bot:${bot.id}`, bot.id), undefined);
+  assert.deepEqual(await store.getMessages(`bot:${bot.id}`), []);
+  assert.deepEqual(await store.getMessages(`group:${group.id}`), []);
+  assert.equal(archiveCalls, 1, 'Bot memory is archived only after the deletion commits');
+
+  const remainingGroup = {
+    id: 'grp_delete-state-failure', name: 'Operations',
+    memberIds: [chief.id], adminId: chief.id, createdAt: Date.now(),
+  };
+  store.state.groups.push(remainingGroup);
+  await store.save();
+  await store.appendMessage(`group:${remainingGroup.id}`, { role: 'user', text: 'Keep this group history' });
+  await store.setSession(`group:${remainingGroup.id}`, chief.id, { sessionId: 'group-session' });
+  const beforeGroupState = structuredClone(store.state);
+  const beforeRemainingGroupMessages = structuredClone(await store.getMessages(`group:${remainingGroup.id}`));
+  const remainingGroupPath = store.messagePath(`group:${remainingGroup.id}`);
+  const groupTeam = new Team({ store, memory, engine: { cancelChat() {} }, broadcast() {} });
+  store.persistDeleteJson = async (path, value) => {
+    if (path === store.statePath) throw unavailable();
+    return persist(path, value);
+  };
+  await assert.rejects(groupTeam.deleteGroup(undefined, remainingGroup.id), { code: 'EIO' });
+  assert.deepEqual(store.state, beforeGroupState);
+  assert.ok(store.state.groups.some((item) => item.id === remainingGroup.id));
+  assert.deepEqual(await readFile(remainingGroupPath, 'utf8').then(JSON.parse), beforeRemainingGroupMessages);
+
+  store.persistDeleteJson = persist;
+  await groupTeam.deleteGroup(undefined, remainingGroup.id);
+  assert.equal(store.state.groups.some((item) => item.id === remainingGroup.id), false);
+  assert.equal(store.getSession(`group:${remainingGroup.id}`, chief.id), undefined);
+  assert.deepEqual(await store.getMessages(`group:${remainingGroup.id}`), []);
+});
+
+test('startup rolls back a prepared deletion and cleans its recovery files', async (t) => {
+  const { dir, store, chat } = await fixture(t);
+  const bot = store.state.bots[0];
+  const kept = await store.appendMessage(chat, { role: 'user', text: 'Recover prepared deletion' });
+  await store.setSession(chat, bot.id, { sessionId: 'session-before-delete' });
+  await store.writeChain;
+  const beforeState = structuredClone(store.state);
+  const beforeMessages = structuredClone(await store.getMessages(chat));
+  const backups = await stageInterruptedDeletion(store, chat, 'prepared');
+
+  const restarted = new Store(dir);
+  await restarted.init();
+
+  assert.deepEqual(restarted.state, beforeState);
+  assert.deepEqual(await restarted.getMessages(chat), beforeMessages);
+  assert.ok((await restarted.getMessages(chat)).some((message) => message.id === kept.id));
+  await assertMissing(restarted.deleteTransactionPath);
+  await assertMissing(backups.stateBackupPath);
+  await assertMissing(backups.messageBackupPath);
+});
+
+test('startup keeps a committed deletion and cleans leftover recovery files', async (t) => {
+  const { dir, store, chat } = await fixture(t);
+  const bot = store.state.bots[0];
+  await store.appendMessage(chat, { role: 'user', text: 'Commit deletion' });
+  await store.setSession(chat, bot.id, { sessionId: 'session-to-delete' });
+  await store.writeChain;
+  const backups = await stageInterruptedDeletion(store, chat, 'committed');
+
+  const restarted = new Store(dir);
+  await restarted.init();
+
+  assert.equal(restarted.getSession(chat, bot.id), undefined);
+  assert.deepEqual(await restarted.getMessages(chat), []);
+  await assertMissing(restarted.deleteTransactionPath);
+  await assertMissing(backups.stateBackupPath);
+  await assertMissing(backups.messageBackupPath);
+});
+
+test('a failed rollback fences further writes until startup recovers the journal', async (t) => {
+  const { dir, store, chat } = await fixture(t);
+  const kept = await store.appendMessage(chat, { role: 'user', text: 'Recover after rollback failure' });
+  await store.writeChain;
+  const beforeState = structuredClone(store.state);
+  const beforeMessages = structuredClone(await store.getMessages(chat));
+  const persist = store.persistDeleteJson.bind(store);
+  store.persistDeleteJson = async (path, value) => {
+    if (path === store.statePath) throw unavailable();
+    return persist(path, value);
+  };
+  store.restoreDeleteTransaction = async () => { throw unavailable(); };
+
+  await assert.rejects(store.deleteChat(chat), { code: 'EIO' });
+  assert.deepEqual(store.state, beforeState);
+  await assert.rejects(store.save(), /restart the Mini App to recover its journal/);
+  assert.ok((await readFile(store.messagePath(chat), 'utf8').then(JSON.parse)).length === 0);
+
+  const restarted = new Store(dir);
+  await restarted.init();
+  assert.deepEqual(restarted.state, beforeState);
+  assert.deepEqual(await restarted.getMessages(chat), beforeMessages);
+  assert.ok((await restarted.getMessages(chat)).some((message) => message.id === kept.id));
+  await assertMissing(restarted.deleteTransactionPath);
 });
 
 test('a session created while another chat is being deleted survives in memory and on disk', async (t) => {

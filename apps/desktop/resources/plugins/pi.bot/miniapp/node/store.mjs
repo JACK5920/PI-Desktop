@@ -1,11 +1,14 @@
 // @ts-check
 import { randomUUID } from 'node:crypto';
-import { appendFile, copyFile, mkdir, open, readFile, rename, rm } from 'node:fs/promises';
+import { appendFile, copyFile, mkdir, open, readFile, rename, rm, stat } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { userReaction } from '../client/emoji-data.js';
 
 import { resolveLocale, setLocale, t } from './i18n.mjs';
 import { ReactionError, validateReaction } from './reactions.mjs';
+
+const DELETE_TRANSACTION_FILE = '.pi-bot-delete-transaction.json';
+const DELETE_BACKUP_PREFIX = '.pi-bot-delete-';
 
 export const DEFAULT_MESSAGE_PAGE_SIZE = 100;
 export const MAX_MESSAGE_PAGE_SIZE = 500;
@@ -166,6 +169,34 @@ async function readJson(path, fallback, logger) {
   }
 }
 
+async function copyIfPresent(source, destination) {
+  try {
+    await copyFile(source, destination);
+  } catch (error) {
+    if (error?.code === 'ENOENT') return false;
+    throw error;
+  }
+
+  try {
+    const handle = await open(destination, 'r+');
+    try {
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await syncDirectory(dirname(destination));
+  } catch (error) {
+    await rm(destination, { force: true }).catch(() => {});
+    throw error;
+  }
+  return true;
+}
+
+async function syncDirectory(path) {
+  // Directory handles cannot be flushed on every supported platform (notably Windows).
+  await open(path, 'r').then((handle) => handle.sync().finally(() => handle.close())).catch(() => {});
+}
+
 function defaultState() {
   return {
     version: 2,
@@ -247,6 +278,7 @@ export class Store {
     this.logger = logger ?? { warn() {} };
     this.statePath = join(dataDir, 'state.json');
     this.messagesDir = join(dataDir, 'messages');
+    this.deleteTransactionPath = join(dataDir, DELETE_TRANSACTION_FILE);
     this.usagePath = join(dataDir, 'usage.jsonl');
     /** @type {ReturnType<typeof defaultState>} */
     this.state = defaultState();
@@ -261,10 +293,14 @@ export class Store {
     this.usageIdsReady = undefined;
     /** @type {Promise<void>} */
     this.writeChain = Promise.resolve();
+    /** A failed rollback keeps the journal authoritative; don't let later writes overwrite it. */
+    this.storageFault = undefined;
   }
 
   async init() {
     await mkdir(this.messagesDir, { recursive: true });
+    await this.recoverDeleteTransaction();
+    this.storageFault = undefined;
     this.state = { ...defaultState(), ...(await readJson(this.statePath, defaultState(), this.logger)) };
     this.state.settings = { ...defaultState().settings, ...(this.state.settings ?? {}) };
     setLocale(resolveLocale(this.state));
@@ -376,7 +412,11 @@ export class Store {
 
   /** Serialises every disk write. */
   enqueue(task) {
-    const next = this.writeChain.then(task, task);
+    const run = () => {
+      if (this.storageFault) throw this.storageFault;
+      return task();
+    };
+    const next = this.writeChain.then(run, run);
     this.writeChain = next.then(
       () => undefined,
       () => undefined,
@@ -386,6 +426,97 @@ export class Store {
 
   save() {
     return this.enqueue(() => writeJsonAtomic(this.statePath, this.state));
+  }
+
+  /** An overridable persistence seam keeps failure/recovery tests deterministic. */
+  persistDeleteJson(path, value) {
+    return writeJsonAtomic(path, value);
+  }
+
+  async restoreDeleteTransaction(transaction) {
+    const requiredBackups = [
+      ...(transaction.stateExisted ? [transaction.stateBackup] : []),
+      ...transaction.messages.filter((entry) => entry.existed).map((entry) => entry.backup),
+    ];
+    for (const name of requiredBackups) {
+      const info = await stat(join(this.dir, name));
+      if (!info.isFile()) throw new Error('Pending Mini App deletion backup is not a regular file');
+    }
+
+    const restore = async (backupName, target, existed) => {
+      if (!existed) {
+        await rm(target, { force: true });
+        await syncDirectory(dirname(target));
+        return;
+      }
+      const backup = join(this.dir, backupName);
+      const temp = `${target}.${process.pid}.${Date.now()}.restore`;
+      try {
+        await copyFile(backup, temp);
+        const handle = await open(temp, 'r+');
+        try {
+          await handle.sync();
+        } finally {
+          await handle.close();
+        }
+        await rename(temp, target);
+        await syncDirectory(dirname(target));
+      } catch (error) {
+        await rm(temp, { force: true }).catch(() => {});
+        throw error;
+      }
+    };
+
+    await restore(transaction.stateBackup, this.statePath, transaction.stateExisted);
+    for (const entry of transaction.messages) {
+      await restore(entry.backup, this.messagePath(entry.chatId), entry.existed);
+    }
+  }
+
+  async cleanupDeleteTransaction(transaction) {
+    const backups = [transaction.stateBackup, ...transaction.messages.map((entry) => entry.backup)];
+    await Promise.all(backups.map((name) => rm(join(this.dir, name), { force: true })));
+    await rm(this.deleteTransactionPath, { force: true });
+  }
+
+  async recoverDeleteTransaction() {
+    let raw;
+    try {
+      raw = await readFile(this.deleteTransactionPath, 'utf8');
+    } catch (error) {
+      if (error?.code === 'ENOENT') return;
+      throw error;
+    }
+
+    let transaction;
+    try {
+      transaction = JSON.parse(raw);
+    } catch {
+      throw new Error('Pending Mini App deletion recovery record is unreadable');
+    }
+    const validId = typeof transaction?.id === 'string' && /^[a-f0-9]{32}$/.test(transaction.id);
+    const validPhase = ['prepared', 'committed', 'rolled_back'].includes(transaction?.phase);
+    const validBackup = (name, suffix) => typeof name === 'string' &&
+      name === basename(name) && name === `${DELETE_BACKUP_PREFIX}${transaction.id}-${suffix}.bak`;
+    const messageIds = new Set();
+    if (transaction?.version !== 1 || !validId || !validPhase ||
+      typeof transaction.stateExisted !== 'boolean' || !validBackup(transaction.stateBackup, 'state') ||
+      !Array.isArray(transaction.messages) || transaction.messages.some((entry, index) => {
+        if (typeof entry?.chatId !== 'string' || entry.chatId.length === 0 || entry.chatId.length > 256 ||
+          messageIds.has(entry.chatId) || typeof entry.existed !== 'boolean' ||
+          !validBackup(entry.backup, `message-${index}`)) return true;
+        messageIds.add(entry.chatId);
+        return false;
+      })) {
+      throw new Error('Pending Mini App deletion recovery record is invalid');
+    }
+
+    if (transaction.phase === 'prepared') {
+      await this.restoreDeleteTransaction(transaction);
+      transaction.phase = 'rolled_back';
+      await this.persistDeleteJson(this.deleteTransactionPath, transaction);
+    }
+    await this.cleanupDeleteTransaction(transaction);
   }
 
   // ---------- bots ----------
@@ -622,22 +753,88 @@ export class Store {
   }
 
   async deleteChat(chatId) {
-    await this.getMessages(chatId);
-    // Empty the transcript only after the state that forgets this chat is on disk. The messages are
-    // the one thing here that cannot be rebuilt: truncating them first means a failed save leaves
-    // the chat listed and the history already gone. In the opposite order a failed save leaves both
-    // intact, so the caller can simply try again.
-    //
-    // The session entry is removed from the live object rather than by swapping in the snapshot: a
-    // `setSession` for another chat can land while this write is in flight, and replacing the object
-    // would drop the entry it just created, in memory and then on disk. For the same reason a failed
-    // write leaves the live object untouched.
-    await this.enqueue(async () => {
-      const { [chatId]: forgotten, ...sessions } = this.state.sessions;
-      await writeJsonAtomic(this.statePath, { ...this.state, sessions });
-      delete this.state.sessions[chatId];
-      await writeJsonAtomic(this.messagePath(chatId), []);
-      this.messageCache.set(chatId, []);
+    return this.deleteChats([chatId]);
+  }
+
+  /**
+   * Atomically forget one or more conversations and apply related Bot/group state changes.
+   * The callback must be synchronous and side-effect-free; it is applied to a draft before disk
+   * writes, and to the live state only after every transcript and the state file are committed.
+   * @param {string[]} chatIds
+   * @param {(state: ReturnType<typeof defaultState>) => void} [updateState]
+   */
+  async deleteChats(chatIds, updateState) {
+    const ids = [...new Set(chatIds.filter((id) => typeof id === 'string' && id.length > 0))];
+    if (ids.length === 0) return;
+    await Promise.all(ids.map((chatId) => this.getMessages(chatId)));
+    const messageFiles = ids.map((chatId) => ({ chatId, path: this.messagePath(chatId) }));
+
+    return this.enqueue(async () => {
+      const transactionId = randomUUID().replace(/-/g, '');
+      const stateBackup = `${DELETE_BACKUP_PREFIX}${transactionId}-state.bak`;
+      const messageBackups = messageFiles.map((_entry, index) => `${DELETE_BACKUP_PREFIX}${transactionId}-message-${index}.bak`);
+      const nextState = structuredClone(this.state);
+      for (const chatId of ids) delete nextState.sessions[chatId];
+      updateState?.(nextState);
+
+      const transaction = {
+        version: 1,
+        id: transactionId,
+        phase: 'prepared',
+        stateBackup,
+        stateExisted: false,
+        messages: messageFiles.map((entry, index) => ({
+          chatId: entry.chatId,
+          backup: messageBackups[index],
+          existed: false,
+        })),
+      };
+      const createdBackups = [];
+      let journalWritten = false;
+      try {
+        transaction.stateExisted = await copyIfPresent(this.statePath, join(this.dir, stateBackup));
+        if (transaction.stateExisted) createdBackups.push(stateBackup);
+        for (let index = 0; index < messageFiles.length; index += 1) {
+          const existed = await copyIfPresent(messageFiles[index].path, join(this.dir, messageBackups[index]));
+          transaction.messages[index].existed = existed;
+          if (existed) createdBackups.push(messageBackups[index]);
+        }
+
+        await this.persistDeleteJson(this.deleteTransactionPath, transaction);
+        journalWritten = true;
+        for (const entry of messageFiles) await this.persistDeleteJson(entry.path, []);
+        await this.persistDeleteJson(this.statePath, nextState);
+        transaction.phase = 'committed';
+        await this.persistDeleteJson(this.deleteTransactionPath, transaction);
+      } catch (error) {
+        if (journalWritten) {
+          try {
+            await this.restoreDeleteTransaction(transaction);
+            transaction.phase = 'rolled_back';
+            await this.persistDeleteJson(this.deleteTransactionPath, transaction);
+            await this.cleanupDeleteTransaction(transaction);
+          } catch (rollbackError) {
+            this.storageFault = new Error('A chat deletion could not be fully rolled back; restart the Mini App to recover its journal');
+            this.logger.warn('minimax_bot.delete_rollback_failed', {
+              code: rollbackError?.code ?? 'unknown',
+            });
+          }
+        } else {
+          await Promise.all(createdBackups.map((name) => rm(join(this.dir, name), { force: true }).catch(() => {})));
+        }
+        throw error;
+      }
+
+      // Keep the state object stable and preserve unrelated changes that arrived while disk writes
+      // were in flight. The transaction callback only removes/updates the entities it owns.
+      for (const chatId of ids) delete this.state.sessions[chatId];
+      updateState?.(this.state);
+      for (const chatId of ids) this.messageCache.set(chatId, []);
+      // The committed marker makes cleanup restart-safe; failure here must not turn a committed
+      // deletion into a reported failure.
+      await this.cleanupDeleteTransaction(transaction).catch((error) => {
+        this.logger.warn('minimax_bot.delete_cleanup_deferred', { code: error?.code ?? 'unknown' });
+      });
     });
   }
 
