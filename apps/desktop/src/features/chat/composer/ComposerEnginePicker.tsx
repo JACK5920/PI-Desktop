@@ -5,7 +5,7 @@ import { useAppStore } from "../../../stores/app-store";
 import { IconBot, IconCheck, IconChevronDown } from "../../../components/icons";
 import { AnchoredMenu } from "../../../components/settings/AnchoredMenu";
 import { TooltipButton } from "../../../components/ui";
-import { composerEngineMenuFocusIndex } from "./omp-engine-compatibility.mjs";
+import { composerEngineMenuFocusIndex, deriveOmpEngineIssue } from "./omp-engine-compatibility.mjs";
 import { AGENT_ENGINE_REGISTRY, getAgentEngine, type AgentEngineId } from "../../../../../../packages/shared/src/agent-engine-registry.mjs";
 import { agentEngineForState } from "../../../lib/session-agent-engine";
 
@@ -25,7 +25,7 @@ export function ComposerEnginePicker({
   open: boolean;
   setOpen: Dispatch<SetStateAction<boolean>>;
   onCloseOtherMenus: () => void;
-  onIssueChange: (issue: EngineIssue | null) => void;
+  onIssueChange: (engine: AgentEngineId, issue: EngineIssue | null) => void;
 }) {
   const engine = useAppStore(agentEngineForState);
   const [status, setStatus] = useState<EngineStatus | null>(null);
@@ -54,19 +54,11 @@ export function ComposerEnginePicker({
     }
   }, [engine, refreshStatus, status, statusFailed, statusLoading]);
 
-  const issue: EngineIssue | null = engine !== "omp"
-    ? null
-    : statusLoading || status === null && !statusFailed
-      ? "checking"
-      : statusFailed
-        ? "statusUnavailable"
-        : status?.supported !== true
-          ? "unsupportedPlatform"
-          : !status.installedVersion
-            ? "notInstalled"
-          : null;
+  const issue = deriveOmpEngineIssue(engine, status, statusLoading, statusFailed);
 
-  useEffect(() => onIssueChange(issue), [issue, onIssueChange]);
+  // Engine is part of the state identity: switching from PI to a cached-ready
+  // OMP leaves `issue` null, but must still replace the parent's PI snapshot.
+  useEffect(() => onIssueChange(engine, issue), [engine, issue, onIssueChange]);
 
   const selectEngine = async (next: AgentEngineId) => {
     setOpen(false);

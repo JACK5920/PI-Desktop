@@ -10,3 +10,13 @@ export function composerEngineMenuFocusIndex(items, currentIndex, key) {
   if (current < 0) return key === "ArrowDown" ? enabled[0] : enabled.at(-1);
   return enabled[(current + step + enabled.length) % enabled.length];
 }
+
+/** Report only the readiness issue belonging to the currently selected engine. */
+export function deriveOmpEngineIssue(engine, status, statusLoading, statusFailed) {
+  if (engine !== "omp") return null;
+  if (statusLoading || (status === null && !statusFailed)) return "checking";
+  if (statusFailed) return "statusUnavailable";
+  if (status?.supported !== true) return "unsupportedPlatform";
+  if (!status.installedVersion) return "notInstalled";
+  return null;
+}

@@ -19,6 +19,27 @@ function uiMessage(item, role, content, extra = {}) {
   };
 }
 
+function normalizeDeliveryText(value) {
+  return typeof value === "string" ? value.replace(/\r\n?/g, "\n").trim() : "";
+}
+
+/** Use the delivered receipt as the canonical result, then fall back to the latest assistant answer. */
+export function getOmpSubagentConclusion(turns, deliveryOutput) {
+  const receipt = normalizeDeliveryText(deliveryOutput);
+  if (receipt) return { content: receipt, source: "delivery" };
+  if (!Array.isArray(turns)) return null;
+  for (let turnIndex = turns.length - 1; turnIndex >= 0; turnIndex -= 1) {
+    const rows = Array.isArray(turns[turnIndex]?.rows) ? turns[turnIndex].rows : [];
+    for (let rowIndex = rows.length - 1; rowIndex >= 0; rowIndex -= 1) {
+      const row = rows[rowIndex];
+      if (row?.kind !== "answer") continue;
+      const content = normalizeDeliveryText(row.message?.content);
+      if (content) return { content, source: "transcript" };
+    }
+  }
+  return null;
+}
+
 /** Adapt native OMP RPC messages to the common read-only PI subagent transcript view. */
 export function buildOmpSubagentTranscriptTurns(messages, agentStatus, labels = {}, assignedTask = "") {
   const timeline = buildOmpSubagentTimeline(messages, agentStatus);

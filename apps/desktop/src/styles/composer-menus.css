@@ -1377,6 +1377,43 @@
 .omp-native-agent-panel-workspace .omp-native-agent-transcript { min-width: 0; min-height: 0; height: 0; flex: 1 1 0; max-height: none; overflow-x: hidden; overflow-y: auto; overscroll-behavior-y: contain; scrollbar-gutter: stable; padding: 0 10px 16px; border-radius: 0; background: transparent; }
 .omp-native-agent-panel-workspace.is-focused-agent .omp-native-agent-transcript { padding: 0 16px 32px; }
 .omp-native-agent-transcript-view { position: relative; display: flex; min-width: 0; min-height: 0; height: 0; flex: 1 1 0; flex-direction: column; overflow: hidden; }
+.omp-native-agent-detail-tabs { display: flex; flex: none; gap: 4px; padding: 0 14px; border-bottom: 1px solid var(--ds-border-subtle); }
+.omp-native-agent-detail-tabs > button { position: relative; min-height: 38px; padding: 8px 10px; border: 0; border-radius: var(--radius-xs) var(--radius-xs) 0 0; background: transparent; color: var(--ds-text-muted); font-size: var(--text-xs); cursor: pointer; }
+.omp-native-agent-detail-tabs > button:hover { background: var(--ds-bg-hover); color: var(--ds-text-primary); }
+.omp-native-agent-detail-tabs > button[aria-selected="true"] { color: var(--ds-text-primary); font-weight: var(--font-weight-semibold); }
+.omp-native-agent-detail-tabs > button[aria-selected="true"]::after { position: absolute; right: 8px; bottom: -1px; left: 8px; height: 2px; border-radius: 2px; background: var(--ds-accent); content: ""; }
+.omp-native-agent-detail-panel { display: flex; min-width: 0; min-height: 0; flex: 1 1 0; flex-direction: column; overflow: hidden; }
+.omp-native-agent-conclusion-view { display: flex; min-width: 0; min-height: 0; flex: 1 1 0; flex-direction: column; overflow: hidden; }
+.omp-native-agent-conclusion-toolbar { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 12px; min-height: 42px; padding: 5px 14px; border-bottom: 1px solid var(--ds-border-subtle); }
+.omp-native-agent-conclusion-toolbar > div:first-child { display: flex; min-width: 0; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+.omp-native-agent-conclusion-toolbar strong { color: var(--ds-text-primary); font-size: var(--text-sm); }
+.omp-native-agent-conclusion-toolbar span,
+.omp-native-agent-conclusion-toolbar small { color: var(--ds-text-muted); font-size: var(--text-xs); }
+.omp-native-agent-conclusion-toolbar small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.omp-native-agent-conclusion-actions { display: flex; flex: none; align-items: center; gap: 4px; }
+.omp-native-agent-conclusion-actions button { display: inline-flex; width: 30px; height: 30px; align-items: center; justify-content: center; border: 1px solid transparent; border-radius: var(--radius-xs); background: transparent; color: var(--ds-text-secondary); cursor: pointer; }
+.omp-native-agent-conclusion-actions button:hover:not(:disabled) { border-color: var(--ds-border-subtle); background: var(--ds-bg-hover); color: var(--ds-text-primary); }
+.omp-native-agent-conclusion-actions button:disabled { cursor: not-allowed; opacity: .45; }
+.omp-native-agent-conclusion-scroll { min-width: 0; min-height: 0; height: 0; flex: 1 1 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior-y: contain; scrollbar-gutter: stable; padding: 18px 22px 30px; }
+.omp-native-agent-conclusion-scroll > article { max-width: 1040px; margin: 0 auto; overflow-wrap: anywhere; font-size: var(--text-sm-plus); line-height: var(--leading-body); }
+.omp-native-agent-conclusion-scroll > article > :first-child { margin-top: 0; }
+.omp-native-agent-conclusion-scroll > article > :last-child { margin-bottom: 0; }
+.omp-native-agent-conclusion-empty { max-width: 680px; margin: 20px auto; color: var(--ds-text-muted); font-size: var(--text-sm); line-height: var(--leading-body); }
+.omp-native-agent-conclusion-empty.is-error { color: var(--ds-error); }
+.omp-native-agent-conclusion-note { flex: none; padding: 0 14px 8px; color: var(--ds-text-muted); font-size: var(--text-2xs); }
+.omp-subagent-conclusion-overlay { z-index: 120; padding: 4vh 3vw; }
+.omp-subagent-conclusion-reader { display: flex; width: min(1440px, 94vw); height: min(90vh, 1040px); max-height: 90vh; flex-direction: column; gap: 0; overflow: hidden; padding: 0; }
+.omp-subagent-conclusion-reader-header { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 20px; padding: 16px 22px; border-bottom: 1px solid var(--ds-border-subtle); }
+.omp-subagent-conclusion-reader-header > div:first-child { display: grid; min-width: 0; gap: 4px; }
+.omp-subagent-conclusion-reader-header h2 { margin: 0; overflow: hidden; color: var(--ds-text-primary); font-size: var(--text-base-plus); font-weight: var(--font-weight-semibold); text-overflow: ellipsis; white-space: nowrap; }
+.omp-subagent-conclusion-reader-header span { color: var(--ds-text-muted); font-size: var(--text-xs); }
+.omp-subagent-conclusion-reader-actions { display: flex; flex: none; gap: 6px; }
+.omp-subagent-conclusion-reader-actions button { display: inline-flex; width: 34px; height: 34px; align-items: center; justify-content: center; border: 1px solid var(--ds-border-subtle); border-radius: var(--radius-sm); background: var(--ds-raised); color: var(--ds-text-secondary); cursor: pointer; }
+.omp-subagent-conclusion-reader-actions button:hover { background: var(--ds-bg-hover); color: var(--ds-text-primary); }
+.omp-subagent-conclusion-reader-scroll { min-width: 0; min-height: 0; flex: 1 1 auto; overflow-x: hidden; overflow-y: auto; overscroll-behavior-y: contain; scrollbar-gutter: stable; padding: 28px clamp(20px, 5vw, 72px); }
+.omp-subagent-conclusion-reader-scroll > article { max-width: 1040px; margin: 0 auto; overflow-wrap: anywhere; font-size: var(--text-base); line-height: var(--leading-relaxed); }
+.omp-subagent-conclusion-reader-scroll > article > :first-child { margin-top: 0; }
+.omp-subagent-conclusion-reader-scroll > article > :last-child { margin-bottom: 0; }
 .omp-native-agent-focused-header > div { display: grid; min-width: 0; gap: 2px; }
 .omp-native-agent-focused-header > div > strong,
 .omp-native-agent-focused-header > div > span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1393,17 +1430,16 @@
 .omp-native-agent-workpanel-actions button:disabled { cursor: not-allowed; opacity: .55; }
 .omp-native-agent-panel-workspace .omp-native-requested-tasks ol { max-height: 140px; overflow: auto; }
 .omp-native-agent-unlinked-note { margin: 0; color: var(--text-muted); font-size: var(--text-xs); }
-.omp-native-agent-delivery { display: flex; flex-direction: column; gap: 6px; flex: none; margin: 0 10px 6px; padding: 8px 10px; border: 1px solid var(--ds-border-subtle); border-radius: var(--radius-sm); background: var(--ds-raised); }
-.omp-native-agent-panel-workspace.is-focused-agent .omp-native-agent-delivery { margin: 0 14px 8px; }
-.omp-native-agent-delivery > header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
-.omp-native-agent-delivery > header > strong { color: var(--ds-text-primary); font-size: var(--text-xs); }
-.omp-native-agent-delivery > header > span { color: var(--ds-text-secondary); font-size: var(--text-xs); }
-.omp-native-agent-delivery > header > small { margin-left: auto; color: var(--ds-text-muted); font-size: var(--text-2xs); }
-.omp-native-agent-delivery > p { margin: 0; color: var(--ds-text-secondary); font-size: var(--text-xs); white-space: pre-wrap; overflow-wrap: anywhere; }
-.omp-native-agent-delivery > p[role="alert"] { color: var(--ds-error); }
-.omp-native-agent-delivery-output { max-height: 180px; overflow: auto; margin: 0; padding: 8px; border-radius: var(--radius-xs); background: var(--surface-1); color: var(--ds-text-primary); font-family: var(--font-mono); font-size: var(--text-xs); white-space: pre-wrap; overflow-wrap: anywhere; }
 .omp-native-agent-delivery-empty { color: var(--ds-text-muted); }
-.omp-native-agent-delivery > small { color: var(--ds-text-muted); font-size: var(--text-2xs); }
+.omp-native-agent-detail-tabs button:focus-visible,
+.omp-native-agent-conclusion-actions button:focus-visible,
+.omp-subagent-conclusion-reader-actions button:focus-visible { outline: 2px solid var(--ds-accent-soft); outline-offset: 2px; }
+@media (max-width: 680px) {
+  .omp-subagent-conclusion-overlay { padding: 0; }
+  .omp-subagent-conclusion-reader { width: 100%; height: 100%; max-height: 100%; border-radius: 0; }
+  .omp-native-agent-conclusion-scroll { padding: 14px 14px 24px; }
+  .omp-subagent-conclusion-reader-scroll { padding: 18px 16px 28px; }
+}
 .omp-native-requested-tasks { padding: 8px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); color: var(--text-secondary); }
 .omp-native-requested-tasks ol { margin: 6px 0; padding-left: 22px; }
 .omp-native-requested-tasks li { margin: 3px 0; overflow-wrap: anywhere; }

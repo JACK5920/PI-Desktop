@@ -94,6 +94,8 @@ export function buildOmpSubagentTurnGroup(items, roster) {
     runningCount: uniqueAgents.filter((entry) => entry.status === "running").length,
     completedCount: uniqueAgents.filter((entry) => entry.status === "completed").length,
     failedCount: uniqueAgents.filter((entry) => ["failed", "timed_out", "denied"].includes(entry.status)).length,
+    abortedCount: uniqueAgents.filter((entry) => ["aborted", "stopped"].includes(entry.status)).length,
     unknownCount: uniqueAgents.filter((entry) => entry.status === "unknown").length,
+    unconfirmedCount: uniqueAgents.filter((entry) => entry.status === "unknown").length,
   };
 }

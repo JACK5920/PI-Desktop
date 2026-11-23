@@ -48,6 +48,69 @@ test("OMP subagent roster and transcript survive archive recreation and merge wi
   }
 });
 
+test("a delayed active OMP roster cannot regress an archived terminal result", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-subagent-terminal-merge-"));
+  try {
+    const archive = new OmpSubagentArchive(root);
+    await archive.mergeRoster("session-1", [{
+      id: "AgentA",
+      parentToolCallId: "task-call-1",
+      task: "Inspect the report",
+      status: "completed",
+    }]);
+
+    const merged = await archive.mergeRoster("session-1", [{
+      id: "AgentA",
+      parentToolCallId: "task-call-1",
+      task: "Inspect the report",
+      status: "running",
+      progress: { message: "stale live snapshot" },
+    }]);
+    assert.equal(merged[0].status, "completed");
+    assert.equal(merged[0].lastKnownStatus, "completed");
+    assert.equal(merged[0].observedActive, false);
+
+    const afterRestart = await new OmpSubagentArchive(root).getRoster("session-1");
+    assert.equal(afterRestart[0].status, "completed");
+    assert.equal(afterRestart[0].observedActive, false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("a new parent Task call starts a fresh lifecycle generation", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-subagent-generation-"));
+  try {
+    const archive = new OmpSubagentArchive(root);
+    await archive.upsertAgent("session-1", {
+      id: "AgentA",
+      parentToolCallId: "task-call-old",
+      status: "completed",
+      deliveryOutput: "old report",
+      transcriptOutcome: "completed",
+    });
+
+    await archive.upsertAgent("session-1", {
+      id: "AgentA",
+      parentToolCallId: "task-call-new",
+      status: "running",
+      progress: { message: "new run" },
+    });
+
+    const [agent] = await archive.getRoster("session-1");
+    assert.equal(agent.parentToolCallId, "task-call-new");
+    assert.equal(agent.status, "running");
+    assert.equal(agent.lastKnownStatus, "running");
+    assert.equal(agent.observedActive, false, "an archive read is historical, not proof of a live worker");
+    assert.equal(agent.deliveryOutput, undefined);
+    assert.equal(agent.transcriptOutcome, undefined);
+    const live = await archive.mergeRoster("session-1", [{ id: "AgentA", parentToolCallId: "task-call-new", status: "running" }]);
+    assert.equal(live[0].observedActive, true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("OMP subagent archive hashes path-shaped session and agent identities", async () => {
   const root = await mkdtemp(join(tmpdir(), "omp-subagent-archive-"));
   try {

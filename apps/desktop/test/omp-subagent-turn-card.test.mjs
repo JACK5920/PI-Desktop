@@ -26,6 +26,31 @@ test("each child retains its exact parent Task call when opening the detail pane
   assert.match(card, /const tabId = `omp-subagent-batch:\$\{toolCallId\}:\$\{agent\.id\}`/);
 });
 
+test("OMP child cards surface delivery previews and link the persisted parent reply", async () => {
+  assert.match(card, /ompSubagentDeliveryPreview\(agent\.deliveryOutput/);
+  assert.match(card, /subagentResultPreview/);
+  assert.match(card, /parentResponseMessageId/);
+  assert.match(card, /subagentMainReplyAvailable/);
+  assert.match(card, /subagentAwaitingMainReply/);
+  assert.match(card, /data-message-id/);
+  assert.match(topology, /parentResponseMessageId=\{parentResponseMessageId\}/);
+  const assistantTurn = await read("../src/features/chat/transcript/AssistantTurn.tsx");
+  assert.match(assistantTurn, /parentResponseMessageId: complete \? actionMessage\?\.id/);
+});
+
+test("OMP conclusion and execution are separate readable views", () => {
+  assert.match(panel, /getOmpSubagentConclusion\(transcriptTurns, selectedAgentDeliveryOutput\)/);
+  assert.match(panel, /role="tablist"/);
+  assert.match(panel, /subagentViewConclusion/);
+  assert.match(panel, /subagentViewExecution/);
+  assert.match(panel, /<Markdown source=\{conclusionText\}/);
+  assert.match(panel, /<SubagentTranscriptContent turns=\{transcriptTurns\}/);
+  assert.match(panel, /<OmpSubagentConclusionReader/);
+  assert.match(styles, /\.omp-native-agent-conclusion-scroll \{[^}]*flex: 1 1 0;[^}]*overflow-y: auto;/);
+  assert.match(styles, /\.omp-subagent-conclusion-reader \{[^}]*width: min\(1440px, 94vw\)/);
+  assert.doesNotMatch(styles, /\.omp-native-agent-delivery-output\s*\{[^}]*max-height:\s*180px/);
+});
+
 test("OMP detail transcript owns the nested scroll input and fixed-shell height chain", () => {
   assert.match(panel, /className="subagent-transcript-scroll omp-native-agent-transcript" data-scroll-owner="follow"/);
   assert.match(panel, /ref=\{scrollRef\}[\s\S]*?onScroll=\{handleScroll\}/);

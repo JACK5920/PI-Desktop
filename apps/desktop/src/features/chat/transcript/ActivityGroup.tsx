@@ -150,6 +150,8 @@ type ActivityGroupProps = {
   turnDelegationStatuses?: ReadonlyMap<string, SubagentOutcome>;
   /** Delegation timings from the entire assistant turn (cross-activity-part). */
   turnDelegationTimings?: ReadonlyMap<string, SubagentTiming>;
+  /** Persisted final parent reply, when this turn has completed. */
+  parentResponseMessageId?: string;
 };
 
 /** Whether two activity items render identically, delegate rows included. */
@@ -180,6 +182,7 @@ function activityGroupPropsEqual(
     previous.turnActive !== next.turnActive ||
     previous.endedAt !== next.endedAt ||
     previous.runtimeActivity !== next.runtimeActivity ||
+    previous.parentResponseMessageId !== next.parentResponseMessageId ||
     previous.items.length !== next.items.length
   ) {
     return false;
@@ -210,6 +213,7 @@ export const ActivityGroup = memo(function ActivityGroup({
   runtimeActivity,
   turnDelegationStatuses,
   turnDelegationTimings,
+  parentResponseMessageId,
 }: ActivityGroupProps) {
   const hasOmpBatch = items.some((item) => item.kind === "tool" && isOmpTaskBatch(item.message.engineOrigin, item.message.toolName, item.message.toolArgs));
   const showThinking = useAppStore((state) => resolveShowThinking(state.settings));
@@ -365,6 +369,7 @@ export const ActivityGroup = memo(function ActivityGroup({
     delegateItems={delegateItems}
     delegationStatuses={delegationStatuses}
     delegationTimings={delegationTimings}
+    parentResponseMessageId={parentResponseMessageId}
     onUserInteraction={claimDisclosure}
   />;
 

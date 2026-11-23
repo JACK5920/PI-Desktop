@@ -534,6 +534,11 @@
   z-index: 6;
 }
 
+.subagent-result-jump {
+  bottom: calc(var(--st-composer-dock-height, 68px) + 8px);
+  z-index: 6;
+}
+
 .subagent-transcript-composer {
   flex: none;
   border-top: 1px solid var(--ds-border-subtle);

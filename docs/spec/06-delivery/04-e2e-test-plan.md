@@ -9290,6 +9290,42 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
 - **Milestone**: M6
 - **Status**: Draft
 
+#### E2E-OMP-subagent-delivery-display-and-recovery
+
+- **Preconditions:** An isolated OMP conversation fixture with one Task batch,
+  at least three explicitly linked child agents, durable parent tool-result
+  receipts, child transcripts containing tool activity, one partial failure,
+  and a persisted final assistant reply. No provider credentials are required.
+- **Steps:**
+  1. Load the active batch and verify every observed child is listed with its
+     own status, task, and bounded delivery preview; verify requested/observed,
+     completed, failed, stopped, and unconfirmed counts are not conflated.
+  2. Remove the final parent reply from the fixture and reload. Verify settled
+     children remain visible and the card says it is waiting for the main reply;
+     restore the reply and verify the card link targets its exact message id.
+  3. Open each child detail. Verify the receipt renders as Markdown (including
+     a table), the same final answer is not repeated in the transcript, and all
+     task/tool rows remain available for review.
+  4. Reopen the conversation from persisted messages and archive data. Verify
+     previews, statuses, exact parent Task linkage and transcript are restored.
+  5. Apply a delayed `running` snapshot to a terminal agent with the same parent
+     Task id; then apply a running snapshot with a new parent Task id.
+- **Expected:** The parent transcript remains the only authoritative main
+  answer; child receipts are immediately reviewable without opening the work
+  panel; the panel provides the complete sourced transcript; duplicate result
+  text is rendered once; a stale active snapshot cannot regress a terminal
+  result, while a new Task generation can start normally.
+- **Automated coverage:** `omp-subagent-archive.test.mjs`,
+  `omp-subagent-roster.test.mjs`, `omp-subagent-turn-group.test.mjs`,
+  `omp-subagent-transcript-refresh.test.mjs`, and
+  `omp-subagent-turn-card.test.mjs`. Packaged desktop interaction remains a
+  separate candidate acceptance check.
+- **Specs:** `04-ux/08-component-spec.md` (OMP-native delivery and parent reply),
+  `ADR 0357`.
+- **Acceptance:** Quality
+- **Milestone:** Maintenance
+- **Status:** Automated unit/source regression coverage; full desktop run pending.
+
 #### E2E-119: Parallel subagents report back without entering the parent's context
 
 - **Preconditions**: A project-bound Agent session with the user home containing
@@ -20617,6 +20653,23 @@ permission-request UI below has isolated fixture automation.
   `apps/desktop/test/omp-thinking-level-refresh.test.mjs`, and Desktop
   TypeScript check. No credentials or external model call are used.
 
+### E2E-composer-omp-engine-switch-readiness
+
+- **Preconditions:** A new-task composer and a cached OMP engine status for both
+  an installed/available engine and an unavailable engine. No provider
+  credentials or model request are required.
+- **Path:** With a non-empty draft, switch from PI to OMP while the cached OMP
+  status is already available and verify Send becomes enabled without requiring
+  a status-value transition. Repeat with checking and unavailable OMP states;
+  verify Send remains disabled with the matching engine explanation. Switch
+  back to PI and confirm an OMP issue does not block PI sending.
+- **Expected:** Engine readiness is reported with the engine identity, so a
+  cached `null` OMP issue replaces the former PI state on selection. A genuine
+  OMP checking/unavailable issue still blocks submission; no stale OMP state
+  leaks into PI mode.
+- **Coverage:** `apps/desktop/test/omp-engine-compatibility.test.mjs`, Desktop
+  TypeScript check, and renderer build. The test does not call a model provider.
+
 ### E2E-OMP-session-local-spill-links
 
 - **Preconditions:** Isolated OMP 19 RPC profile with a native session JSONL
@@ -20661,3 +20714,34 @@ permission-request UI below has isolated fixture automation.
   `chat-context-menu-items.test.mjs`, `bounded-history-mutations.test.mjs`,
   `omp-rpc-native-integration.test.mjs`, Desktop TypeScript check, and
   `git diff --check`. No user transcript or engine mapping is modified.
+
+
+### E2E-OMP-subagent-conclusion-reader
+
+- **Preconditions:** An isolated OMP session with one completed subagent,
+  a long Markdown delivery (including headings, tables and lists), and a child
+  transcript containing tool activity and its assistant answer. No provider
+  credentials or live model request are required.
+- **Path:** Open the child detail from its parent turn. Confirm **Delivered
+  result** is selected and the complete conclusion uses the entire right-pane
+  body with a single scroll surface. For a long result, verify the down-arrow
+  appears while the pane is above its end, click it to jump to the bottom, then
+  scroll up and confirm it reappears. Resize the pane and verify it remains
+  readable. Switch to **Execution** and inspect the child transcript and tool
+  history; verify its jump arrow remains independent. Return to the result, copy
+  it, open the large reader, scroll to the end, then close with Escape and with
+  the close button. Exercise left/right, Home and End keyboard navigation
+  between the tabs.
+- **Expected:** Result and execution are separate views, not stacked panels.
+  The conclusion has no fixed-height nested preview box; its Markdown remains
+  intact and is available from the receipt, or from the latest child assistant
+  answer when no receipt text exists. The expanded reader occupies most of the
+  window, retains a fixed title/action row, restores focus on close, and copies
+  the full source text. The execution tab retains its independent timeline
+  scroll and complete transcript. Each view's jump-to-bottom control responds
+  only to that view's own scroll position. Changing views does not change OMP
+  state or session data.
+- **Coverage:** `apps/desktop/test/omp-subagent-conclusion-view.test.mjs`,
+  `apps/desktop/test/omp-subagent-turn-card.test.mjs`, Desktop TypeScript
+  check/build, and manual Electron verification. No live provider request is
+  required.

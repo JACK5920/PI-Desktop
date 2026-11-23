@@ -24,9 +24,51 @@ function toStatus(value) {
   return typeof value === "string" && value.trim() ? value.trim() : "unknown";
 }
 
-function isTerminalStatus(value) {
-  return ["completed", "complete", "success", "succeeded", "failed", "failure", "error", "aborted", "cancelled", "canceled", "stopped", "timed_out", "timeout"]
-    .includes(String(value ?? "").trim().toLowerCase().replace(/[\s-]+/g, "_"));
+function terminalStatus(value) {
+  const status = String(value ?? "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  return ["completed", "complete", "success", "succeeded", "failed", "failure", "error", "aborted", "cancelled", "canceled", "stopped", "timed_out", "timeout", "denied"]
+    .includes(status) ? status : "";
+}
+
+function terminalStatusOf(agent) {
+  return terminalStatus(agent?.deliveryOutcome)
+    || terminalStatus(agent?.transcriptOutcome)
+    || terminalStatus(agent?.lastKnownStatus)
+    || terminalStatus(agent?.status);
+}
+
+function isNewTaskGeneration(previous, incoming) {
+  return Boolean(previous?.parentToolCallId && incoming?.parentToolCallId
+    && previous.parentToolCallId !== incoming.parentToolCallId);
+}
+
+/** Merge one OMP snapshot without letting a delayed active event undo a settled task. */
+function mergeAgentSnapshot(previous, incoming, activeFromStatus) {
+  const newGeneration = isNewTaskGeneration(previous, incoming);
+  const prior = newGeneration ? null : previous;
+  const status = toStatus(incoming.status ?? incoming.progress?.status ?? prior?.status);
+  const priorTerminal = terminalStatusOf(prior);
+  const incomingTerminal = terminalStatus(status);
+  const preserveTerminal = Boolean(priorTerminal && !incomingTerminal);
+  const merged = {
+    ...(prior ?? {}),
+    ...incoming,
+    id: incoming.id,
+    status: preserveTerminal ? priorTerminal : status,
+    lastKnownStatus: preserveTerminal ? priorTerminal : status,
+    observedActive: preserveTerminal ? false : activeFromStatus(status),
+  };
+
+  // A new Task call is a new lifecycle generation. Do not carry the previous
+  // run's delivery, transcript outcome, or progress into the new card.
+  if (newGeneration) {
+    for (const field of ["deliveryStatus", "deliveryOutcome", "deliveryOutput", "deliveryOutputTruncated", "deliveryError", "deliveryAbortReason", "deliveryDuration", "deliveryToolCallId", "transcriptOutcome"]) {
+      delete merged[field];
+    }
+    if (!incoming.name && previous.name) merged.name = previous.name;
+  }
+
+  return merged;
 }
 
 /**
@@ -129,15 +171,9 @@ export class OmpSubagentArchive {
       const agents = await this.#readIndex(sessionId);
       const previousIndex = agents.findIndex((item) => item.id === agent.id);
       const previous = previousIndex >= 0 ? agents[previousIndex] : null;
-      const status = toStatus(agent.status ?? agent.progress?.status ?? previous?.status);
-      const next = {
-        ...previous,
-        ...agent,
-        id: agent.id,
-        status,
-        lastKnownStatus: status,
-        observedActive: !isTerminalStatus(status) && ["running", "pending", "started", "unknown"].includes(status.toLowerCase()),
-      };
+      const next = mergeAgentSnapshot(previous, agent, (status) =>
+        !terminalStatus(status) && ["running", "pending", "started", "unknown"].includes(status.toLowerCase()),
+      );
       if (jsonSize(next) > MAX_AGENT_METADATA_BYTES) throw new Error("OMP subagent metadata size limit exceeded");
       if (previousIndex >= 0) agents.splice(previousIndex, 1);
       agents.push(next);
@@ -154,15 +190,7 @@ export class OmpSubagentArchive {
       const next = new Map(agents.map((agent) => [agent.id, { ...agent, observedActive: false }]));
       for (const agent of current) {
         const previous = next.get(agent.id);
-        const status = toStatus(agent.status ?? agent.progress?.status ?? previous?.status);
-        const merged = {
-          ...previous,
-          ...agent,
-          id: agent.id,
-          observedActive: !isTerminalStatus(status),
-          status,
-          lastKnownStatus: status,
-        };
+        const merged = mergeAgentSnapshot(previous, agent, (status) => !terminalStatus(status));
         if (jsonSize(merged) > MAX_AGENT_METADATA_BYTES) continue;
         next.delete(agent.id);
         next.set(agent.id, merged);

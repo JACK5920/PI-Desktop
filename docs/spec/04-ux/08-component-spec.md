@@ -2807,6 +2807,34 @@ as a conversation:
   state. Delegation rows remain excluded from the parent turn stream and
   minimap.
 
+#### OMP-native delivery and parent reply
+
+OMP subagent cards use OMP's explicit Task roster and `<task-result>` delivery
+receipts; they do not reinterpret a child status as the parent's answer. Each
+child row may show a bounded, Markdown-clean delivery preview, labeled as the
+child's output. Batch outcome counts keep completed, failed, stopped and
+unconfirmed work distinct. When every requested child has a confirmed terminal
+outcome but the parent assistant has not persisted its final reply, the card
+says that it is waiting for the main reply. Once that reply is persisted, a
+localized link targets the actual assistant message in the same turn; the card
+does not generate or duplicate a synthetic summary.
+
+The work-panel detail separates **Delivered result** from **Execution** so a
+long report never competes for height with the tool timeline. The result tab
+fills the available detail body and owns one full-height scroll surface; it
+uses the shared Markdown renderer and offers copy plus a large reader sized to
+the window. The execution tab keeps the complete child transcript and tool
+timeline in its own scroll surface. When a delivered result overflows and its
+reader is above the end, a separate accessible down-arrow jumps that result
+pane to the bottom; its scroll state is independent from the execution timeline.
+Receipt output is canonical when present;
+otherwise the latest assistant answer is the result view's source. The report
+and transcript are not stacked together, so repeated answer text is never
+shown as two adjacent copies. Receipt previews are rebuilt from the persisted
+parent tool result on history reload, while archive lifecycle updates are
+monotonic within one `parentToolCallId`; a different parent Task call starts a
+fresh lifecycle generation.
+
 - Runs are rebuilt from the message list on every render, so group memoization
   compares them by row identity and length rather than by object identity —
   otherwise a streaming delegate would freeze at its first row.
@@ -3339,6 +3367,7 @@ reasoning-level control.
 |---|---|---|
 | Idle (no model) | textarea active, send button disabled + tooltip "Configure a model first" | Agent link remains available in model menu |
 | Idle (ready) | textarea active; Send requires draft content | Send active when content exists |
+| OMP engine readiness | Readiness belongs to the selected engine, not the previous engine's cached issue state | A cached installed OMP status must be published on engine switch; only the current OMP checking/unavailable state may block Send |
 | Home/new-session initialization | textarea and mode/model × reasoning/permission triggers remain available while the durable empty session is loading; the session row is already present and the first configuration selection applies to that session | Configure the session, then send |
 | New session (reasoning model) | Combined model × reasoning chip shows the model and its binding default thinking level; an unmatched model starts at Off while keeping the manual ladder available | User may select any level enabled in the model binding, or any canonical level for an unmatched model |
 | New session / switch while another session is running | textarea active, send button enabled for the destination session's own run state | Send active, Stop hidden unless the destination session itself is running with an empty draft |

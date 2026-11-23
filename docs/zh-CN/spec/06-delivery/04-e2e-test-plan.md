@@ -10373,6 +10373,13 @@ PluginPack 产物的解包目录，仅用于开发验证。验收 #1711 前需�
 - **预期：** 选择模板会保留原有草稿文本和附件，不会自行创建提案或生命周期记录，也不会改写不可变审批快照。以 Goal 模式发送后只创建正常的 `SubmitGoal` 提案，并沿用现有审批与 Host 管理的生命周期。拒绝后仍按现有行为返回可编辑的 Goal 规划状态。
 - **覆盖：** `goal-templates.test.mjs`、`composer-mode-menu.test.mjs`、i18n catalog 一致性、Goal 提案/审批测试和桌面类型检查；不使用真实 provider，也不新增持久化数据源。
 
+### E2E-composer-omp-engine-switch-readiness
+
+- **前置条件：** 新任务输入框，以及分别代表 OMP 已安装可用和不可用的缓存状态。无需 provider 凭据或模型请求。
+- **路径：** 在 PI 模式输入草稿，切换到 OMP；当 OMP 的可用状态已缓存时，确认无需等待状态值再次变化，发送按钮也会启用。再使用“检查中”和“不可用”状态，确认发送仍被阻止且提示对应当前引擎。切回 PI 后，确认 OMP 问题状态不会阻止 PI 发送。
+- **预期：** 引擎就绪信息始终与对应引擎绑定；切换到 OMP 时，即使缓存状态为无问题，也会替换前一个 PI 状态。真实的 OMP 检查中/不可用状态仍会阻止发送；OMP 状态不会泄漏到 PI 模式。
+- **覆盖：** `apps/desktop/test/omp-engine-compatibility.test.mjs`、桌面 TypeScript 检查和渲染器构建。不调用模型 provider。
+
 ### E2E-CHROME-compact-chat-window
 
 - **前置条件：** 使用隔离 profile 启动已构建的桌面应用，准备本地会话、未发送的输入框草稿、已打开的工作面板标签和已知的常规窗口尺寸。无需调用真实模型服务。

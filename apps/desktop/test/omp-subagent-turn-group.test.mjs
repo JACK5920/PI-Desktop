@@ -31,6 +31,19 @@ test("turn group collects only explicitly linked agents across sibling OMP Task 
   assert.equal(group.completedCount, 1);
   assert.equal(group.failedCount, 1);
   assert.equal(group.unknownCount, 0);
+  assert.equal(group.abortedCount, 0);
+  assert.equal(group.unconfirmedCount, 0);
+});
+
+test("turn group keeps aborted and unconfirmed outcomes separate from failures", () => {
+  const group = buildOmpSubagentTurnGroup([batch("call-a", [{}, {}, {}])], [
+    { id: "agent-aborted", parentToolCallId: "call-a", status: "cancelled", observedActive: false },
+    { id: "agent-unknown", parentToolCallId: "call-a", status: "running", lastKnownStatus: "running", observedActive: false },
+    { id: "agent-failed", parentToolCallId: "call-a", status: "failed", observedActive: false },
+  ]);
+  assert.equal(group.abortedCount, 1);
+  assert.equal(group.failedCount, 1);
+  assert.equal(group.unconfirmedCount, 1);
 });
 
 test("a subagent that left the active roster is not presented as running without terminal evidence", () => {

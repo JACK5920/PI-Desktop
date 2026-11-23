@@ -4,6 +4,7 @@ export function subscribeOmpSubagentRoster(sessionId: string, listener: (roster:
 export function recordOmpSubagentRoster(sessionId: string, incoming: Array<Record<string, any>>): Array<Record<string, any>>;
 export function recordOmpSubagentTranscriptOutcome(sessionId: string, agentId: string, outcome: "completed" | "failed" | "aborted", options?: { confirmed?: boolean }): Array<Record<string, any>>;
 export function recordOmpSubagentDeliveries(sessionId: string, toolCallId: string, toolResultText: string): Array<Record<string, any>>;
+export function ompSubagentDeliveryPreview(output: string): string;
 export function parseOmpTaskResultDeliveries(text: string): Array<{
   id: string;
   agent: string;
