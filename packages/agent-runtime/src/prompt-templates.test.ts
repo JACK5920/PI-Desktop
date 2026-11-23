@@ -133,6 +133,27 @@ describe("loadComposerTemplates", () => {
     );
   });
 
+  it("reads a BOM-prefixed template's frontmatter and body", async () => {
+    const file = join(userDir, "bom-template.md");
+    await writeFile(
+      file,
+      "\uFEFF---\r\ndescription: BOM template description\r\nargument-hint: <path>\r\n---\r\nBOM body $1.",
+    );
+    try {
+      const { templates } = await loadComposerTemplates(root, {
+        project: projectDir,
+        user: userDir,
+      });
+      expect(templates.find((template) => template.name === "bom-template")).toMatchObject({
+        description: "BOM template description",
+        argumentHint: "<path>",
+        content: "BOM body $1.",
+      });
+    } finally {
+      await rm(file);
+    }
+  });
+
   it("degrades to an empty list when directories are missing", async () => {
     const { templates, diagnostics } = await loadComposerTemplates(root, {
       project: join(root, "absent-a"),
