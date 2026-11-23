@@ -399,11 +399,11 @@ export class UserMcpRuntime {
       existing.lastUsedAt = Date.now();
       return { tools: existing.client.getTools(), entry: existing };
     }
-    // A server that already failed its handshake this run stays failed until the
-    // user edits it or asks for a test, so every session assembly does not pay
-    // the connect timeout again.
-    if (existing?.status.state === "failed") {
-      if (pin) existing.activeCalls += 1;
+    // Session assembly does not hammer a server whose handshake already failed.
+    // An explicit tool dispatch is different: it is a user-visible attempt to
+    // use that server, so retry one handshake and revalidate the fresh catalog.
+    // Do not close a connected client here; in-flight work may still depend on it.
+    if (existing?.status.state === "failed" && !pin) {
       existing.lastUsedAt = Date.now();
       return { tools: [], entry: existing };
     }
