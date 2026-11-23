@@ -270,11 +270,7 @@ function createStdioTransport(
 function parseSseMessages(body: string): JsonRpcMessage[] {
   const out: JsonRpcMessage[] = [];
   for (const block of body.split(/\n\n/)) {
-    const data = block
-      .split(/\n/)
-      .filter((line) => line.startsWith("data:"))
-      .map((line) => line.slice(5).trim())
-      .join("");
+    const data = parseSseEvent(block).data;
     if (!data) continue;
     try {
       out.push(JSON.parse(data) as JsonRpcMessage);
@@ -283,6 +279,20 @@ function parseSseMessages(body: string): JsonRpcMessage[] {
     }
   }
   return out;
+}
+
+function parseSseEvent(block: string): { event: string; data: string } {
+  let event = "message";
+  const data: string[] = [];
+  for (const raw of block.split(/\r?\n/)) {
+    if (!raw || raw.startsWith(":")) continue;
+    const separator = raw.indexOf(":");
+    const field = separator < 0 ? raw : raw.slice(0, separator);
+    const value = separator < 0 ? "" : raw.slice(separator + 1).replace(/^ /, "");
+    if (field === "event") event = value || "message";
+    else if (field === "data") data.push(value);
+  }
+  return { event, data: data.join("\n") };
 }
 
 
@@ -404,11 +414,245 @@ function createHttpTransport(
   }
   let closed = false;
   let sessionId: string | undefined;
+  let legacyEndpoint: string | undefined;
+  let legacyStreamController: AbortController | undefined;
+  let legacyStreamTask: Promise<void> | undefined;
   const activeControllers = new Set<AbortController>();
+
+  const sendLegacy = async (
+    message: JsonRpcMessage,
+    controller: AbortController,
+  ) => {
+    if (!legacyEndpoint) throw mcpError("UNAVAILABLE", "legacy mcp event stream has no message endpoint");
+    options.assertUrlAllowed?.(legacyEndpoint);
+    const response = await fetchImpl(legacyEndpoint, {
+      method: "POST",
+      headers: {
+        ...headersForMcpRequest(options.headers, options.url, legacyEndpoint),
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+        "mcp-protocol-version": MCP_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify(message),
+      redirect: "manual",
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      try {
+        await response.body?.cancel();
+      } catch {
+        // The status is sufficient for the structured MCP error.
+      }
+      const error = mcpError("HTTP_ERROR", `mcp server returned ${response.status}`) as McpError & { status?: number };
+      error.status = response.status;
+      throw error;
+    }
+    const contentType = response.headers.get("content-type") ?? "";
+    if (contentType.includes("text/event-stream")) {
+      await streamSseMessages(response, handlers.onMessage);
+      return;
+    }
+    const body = await readBoundedHttpBody(response);
+    if (!body.trim()) return;
+    const parsed = JSON.parse(body) as JsonRpcMessage | JsonRpcMessage[];
+    for (const entry of Array.isArray(parsed) ? parsed : [parsed]) handlers.onMessage(entry);
+  };
+
+  const startLegacyStream = async (timeoutMs: number, signal?: AbortSignal): Promise<void> => {
+    if (legacyEndpoint) return;
+    if (legacyStreamTask) return legacyStreamTask;
+
+    const controller = new AbortController();
+    legacyStreamController = controller;
+    activeControllers.add(controller);
+    let resolveEndpoint!: () => void;
+    let rejectEndpoint!: (error: Error) => void;
+    const endpointReady = new Promise<void>((resolvePromise, rejectPromise) => {
+      resolveEndpoint = resolvePromise;
+      rejectEndpoint = rejectPromise;
+    });
+    const onRequestAbort = () => controller.abort();
+    if (signal?.aborted) controller.abort();
+    else signal?.addEventListener("abort", onRequestAbort, { once: true });
+
+    const consume = async (response: Response) => {
+      if (!response.ok) {
+        await response.body?.cancel().catch(() => undefined);
+        const error = mcpError("HTTP_ERROR", `mcp server returned ${response.status}`) as McpError & { status?: number };
+        error.status = response.status;
+        throw error;
+      }
+      if (!(response.headers.get("content-type") ?? "").includes("text/event-stream")) {
+        await response.body?.cancel().catch(() => undefined);
+        throw mcpError("INVALID_RESPONSE", "legacy mcp endpoint did not return an event stream");
+      }
+      if (!response.body) throw mcpError("INVALID_RESPONSE", "legacy mcp event stream has no body");
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (!value) continue;
+          buffer += decoder.decode(value, { stream: true });
+          for (;;) {
+            const boundary = /\r?\n\r?\n/.exec(buffer);
+            if (!boundary) break;
+            const block = buffer.slice(0, boundary.index);
+            buffer = buffer.slice(boundary.index + boundary[0].length);
+            if (new TextEncoder().encode(block).byteLength > MAX_HTTP_RESPONSE_BYTES) {
+              await reader.cancel();
+              throw mcpError("LIMIT_EXCEEDED", "mcp server event is too large");
+            }
+            const event = parseSseEvent(block);
+            if (!event.data) continue;
+            if (event.event === "endpoint") {
+              let endpoint: URL;
+              try {
+                endpoint = new URL(event.data.trim(), options.url);
+              } catch {
+                throw mcpError("INVALID_RESPONSE", "legacy mcp server returned an invalid message endpoint");
+              }
+              if ((endpoint.protocol !== "http:" && endpoint.protocol !== "https:") || endpoint.origin !== new URL(options.url).origin) {
+                throw mcpError("HTTP_REDIRECT", "legacy mcp message endpoint must be same-origin");
+              }
+              options.assertUrlAllowed?.(endpoint.toString());
+              legacyEndpoint = endpoint.toString();
+              resolveEndpoint();
+              continue;
+            }
+            if (event.event === "message") {
+              try {
+                handlers.onMessage(JSON.parse(event.data) as JsonRpcMessage);
+              } catch {
+                // Ignore malformed or non-JSON events; the matching RPC will time out.
+              }
+            }
+          }
+          if (new TextEncoder().encode(buffer).byteLength > MAX_HTTP_RESPONSE_BYTES) {
+            await reader.cancel();
+            throw mcpError("LIMIT_EXCEEDED", "mcp server event is too large");
+          }
+        }
+        buffer += decoder.decode();
+        if (new TextEncoder().encode(buffer).byteLength > MAX_HTTP_RESPONSE_BYTES) {
+          throw mcpError("LIMIT_EXCEEDED", "mcp server event is too large");
+        }
+        const finalEvent = parseSseEvent(buffer);
+        if (finalEvent.event === "endpoint" && finalEvent.data && !legacyEndpoint) {
+          const endpoint = new URL(finalEvent.data.trim(), options.url);
+          if ((endpoint.protocol !== "http:" && endpoint.protocol !== "https:") || endpoint.origin !== new URL(options.url).origin) {
+            throw mcpError("HTTP_REDIRECT", "legacy mcp message endpoint must be same-origin");
+          }
+          options.assertUrlAllowed?.(endpoint.toString());
+          legacyEndpoint = endpoint.toString();
+          resolveEndpoint();
+        } else if (finalEvent.event === "message" && finalEvent.data) {
+          try { handlers.onMessage(JSON.parse(finalEvent.data) as JsonRpcMessage); } catch { /* Ignore malformed final events. */ }
+        }
+        if (legacyEndpoint) {
+          throw mcpError("UNAVAILABLE", "legacy mcp event stream closed");
+        }
+        if (!legacyEndpoint) {
+          const error = mcpError("INVALID_RESPONSE", "legacy mcp stream ended before its message endpoint");
+          rejectEndpoint(error);
+          throw error;
+        }
+      } finally {
+        reader.releaseLock();
+      }
+    };
+
+    const run = async () => {
+      let url = options.url;
+      try {
+        for (let hop = 0; ; hop += 1) {
+          options.assertUrlAllowed?.(url);
+          const response = await fetchImpl(url, {
+            method: "GET",
+            headers: {
+              ...headersForMcpRequest(options.headers, options.url, url),
+              accept: "text/event-stream",
+              "mcp-protocol-version": MCP_PROTOCOL_VERSION,
+            },
+            redirect: "manual",
+            signal: controller.signal,
+          });
+          if (response.status >= 300 && response.status <= 399) {
+            await response.body?.cancel().catch(() => undefined);
+            const location = response.headers.get("location");
+            if (!location || hop >= MAX_MCP_REDIRECTS) throw mcpError("HTTP_REDIRECT", "invalid legacy mcp event stream redirect");
+            const next = new URL(location, url);
+            if ((next.protocol !== "http:" && next.protocol !== "https:") || next.origin !== new URL(options.url).origin) {
+              throw mcpError("HTTP_REDIRECT", "legacy mcp event stream redirects must be same-origin");
+            }
+            url = next.toString();
+            continue;
+          }
+          await consume(response);
+          return;
+        }
+      } catch (error) {
+        rejectEndpoint(error instanceof Error ? error : mcpError("UNAVAILABLE", String(error)));
+        const hadEndpoint = Boolean(legacyEndpoint);
+        if (legacyStreamController === controller) {
+          legacyEndpoint = undefined;
+          if (!closed && hadEndpoint) handlers.onClose(error instanceof Error ? error.message : "legacy mcp event stream closed");
+        }
+        throw error;
+      } finally {
+        activeControllers.delete(controller);
+        if (legacyStreamController === controller) legacyStreamController = undefined;
+      }
+    };
+
+    legacyStreamTask = run();
+    void legacyStreamTask.catch(() => undefined);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      let abortWait!: () => void;
+      const aborted = new Promise<never>((_resolve, reject) => {
+        abortWait = () => reject(signal?.aborted
+          ? mcpError("TOOL_ABORTED", "mcp tool call aborted")
+          : mcpError("TIMEOUT", "legacy mcp endpoint discovery timed out"));
+      });
+      if (controller.signal.aborted) abortWait();
+      else controller.signal.addEventListener("abort", abortWait, { once: true });
+      try {
+        await Promise.race([endpointReady, aborted]);
+      } finally {
+        controller.signal.removeEventListener("abort", abortWait);
+      }
+    } catch (error) {
+      controller.abort();
+      throw error;
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onRequestAbort);
+    }
+  };
 
   return {
     send: async (message, timeoutMs = options.timeoutMs, signal) => {
       if (closed) throw mcpError("UNAVAILABLE", "mcp session is closed");
+      if (legacyEndpoint) {
+        const controller = new AbortController();
+        const abort = () => controller.abort();
+        if (signal?.aborted) abort();
+        else signal?.addEventListener("abort", abort, { once: true });
+        activeControllers.add(controller);
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+          await sendLegacy(message, controller);
+        } finally {
+          clearTimeout(timer);
+          signal?.removeEventListener("abort", abort);
+          activeControllers.delete(controller);
+        }
+        return;
+      }
       const controller = new AbortController();
       const abort = () => controller.abort();
       if (signal?.aborted) abort();
@@ -469,7 +713,9 @@ function createHttpTransport(
             } catch {
               // The status is sufficient for the structured MCP error.
             }
-            throw mcpError("HTTP_ERROR", `mcp server returned ${response.status}`);
+            const error = mcpError("HTTP_ERROR", `mcp server returned ${response.status}`) as McpError & { status?: number };
+            error.status = response.status;
+            throw error;
           }
           const nextSession = response.headers.get("mcp-session-id");
           if (nextSession && new URL(url).origin === initialOrigin) sessionId = nextSession;
@@ -499,6 +745,14 @@ function createHttpTransport(
           for (const entry of Array.isArray(parsed) ? parsed : [parsed]) handlers.onMessage(entry);
           return;
         }
+      } catch (error) {
+        const status = (error as McpError & { status?: number })?.status;
+        if (message.method === "initialize" && [400, 404, 405].includes(status ?? 0)) {
+          await startLegacyStream(timeoutMs, signal);
+          await sendLegacy(message, controller);
+          return;
+        }
+        throw error;
       } finally {
         clearTimeout(timer);
         signal?.removeEventListener("abort", abort);
@@ -509,6 +763,9 @@ function createHttpTransport(
       closed = true;
       for (const controller of activeControllers) controller.abort();
       activeControllers.clear();
+      legacyEndpoint = undefined;
+      legacyStreamTask = undefined;
+      legacyStreamController = undefined;
       handlers.onClose("mcp session closed");
     },
   };

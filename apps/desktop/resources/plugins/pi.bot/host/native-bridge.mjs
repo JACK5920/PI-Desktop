@@ -5,6 +5,7 @@
 // 对外仍实现 MiniAppAgentClient（run/answer/reply/models）+ 原版事件流，engine.mjs 零改动。
 
 import { randomBytes } from 'node:crypto';
+import { createSessionQueue } from './session-queue.mjs';
 
 // 主对话没有「两分钟就掐」这回事：一个回合跑多久由宿主的模型与工具决定。
 // 这里只设一个兜底上限，防止回合永远不收口（真正收口靠 desktop:turnEnded /
@@ -51,6 +52,7 @@ function isIdleStatus(status) {
 }
 
 export function createNativeAgentBridge({ pi, logger }) {
+  const queue = createSessionQueue();
   const botToHost = new Map();      // 原插件 sessionId → PI-Desktop durable session id
   const subscriptions = new Map();  // host sessionId → subscriptionId
   const active = new Map();         // host sessionId → 当前回合
@@ -67,12 +69,20 @@ export function createNativeAgentBridge({ pi, logger }) {
         missing,
         operations: [...ids],
         events: typeof pi?.desktop?.subscribeAgentEvents === 'function' && typeof pi?.events?.on === 'function',
+        // 引擎按 has('agent.run') 决定排队；native 桥实现了会话级串行队列。
+        has: (name) => name === 'agent.run',
       };
       if (!capabilities.supported) {
         logger.warn('pi.bot.native.unsupported', { missing });
       }
     } catch (error) {
-      capabilities = { supported: false, missing: REQUIRED_OPERATIONS, operations: [], events: false };
+      capabilities = {
+        supported: false,
+        missing: REQUIRED_OPERATIONS,
+        operations: [],
+        events: false,
+        has: (name) => name === 'agent.run',
+      };
       logger.warn('pi.bot.native.probe.failed', { message: String(error?.message ?? error) });
     }
     return capabilities;
@@ -305,13 +315,25 @@ export function createNativeAgentBridge({ pi, logger }) {
 
   return {
     async run(input, options = {}) {
-      return runTurn({
+      const run = () => runTurn({
         text: input?.text,
         sessionId: input?.sessionId,
         signal: options.signal,
         onEvent: options.onEvent,
         label: input?.botName,
       });
+      const sessionId = input?.sessionId;
+      if (input?.whenBusy !== 'queue' || !sessionId) return run();
+      const slot = queue.acquire(sessionId, options.signal);
+      if (slot.queued) {
+        emit(options.onEvent, { type: 'run.queued', sessionId, position: slot.position });
+        await slot.queued;
+      }
+      try {
+        return await run();
+      } finally {
+        slot.release();
+      }
     },
     async answer(input, options = {}) {
       const answers = Array.isArray(input?.answers) ? input.answers : [];

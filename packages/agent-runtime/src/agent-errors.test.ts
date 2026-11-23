@@ -748,6 +748,34 @@ describe("classifyAgentError", () => {
     });
   });
 
+  it.each([
+    [
+      "Error code: 402 - {'error': {'message': 'Insufficient Balance'}}",
+      "PROVIDER_ERROR",
+      false,
+      402,
+    ],
+    ["Error code: 401 - Incorrect API key provided", "PROVIDER_UNAUTHORIZED", false, 401],
+    ["Error code: 429 - Rate limit reached for model", "PROVIDER_RATE_LIMITED", true, 429],
+    ["Error code: 404 - The model does not exist", "MODEL_NOT_CONFIGURED", false, 404],
+    ["Error code: 402 - see note (500)", "PROVIDER_ERROR", false, 402],
+  ])(
+    "reads an OpenAI SDK Error code prefix as the HTTP status: %s",
+    (message, code, retriable, providerStatus) => {
+      expect(classifyAgentError(new Error(message))).toMatchObject({
+        code,
+        retriable,
+        details: { providerStatus },
+      });
+    },
+  );
+
+  it("does not read a longer business code as an HTTP status", () => {
+    const classified = classifyAgentError(new Error("Error code: 30001 - account request rejected"));
+    expect(classified.code).toBe("PROVIDER_ERROR");
+    expect(classified.details?.providerStatus).toBeUndefined();
+  });
+
   it("does not treat a bare credits mention or a 429 rate limit as credit exhaustion", () => {
     expect(classifyAgentError(new Error("credits"))).toMatchObject({
       code: "PROVIDER_ERROR",
@@ -797,6 +825,21 @@ describe("classifyAgentError", () => {
     });
   });
 
+  it("classifies checkpoint guard failures as local and drops stale provider fields", () => {
+    const error = Object.assign(
+      new Error("CONTEXT_COMPACTION_FAILED: unable to fit the retained context"),
+      { status: 503, code: "ECONNRESET" },
+    );
+    const classified = classifyAgentError(error);
+    expect(classified).toMatchObject({
+      code: "CONTEXT_COMPACTION_FAILED",
+      retriable: false,
+      details: { origin: "local" },
+    });
+    expect(classified.details).not.toHaveProperty("providerStatus");
+    expect(classified.details).not.toHaveProperty("providerCode");
+  });
+
   it("classifies network failures via the cause chain", () => {
     const err = new Error("fetch failed");
     (err as any).cause = Object.assign(new Error("connect ECONNREFUSED"), {
@@ -829,11 +872,57 @@ describe("classifyAgentError", () => {
   it.each([
     "403 AccountOverdueError: overdue balance",
     '403 {"code":"AccountOverdueError","message":"account overdue balance"}',
+    "your account has an overdue balance",
   ])("treats Volcengine overdue-account failures as terminal: %s", (message) => {
     expect(classifyAgentError(new Error(message))).toMatchObject({
       code: "PROVIDER_ERROR",
       retriable: false,
     });
+  });
+
+  it.each([
+    "Insufficient Balance",
+    "Sorry, your account balance is insufficient",
+    "insufficient balance of the account",
+    '{"code":30001,"message":"Sorry, your account balance is insufficient","data":null}',
+    "Your credit balance is too low to access the Anthropic API.",
+    '{"code":"Arrearage","message":"Access denied, please make sure your account is in good standing.","type":"Arrearage"}',
+    "Arrearage",
+    "Access denied, please make sure your account is in good standing.",
+  ])("treats provider-specific account exhaustion as terminal: %s", (message) => {
+    for (const candidate of [
+      message,
+      `429: ${message}`,
+      Object.assign(new Error(message), { status: 429 }),
+    ]) {
+      expect(classifyAgentError(candidate)).toMatchObject({
+        code: "PROVIDER_ERROR",
+        retriable: false,
+      });
+    }
+  });
+
+  it("recognizes Arrearage in a structured provider code", () => {
+    expect(classifyAgentError(Object.assign(new Error("Access denied"), { code: "Arrearage" })))
+      .toMatchObject({ code: "PROVIDER_ERROR", retriable: false });
+  });
+
+  it("does not overclassify generic balance, access, or account wording as exhaustion", () => {
+    for (const message of [
+      "balance",
+      "Access denied",
+      "Your account is in good standing.",
+      "insufficient credentials",
+    ]) {
+      expect(classifyAgentError(new Error(message))).toMatchObject({
+        code: "PROVIDER_ERROR",
+        retriable: true,
+      });
+      expect(classifyAgentError(Object.assign(new Error(message), { status: 429 }))).toMatchObject({
+        code: "PROVIDER_RATE_LIMITED",
+        retriable: true,
+      });
+    }
   });
 
   it("names the failing layer behind a nested DNS cause", () => {

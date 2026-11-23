@@ -25,11 +25,13 @@ export function SubagentTopology({
   items,
   delegationStatuses,
   delegationTimings,
+  parentResponseMessageId,
   onUserInteraction,
 }: {
   items: DelegationActivityItem[];
   delegationStatuses?: ReadonlyMap<string, SubagentOutcome>;
   delegationTimings?: ReadonlyMap<string, SubagentTiming>;
+  parentResponseMessageId?: string;
   onUserInteraction?: () => void;
 }) {
   const hasOmpBatch = items.some(({ message }) => isOmpTaskBatch(message.engineOrigin, message.toolName, message.toolArgs));
@@ -125,7 +127,7 @@ export function SubagentTopology({
         aria-label={t("chat.subagentTopology")}
       >
         {topologyEntries.map((entry, index) => {
-          if (entry.kind === "omp-group") return <OmpSubagentTurnCard key="omp-subagent-turn-group" group={ompTurnGroup} onUserInteraction={onUserInteraction} />;
+          if (entry.kind === "omp-group") return <OmpSubagentTurnCard key="omp-subagent-turn-group" group={ompTurnGroup} parentResponseMessageId={parentResponseMessageId} onUserInteraction={onUserInteraction} />;
           const { item } = entry;
           return <ToolRow
             key={`${item.message.id}:${index}`}

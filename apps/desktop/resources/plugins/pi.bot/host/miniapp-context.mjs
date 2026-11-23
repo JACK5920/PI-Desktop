@@ -115,6 +115,8 @@ export async function startBotHost({ pi, pluginRoot, dataDir, mode = 'loop', log
       signal: controller.signal,
       logger,
       agent,
+      // 0.7.31 起的契约：声明后引擎才会带 whenBusy:'queue' 并在忙时排队而不是报 BUSY。
+      capabilities: agent.capabilities,
     };
     let lifecycle;
     try {

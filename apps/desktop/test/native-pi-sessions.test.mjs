@@ -461,10 +461,11 @@ test("desktop session fork keeps the existing host contract", async () => {
   });
   const result = await handle({ sessionId: "desktop-parent", title: "Child", throughMessageId: "m1" });
   assert.equal(result.session.id, "desktop-child");
-  assert.deepEqual(hostCalls, [{
-    method: "session.fork",
-    input: { sessionId: "desktop-parent", title: "Child", throughMessageId: "m1" },
-  }]);
+  assert.deepEqual(hostCalls.map(({ method }) => method), ["session.get", "session.fork"]);
+  assert.deepEqual(hostCalls[0].input, { id: "desktop-parent", messageLimit: 1 });
+  assert.deepEqual(hostCalls[1].input, {
+    sessionId: "desktop-parent", title: "Child", throughMessageId: "m1",
+  });
 });
 
 const assistantRow = (id, status, content = "part") => ({
@@ -585,6 +586,8 @@ test("busy Desktop fork delegates only anchored snapshots to the authoritative h
   }
   assert.equal(hostCalls.length, 0);
   assert.equal((await handle({ sessionId: "parent", throughMessageId: "old" })).session.id, "child");
-  assert.equal(hostCalls[0].input.throughMessageId, "old");
+  assert.deepEqual(hostCalls.map(({ method }) => method), ["session.get", "session.fork"]);
+  assert.equal(hostCalls[1].input.throughMessageId, "old");
   await assert.rejects(handle({ sessionId: "parent", throughMessageId: "current" }), { errorCode: "AGENT_BUSY" });
+  assert.deepEqual(hostCalls.slice(2).map(({ method }) => method), ["session.get", "session.fork"]);
 });

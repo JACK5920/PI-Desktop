@@ -5,6 +5,7 @@ import {
   getOmpSubagentRoster,
   isOmpTaskBatch,
   ompToolResultText,
+  ompSubagentDeliveryPreview,
   parseOmpTaskResultDeliveries,
   recordOmpSubagentDeliveries,
   recordOmpSubagentRoster,
@@ -178,6 +179,19 @@ test("tool result text is read from block arrays and escaped JSON payloads", () 
   assert.equal(parseOmpTaskResultDeliveries(ompToolResultText(block))[0].output, "ok");
   const escaped = { content: JSON.stringify(block.content) };
   assert.match(ompToolResultText(escaped), /<task-result id="A"/);
+});
+
+test("OMP delivery previews remove common Markdown noise and remain bounded", () => {
+  const preview = ompSubagentDeliveryPreview([
+    "## **结论**",
+    "- `PASS`: 14 / 14 tests",
+    "| Item | Result |",
+    "| --- | --- |",
+    "| Build | **green** |",
+  ].join("\n"));
+  assert.equal(preview, "结论 · PASS: 14 / 14 tests · Item · Result · Build · green");
+  assert.ok(ompSubagentDeliveryPreview("x".repeat(1000)).length <= 241);
+  assert.equal(ompSubagentDeliveryPreview("  \n  "), "");
 });
 
 test("batch surfaces show buckets and the delivered conclusion instead of an N/N claim", async () => {

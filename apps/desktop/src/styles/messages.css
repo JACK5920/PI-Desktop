@@ -3007,11 +3007,20 @@
 .omp-subagent-turn-card-heading { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
 .omp-subagent-turn-card-heading strong { overflow: hidden; color: var(--ds-text-primary); font-size: var(--text-sm); text-overflow: ellipsis; white-space: nowrap; }
 .omp-subagent-turn-card-heading > span { overflow-wrap: anywhere; color: var(--ds-text-muted); font-size: var(--text-xs); }
+.omp-subagent-turn-card-outcomes { color: var(--ds-text-secondary) !important; }
+.omp-subagent-turn-parent-reply { flex: none; border: 1px solid var(--ds-border-subtle); border-radius: var(--radius-sm); background: var(--ds-raised); color: var(--ds-text-secondary); cursor: pointer; font-size: var(--text-xs); padding: 5px 8px; }
+.omp-subagent-turn-parent-reply:hover { background: var(--ds-bg-hover); color: var(--ds-text-primary); }
+.omp-subagent-turn-parent-reply:focus-visible { outline: 2px solid color-mix(in oklab, var(--ds-accent) 58%, transparent); outline-offset: 2px; }
+.omp-subagent-turn-awaiting-reply { flex: none; color: var(--ds-text-muted); font-size: var(--text-xs); }
 .omp-subagent-turn-card-unknown { flex: none; color: var(--ds-warning); font-size: var(--text-xs); }
 .omp-subagent-turn-agents { display: grid; min-width: 0; gap: 2px; padding: 4px 8px 8px; }
 .omp-subagent-turn-agent { min-width: 0; border-bottom: 1px solid var(--ds-border-subtle); }
 .omp-subagent-turn-agent:last-of-type { border-bottom: 0; }
 .omp-subagent-turn-agent .subagent-topology-node-header { min-height: 0; border-radius: var(--radius-sm); padding: 7px 8px; }
+.omp-subagent-delivery-preview { min-width: 0; padding: 0 12px 8px 42px; }
+.omp-subagent-delivery-preview > span { color: var(--ds-text-muted); font-size: var(--text-2xs); }
+.omp-subagent-delivery-preview p { display: -webkit-box; overflow: hidden; margin: 2px 0 0; color: var(--ds-text-secondary); font-size: var(--text-xs); line-height: 1.45; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.omp-subagent-parent-reply-highlight { outline: 2px solid color-mix(in oklab, var(--ds-accent) 58%, transparent); outline-offset: 4px; border-radius: var(--radius-sm); }
 .omp-subagent-turn-more { min-height: 30px; margin: 4px 0 0; border: 1px solid var(--ds-border-subtle); border-radius: var(--radius-sm); background: var(--ds-raised); color: var(--ds-text-secondary); cursor: pointer; font-size: var(--text-xs); }
 .omp-subagent-turn-more:hover { background: var(--ds-bg-hover); color: var(--ds-text-primary); }
 .omp-subagent-turn-empty { margin: 0; padding: 10px 12px; color: var(--ds-text-muted); font-size: var(--text-xs); }

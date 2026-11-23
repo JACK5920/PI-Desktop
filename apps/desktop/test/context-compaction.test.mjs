@@ -127,7 +127,7 @@ test("the hard boundary is enforced by the host, with a model-side escape hatch"
   // can expire it without rewriting earlier instructions.
   assert.match(
     runtime,
-    /messages: \[\s*\.\.\.context\.messages,\s*\{\s*role: "system",\s*content: "",\s*sections: \{ \[CONTEXT_BUDGET_SECTION\]: reminder \}/,
+    /const message: AgentMessage = supportsMidConversationSystemMessages\(this\.model\)[\s\S]*?sections: \{ \[CONTEXT_BUDGET_SECTION\]: reminder \}[\s\S]*?return \{ \.\.\.context, messages: \[\.\.\.context\.messages, message\] \}/,
   );
   assert.match(hostPermissions, /"new_context"/);
 });

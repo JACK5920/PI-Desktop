@@ -23,6 +23,40 @@
 - **Specs:** `03-runtime/08-error-codes.md` §3.2.
 
 
+## E2E-PROVIDER-provider-specific-account-exhaustion
+
+- **Preconditions:** Isolated Agent runtime and synthetic error messages; no
+  real provider credentials, paid requests, or user history.
+- **Steps:** Exercise DeepSeek/SiliconFlow/MiniMax insufficient-balance wording,
+  Anthropic low-credit wording, DashScope `Arrearage`, Volcengine overdue
+  account wording/code, and an OpenAI SDK `Error code: NNN` prefix. Repeat
+  exhaustion cases with missing status and HTTP 429. Include near-miss generic
+  text (`balance`, `Access denied`, `account is in good standing`) and a
+  business code such as `30001`.
+- **Expected:** Explicit account exhaustion ends as terminal
+  `PROVIDER_ERROR`; it never consumes the retry budget, including if wrapped
+  as HTTP 429. Generic near-miss text remains eligible for the normal status
+  policy. OpenAI SDK prefixes expose the leading three-digit HTTP status, while
+  longer business codes are not treated as statuses.
+- **Automated coverage:** `agent-errors.test.ts`.
+- **Specs:** `03-runtime/02-agent-runtime.md`, `03-runtime/08-error-codes.md`.
+
+
+## E2E-PROVIDER-qwen-token-plan-current-and-legacy-endpoints
+
+- **Preconditions:** Provider preset table only; no API key or network request.
+- **Steps:** Resolve both Qwen Token Plan Team presets by vendor key and current
+  endpoint; resolve their previous `aliyuncs.com` endpoint URLs; inspect vendor
+  host recognition for current and legacy hosts.
+- **Expected:** New preset selections use the published Qwen Team endpoints
+  and names. Existing rows using the prior endpoints still resolve to the same
+  provider identity and host classification; stored endpoint and credential
+  values are not migrated or rewritten.
+- **Automated coverage:** `provider-presets.test.ts`.
+- **Specs:** `03-runtime/12-provider-config-schema.md`,
+  `03-runtime/13-model-catalog-and-selection.md`.
+
+
 ## E2E-TASK-DOCK-tab-content-isolation
 
 - **Preconditions:** Isolated Electron renderer with synthetic todos and a running
@@ -9290,6 +9324,42 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
 - **Milestone**: M6
 - **Status**: Draft
 
+#### E2E-OMP-subagent-delivery-display-and-recovery
+
+- **Preconditions:** An isolated OMP conversation fixture with one Task batch,
+  at least three explicitly linked child agents, durable parent tool-result
+  receipts, child transcripts containing tool activity, one partial failure,
+  and a persisted final assistant reply. No provider credentials are required.
+- **Steps:**
+  1. Load the active batch and verify every observed child is listed with its
+     own status, task, and bounded delivery preview; verify requested/observed,
+     completed, failed, stopped, and unconfirmed counts are not conflated.
+  2. Remove the final parent reply from the fixture and reload. Verify settled
+     children remain visible and the card says it is waiting for the main reply;
+     restore the reply and verify the card link targets its exact message id.
+  3. Open each child detail. Verify the receipt renders as Markdown (including
+     a table), the same final answer is not repeated in the transcript, and all
+     task/tool rows remain available for review.
+  4. Reopen the conversation from persisted messages and archive data. Verify
+     previews, statuses, exact parent Task linkage and transcript are restored.
+  5. Apply a delayed `running` snapshot to a terminal agent with the same parent
+     Task id; then apply a running snapshot with a new parent Task id.
+- **Expected:** The parent transcript remains the only authoritative main
+  answer; child receipts are immediately reviewable without opening the work
+  panel; the panel provides the complete sourced transcript; duplicate result
+  text is rendered once; a stale active snapshot cannot regress a terminal
+  result, while a new Task generation can start normally.
+- **Automated coverage:** `omp-subagent-archive.test.mjs`,
+  `omp-subagent-roster.test.mjs`, `omp-subagent-turn-group.test.mjs`,
+  `omp-subagent-transcript-refresh.test.mjs`, and
+  `omp-subagent-turn-card.test.mjs`. Packaged desktop interaction remains a
+  separate candidate acceptance check.
+- **Specs:** `04-ux/08-component-spec.md` (OMP-native delivery and parent reply),
+  `ADR 0357`.
+- **Acceptance:** Quality
+- **Milestone:** Maintenance
+- **Status:** Automated unit/source regression coverage; full desktop run pending.
+
 #### E2E-119: Parallel subagents report back without entering the parent's context
 
 - **Preconditions**: A project-bound Agent session with the user home containing
@@ -11438,6 +11508,36 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
   desktop and host. Host-core and targeted renderer tests are companion checks,
   not substitutes for the Electron journey.
 
+### E2E-PLUGIN-pi-bot-delete-transaction-rollback
+
+- **Preconditions:** An isolated Mini App data directory with one Bot, a
+  single-member group, session pointers, and non-empty private/group
+  transcripts. No provider credentials or live model request are required.
+- **Path:** Reset a conversation while injecting transcript and state-write
+  failures. Delete the Bot and its single-member group while failing a later
+  transcript write; delete the group while failing the state commit. Reopen the
+  Store with a `prepared` transaction journal and with a `committed` journal,
+  then retry a failed reset.
+- **Expected:** Every failed pre-commit operation restores the original Bot and
+  group roster, membership, schedules, session pointers, state file, and all
+  affected transcripts; the operation is retryable. Startup rolls an
+  interrupted `prepared` transaction back, keeps a `committed` deletion, and
+  cleans the journal/backups. If rollback itself fails, the journal remains
+  authoritative and Store write-queue operations are fenced until startup
+  recovery succeeds.
+- **Coverage:** `apps/desktop/resources/plugins/pi.bot/tests/storage-reliability.test.mjs`
+  exercises the isolated Store/Team persistence path, including rollback,
+  retry, restart recovery, and Bot/group batch deletion. No real user data is
+  touched.
+- **Specs:** `apps/desktop/resources/plugins/pi.bot/README.md`,
+  `07-plugins/11-plugin-storage-isolation.md` (private data remains plugin-owned;
+  the transaction is internal to this Mini App).
+- **Acceptance:** F / G / Quality — failed deletion is non-destructive and
+  recoverable.
+- **Milestone:** Maintenance. **Status:** Automated isolated persistence
+  integration; visual confirmation of the existing delete/reset controls is
+  unchanged and not required for this data-path fix.
+
 ## 8. Traceability Matrix
 
 | Acceptance | Scenarios |
@@ -11479,6 +11579,7 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
 | E — Tools & permissions | E2E-008a, E2E-014, E2E-015, E2E-016, E2E-017, E2E-018, E2E-019, E2E-024I, E2E-024K, E2E-040, E2E-049, E2E-074, E2E-093, E2E-097, E2E-099, E2E-100, E2E-101, E2E-102, E2E-102d, E2E-102e, E2E-102g, E2E-103, E2E-105, E2E-106, E2E-107, E2E-111, E2E-112, E2E-113, E2E-114, E2E-115, E2E-116, E2E-119, E2E-121, E2E-122, E2E-142, E2E-145, E2E-147, E2E-155, E2E-158, E2E-166, E2E-181, E2E-PLUGIN-imported-pi-package-skills |
 | F — Persistence | E2E-020, E2E-021, E2E-021a, E2E-038, E2E-SETTINGS-inline-capability-imports, E2E-040, E2E-042, E2E-047, E2E-048, E2E-051, E2E-054, E2E-056, E2E-061, E2E-062, E2E-064, E2E-066, E2E-068, E2E-071, E2E-072, E2E-073, E2E-082, E2E-084, E2E-096, E2E-098, E2E-102, E2E-102b, E2E-102c, E2E-102d, E2E-102g, E2E-102i, E2E-103, E2E-AGENTS-001, E2E-061a, E2E-073a, E2E-104, E2E-106, E2E-107, E2E-108, E2E-109, E2E-110, E2E-112, E2E-118, E2E-119, E2E-120, E2E-121, E2E-123, E2E-142, E2E-146, E2E-146a, E2E-148, E2E-151, E2E-158, E2E-160, E2E-168, E2E-171, E2E-177, E2E-178, E2E-183, E2E-186, E2E-005J, E2E-PROVIDER-custom-endpoint-no-api-key, E2E-PLUGIN-session-orchestrator-real-workers, E2E-PLUGIN-provider-catalog-add-service, E2E-SESSION-outbox-unclassifiable-failure-does-not-stall-the-queue |
 | F — Persistence (project ordering) | E2E-251 |
+| F / G / Quality — Mini App transactional deletion | E2E-PLUGIN-pi-bot-delete-transaction-rollback |
 | G / Security — Fetch redirect policy | E2E-PLUGIN-fetch-redirect-policy |
 | G — Plugins | E2E-022, E2E-022A, E2E-022B, E2E-022C, E2E-023, E2E-024, E2E-024B, E2E-024C, E2E-024D, E2E-024AA, E2E-024E, E2E-024W, E2E-024F, E2E-024G, E2E-024H, E2E-024I, E2E-024J, E2E-024K, E2E-024L, E2E-024M, E2E-024N, E2E-024O, E2E-024P, E2E-025, E2E-026, E2E-105, E2E-117, E2E-120, E2E-122, E2E-123, E2E-024Q, E2E-148, E2E-152, E2E-153, E2E-PLUGIN-imported-pi-package-skills, E2E-PLUGIN-imported-pi-package-wrapper, E2E-PLUGIN-import-extension-installs-dependencies, E2E-PLUGIN-import-extension-reports-missing-dependency, E2E-PLUGIN-global-shortcut-owns-only-its-own-command, E2E-PLUGIN-permission-gate-for-real-time-capabilities, E2E-PLUGIN-background-audio-and-realtime-connection, E2E-PLUGIN-fs-root-follows-the-calling-session, E2E-PLUGIN-provider-catalog-add-service, E2E-PLUGIN-reviews-public-reads |
 | H — Diagnostics | E2E-027, E2E-031, E2E-034, E2E-042, E2E-096, E2E-098, E2E-104, E2E-107, E2E-108, E2E-109, E2E-110, E2E-113, E2E-115, E2E-116, E2E-118, E2E-121, E2E-146, E2E-146a, E2E-155, E2E-159, E2E-176, E2E-194, E2E-195 |
@@ -20617,6 +20718,23 @@ permission-request UI below has isolated fixture automation.
   `apps/desktop/test/omp-thinking-level-refresh.test.mjs`, and Desktop
   TypeScript check. No credentials or external model call are used.
 
+### E2E-composer-omp-engine-switch-readiness
+
+- **Preconditions:** A new-task composer and a cached OMP engine status for both
+  an installed/available engine and an unavailable engine. No provider
+  credentials or model request are required.
+- **Path:** With a non-empty draft, switch from PI to OMP while the cached OMP
+  status is already available and verify Send becomes enabled without requiring
+  a status-value transition. Repeat with checking and unavailable OMP states;
+  verify Send remains disabled with the matching engine explanation. Switch
+  back to PI and confirm an OMP issue does not block PI sending.
+- **Expected:** Engine readiness is reported with the engine identity, so a
+  cached `null` OMP issue replaces the former PI state on selection. A genuine
+  OMP checking/unavailable issue still blocks submission; no stale OMP state
+  leaks into PI mode.
+- **Coverage:** `apps/desktop/test/omp-engine-compatibility.test.mjs`, Desktop
+  TypeScript check, and renderer build. The test does not call a model provider.
+
 ### E2E-OMP-session-local-spill-links
 
 - **Preconditions:** Isolated OMP 19 RPC profile with a native session JSONL
@@ -20661,3 +20779,34 @@ permission-request UI below has isolated fixture automation.
   `chat-context-menu-items.test.mjs`, `bounded-history-mutations.test.mjs`,
   `omp-rpc-native-integration.test.mjs`, Desktop TypeScript check, and
   `git diff --check`. No user transcript or engine mapping is modified.
+
+
+### E2E-OMP-subagent-conclusion-reader
+
+- **Preconditions:** An isolated OMP session with one completed subagent,
+  a long Markdown delivery (including headings, tables and lists), and a child
+  transcript containing tool activity and its assistant answer. No provider
+  credentials or live model request are required.
+- **Path:** Open the child detail from its parent turn. Confirm **Delivered
+  result** is selected and the complete conclusion uses the entire right-pane
+  body with a single scroll surface. For a long result, verify the down-arrow
+  appears while the pane is above its end, click it to jump to the bottom, then
+  scroll up and confirm it reappears. Resize the pane and verify it remains
+  readable. Switch to **Execution** and inspect the child transcript and tool
+  history; verify its jump arrow remains independent. Return to the result, copy
+  it, open the large reader, scroll to the end, then close with Escape and with
+  the close button. Exercise left/right, Home and End keyboard navigation
+  between the tabs.
+- **Expected:** Result and execution are separate views, not stacked panels.
+  The conclusion has no fixed-height nested preview box; its Markdown remains
+  intact and is available from the receipt, or from the latest child assistant
+  answer when no receipt text exists. The expanded reader occupies most of the
+  window, retains a fixed title/action row, restores focus on close, and copies
+  the full source text. The execution tab retains its independent timeline
+  scroll and complete transcript. Each view's jump-to-bottom control responds
+  only to that view's own scroll position. Changing views does not change OMP
+  state or session data.
+- **Coverage:** `apps/desktop/test/omp-subagent-conclusion-view.test.mjs`,
+  `apps/desktop/test/omp-subagent-turn-card.test.mjs`, Desktop TypeScript
+  check/build, and manual Electron verification. No live provider request is
+  required.

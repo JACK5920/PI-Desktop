@@ -32,8 +32,9 @@ test("OMP busy-send choices route through native steer and follow-up RPC instead
   assert.match(queueSlice, /resolveAgentEngine\(\{[\s\S]*?\) === "omp"[\s\S]*?streamingBehavior: "followUp"/);
   assert.match(queueSlice, /runtime\.insertOptimisticUserMessage\(sessionId, message\)/);
   assert.match(queueSlice, /runtime\.retractOptimisticUserMessage\(sessionId, message\)/);
-  assert.match(ipc, /req\.streamingBehavior === "followUp"[\s\S]*?command\(req\.sessionId, "prompt"[\s\S]*?streamingBehavior: "followUp"/);
-  assert.match(ipc, /command\(req\.sessionId, "steer"/);
+  assert.match(ipc, /commandType: req\.streamingBehavior === "followUp" \? "prompt" : "steer"[\s\S]*?streamingBehavior: "followUp"/);
+  assert.match(ipc, /commandType: req\.streamingBehavior === "followUp" \? "prompt" : "steer"/);
+  assert.match(ipc, /sidecar\.call<[^>]+>\("agent\.steer"/);
   assert.match(ipc, /session\.appendMessage[\s\S]*?turnId: req\.expectedTurnId/);
 });
 

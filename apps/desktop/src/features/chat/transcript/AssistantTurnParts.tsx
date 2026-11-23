@@ -123,13 +123,14 @@ type PartContext = {
   isActive: boolean;
   activePart?: AssistantTurnPart;
   runtimeActivity?: AgentActivity;
+  parentResponseMessageId?: string;
   turnDelegationStatuses: ReadonlyMap<string, SubagentOutcome>;
   turnDelegationTimings: ReadonlyMap<string, SubagentTiming>;
 };
 
 const TurnPartBlock = memo(function TurnPartBlock({
   block, isActive, activePart, runtimeActivity,
-  turnDelegationStatuses, turnDelegationTimings,
+  parentResponseMessageId, turnDelegationStatuses, turnDelegationTimings,
 }: PartContext & { block: RenderBlock<AssistantTurnPart> }) {
   return <>{block.items.map((part) => part.kind === "activity" ? (
     <ActivityGroup
@@ -140,6 +141,7 @@ const TurnPartBlock = memo(function TurnPartBlock({
       isActive={part === activePart}
       turnActive={isActive}
       runtimeActivity={part === activePart ? runtimeActivity : undefined}
+      parentResponseMessageId={parentResponseMessageId}
       turnDelegationStatuses={turnDelegationStatuses}
       turnDelegationTimings={turnDelegationTimings}
     />

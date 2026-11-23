@@ -13,6 +13,33 @@ function terminalStatus(value) {
 
 const MAX_DELIVERY_BLOCKS = 32;
 const MAX_DELIVERY_OUTPUT_CHARS = 12000;
+const MAX_DELIVERY_PREVIEW_CHARS = 240;
+
+/** Make a short, readable card teaser without leaking Markdown delimiters. */
+export function ompSubagentDeliveryPreview(value) {
+  if (typeof value !== "string" || !value.trim()) return "";
+  const lines = value.replace(/\r\n?/g, "\n").replace(/^[ \t]*```[^\n]*$/gm, "").split("\n")
+    .filter((line) => !/^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line))
+    .map((line) => line.trim()
+      .replace(/^#{1,6}\s+/, "")
+      .replace(/^>+\s?/, "")
+      .replace(/^[-*+]\s+/, "")
+      .replace(/^\d+[.)]\s+/, "")
+      .replace(/^\|\s*/, "")
+      .replace(/\s*\|\s*$/, "")
+      .replace(/\s*\|\s*/g, " · ")
+      .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+      .replace(/\*\*(.*?)\*\*/g, "$1")
+      .replace(/__(.*?)__/g, "$1")
+      .replace(/~~(.*?)~~/g, "$1")
+      .replace(/`+/g, ""))
+    .filter(Boolean);
+  const preview = (lines.length ? lines.join(" · ") : value).replace(/\s+/g, " ").trim();
+  return preview.length > MAX_DELIVERY_PREVIEW_CHARS
+    ? `${preview.slice(0, MAX_DELIVERY_PREVIEW_CHARS).trimEnd()}…`
+    : preview;
+}
 
 /** Collapse a `<task-result status>` into the roster's small outcome vocabulary. */
 function deliveryOutcome(value) {

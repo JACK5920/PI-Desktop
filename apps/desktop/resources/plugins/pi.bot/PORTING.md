@@ -1,8 +1,10 @@
 # MiniMax Bot → PI-Desktop 源码级移植说明
 
-> **结论**：MiniMax Code 3.1.14 下发的官方插件 `minimax-bot` **v0.7.24** 已全量移植为 PI-Desktop 0.21.0 的内置插件 `pi.bot`。原包 **101 个文件逐字节未改**（13 个关键文件 SHA-256 复核一致），新增 7 个适配层文件 + 1 份移植说明。三档能力桥全部落地：**L1 纯文本 / L2 本地工具循环 / L3 native（宿主完整 Agent 回合，含 shell）**。L3 采用 `desktop.control` 官方通道，不需要 `agent.extension` 高风险授权。
+> **结论**：MiniMax Code 下发的官方插件 `minimax-bot` **v0.7.31** 已全量移植为 PI-Desktop 0.21.0 的内置插件 `pi.bot`。原包 **103 个文件逐字节未改**（全量 SHA-256 复核一致），新增 8 个适配层文件 + 1 份移植说明。三档能力桥全部落地：**L1 纯文本 / L2 本地工具循环 / L3 native（宿主完整 Agent 回合，含 shell）**，并按 0.7.31 新契约实现了**会话级排队**（`whenBusy:'queue'` + `run.queued`）。L3 采用 `desktop.control` 官方通道，不需要 `agent.extension` 高风险授权。
 >
-> 移植时间：2026-11-13　目标项目：`E:\PI-Desktop-dev`　落点：`apps/desktop/resources/plugins/pi.bot/`
+> 移植时间：2026-11-13　最近升级：2026-11-23（0.7.24 → 0.7.31）　目标项目：`E:\PI-Desktop-dev`　落点：`apps/desktop/resources/plugins/pi.bot/`
+
+> **验证范围说明**：下文“原包 103 文件哈希一致”“仅新增插件目录”和“未修改现有文件”等表格/结论记录的是 2026-11-13 初次移植时的快照，不代表当前工作树。后续已在内置插件中补入兼容和可靠性改动，2026-11-23 的当前 Git 变更应以 `git status` 和对应测试为准。
 
 ---
 
@@ -10,17 +12,18 @@
 
 | 项 | 值 |
 |---|---|
-| 原包来源 | `E:\UserData\minimax\v2\plugin-cache\official\sha256-tree-v1-d7cd61e5…\` |
+| 原包来源 | `E:\UserData\minimax\v2\plugin-cache\official\sha256-tree-v1-2cf8fd02…\`（v0.7.31） |
 | 落点 | `E:\PI-Desktop-dev\apps\desktop\resources\plugins\pi.bot\`（内置插件目录，host-core 自动扫描，**不改主程序一行**） |
-| 原源码 | 101 文件 / 2.9 MB，**零改动**（`miniapp/`、`tests/`、`.minimax-plugin/`、README、icon、原 package.json 全保留） |
-| 新增适配层 | 7 文件：`manifest.json`、`main.cjs`、`panel/index.html`、`host/agent-bridge.mjs`、`host/native-bridge.mjs`、`host/miniapp-context.mjs`、`host/standalone.mjs`（另加本说明文档 `PORTING.md`，合计 8 个新文件） |
+| 原源码 | 103 文件 / 2.8 MB，**零改动**（`miniapp/`、`tests/`、`.minimax-plugin/`、README、icon、原 package.json 全保留） |
+| 新增适配层 | 9 文件：`manifest.json`、`main.cjs`、`panel/index.html`、`host/agent-bridge.mjs`、`host/native-bridge.mjs`、`host/miniapp-context.mjs`、`host/session-queue.mjs`、`host/standalone.mjs`、`host/queue-selftest.mjs`（另加本说明文档 `PORTING.md`，合计 10 个新文件） |
 | 插件清单 | PI-Desktop 规范 `manifest.json`，已通过项目自带 `validateManifest()` 校验 |
 | 入口 | `main.cjs`（CommonJS）—— 因为原包 `package.json` 是 `"type": "module"`，`.cjs` 才能被 `require()` 加载 |
 | 页面 | `ui.panel` → `panel/index.html` → iframe 指向本机回环服务 `/bot`，**原版 client 零改写**；同一份 HTML 也注册成 `contributes.views`，成为工作面板「新建」列表里的一行 |
 | 入口 | ① 工作面板「新建」→ MiniMax Bot（停靠视图，无标题栏）② 插件启动器 `Alt+Space` 输 `bot` ③ 命令面板「打开独立窗口」（1180×780）④ 视图右下角「独立窗口」按钮 |
 | 资源 | **按需启动**：不开窗口不跑 Bot 服务，页面关掉 ~5 秒后回收（见 §5.3） |
-| 模型桥 | `pi.agent.complete` + `pi.models.list`，默认 `complete` 模式；`loop` 模式启用工具循环 |
-| 验证 | **L3 native 自测 14/14**、L2 回归 13/13、L1 回归 11/11、按需启动与回收 11/11、清单校验 OK、真实浏览器截图 + 内容区 100% 占满（旧版 93%） |
+| 模型桥 | `pi.agent.complete` + `pi.models.list`，默认 `loop` 模式（工具循环 + 团队工具）；`complete` 为纯文本降级档，`native` 用宿主完整 Agent 回合（需 `PI_BOT_AGENT_MODE=native` 显式开启） |
+| 排队 | 声明 `capabilities.has('agent.run')`，同一 Bot 会话忙时按 `whenBusy:'queue'` 排队并回 `run.queued`，等满 10 分钟由引擎判 BUSY（0.7.31 契约） |
+| 验证 | **L3 native 自测 14/14**、L2 回归 13/13、L1 回归 11/11、排队专项 11/11、并发集成 6/6、上游 442 项测试 439 通过（3 项为 Windows 文件锁/并发写的老问题）、清单校验 OK |
 | Git 影响 | 仅新增 `?? apps/desktop/resources/plugins/pi.bot/`，**未修改任何现有文件**（项目原有 20+ 个改动文件全部保持原样） |
 
 ---
@@ -36,6 +39,8 @@ apps/desktop/resources/plugins/pi.bot/
 │   ├── agent-bridge.mjs           ← 新增：MiniAppAgentClient 契约适配 + L1/L2 工具循环
 │   ├── native-bridge.mjs          ← 新增（L3）：desktop.control 完整 Agent 回合 + 事件流翻译
 │   ├── miniapp-context.mjs        ← 新增：端口/数据目录/日志/生命周期/三模式分发
+│   ├── session-queue.mjs          ← 新增：会话级串行队列（0.7.31 的 whenBusy:'queue'）
+│   ├── queue-selftest.mjs         ← 新增：排队回归（桥接层 + 引擎全链路）
 │   └── standalone.mjs             ← 新增：脱离 PI-Desktop 的独立运行与自测入口
 ├── miniapp/                       ← 原包，一字未改
 │   ├── client/                    原生 ESM 页面（app.js / panels.js / skins/ …）
@@ -43,7 +48,7 @@ apps/desktop/resources/plugins/pi.bot/
 │   │                              task-dispatcher.mjs / memory.mjs / mcp.mjs / …
 │   ├── miniapp.json               原 MiniApp 清单（surface.path=/bot）
 │   └── package.json              原包元信息（type: module）
-├── .minimax-plugin/plugin.json    原插件清单（schemaVersion 1 / minimax-bot 0.7.24）
+├── .minimax-plugin/plugin.json    原插件清单（schemaVersion 1 / minimax-bot 0.7.31）
 ├── servers.mcp.json               原 MCP 端点声明
 ├── tests/                         原 40+ 测试，全量保留
 ├── README.md / LICENSE / icon.png 原文档与资源
@@ -301,7 +306,7 @@ pub(super) fn is_contrib_id(value: &str) -> bool {
 | 清单里的 id | 输出 |
 |---|---|
 | `pibot.launcher` | `PROBE_RESULT=FAIL error=PLUGIN_INVALID: launcher trigger id is missing or invalid` |
-| `pibot-launcher` | `PROBE_RESULT=OK id=pi.bot version=0.7.24 perms=9` |
+| `pibot-launcher` | `PROBE_RESULT=OK id=pi.bot version=0.7.31 perms=9` |
 
 探针跑完即删，`git diff -- crates/host-core/src/plugins/tests.rs` 为空。
 
@@ -389,13 +394,14 @@ PI_BOT_AGENT_MODE=native pnpm dev
 
 | 检查 | 结果 |
 |---|---|
-| 原包 101 文件全量复制 | ✅ 13 个关键文件 SHA-256 与源一致（engine/server/mcp/store/team/task-dispatcher/memory/client/manifest/README/package.json） |
+| 原包 103 文件全量复制 | ✅ 103 个文件 SHA-256 全量与源一致（含 engine/server/mcp/store/team/task-dispatcher/memory/client/tests/README/package.json） |
 | 现有项目文件 | ✅ `git status` 里本次移植只新增 `?? apps/desktop/resources/plugins/pi.bot/`；项目原有的 20+ 个 `M` 文件是移植前就存在的用户改动，一个都没碰、也没新增任何 `M` |
 | `validateManifest()` | ✅ `{ ok: true }`（首轮发现 `services.id` 不允许点号，已改为 `pibot_server`） |
 | 插件入口契约（模拟宿主） | ✅ `onLoad` 注册命令/服务 → `service.start` 拉起服务 → `onPanelInvoke` 返回 origin/status → `/bot` HTTP 200 → `onUnload` 清空 |
 | **L3 `native` 自测** | ✅ **14/14**：页面、state、21 MCP 工具、建 Bot/群、记忆、定时、私聊回合、**宿主 Agent 工具事件 parts=2**、**回复来自流式事件**、**带宿主工具执行结果**、群聊 @ 点名、用量 |
 | L2 `loop` 回归 | ✅ **13/13**：页面、state、21 MCP 工具、建 Bot、建群、记忆、定时、私聊回合、**工具片段 parts=2**、**最终答复结合工具结果**、群聊 @ 点名、用量 |
 | L1 `complete` 回归 | ✅ **11/11**（无工具片段断言，符合预期） |
+| **排队能力（0.7.31）** | ✅ `node host/queue-selftest.mjs` **17/17**：同会话并发 → `run.queued(position=1)` 且串行、不同会话并行、排队中取消 → `REQUEST_CANCELLED` 且不执行、未声明 `whenBusy` 仍按旧行为、能力表只声明 `agent.run`；引擎全链路：带 sessionId 的第二轮成功（能力接线正确）、私聊/群聊同时触发均完成且无 BUSY |
 | 清单校验（含新权限） | ✅ `validateManifest()` OK，`permissions` 含 `desktop.control` / `shell.openExternal` |
 | 插件入口三模式 | ✅ 模拟宿主 `pi.*`：`onLoad` → `service.start` → `pibot.origin` / `pibot.status`（native 返回 `capabilities.supported=true` 与全套工具清单）→ 服务页面 200 → `onUnload` 清空 |
 | 面板白名单自愈 | ✅ 模拟宿主验证 `pibot.ensurePolicy` → `pi.ui.openPanel()` 被调用 1 次（宿主据此重新应用 `netDomains`）；**改版后仅独立窗口调用，停靠视图直接跳过**（视图由宿主正确下发，多调会凭空多弹一个窗口） |
@@ -463,7 +469,7 @@ rm -rf E:/PI-Desktop-dev/apps/desktop/resources/plugins/pi.bot
 
 没有修改任何现有文件、没有改 `pnpm-workspace.yaml`、没有动主程序代码，`git status` 里除了这个新增目录不会产生任何差异。原 MiniMax Code 的插件缓存与数据目录全程只读。
 
-**只想撤掉 L3、保留原移植**：改 L3 前备份的 6 个文件在 `D:\workbuddy-work\2026-11-13-11-56-06\l3-backup\`（`manifest.json.bak` / `main.cjs.bak` / `PORTING.md.bak` / `host/*.bak`），把它们复制回 `pi.bot/` 对应位置，再删掉 `host/native-bridge.mjs` 即可；`manifest.json` 里会一并去掉 `desktop.control` 权限。源码级移植（101 文件 + L1/L2）完全不受影响。
+**只想撤掉 L3、保留原移植**：改 L3 前备份的 6 个文件在 `D:\workbuddy-work\2026-11-13-11-56-06\l3-backup\`（`manifest.json.bak` / `main.cjs.bak` / `PORTING.md.bak` / `host/*.bak`），把它们复制回 `pi.bot/` 对应位置，再删掉 `host/native-bridge.mjs` 即可；`manifest.json` 里会一并去掉 `desktop.control` 权限。源码级移植（103 文件 + L1/L2）完全不受影响。
 
 ---
 

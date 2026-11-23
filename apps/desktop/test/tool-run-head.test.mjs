@@ -80,7 +80,7 @@ test("the body is the output, with no card around it", () => {
   // No heading, no frame — but the channel keeps a name, so stderr is not told
   // apart by its tint alone.
   assert.match(details, /plain \? \(\s*\/\/[\s\S]*?<span className="sr-only">\{label\}<\/span>/);
-  assert.match(details, /\) : \(\s*<BlockHead label=\{label\} copy=\{blockCopyText\(block\)\} \/>/);
+  assert.match(details, /\) : \(\s*<BlockHead label=\{label\} copy=\{blockCopyText\(block,\s*\(key\) => t\(key\)\)\} \/>/);
   assert.match(
     styles,
     /\.tool-block\.is-plain \.tool-row-content \{[\s\S]*?border: 0;[\s\S]*?background: transparent;[\s\S]*?padding: 0;/,

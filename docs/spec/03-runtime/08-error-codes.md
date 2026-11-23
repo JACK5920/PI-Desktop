@@ -56,6 +56,7 @@ registered; reserved codes in §3.7 remain intentionally absent from
 | `NOT_FOUND` | no | entity not found |
 | `SESSION_NOT_FOUND` | no | a session-scoped RPC (including `tools.execute`) named a session the host does not have; an unknown id never inherits the global workspace |
 | `CONFLICT` | maybe | state conflict / busy resource |
+| `SESSION_DELETE_IN_PROGRESS` | yes | the same session is already being deleted; retry only after the current deletion settles |
 | `UNSUPPORTED` | no | the operation has no implementation on this surface, e.g. a trusted-extension prompt while no desktop window can show it (spec 16 §9) |
 | `FORBIDDEN` | no | RACP: the principal's roles do not admit the method (spec 19 §13) |
 | `METHOD_NOT_FOUND` | no | RACP: unknown method on this Host, e.g. `host/list` without a Gateway |
@@ -91,7 +92,9 @@ does not turn temporary thread pressure into a host process exit.
 ### 3.2 Agent / session
 
 Provider status parsing also recognizes DashScope `Code: <status>` envelopes
-at the start of an error message. A streamed `InvalidParameter: <400>`
+and OpenAI SDK `Error code: <status>` prefixes at the start of an error message.
+The OpenAI form accepts only a three-digit HTTP status and does not let a later
+parenthesized number override that prefix. A streamed `InvalidParameter: <400>`
 rejection is terminal even when the enclosing HTTP response was 200:
 resending unchanged tool history cannot repair it. Structured error status
 fields retain precedence; arbitrary angle-bracket numbers in prose are not
@@ -107,9 +110,9 @@ their existing classifications.
 | `AGENT_SIDECAR_CRASHED` | no | the Node agent sidecar process died mid-turn; the owning turn settles as aborted with this code instead of an unrelated plan-approval code (issue #1077) |
 | `AGENT_SIDECAR_OOM` | no | the sidecar died after its JavaScript heap hit the configured cap, diagnosed from the V8 fatal-error banner in its stderr tail; the same turn fails the same way until the input shrinks (issue #1077) |
 | `MODEL_NOT_CONFIGURED` | no | no usable model selected, or provider rejects the selected model as unknown |
-| `PROVIDER_ERROR` | yes | upstream provider failure; retryable 5xx gateway errors get up to ten same-turn retries, while malformed 400/422 requests, adapter-refused options, HTTP 402, and explicit billing, credit, spend, usage, or disk exhaustion (including `insufficient_quota` and insufficient-credits wording) are terminal |
+| `PROVIDER_ERROR` | yes | upstream provider failure; retryable 5xx gateway errors get up to ten same-turn retries, while malformed 400/422 requests, adapter-refused options, HTTP 402, and explicit billing, credit, spend, usage, or disk exhaustion (including `insufficient_quota`, provider-specific insufficient-balance/low-credit/overdue phrases, and DashScope `Arrearage`) are terminal |
 | `PROVIDER_UNAUTHORIZED` | no | bad/missing provider credentials |
-| `PROVIDER_RATE_LIMITED` | yes | temporary provider throughput limit; runtime retries up to ten times across setup/stream. Explicit billing/account exhaustion remains terminal `PROVIDER_ERROR`, including when returned with HTTP 429 |
+| `PROVIDER_RATE_LIMITED` | yes | temporary provider throughput limit; runtime retries up to ten times across setup/stream. Explicit billing/account exhaustion remains terminal `PROVIDER_ERROR`, including when returned with HTTP 429; generic `balance`, `Access denied`, or `account is in good standing` text alone does not imply exhaustion |
 | `CONTEXT_TOO_LARGE` | no | prompt/context still exceeds the safe model budget after recovery, the second provider overflow occurred, or automatic recovery is disabled |
 | `CONTEXT_COMPACTION_FAILED` | no | automatic retained-tail recovery could not prepare, persist, or fit a checkpoint, or manual checkpoint summary generation / durable append failed; the guarded next provider request does not start |
 | `STREAM_FAILED` | yes | provider stream was terminated, closed prematurely, or otherwise ended before a complete response; up to ten same-turn retries may precede the terminal event |

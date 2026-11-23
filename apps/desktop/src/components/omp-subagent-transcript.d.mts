@@ -6,3 +6,7 @@ export function buildOmpSubagentTranscriptTurns(
   labels?: { unlinkedResult?: string; image?: string },
   assignedTask?: string,
 ): SubagentTranscriptDisplayTurn[];
+export function getOmpSubagentConclusion(
+  turns: SubagentTranscriptDisplayTurn[],
+  deliveryOutput: string,
+): { content: string; source: "delivery" | "transcript" } | null;

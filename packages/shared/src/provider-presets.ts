@@ -22,6 +22,8 @@ export type NamedEndpointPreset = {
   /** i18n key under `settings`. */
   labelKey: string;
   aliases?: readonly string[];
+  /** Historical vendor-owned endpoints kept recognizable for saved rows. */
+  legacyBaseUrls?: readonly string[];
   /** Completions thinking/tool-stream flags for Zhipu / Z.AI hosts. */
   zhipuCompat?: boolean;
 };
@@ -324,20 +326,26 @@ export const NAMED_ENDPOINT_PRESETS: readonly NamedEndpointPreset[] = [
   {
     id: "alibaba-token-plan",
     vendorKey: "alibaba-token-plan",
-    name: "Qwen Token Plan",
-    baseUrl: "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1",
+    name: "Qwen Token Plan Team",
+    baseUrl: "https://token-plan.maas.qwencloudapi.com/compatible-mode/v1",
     apiStyle: "chat_completions",
     labelKey: "settings.presetAlibabaTokenPlan",
     aliases: ["qwen-token-plan", "qwen-token-plan-individual"],
+    legacyBaseUrls: [
+      "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1",
+    ],
   },
   {
     id: "alibaba-token-plan-cn",
     vendorKey: "alibaba-token-plan-cn",
-    name: "Qwen Token Plan (China)",
-    baseUrl: "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+    name: "Qwen Token Plan Team CN",
+    baseUrl: "https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1",
     apiStyle: "chat_completions",
     labelKey: "settings.presetAlibabaTokenPlanCn",
     aliases: ["qwen-token-plan-cn"],
+    legacyBaseUrls: [
+      "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+    ],
   },
   {
     id: "xiaomi-token-plan-cn",
@@ -404,12 +412,18 @@ function endpointHost(value: string | undefined): string | undefined {
 export function addressesPublishedVendorHost(baseUrl: string | undefined): boolean {
   const host = endpointHost(baseUrl);
   if (!host) return false;
-  return NAMED_ENDPOINT_PRESETS.some((preset) => endpointHost(preset.baseUrl) === host);
+  return NAMED_ENDPOINT_PRESETS.some(
+    (preset) =>
+      endpointHost(preset.baseUrl) === host ||
+      preset.legacyBaseUrls?.some((legacyUrl) => endpointHost(legacyUrl) === host),
+  );
 }
 
 function presetByUrl(url: string): NamedEndpointPreset | undefined {
   const exact = NAMED_ENDPOINT_PRESETS.find(
-    (preset) => normalizeEndpointUrl(preset.baseUrl) === url,
+    (preset) =>
+      normalizeEndpointUrl(preset.baseUrl) === url ||
+      preset.legacyBaseUrls?.some((legacyUrl) => normalizeEndpointUrl(legacyUrl) === url),
   );
   if (exact) return exact;
   if (url.includes("open.bigmodel.cn")) {

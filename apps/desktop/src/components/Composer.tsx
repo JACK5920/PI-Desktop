@@ -123,8 +123,7 @@ export function Composer({
       ? agentEngineIssueState.issue
       : t("settings.omp.engineChecking")
     : null;
-  const handleAgentEngineIssueChange = useCallback((issue: string | null) => {
-    const engine = agentEngineForState(useAppStore.getState());
+  const handleAgentEngineIssueChange = useCallback((engine: ReturnType<typeof agentEngineForState>, issue: string | null) => {
     setAgentEngineIssueState({ engine, issue });
   }, []);
   const plugins = useAppStore((s) => s.plugins);

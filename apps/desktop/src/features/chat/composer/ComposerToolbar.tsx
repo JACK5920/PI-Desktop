@@ -63,7 +63,7 @@ export type ComposerToolbarProps = {
   modelLabel: string;
   engineIssueMessage?: string | null;
   selectedProvider?: ProviderPublic;
-  onEngineIssueChange: (issue: string | null) => void;
+  onEngineIssueChange: (engine: ReturnType<typeof agentEngineForState>, issue: string | null) => void;
   thinkingLabel: string;
   /** The selected model asks for OpenAI's priority tier (ADR 0334). */
   modelFastMode?: boolean;

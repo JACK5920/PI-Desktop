@@ -14,6 +14,8 @@ export function buildOmpSubagentTurnGroup(
   runningCount: number;
   completedCount: number;
   failedCount: number;
+  abortedCount: number;
   unknownCount: number;
+  unconfirmedCount: number;
 };
 export function isOmpSubagentTurnBatchItem(item: { message: Record<string, any> }): boolean;

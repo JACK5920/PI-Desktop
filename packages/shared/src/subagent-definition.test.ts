@@ -64,6 +64,25 @@ Review the diff and report only defects you can point at a line for.
     expect(result.warnings).toEqual([]);
   });
 
+  it("parses frontmatter when the file starts with one UTF-8 BOM", () => {
+    const result = parse("\uFEFF---\r\nname: code-reviewer\r\ndescription: Reviews the patch.\r\ntools: Read, Grep\r\n---\r\nReview the changed files.");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.definition).toMatchObject({
+      name: "code-reviewer",
+      description: "Reviews the patch.",
+      tools: ["Read", "Grep"],
+      prompt: "Review the changed files.",
+    });
+  });
+
+  it("removes only the leading BOM rather than normalizing embedded markers", () => {
+    const result = parse("\uFEFF---\ndescription: Reviews the patch.\n---\nBody with \uFEFF marker.");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.definition.prompt).toBe("Body with \uFEFF marker.");
+  });
+
   it("preserves the no-pass thinking selection", () => {
     const result = parse(`---
 description: Uses the provider default.

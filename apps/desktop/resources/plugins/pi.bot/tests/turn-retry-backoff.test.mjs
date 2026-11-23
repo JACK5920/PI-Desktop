@@ -36,3 +36,12 @@ test('mayRetryFailure: a thrown error needs retryable:true; a returned error res
   assert.equal(mayRetryFailure({ thrown: false, code: 'TURN_FAILED' }), true);
   assert.equal(mayRetryFailure({ thrown: false, retryable: true }), true);
 });
+
+test('mayRetryFailure: session_busy vetoes retries without changing other BUSY reasons', () => {
+  for (const thrown of [true, false]) {
+    assert.equal(mayRetryFailure({ thrown, retryable: true, code: 'BUSY', reason: 'session_busy' }), false);
+    for (const reason of ['queue_full', 'rate_limited', 'observer_limit']) {
+      assert.equal(mayRetryFailure({ thrown, retryable: true, code: 'BUSY', reason }), true, reason);
+    }
+  }
+});

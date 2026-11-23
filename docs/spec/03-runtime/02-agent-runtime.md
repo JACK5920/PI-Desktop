@@ -215,9 +215,16 @@ claim the same counter, so a setup 429 followed by a stream 429 cannot reset or
 multiply the budget. The captured response status is applied before classifying
 the provider message in both phases, so a generic 429 body still enters the
 429 budget while known non-retryable classifications remain terminal. Explicit
-billing/account exhaustion (including `insufficient_quota` and spend-limit
-codes) is terminal `PROVIDER_ERROR` even with HTTP 429. The main session and
-builtin subagents use the same controller and policy.
+billing/account exhaustion (including `insufficient_quota`, spend-limit codes,
+DeepSeek/SiliconFlow/MiniMax insufficient-balance wording, Anthropic low-credit
+wording, DashScope `Arrearage`, and Volcengine overdue-account wording/codes)
+is terminal `PROVIDER_ERROR` even when a gateway labels it HTTP 429. Generic
+`balance`, `Access denied`, or `account is in good standing` text alone is not
+enough to infer exhaustion. OpenAI SDK `Error code: NNN` prefixes are parsed
+only at the beginning of the message as HTTP status (400-599), with the
+three-digit word boundary preventing business codes such as `30001` from
+being interpreted as HTTP. The main session and builtin subagents use the
+same controller and policy.
 
 429 retries are silent at the transcript lifecycle: no intermediate assistant
 error, lifecycle `error`, `turn_end`, `agent_end`, or duplicate assistant

@@ -39,6 +39,8 @@ export const ErrorCodes = {
   /** The operation has no implementation on this surface (spec 16 §9). */
   UNSUPPORTED: "UNSUPPORTED",
   CONFLICT: "CONFLICT",
+  /** A session-scoped destructive operation was rejected because deletion is already in progress. */
+  SESSION_DELETE_IN_PROGRESS: "SESSION_DELETE_IN_PROGRESS",
   TIMEOUT: "TIMEOUT",
   NETWORK_ERROR: "NETWORK_ERROR",
   /**

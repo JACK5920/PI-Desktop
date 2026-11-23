@@ -22,6 +22,7 @@ type ActivityItemsProps = {
   delegateItems: DelegationActivityItem[];
   delegationStatuses: ReadonlyMap<string, SubagentOutcome>;
   delegationTimings: ReadonlyMap<string, SubagentTiming>;
+  parentResponseMessageId?: string;
   onUserInteraction: () => void;
 };
 
@@ -36,6 +37,7 @@ type ActivityItemBlockProps = Omit<ActivityItemsProps, "items" | "delegateItems"
 const ActivityItemBlock = memo(function ActivityItemBlock({
   block, isActive, live, topologyItem,
   delegateItems, delegationStatuses, delegationTimings, onUserInteraction,
+  parentResponseMessageId,
 }: ActivityItemBlockProps) {
   return <>{block.items.map((item) => {
     // The topology predicate narrows to all tools, but a false result can still
@@ -48,6 +50,7 @@ const ActivityItemBlock = memo(function ActivityItemBlock({
         items={delegateItems}
         delegationStatuses={delegationStatuses}
         delegationTimings={delegationTimings}
+        parentResponseMessageId={parentResponseMessageId}
         onUserInteraction={onUserInteraction}
       />;
     }
@@ -102,6 +105,7 @@ export const ActivityItems = memo(function ActivityItems({ items, ...context }: 
       delegateItems={ownsTopology ? context.delegateItems : undefined}
       delegationStatuses={ownsTopology ? context.delegationStatuses : undefined}
       delegationTimings={ownsTopology ? context.delegationTimings : undefined}
+      parentResponseMessageId={ownsTopology ? context.parentResponseMessageId : undefined}
       onUserInteraction={context.onUserInteraction}
     />;
   })}</>;

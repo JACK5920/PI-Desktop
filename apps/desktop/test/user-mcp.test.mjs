@@ -442,7 +442,7 @@ test("reconnection revalidates the advertised tool list before dispatch", async 
   assert.deepEqual(state.calls, []);
 });
 
-test("a failed reconnect reports unavailability without repeated handshakes", async (t) => {
+test("each explicit tool dispatch gets one recovery handshake when reconnect still fails", async (t) => {
   const { rt, client, state } = reconnectingRuntime(t);
   await rt.toolsForProject("/repo");
   client.close();
@@ -450,8 +450,27 @@ test("a failed reconnect reports unavailability without repeated handshakes", as
   for (let i = 0; i < 2; i += 1) {
     await assert.rejects(rt.callTool("mcp_stub_lookup", {}, "/repo"), { errorCode: "UNAVAILABLE" });
   }
-  assert.equal(state.handshakes, 2);
+  assert.equal(state.handshakes, 3);
   assert.deepEqual(state.calls, []);
+});
+
+test("an explicit tool dispatch retries a cached failed server and revalidates its catalog", async (t) => {
+  const { rt, client, state } = reconnectingRuntime(t);
+  await rt.toolsForProject("/repo");
+  client.close();
+  state.fail = true;
+  assert.deepEqual(await rt.toolsForProject("/repo"), []);
+  assert.equal(rt.statusFor("stub").state, "failed");
+  assert.deepEqual(await rt.toolsForProject("/repo"), [], "session assembly does not repeat the failed handshake");
+  assert.equal(state.handshakes, 2);
+
+  state.fail = false;
+  state.advertised = [{ name: "lookup" }, { name: "new_tool" }];
+  assert.equal(await rt.callTool("mcp_stub_lookup", {}, "/repo"), "lookup");
+  assert.equal(state.handshakes, 3, "explicit dispatch gets one fresh handshake");
+  assert.deepEqual(state.calls, ["lookup"]);
+  assert.equal(rt.statusFor("stub").state, "ready");
+  assert.equal(rt.statusFor("stub").toolCount, 2);
 });
 
 test("scope and enablement are checked before reconnecting a remembered tool", async (t) => {

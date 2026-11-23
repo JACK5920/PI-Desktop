@@ -68,9 +68,13 @@ test("docked child assistant history hides actions owned by the active parent se
   );
   assert.match(
     assistantTurnSource,
-    /complete: complete && Boolean\(actionMessage\) && canMutateHistory,/,
+    /complete: complete && Boolean\(actionMessage\),/,
   );
-  assert.equal((assistantTurnSource.match(/\{canMutateHistory \? <TooltipButton/g) ?? []).length, 2);
+  assert.match(assistantTurnSource, /canAskAboutSelection: canBranch,/);
+  assert.match(assistantTurnSource, /canRegenerate,/);
+  assert.match(assistantTurnSource, /canBranch,/);
+  assert.equal((assistantTurnSource.match(/\{canBranch \? <TooltipButton/g) ?? []).length, 1);
+  assert.equal((assistantTurnSource.match(/\{canRegenerate \? <TooltipButton/g) ?? []).length, 1);
   assert.match(sideChatTabSource, /allowHistoryMutations=\{false\}/);
   assert.match(transcriptSource, /TranscriptHistoryActionsContext\.Provider value=\{props\.allowHistoryMutations \?\? true\}/);
 });

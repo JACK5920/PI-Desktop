@@ -301,12 +301,12 @@ export function registerSessionIpc({
           errorCode: ErrorCodes.INVALID_ARGUMENT,
         });
       }
-      await rejectOmpHistoryMutation(host, sessionId, "通用分叉");
       if (activeTurns.has(sessionId) && !String(input.throughMessageId ?? "").trim()) {
         throw Object.assign(new Error("Cannot fork a running session"), {
           errorCode: ErrorCodes.AGENT_BUSY,
         });
       }
+      await rejectOmpHistoryMutation(host, sessionId, "通用分叉");
       // Resolve enrichment before the mutation so a provider-list failure
       // cannot report a failed IPC after the child has already been committed.
       const { providers, defaults } = await sessionCapabilityContext();
