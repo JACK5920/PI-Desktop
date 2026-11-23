@@ -574,15 +574,18 @@ export class Store {
   }
 
   /** Commit one inbox batch atomically, preserving streaming message object identity. */
-  async updateMessages(chatId, messageIds, patch) {
+  async updateMessages(chatId, messageIds, patch, options = {}) {
     await this.getMessages(chatId);
     const ids = new Set(messageIds);
     return this.enqueue(async () => {
       const list = this.messageCache.get(chatId) ?? [];
-      const selected = list.filter((message) => ids.has(message.id));
+      // `when` keeps the selection to messages still in the state the caller reached them in: a
+      // resume that read `held` must not overwrite a state another path wrote while it waited.
+      const selected = list.filter((message) => ids.has(message.id) && (!options.when || options.when(message)));
+      const touched = new Set(selected.map((message) => message.id));
       const patches = new Map(selected.map((message) => [message.id, Object.hasOwn(patch, 'dispatchState')
         ? { ...patch, dispatchRevision: (message.dispatchRevision ?? 0) + 1 } : patch]));
-      await writeJsonAtomic(this.messagePath(chatId), list.map((message) => ids.has(message.id) ? { ...message, ...patches.get(message.id) } : message));
+      await writeJsonAtomic(this.messagePath(chatId), list.map((message) => touched.has(message.id) ? { ...message, ...patches.get(message.id) } : message));
       for (const message of selected) Object.assign(message, patches.get(message.id));
       return selected;
     });
@@ -620,12 +623,22 @@ export class Store {
 
   async deleteChat(chatId) {
     await this.getMessages(chatId);
+    // Empty the transcript only after the state that forgets this chat is on disk. The messages are
+    // the one thing here that cannot be rebuilt: truncating them first means a failed save leaves
+    // the chat listed and the history already gone. In the opposite order a failed save leaves both
+    // intact, so the caller can simply try again.
+    //
+    // The session entry is removed from the live object rather than by swapping in the snapshot: a
+    // `setSession` for another chat can land while this write is in flight, and replacing the object
+    // would drop the entry it just created, in memory and then on disk. For the same reason a failed
+    // write leaves the live object untouched.
     await this.enqueue(async () => {
+      const { [chatId]: forgotten, ...sessions } = this.state.sessions;
+      await writeJsonAtomic(this.statePath, { ...this.state, sessions });
+      delete this.state.sessions[chatId];
       await writeJsonAtomic(this.messagePath(chatId), []);
       this.messageCache.set(chatId, []);
-      delete this.state.sessions[chatId];
     });
-    await this.save();
   }
 
   /** Sidebar summary of one chat, read from the warm cache. */

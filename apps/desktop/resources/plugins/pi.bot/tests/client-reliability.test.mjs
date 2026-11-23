@@ -85,6 +85,24 @@ after(() => {
   window.close();
 });
 
+test('failed execution records prefer a known reason and fall back to the error code', async () => {
+  const { renderExecutionRecords } = await import('../miniapp/client/execution-records.js');
+  const { setLocale, t: translate } = await import('../miniapp/client/i18n.js');
+  const drawer = document.createElement('div');
+  const header = document.createElement('header');
+  for (const language of ['zh', 'en']) {
+    setLocale(language);
+    const failed = message('busy-session', '', { status: 'error', errorCode: 'BUSY', errorReason: 'session_busy', error: 'Old generic error', retryable: true });
+    state.messages.set(failed.chatId, [failed]);
+    renderExecutionRecords(drawer, header, failed.chatId, () => {});
+    assert.equal(drawer.querySelector('.execution-error').textContent, translate('agentError.reason.session_busy'));
+    failed.errorReason = 'unknown_reason';
+    renderExecutionRecords(drawer, header, failed.chatId, () => {});
+    assert.equal(drawer.querySelector('.execution-error').textContent, translate('agentError.BUSY'));
+  }
+  setLocale('en');
+});
+
 test('pending Enter sends once; an uncertain retry keeps its ID and preserves a newer draft', async () => {
   await reset();
   let rejectFirst;
@@ -568,6 +586,38 @@ test('held supplements require an explicit continuation and a failed action leav
   assert.equal(document.querySelector('.message-delivery button').disabled, false);
   assert.match(document.querySelector('.message-delivery').textContent, /Correction|Check the full session/);
   assert.equal(calls.filter((call) => call.path.endsWith('/resume-pending')).length, 1);
+});
+
+test('a request stranded by a restart offers to send it again, and one this page just sent does not', async () => {
+  // A request that reached the disk and then lost the process before any state change carries no
+  // dispatchRevision; it is still recoverable, and the server says so too.
+  const stranded = message('msg_stranded', 'Ship the hotfix', { role: 'user', dispatchState: 'pending' });
+  await reset([stranded]);
+  const button = document.querySelector('.message-delivery button');
+  assert.equal(button.textContent, 'Continue with follow-ups');
+  route = ({ path }) => path.endsWith('/resume-pending') ? response({ ok: true }) : undefined;
+  button.click(); await settle();
+  assert.equal(calls.filter((call) => call.path.endsWith('/resume-pending')).length, 1);
+
+  // The busy event carries no message, but it changes whether this line offers a resume.
+  const late = message('msg_late', 'Held back', { role: 'user', dispatchState: 'pending' });
+  await reset([late]);
+  assert.notEqual(document.querySelector('.message-delivery button'), null);
+  emit({ type: 'chat.busy', chatId: late.chatId, busy: true, turns: [] });
+  await settle();
+  assert.equal(document.querySelector('.message-delivery button'), null);
+  emit({ type: 'chat.busy', chatId: late.chatId, busy: false, turns: [] });
+  await settle();
+  assert.notEqual(document.querySelector('.message-delivery button'), null);
+
+  // A request this page just sent is pending with no reply too; it must not offer to resume itself.
+  await reset();
+  const fresh = message('msg_fresh', 'Just typed', { role: 'user', dispatchState: 'pending' });
+  route = ({ path, options }) => path.endsWith('/messages') && options.method === 'POST'
+    ? response({ message: fresh }) : undefined;
+  type('Just typed'); enter(); await settle();
+  assert.equal(document.querySelector('.message-delivery button'), null);
+  assert.equal(document.querySelector('.message-delivery button'), null);
 });
 
 test('a delayed send receipt cannot restore an obsolete pending state after the live processing event', async () => {

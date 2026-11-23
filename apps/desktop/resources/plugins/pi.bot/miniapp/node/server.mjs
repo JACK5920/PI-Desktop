@@ -134,7 +134,7 @@ export async function start(context) {
     }
   };
 
-  const engine = new Engine({ store, memory, agent: context.agent, logger: context.logger, broadcast });
+  const engine = new Engine({ store, memory, agent: context.agent, capabilities: context.capabilities, logger: context.logger, broadcast });
   const team = new Team({ store, memory, engine, broadcast });
   const handleMcp = createMcpHandler({ team, engine });
 

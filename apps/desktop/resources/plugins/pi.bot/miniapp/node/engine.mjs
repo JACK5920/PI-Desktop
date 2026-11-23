@@ -4,7 +4,7 @@ import { stat } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { t } from './i18n.mjs';
-import { storageBudget } from './memory.mjs';
+import { MemoryError, storageBudget } from './memory.mjs';
 import { selectMemoryContext } from './memory-context.mjs';
 import { UserInbox } from './user-inbox.mjs';
 import { TaskDispatcher } from './task-dispatcher.mjs';
@@ -47,6 +47,7 @@ const HELPER_ACTIVE = new Set(['queued', 'running']);
  * Model capacity errors (429/529) and timeouts usually clear within a minute.
  */
 export const TURN_RETRY_DELAYS_MS = Object.freeze([8000, 20000]);
+export const QUEUE_WAIT_LIMIT_MS = 10 * 60 * 1000;
 /**
  * How often a running turn writes its progress to disk. A crash must leave the work the model
  * already did in the ledger, so the turn's known state cannot live only in memory.
@@ -68,6 +69,8 @@ const OUTCOME_UNKNOWN = 'AGENT_OUTCOME_UNKNOWN';
 export function mayRetryFailure({ thrown, retryable, code, reason }) {
   if (retryable === false) return false;
   if (code === OUTCOME_UNKNOWN) return false;
+  // Resending can duplicate text already delivered by older Hosts; current Hosts stay busy beyond the retry window.
+  if (code === 'BUSY' && reason === 'session_busy') return false;
   if (reason && NO_RETRY_REASONS.has(reason)) return false;
   return thrown ? retryable === true : true;
 }
@@ -165,6 +168,9 @@ export class Engine {
    *   store: Store,
    *   memory: MemoryStore,
    *   agent: MiniAppAgentClient | undefined,
+   *   capabilities?: { has(name: string): boolean },
+   *   retryDelaysMs?: readonly number[],
+   *   queueWaitLimitMs?: number,
    *   logger: import('./miniapp-api.js').MiniAppLogger,
    *   broadcast: (event: Record<string, unknown>) => void,
    * }} deps
@@ -173,6 +179,8 @@ export class Engine {
     this.store = deps.store;
     this.memory = deps.memory;
     this.agent = deps.agent;
+    this.capabilities = deps.capabilities;
+    this.queueWaitLimitMs = deps.queueWaitLimitMs ?? QUEUE_WAIT_LIMIT_MS;
     this.logger = deps.logger;
     /** Waits before each automatic retry of a failed turn (tests shorten them). */
     this.retryDelays = deps.retryDelaysMs ?? TURN_RETRY_DELAYS_MS;
@@ -631,7 +639,12 @@ export class Engine {
     /** @param {MiniAppAgentRunEvent} event */
     const onEvent = (event) => {
       switch (event.type) {
+        case 'run.queued':
+          message.live = { key: 'live.queued', params: {} };
+          flush(true);
+          break;
         case 'turn.started':
+          message.live = undefined;
           // The Host has the message now: a later retry need not (and must not) send it again.
           reachedHost = true;
           // The model is running for this turn, so it has a duration to report.
@@ -779,6 +792,11 @@ export class Engine {
             failureReason = String(/** @type {any} */ (error)?.reason ?? '');
           }
         }
+        if (failureCode === 'REQUEST_CANCELLED' && !reachedHost && controller.signal.aborted) {
+          result = skippedTurn();
+          failure = '';
+          failureCode = '';
+        }
         const thrown = Boolean(failure);
         const failed = thrown || result?.status === 'error';
         const canRetry =
@@ -839,6 +857,7 @@ export class Engine {
       message.error = failure;
       // The page localises known codes; `error` keeps the text for anything else.
       if (failureCode) message.errorCode = failureCode;
+      if (failureReason) message.errorReason = failureReason;
     }
     else if (result?.error) {
       // A Host that classifies the failure says why; an older one sends only a generic sentence,
@@ -919,7 +938,7 @@ export class Engine {
       accepted: reachedHost || Boolean(result && !result.skipped),
       // A returned terminal result is known; exceptions after admission may have lost observation.
       safeToContinue: Boolean(result && !result.pendingQuestion) || (!reachedHost && (!invoked || [
-        'BUSY', 'NOT_PERMITTED', 'INVALID_ARGUMENTS', 'AGENT_UNAVAILABLE', 'SESSION_NOT_FOUND',
+        'BUSY', 'NOT_PERMITTED', 'INVALID_ARGUMENTS', 'AGENT_UNAVAILABLE', 'SESSION_NOT_FOUND', 'REQUEST_CANCELLED',
       ].includes(failureCode))),
       skipped: Boolean(result?.skipped),
       // The turn ended waiting for the user: its text is not the Bot's final answer.
@@ -1046,8 +1065,41 @@ export class Engine {
     const model = await this.turnModel(input.bot, known);
     if (signal.aborted || this.disposed) return undefined;
     let result;
+    const queue = Boolean(sessionId && this.capabilities?.has('agent.run') === true);
+    const queueController = new AbortController();
+    let queueTimer;
+    let started = false;
+    let waitExpired = false;
+    const cancel = () => {
+      clearTimeout(queueTimer);
+      queueController.abort();
+    };
+    const observe = (event) => {
+      if (event.type === 'turn.started') {
+        started = true;
+        clearTimeout(queueTimer);
+      } else if (queue && event.type === 'run.queued' && !started && !queueTimer && !signal.aborted) {
+        queueTimer = setTimeout(() => {
+          waitExpired = true;
+          queueController.abort();
+        }, this.queueWaitLimitMs);
+      }
+      onEvent(event);
+    };
+    if (queue) signal.addEventListener('abort', cancel, { once: true });
     try {
-      result = await agent.run({ text, sessionId, ...(model ? { model } : {}) }, { signal, onEvent });
+      try {
+        result = await agent.run({ text, sessionId, ...(model ? { model } : {}), ...(queue ? { whenBusy: 'queue' } : {}) },
+          { signal: queue ? queueController.signal : signal, onEvent: observe });
+      } catch (error) {
+        if (waitExpired && errorCode(error) === 'REQUEST_CANCELLED') {
+          throw Object.assign(new Error(t('agentError.reason.session_busy')), { code: 'BUSY', reason: 'session_busy' });
+        }
+        throw error;
+      } finally {
+        clearTimeout(queueTimer);
+        signal.removeEventListener('abort', cancel);
+      }
     } catch (error) {
       // The Host rejects a model it no longer offers before the turn starts; say which setting to fix.
       if (model && errorCode(error) === 'INVALID_ARGUMENTS') {
@@ -2038,8 +2090,14 @@ export function nextRun(schedule, from) {
 
 export function describeAgentError(error) {
   const code = errorCode(error);
+  const reason = /** @type {any} */ (error)?.reason;
+  if (code === 'BUSY' && reason === 'session_busy') return t('agentError.reason.session_busy');
   const key = `agentError.${code}`;
   const text = code ? t(key) : key;
   if (text !== key) return text;
-  return errorText(error) || t('agentError.unknown');
+  // The plugin's own errors carry a message that was written to be read by the user; the Host's
+  // carry an internal identifier nobody can act on. Showing the first and hiding the second
+  // keeps a session id or a service name out of the chat.
+  if (error instanceof EngineError || error instanceof MemoryError) return errorText(error);
+  return t('agentError.hostError');
 }

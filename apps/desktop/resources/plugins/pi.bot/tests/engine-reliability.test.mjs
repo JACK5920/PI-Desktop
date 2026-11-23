@@ -25,7 +25,7 @@ async function until(predicate) {
   throw new Error('The expected engine state did not arrive');
 }
 
-async function fixture(t) {
+async function fixture(t, deps = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'bot-engine-reliability-'));
   const store = new Store(dir);
   const memory = new MemoryStore(dir);
@@ -33,7 +33,7 @@ async function fixture(t) {
   await memory.init();
   setLocale('en');
   const events = [];
-  const engine = new Engine({ store, memory, logger: { warn() {} }, broadcast: (event) => events.push(event), retryDelaysMs: [] });
+  const engine = new Engine({ store, memory, logger: { warn() {} }, broadcast: (event) => events.push(event), retryDelaysMs: [], ...deps });
   const team = new Team({ store, memory, engine, broadcast() {} });
   const handle = createMcpHandler({ team, engine });
   const rpc = async (name, args) => {
@@ -69,6 +69,298 @@ function started(input, options, sessionId) {
 function idle(engine) {
   return engine.running.size === 0 && engine.tickets.size === 0 && engine.groupLoops.size === 0 && engine.inbox.batches.size === 0 && engine.tasks.runs.size === 0 && engine.tasks.deliveries.size === 0;
 }
+
+test('Host queueing is enabled only for capable Hosts continuing a session', async (t) => {
+  for (const capable of [true, false]) {
+    for (const existing of [true, false]) {
+      await t.test(`${capable}/${existing}`, async (t) => {
+        const { store, engine } = await fixture(t, { capabilities: capable ? { has: (name) => name === 'agent.run' } : undefined });
+        const bot = { id: 'bot_queue', name: 'Queue' };
+        const chatId = `bot:${bot.id}`;
+        store.state.bots = [bot];
+        if (existing) await store.setSession(chatId, bot.id, { sessionId: 'existing' });
+        engine.agent = { async run(input, options) {
+          assert.equal(Object.hasOwn(input, 'whenBusy'), capable && existing);
+          if (capable && existing) assert.equal(input.whenBusy, 'queue');
+          return { ...started(input, options, 'new'), status: 'finished', text: 'Done' };
+        } };
+        assert.equal((await engine.runBotTurn({ bot, chatId, text: 'Hello', kind: 'private' })).status, 'done');
+      });
+    }
+  }
+});
+
+async function queuedFixture(t, queueWaitLimitMs = 1000) {
+  const state = await fixture(t, { capabilities: { has: () => true }, queueWaitLimitMs });
+  const bot = { id: 'bot_queue', name: 'Queue' };
+  const chatId = `bot:${bot.id}`;
+  state.store.state.bots = [bot];
+  await state.store.setSession(chatId, bot.id, { sessionId: 'existing' });
+  return { ...state, bot, chatId };
+}
+
+function queuedCall(options) {
+  return new Promise((_resolve, reject) => {
+    options.signal.addEventListener('abort', () => reject(Object.assign(new Error('Cancelled'), { code: 'REQUEST_CANCELLED' })), { once: true });
+    options.onEvent({ type: 'run.queued', sessionId: 'existing', position: 1 });
+  });
+}
+
+test('queued live status clears when the turn starts and its wait limit no longer applies', async (t) => {
+  const { store, engine, bot, chatId } = await queuedFixture(t, 10);
+  engine.agent = { async run(input, options) {
+    const message = (await store.getMessages(chatId)).find((message) => message.role === 'bot');
+    options.onEvent({ type: 'run.queued', position: 1 });
+    assert.equal(message.live.key, 'live.queued');
+    options.onEvent({ type: 'run.queued', position: 2 });
+    const ids = started(input, options, 'existing');
+    assert.equal(message.live, undefined);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(options.signal.aborted, false);
+    return { ...ids, status: 'finished', text: 'Done' };
+  } };
+  const result = await engine.runBotTurn({ bot, chatId, text: 'Original', kind: 'private' });
+  assert.equal(result.status, 'done');
+  assert.equal(result.text, 'Done');
+});
+
+test('queue wait limit cancels undelivered text once and offers the original for Retry', async (t) => {
+  const { store, engine, bot, chatId } = await queuedFixture(t, 10);
+  engine.retryDelays = [1, 1];
+  let calls = 0;
+  let signal;
+  engine.agent = { run(input, options) {
+    calls += 1;
+    signal = options.signal;
+    return queuedCall(options);
+  } };
+  const result = await engine.runBotTurn({ bot, chatId, text: 'Original', kind: 'private' });
+  const message = (await store.getMessages(chatId)).find((message) => message.id === result.messageId);
+  assert.equal(signal.aborted, true);
+  assert.equal(calls, 1);
+  assert.equal(result.status, 'error');
+  assert.equal(message.errorCode, 'BUSY');
+  assert.equal(message.errorReason, 'session_busy');
+  assert.equal(message.retryable, true);
+  assert.equal(message.retryInput, 'Original');
+  assert.equal(message.live, undefined);
+});
+
+test('queue wait limit preserves AGENT_OUTCOME_UNKNOWN instead of offering original-text Retry', async (t) => {
+  const { store, engine, bot, chatId } = await queuedFixture(t, 10);
+  engine.retryDelays = [1, 1];
+  let calls = 0;
+  engine.agent = { run(input, options) {
+    calls += 1;
+    return new Promise((_resolve, reject) => {
+      options.signal.addEventListener('abort', () => reject(Object.assign(new Error('Outcome unknown'), {
+        code: 'AGENT_OUTCOME_UNKNOWN', retryable: true,
+      })), { once: true });
+      options.onEvent({ type: 'run.queued', position: 1 });
+    });
+  } };
+  const result = await engine.runBotTurn({ bot, chatId, text: 'Original', kind: 'private' });
+  const message = (await store.getMessages(chatId)).find((message) => message.id === result.messageId);
+  assert.equal(message.errorCode, 'AGENT_OUTCOME_UNKNOWN');
+  assert.equal(message.errorReason, undefined);
+  assert.equal(message.status, 'error');
+  assert.equal(message.retryable, undefined);
+  assert.equal(message.retryInput, undefined);
+  assert.equal(result.safeToContinue, false);
+  assert.equal(calls, 1);
+});
+
+test('queue wait limit preserves a claimed turn confirmed aborted by the Host', async (t) => {
+  for (const lateStarted of [false, true]) {
+    await t.test(lateStarted ? 'late turn.started' : 'no turn.started observed', async (t) => {
+      const { store, engine, bot, chatId } = await queuedFixture(t, 10);
+      let calls = 0;
+      engine.agent = { run(input, options) {
+        calls += 1;
+        return new Promise((resolve) => {
+          options.signal.addEventListener('abort', () => {
+            const ids = lateStarted ? started(input, options, 'existing') : { sessionId: 'existing', turnId: 'claimed' };
+            resolve({ ...ids, status: 'aborted', text: 'Partial reply' });
+          }, { once: true });
+          options.onEvent({ type: 'run.queued', position: 1 });
+        });
+      } };
+      const result = await engine.runBotTurn({ bot, chatId, text: 'Original', kind: 'private' });
+      const message = (await store.getMessages(chatId)).find((message) => message.id === result.messageId);
+      assert.equal(result.status, 'aborted');
+      assert.equal(message.status, 'aborted');
+      assert.equal(message.text, 'Partial reply');
+      assert.equal(message.errorCode, undefined);
+      assert.equal(message.errorReason, undefined);
+      assert.equal(message.retryable, undefined);
+      assert.equal(message.retryInput, undefined);
+      assert.equal(result.accepted, true);
+      assert.equal(result.safeToContinue, true);
+      assert.equal(calls, 1);
+    });
+  }
+});
+
+test('follow-ups after a queue timeout respect the Host cancellation outcome', async (t) => {
+  for (const outcome of ['unknown', 'aborted']) {
+    await t.test(outcome, async (t) => {
+      const { store, engine, chatId } = await queuedFixture(t, 10);
+      const expired = deferred();
+      let settle;
+      const calls = [];
+      engine.agent = { run(input, options) {
+        calls.push(input);
+        if (calls.length > 1) return Promise.resolve({ ...started(input, options, 'existing'), status: 'finished', text: 'Done' });
+        return new Promise((resolve, reject) => {
+          settle = () => outcome === 'unknown'
+            ? reject(Object.assign(new Error('Outcome unknown'), { code: 'AGENT_OUTCOME_UNKNOWN' }))
+            : resolve({ sessionId: 'existing', turnId: 'claimed', status: 'aborted' });
+          options.signal.addEventListener('abort', () => expired.resolve(), { once: true });
+          options.onEvent({ type: 'run.queued', position: 1 });
+        });
+      } };
+      const original = await engine.sendUserMessage(chatId, 'Earlier request');
+      await expired.promise;
+      const followUp = await engine.sendUserMessage(chatId, 'Follow-up');
+      settle();
+      await until(() => idle(engine));
+      const messages = await store.getMessages(chatId);
+      const originalMessage = messages.find((message) => message.id === original.id);
+      const followUpMessage = messages.find((message) => message.id === followUp.id);
+      if (outcome === 'unknown') {
+        assert.equal(calls.length, 1);
+        assert.equal(originalMessage.dispatchState, 'uncertain');
+        assert.equal(followUpMessage.dispatchState, 'held');
+      } else {
+        assert.equal(calls.length, 2);
+        assert.equal(originalMessage.dispatchState, 'delivered');
+        assert.equal(followUpMessage.dispatchState, 'delivered');
+        assert.ok(calls[1].text.includes('Follow-up'));
+        assert.equal(calls[1].text.includes('Earlier request'), false);
+      }
+    });
+  }
+});
+
+test('Stop while queued is aborted rather than a session busy error', async (t) => {
+  const { store, engine, bot, chatId } = await queuedFixture(t);
+  const queued = deferred();
+  engine.agent = { run(input, options) {
+    const pending = queuedCall(options);
+    queued.resolve();
+    return pending;
+  } };
+  const pending = engine.runBotTurn({ bot, chatId, text: 'Original', kind: 'private' });
+  await queued.promise;
+  engine.cancelChat(chatId);
+  const result = await pending;
+  const message = (await store.getMessages(chatId)).find((message) => message.id === result.messageId);
+  assert.equal(result.status, 'aborted');
+  assert.equal(message.errorReason, undefined);
+  assert.equal(message.errorCode, undefined);
+});
+
+test('follow-ups cancel queued text safely and include it in the next turn', async (t) => {
+  const { store, engine, chatId } = await queuedFixture(t);
+  const queued = deferred();
+  const calls = [];
+  let signal;
+  engine.agent = { run(input, options) {
+    calls.push(input);
+    if (calls.length === 1) {
+      signal = options.signal;
+      const pending = queuedCall(options);
+      queued.resolve();
+      return pending;
+    }
+    return Promise.resolve({ ...started(input, options, 'existing'), status: 'finished', text: 'Done' });
+  } };
+  await engine.sendUserMessage(chatId, 'Earlier request');
+  await queued.promise;
+  await engine.sendUserMessage(chatId, 'Follow-up');
+  await until(() => idle(engine));
+  assert.equal(signal.aborted, true);
+  assert.equal(calls.length, 2);
+  assert.ok(calls[1].text.includes('Earlier request'));
+  assert.ok(calls[1].text.includes('Follow-up'));
+  const messages = await store.getMessages(chatId);
+  assert.equal(messages.some((message) => ['held', 'uncertain'].includes(message.dispatchState)), false);
+  assert.equal(messages.find((message) => message.role === 'bot').status, 'aborted');
+});
+
+test('REQUEST_CANCELLED after turn.started does not allow replaying an admitted request', async (t) => {
+  const { engine, bot, chatId } = await queuedFixture(t);
+  const admitted = deferred();
+  engine.agent = { run(input, options) {
+    const pending = queuedCall(options);
+    started(input, options, 'existing');
+    admitted.resolve();
+    return pending;
+  } };
+  const pending = engine.runBotTurn({ bot, chatId, text: 'Original', kind: 'private' });
+  await admitted.promise;
+  engine.cancelChat(chatId);
+  const result = await pending;
+  assert.equal(result.safeToContinue, false);
+  assert.equal(result.accepted, true);
+});
+
+test('answer calls retain their original input and cancellation signal on capable Hosts', async (t) => {
+  const { engine } = await queuedFixture(t);
+  const controller = new AbortController();
+  const answer = { sessionId: 'existing', requestId: 'question', answers: [] };
+  engine.agent = { async answer(input, options) {
+    assert.equal(input, answer);
+    assert.equal(options.signal, controller.signal);
+    assert.equal(Object.hasOwn(input, 'whenBusy'), false);
+    return { sessionId: 'existing', status: 'finished' };
+  } };
+  assert.equal((await engine.invoke({ answer }, 'existing', controller.signal, () => {})).status, 'finished');
+});
+
+test('a busy session is not automatically resent and stays available for manual retry', async (t) => {
+  for (const thrown of [true, false]) {
+    await t.test(thrown ? 'thrown' : 'returned', async (t) => {
+      const { store, engine, events } = await fixture(t);
+      const bot = { id: 'bot_busy', name: 'Busy' };
+      const chatId = `bot:${bot.id}`;
+      store.state.bots = [bot];
+      await store.setSession(chatId, bot.id, { sessionId: 'busy-session' });
+      engine.retryDelays = [1, 1];
+      let calls = 0;
+      engine.agent = { async run(input) {
+        assert.equal(input.sessionId, 'busy-session');
+        calls += 1;
+        const error = { code: 'BUSY', reason: 'session_busy', retryable: true, message: 'Busy' };
+        if (thrown) throw Object.assign(new Error(error.message), error);
+        return { status: 'error', error };
+      } };
+      const result = await engine.runBotTurn({ bot, chatId, text: 'Original request', kind: 'private' });
+      const message = (await store.getMessages(chatId)).find((item) => item.id === result.messageId);
+      assert.equal(calls, 1);
+      assert.equal(result.status, 'error');
+      assert.equal(message.status, 'error');
+      assert.equal(message.retryable, true);
+      assert.equal(message.retryInput, 'Original request');
+      assert.equal(message.errorReason, 'session_busy');
+      assert.equal(message.error, translate('agentError.reason.session_busy'));
+      if (thrown) {
+        assert.equal(message.errorCode, 'BUSY');
+        assert.equal(result.errorCode, 'BUSY');
+      }
+      assert.equal(message.retried, undefined);
+      assert.equal(events.some((event) => event.message?.live?.key === 'live.retrying'), false);
+      engine.agent = { async run(input, options) {
+        calls += 1;
+        assert.equal(input.text.endsWith('Original request'), true);
+        return { ...started(input, options, 'manual-retry'), status: 'finished', text: 'Done' };
+      } };
+      await engine.retryMessage(chatId, message.id);
+      await until(() => idle(engine));
+      assert.equal(calls, 2);
+    });
+  }
+});
 
 test('post_group is advertised only for private chats and its shared catalog explains the group restriction', async (t) => {
   const { store, engine, team } = await fixture(t);
@@ -644,6 +936,44 @@ test('an interrupted associated assistant is reported as uncertain, and legacy m
   assert.equal((await restored.getMessages(chatId)).find((message) => message.id === user.id).dispatchState, 'uncertain');
   assert.equal((await reopened.sendUserMessage(chatId, 'Legacy request', [], 'legacy-1')).id, legacy.id);
   assert.equal(runs, 0);
+  reopened.dispose();
+  await restored.writeChain;
+});
+
+test('a request whose queue died with the process is still sendable from the page', async (t) => {
+  const { dir, store, memory, engine } = await fixture(t);
+  const bot = store.state.bots[0];
+  const chatId = `bot:${bot.id}`;
+  // The process died after the inbox marked the batch processing and before any reply existed.
+  const user = await store.appendMessage(chatId, {
+    role: 'user', text: 'Ship the hotfix', clientMessageId: 'orphan-1',
+    clientMessageHash: engine.userMessageFingerprint('Ship the hotfix', []), dispatchState: 'processing',
+  });
+  await store.writeChain;
+
+  const restored = new Store(dir);
+  await restored.init();
+  let runs = 0;
+  const reopened = new Engine({ store: restored, memory, logger: { warn() {} }, broadcast() {}, retryDelaysMs: [], agent: {
+    async run(input, options) { runs += 1; return { ...started(input, options, 'resumed'), status: 'finished', text: 'Shipped' }; },
+  } });
+  reopened.startScheduler();
+  reopened.tasks.start();
+
+  // The load-time mapping keeps `pending`, which the client retry path needs. The queue that owned
+  // it is gone, so the resume route has to recognise it too or the request is stranded for good.
+  const afterRestart = (await restored.getMessages(chatId)).find((message) => message.id === user.id);
+  assert.equal(afterRestart.dispatchState, 'pending');
+  await until(() => idle(reopened));
+  // Nothing replays it on its own: the turn may already have run tools before the process died.
+  assert.equal(runs, 0);
+
+  await reopened.inbox.resume(chatId);
+  await until(() => idle(reopened));
+  assert.equal(runs, 1);
+  const messages = await restored.getMessages(chatId);
+  assert.equal(messages.find((message) => message.id === user.id).dispatchState, 'delivered');
+  assert.equal(messages.filter((message) => message.sourceMessageId === user.id).length, 1);
   reopened.dispose();
   await restored.writeChain;
 });
@@ -1236,4 +1566,48 @@ test('sending after Stop does not restore an explicitly cancelled request that n
   assert.doesNotMatch(calls[0].text, /Cancelled task/);
   assert.equal(original.dispatchState, 'cancelled');
   assert.equal(replacement.dispatchState, 'delivered');
+});
+
+test('a resume that loses the race to a same-id retry does not send the request twice', async (t) => {
+  const { dir, store, memory, engine } = await fixture(t);
+  const bot = store.state.bots[0];
+  const chatId = `bot:${bot.id}`;
+  const text = 'Ship the hotfix';
+  // A request the restart left pending, with no reply.
+  const user = await store.appendMessage(chatId, {
+    role: 'user', text, clientMessageId: 'race-1',
+    clientMessageHash: engine.userMessageFingerprint(text, []), dispatchState: 'pending',
+  });
+  await store.writeChain;
+
+  let runs = 0;
+  engine.agent = { async run(input, options) {
+    runs += 1;
+    return { ...started(input, options, 'reply'), status: 'finished', text: 'Reply' };
+  } };
+
+  // Hold the resume's write, so the retry gets in first.
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const realUpdate = store.updateMessages.bind(store);
+  let held = false;
+  store.updateMessages = async (id, ids, patch, options) => {
+    if (!held && patch?.dispatchState === 'pending') { held = true; await gate; }
+    return realUpdate(id, ids, patch, options);
+  };
+
+  const resuming = engine.inbox.resume(chatId).catch((error) => error);
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  await engine.sendUserMessage(chatId, text, [], 'race-1').catch(() => {});
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  release();
+  await resuming;
+  await until(() => idle(engine));
+
+  // One request, one turn, one reply that answers it.
+  assert.equal(runs, 1);
+  const messages = await store.getMessages(chatId);
+  assert.equal(messages.filter((message) => message.role === 'bot' && message.sourceMessageId === user.id).length, 1);
+  engine.dispose();
+  await store.writeChain;
 });

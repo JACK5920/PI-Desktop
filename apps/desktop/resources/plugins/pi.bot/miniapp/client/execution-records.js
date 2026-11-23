@@ -18,9 +18,11 @@ export function executionNeedsAttention(messages) {
 }
 
 function turnError(message) {
+  const reasonKey = `agentError.reason.${message.errorReason}`;
+  const reasonText = message.errorReason ? t(reasonKey) : reasonKey;
   const key = `agentError.${message.errorCode}`;
   const localized = message.errorCode ? t(key) : key;
-  const error = localized !== key ? localized : message.error || t('note.unknownError');
+  const error = reasonText !== reasonKey ? reasonText : localized !== key ? localized : message.error || t('note.unknownError');
   return message.retried ? t('note.errorAfterRetry', { n: message.retried, error }) : error;
 }
 
@@ -88,7 +90,7 @@ export function renderExecutionRecords(drawer, header, chatId, onManageMemory) {
   const messages = (state.messages.get(chatId) ?? []).filter((message) => message.role === 'bot' && (partsOf(message).some((part) => part.type === 'tool') || message.status === 'error'));
   reconcileChildren(body.querySelector('.execution-list'), messages.length ? [...messages].reverse().map((message) => ({
     key: message.id,
-    signature: JSON.stringify([partsOf(message).filter((part) => part.type === 'tool'), message.status, message.error, message.errorCode, message.retried, message.sessionId, message.ts, botById(message.botId)?.name, locale(), canOpenSession()]),
+    signature: JSON.stringify([partsOf(message).filter((part) => part.type === 'tool'), message.status, message.error, message.errorCode, message.errorReason, message.retried, message.sessionId, message.ts, botById(message.botId)?.name, locale(), canOpenSession()]),
     create: () => updateRecord(h('details', { class: 'execution-record' }, h('summary'), h('div', { class: 'execution-record-body' })), message, onManageMemory),
     update: (node) => updateRecord(node, message, onManageMemory),
   })) : [{ key: 'empty', signature: locale(), create: () => h('p', { class: 'muted' }, t('execution.empty')) }]);

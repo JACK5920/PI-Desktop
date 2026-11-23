@@ -3,6 +3,7 @@
 // 原插件 engine.mjs 只认 run/answer/reply/models 与那套事件流，所以这里负责合成，engine 一行不改。
 
 import { randomBytes } from 'node:crypto';
+import { createSessionQueue } from './session-queue.mjs';
 
 // 官方宿主（MiniMax）给的是一整个 Agent 回合：原生函数调用、步数不设上限、
 // MCP 工具直接进工具表。PI-Desktop 的插件 API 只给一次性补全（pi.agent.complete），
@@ -233,6 +234,7 @@ function trimHistory(messages) {
 
 export function createAgentBridge({ pi, logger, mode = 'loop', origin = '', ownFetch }) {
   const limiter = new RateLimiter(RATE_LIMIT, RATE_WINDOW_MS);
+  const queue = createSessionQueue();
   const sessions = new Map();
   let modelCache;
   const request = typeof ownFetch === 'function' ? ownFetch : (...args) => globalThis.fetch(...args);
@@ -463,13 +465,26 @@ export function createAgentBridge({ pi, logger, mode = 'loop', origin = '', ownF
 
   return {
     async run(input, options = {}) {
-      return runTurn({
+      const run = () => runTurn({
         text: input?.text,
         sessionId: input?.sessionId,
         model: input?.model,
         signal: options.signal,
         onEvent: options.onEvent,
       });
+      // 引擎只在 capabilities.has('agent.run') 为真时才带 whenBusy；不支持就不改变旧行为。
+      const sessionId = input?.sessionId;
+      if (input?.whenBusy !== 'queue' || !sessionId) return run();
+      const slot = queue.acquire(sessionId, options.signal);
+      if (slot.queued) {
+        emit(options.onEvent, { type: 'run.queued', sessionId, position: slot.position });
+        await slot.queued;
+      }
+      try {
+        return await run();
+      } finally {
+        slot.release();
+      }
     },
     async answer(input, options = {}) {
       // 原插件的问卷在 PI-Desktop 没有对应宿主能力；把答案拼成一轮新的用户输入续跑同一会话。
@@ -491,6 +506,8 @@ export function createAgentBridge({ pi, logger, mode = 'loop', origin = '', ownF
       return undefined;
     },
     async models() { return modelCatalog(); },
+    // 0.7.31 起引擎按能力表决定要不要排队；这里已实现串行队列，可以声明。
+    capabilities: { has: (name) => name === 'agent.run' },
     get mode() { return mode; },
     get limiter() { return limiter; },
   };

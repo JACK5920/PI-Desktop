@@ -167,6 +167,7 @@ export interface MiniAppAgentRunResult {
  * that `run` resolves (an earlier call rejects with `BUSY`). Ignore event types you do not know.
  */
 export type MiniAppAgentRunEvent =
+  | { readonly type: 'run.queued'; readonly sessionId?: string; readonly position: number }
   | { readonly type: 'turn.started'; readonly sessionId: string; readonly turnId: string }
   | {
       readonly type: 'text.delta';
@@ -261,7 +262,7 @@ export interface MiniAppAgentError extends Error {
  */
 export interface MiniAppAgentClient {
   run(
-    input: { readonly text: string; readonly sessionId?: string },
+    input: { readonly text: string; readonly sessionId?: string; readonly whenBusy?: 'queue' },
     options?: MiniAppAgentRunOptions,
   ): Promise<MiniAppAgentRunResult>;
   /** Decide a pending permission request. Never writes the user's global rules. */
@@ -297,6 +298,7 @@ export interface MiniAppContext {
   readonly logger: MiniAppLogger;
   readonly hostConnector?: HostConnectorClient;
   readonly agent?: MiniAppAgentClient;
+  readonly capabilities?: { has(name: string): boolean };
 }
 
 export interface MiniAppModule {
