@@ -276,7 +276,7 @@
   overflow: auto;
   padding: 6px 9px 4px;
   border: 1px solid var(--ds-border-subtle);
-  border-radius: 13px;
+  border-radius: var(--radius-md-plus);
   background: var(--ds-bg-elevated-opaque);
   box-shadow: var(--ds-shadow-dialog);
   color: var(--ds-text-primary);
@@ -331,7 +331,7 @@
   padding-top: 2px;
   color: var(--ds-text-muted, var(--ds-text-secondary));
   font-size: var(--text-xs);
-  line-height: 1.4;
+  line-height: var(--leading-normal);
 }
 
 .composer-annotation-number {
@@ -371,7 +371,7 @@
   max-height: 120px;
   overflow: auto;
   cursor: pointer;
-  line-height: 1.45;
+  line-height: var(--leading-body);
 }
 
 .composer-annotation-source-button:hover,
