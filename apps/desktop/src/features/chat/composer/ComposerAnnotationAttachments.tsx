@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { IconPencil, IconTrash } from "../../../components/icons";
+import { IconPencil, IconTrash, IconX } from "../../../components/icons";
 import { Button, Textarea, TooltipButton } from "../../../components/ui";
 import {
   type AnnotationSourceTarget,
@@ -119,19 +119,34 @@ export function ComposerAnnotationAttachments({
         ) setOpen(false);
       }}
     >
-      <button
-        type="button"
-        className="composer-annotation-chip"
-        aria-expanded={open}
-        aria-controls={cardId}
-        aria-label={label}
-        onClick={() => {
-          setOpen(true);
-          setPinnedOpen((value) => !value);
-        }}
-      >
-        {label}
-      </button>
+      <div className="composer-annotation-trigger">
+        <button
+          type="button"
+          className="composer-annotation-chip"
+          aria-expanded={open}
+          aria-controls={cardId}
+          aria-label={label}
+          onClick={() => {
+            setOpen(true);
+            setPinnedOpen((value) => !value);
+          }}
+        >
+          {label}
+        </button>
+        <TooltipButton
+          type="button"
+          className="icon-btn icon-btn-square composer-annotation-clear-trigger"
+          tooltip={t("chat.clearAnnotations")}
+          ariaLabel={t("chat.clearAnnotations")}
+          onClick={(event) => {
+            event.stopPropagation();
+            clearAnnotations();
+            closeCard();
+          }}
+        >
+          <IconX size={12} aria-hidden />
+        </TooltipButton>
+      </div>
       {open ? (
         <div
           id={cardId}

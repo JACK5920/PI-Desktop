@@ -177,8 +177,9 @@
   position: relative;
   display: flex;
   width: fit-content;
-  max-width: 100%;
+  max-width: calc(100% - 12px);
   align-items: center;
+  margin-inline-start: 12px;
   min-width: 0;
 }
 
@@ -197,7 +198,7 @@
   display: inline-flex;
   align-items: center;
   min-height: 25px;
-  padding: 2px 9px;
+  padding: 2px 28px 2px 9px;
   border: 1px solid var(--ds-border-subtle);
   border-radius: var(--radius-full);
   background: var(--ds-bg-chip);
@@ -205,6 +206,47 @@
   font: inherit;
   font-size: var(--text-xs);
   cursor: pointer;
+}
+
+.composer-annotation-trigger {
+  position: relative;
+  display: inline-flex;
+  width: max-content;
+  max-width: 100%;
+  align-items: center;
+}
+
+.composer-annotation-clear-trigger {
+  position: absolute;
+  z-index: 1;
+  inset-inline-end: 4px;
+  width: 18px;
+  min-width: 18px;
+  height: 18px;
+  min-height: 18px;
+  padding: 2px;
+  border: 1px solid var(--ds-border-subtle);
+  border-radius: var(--radius-full);
+  background: var(--ds-bg-elevated-opaque);
+  color: var(--ds-text-secondary);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity var(--motion-duration-fast) var(--motion-ease-out),
+    background var(--motion-duration-fast) var(--motion-ease-out),
+    color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.composer-annotation-trigger:hover .composer-annotation-clear-trigger,
+.composer-annotation-trigger:focus-within .composer-annotation-clear-trigger {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.composer-annotation-clear-trigger:hover,
+.composer-annotation-clear-trigger:focus-visible {
+  background: var(--ds-bg-hover);
+  color: var(--ds-text-primary);
 }
 
 .composer-annotation-chip:hover,

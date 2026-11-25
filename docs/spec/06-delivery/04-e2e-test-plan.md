@@ -5890,7 +5890,9 @@ window; opening a normal panel afterward must still work.
   reference places its numbered source marker beside the exact excerpt. Hovering
   the empty Composer row must not open the preview; hovering or focusing the
   reference chip must open one compact unified card, which remains open while
-  the pointer enters it. Verify each entry is a flat
+  the pointer enters it. The chip aligns with the Composer text inset; its
+  clear-all X appears only on hover or keyboard focus and clears all pending
+  references when activated. Verify each entry is a flat
   numbered row with a muted selected-text label, excerpt, header-aligned
   edit/remove icons, and light separators between multiple rows; verify the
   clear-all footer remains compact and visually secondary. Verify there is no

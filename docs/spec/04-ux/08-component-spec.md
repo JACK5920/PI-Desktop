@@ -2084,6 +2084,9 @@ Single message render — either user (plaintext) or assistant (markdown streami
   divider instead of nested rounded cards. A compact, visually secondary
   clear-all action sits in the card footer. The same card shows optional
   comment text, without a second review panel or redundant trigger tooltip.
+  The reference chip aligns with the Composer text inset. Its clear-all icon is
+  hidden at rest and appears on pointer hover or keyboard focus; activating it
+  clears only the pending references owned by that Composer.
   Clicking an excerpt
   navigates to its source message and highlights only the captured range when
   its optional half-open offsets still resolve exactly. Unsent references also

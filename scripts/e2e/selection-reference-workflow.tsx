@@ -583,6 +583,10 @@ globalThis.selectionReferenceProbe = async () => {
     const referencesChip = buttonNamed("References (1)");
     const composerShell = referencesChip.closest<HTMLElement>(".annotation-composer-fixture");
     assert(composerShell, "the reference trigger is not inside the Composer fixture");
+    const clearTrigger = referencesChip.parentElement?.querySelector<HTMLButtonElement>(".composer-annotation-clear-trigger");
+    assert(clearTrigger, "the reference chip has no hover clear icon");
+    assert(clearTrigger.getAttribute("aria-label") === "Clear all references", "the clear icon has no accessible clear-all label");
+    assert(getComputedStyle(clearTrigger).opacity === "0", "the clear icon is visible before the reference chip is hovered or focused");
     composerShell.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
     await settle();
     assert(
@@ -593,15 +597,23 @@ globalThis.selectionReferenceProbe = async () => {
     referencesChip.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
     await settle();
     assert(host.querySelector('[data-testid="composer-annotation-card"]')?.textContent?.includes(quote), "keyboard focus did not open the unified pending-reference card");
+    assert(getComputedStyle(clearTrigger).opacity === "1", "keyboard focus did not reveal the clear icon");
     referencesChip.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
     await settle();
     const composerCard = host.querySelector<HTMLElement>('[data-testid="composer-annotation-card"]');
     assert(composerCard, "hovering the Composer reference control did not open its unified card");
-    const attachmentRect = referencesChip.parentElement!.getBoundingClientRect();
+    const attachmentRoot = referencesChip.closest<HTMLElement>(".composer-annotation-attachments");
+    assert(attachmentRoot, "the reference chip has no layout root");
+    const attachmentRect = attachmentRoot.getBoundingClientRect();
     const triggerRect = referencesChip.getBoundingClientRect();
     assert(
       attachmentRect.width <= triggerRect.width + 1 && attachmentRect.width < composerShell.getBoundingClientRect().width / 2,
       "the reference hover trigger still spans the full Composer row",
+    );
+    assert(Math.abs(triggerRect.left - composerShell.getBoundingClientRect().left - 12) <= 1, "the reference chip is not inset to align with Composer text");
+    assert(
+      Math.abs(composerCard.getBoundingClientRect().left - triggerRect.left) <= 1,
+      "the reference preview is not aligned to its inset trigger",
     );
     composerCard.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
     await settle();
@@ -632,7 +644,7 @@ globalThis.selectionReferenceProbe = async () => {
         clearReferencesButton.getBoundingClientRect().height <= 30,
       "clear-all references is not visually secondary and compact",
     );
-    const composerHoverBridge = getComputedStyle(referencesChip.parentElement!, "::before");
+    const composerHoverBridge = getComputedStyle(attachmentRoot, "::before");
     assert(composerHoverBridge.pointerEvents !== "none" && Number.parseFloat(composerHoverBridge.height) >= 8, "Composer hover preview has no hit-test bridge across the trigger gap");
     assert(!referencesChip.hasAttribute("title"), "the reference chip retained a redundant hover tooltip");
     assert(!host.querySelector(".composer-annotation-review"), "a separate reference manager is still rendered");
@@ -989,6 +1001,14 @@ globalThis.selectionReferenceProbe = async () => {
     } finally {
       api.getSession = originalGetSession;
     }
+
+    clearTrigger.focus();
+    await settle();
+    assert(getComputedStyle(clearTrigger).opacity === "1", "keyboard navigation did not reveal the focused clear icon");
+    clearTrigger.click();
+    await settleAfterFocus();
+    assert((useAppStore.getState().responseAnnotations.parent ?? []).length === 0, "the chip clear icon did not clear all pending references");
+    assert(!host.querySelector('[data-testid="composer-annotation-card"]'), "clearing references left the hover preview open");
 
     return {
       ok: true,
