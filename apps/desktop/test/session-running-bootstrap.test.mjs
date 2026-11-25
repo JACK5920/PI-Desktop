@@ -46,6 +46,7 @@ test("reopening restores running badges and the selected session before another 
   const state = h.useAppStore.getState();
   assert.equal(state.healthOk, true, state.error);
   assert.equal(state.runningSessions.running, true);
+  assert.equal(typeof state.runningSessionStartedAt.running, "number");
   assert.notEqual(state.runningSessions.idle, true);
   assert.equal(h.sidebarSessionStatus({
     running: state.runningSessions.running, selected: false, outcome: state.sessionOutcomes.running,
@@ -67,6 +68,7 @@ test("a completion arriving during bootstrap wins over the earlier running snaps
   first(h.snapshot);
   await pending;
   assert.equal(h.useAppStore.getState().runningSessions.running, false);
+  assert.equal(h.useAppStore.getState().runningSessionStartedAt.running, undefined);
 });
 
 test("a new live run is retained when the bootstrap snapshot did not contain it", async () => {
@@ -80,6 +82,62 @@ test("a new live run is retained when the bootstrap snapshot did not contain it"
   release(h.snapshot);
   await pending;
   assert.equal(h.useAppStore.getState().runningSessions.running, true);
+  assert.equal(h.useAppStore.getState().runningSessionStartedAt.running, 1);
+});
+
+test("elapsed clock remains session-scoped across turns and conversation switches", async () => {
+  const h = harness([]);
+  await h.useAppStore.getState().bootstrap();
+  h.useAppStore.getState().handleAgentEvent({
+    sessionId: "running", ts: 10_000, event: { type: "agent_start" },
+  });
+  h.useAppStore.getState().handleAgentEvent({
+    sessionId: "running", ts: 12_000, event: { type: "turn_start" },
+  });
+  assert.equal(h.useAppStore.getState().runningSessionStartedAt.running, 10_000);
+
+  await h.useAppStore.getState().selectSession("idle");
+  await h.useAppStore.getState().selectSession("running");
+  assert.equal(h.useAppStore.getState().runningSessionStartedAt.running, 10_000);
+});
+
+test("elapsed clock resets for a new run and clears on error, manual compaction, and stop", async () => {
+  const h = harness([]);
+  await h.useAppStore.getState().bootstrap();
+  h.useAppStore.getState().handleAgentEvent({
+    sessionId: "running", ts: 10_000, event: { type: "agent_start" },
+  });
+  h.useAppStore.getState().handleAgentEvent({
+    sessionId: "running", ts: 20_000, event: { type: "agent_end" },
+  });
+  h.useAppStore.getState().handleAgentEvent({
+    sessionId: "running", ts: 30_000, event: { type: "agent_start" },
+  });
+  assert.equal(h.useAppStore.getState().runningSessionStartedAt.running, 30_000);
+
+  h.useAppStore.getState().handleAgentEvent({
+    sessionId: "running", ts: 40_000,
+    event: { type: "error", error: { code: "PROVIDER_ERROR", message: "failed" } },
+  });
+  assert.equal(h.useAppStore.getState().runningSessionStartedAt.running, undefined);
+
+  h.useAppStore.getState().handleAgentEvent({
+    sessionId: "running", ts: 50_000,
+    event: { type: "compaction_start", reason: "manual" },
+  });
+  assert.equal(h.useAppStore.getState().runningSessionStartedAt.running, 50_000);
+  h.useAppStore.getState().handleAgentEvent({
+    sessionId: "running", ts: 60_000,
+    event: { type: "compaction_end", reason: "manual", ok: true },
+  });
+  assert.equal(h.useAppStore.getState().runningSessionStartedAt.running, undefined);
+
+  h.api.abort = async () => ({});
+  h.useAppStore.getState().handleAgentEvent({
+    sessionId: "running", ts: 70_000, event: { type: "agent_start" },
+  });
+  await h.useAppStore.getState().abortSession("running");
+  assert.equal(h.useAppStore.getState().runningSessionStartedAt.running, undefined);
 });
 
 test("a session list without a running snapshot remains compatible", async () => {

@@ -42,7 +42,8 @@ test("active turns show immediate and phase-specific feedback without a progress
   assert.match(transcript, /const specializedActivity = agentActivity/);
   assert.match(transcript, /!hasSpecializedActivity/);
   assert.match(transcript, /const showWorking =/);
-  assert.match(transcript, /\{showWorking \? <WorkingIndicator \/> : null\}/);
+  assert.match(transcript, /\{showWorking \? <WorkingIndicator startedAt=\{runningSessionStartedAt\} \/> : null\}/);
+  assert.match(transcript, /state\.runningSessionStartedAt\[sessionId\]/);
   assert.match(transcript, /function PlanningIndicator\(/);
   assert.match(transcript, /data-testid="planning-indicator"/);
   assert.match(transcript, /const showPlanning =/);

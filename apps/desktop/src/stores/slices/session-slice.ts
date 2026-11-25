@@ -276,6 +276,14 @@ export function createSessionSlice({
             runningSessions: planRunSettled
               ? { ...state.runningSessions, [sessionId]: executionActive }
               : state.runningSessions,
+            runningSessionStartedAt: planRunSettled
+              ? executionActive
+                ? {
+                    ...state.runningSessionStartedAt,
+                    [sessionId]: state.runningSessionStartedAt[sessionId] ?? Date.now(),
+                  }
+                : withoutRecordKey(state.runningSessionStartedAt, sessionId)
+              : state.runningSessionStartedAt,
             isRunning:
               state.activeSessionId === sessionId && planRunSettled
                 ? executionActive
@@ -1028,6 +1036,7 @@ export function createSessionSlice({
         isRunning:
           state.activeSessionId === sessionId ? false : state.isRunning,
         runningSessions: { ...state.runningSessions, [sessionId]: false },
+        runningSessionStartedAt: withoutRecordKey(state.runningSessionStartedAt, sessionId),
       }));
     },
   };

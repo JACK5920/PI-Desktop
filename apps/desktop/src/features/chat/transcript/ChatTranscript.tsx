@@ -181,6 +181,9 @@ function TranscriptBody({
   const latestTurnResult = useAppStore((state) =>
     sessionId ? state.latestTurnResults[sessionId] : undefined,
   );
+  const runningSessionStartedAt = useAppStore((state) =>
+    sessionId ? state.runningSessionStartedAt[sessionId] : undefined,
+  );
   const navigateToSource = useCallback((target: TranscriptSourceTarget) => {
     if (!sessionId) return;
     if (onNavigateToSource) {
@@ -569,7 +572,7 @@ function TranscriptBody({
                 <RunActivityIndicator activity={specializedActivity} />
               ) : null}
               {showPlanning ? <PlanningIndicator kind={planningKind} /> : null}
-              {showWorking ? <WorkingIndicator /> : null}
+              {showWorking ? <WorkingIndicator startedAt={runningSessionStartedAt} /> : null}
             </div>
           ) : null}
         </div>

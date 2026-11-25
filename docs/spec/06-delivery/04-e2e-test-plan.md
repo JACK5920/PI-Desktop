@@ -20866,3 +20866,25 @@ permission-request UI below has isolated fixture automation.
   `apps/desktop/test/omp-subagent-turn-card.test.mjs`, Desktop TypeScript
   check/build, and manual Electron verification. No live provider request is
   required.
+
+
+### E2E-chat-running-elapsed-time-survives-session-switch
+
+- **Preconditions:** Two local conversations; one conversation has an active
+  Agent turn. No live provider response is required when using a controlled
+  event fixture.
+- **Path:** Start a turn and record its session start time (the accepted
+  submission time, or the first `agent_start` event when the run is restored).
+  Switch to a second conversation and back several times while the first run
+  remains active.
+  Deliver additional `turn_start` events during the same run, then complete it
+  and start another run. Repeat with an error, manual compaction, and Stop.
+- **Expected:** The active conversation's elapsed indicator keeps counting
+  from its original run start across pane unmount/remount and session
+  selection. Additional turn events do not reset the same run. A new run starts
+  a fresh clock; completion, error, manual compaction completion, or Stop clears
+  that session's start time. A run already active during renderer bootstrap gets
+  one stable local baseline until it ends.
+- **Coverage:** `apps/desktop/test/session-running-bootstrap.test.mjs`,
+  `apps/desktop/test/active-turn-surface.test.mjs`, and Desktop TypeScript
+  check.

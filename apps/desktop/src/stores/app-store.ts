@@ -390,6 +390,16 @@ export const useAppStore = create<AppState>((set, get) => {
       );
       if (generation !== bootstrapGeneration) return;
       set((state) => {
+        const runningSessions = {
+          ...Object.fromEntries((sessions.runningSessionIds ?? []).map((id) => [id, true])),
+          // Live start/end events received during bootstrap outrank its snapshot.
+          ...state.runningSessions,
+        };
+        const runningSessionStartedAt = Object.fromEntries(
+          Object.entries(runningSessions)
+            .filter(([, running]) => running)
+            .map(([id]) => [id, state.runningSessionStartedAt[id] ?? Date.now()]),
+        );
         const nextGoalLifecycles = mergeGoalLifecycleSnapshots(
           goalLifecycles,
           state.goalLifecycles,
@@ -400,11 +410,8 @@ export const useAppStore = create<AppState>((set, get) => {
           healthOk: health.ok,
           settings,
           sessions: hydratedSessions,
-          runningSessions: {
-            ...Object.fromEntries((sessions.runningSessionIds ?? []).map((id) => [id, true])),
-            // Live start/end events received during bootstrap outrank its snapshot.
-            ...state.runningSessions,
-          },
+          runningSessions,
+          runningSessionStartedAt,
           providers: providers.providers,
           providerModels: cachedProviderModels,
           workspace: currentWorkspace,

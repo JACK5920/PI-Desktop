@@ -74,6 +74,10 @@ export function createTranscriptSlice({
       if (!sessionId || state.isRunning) return;
       set((current) => ({
         isRunning: true,
+        runningSessionStartedAt: {
+          ...current.runningSessionStartedAt,
+          [sessionId]: Date.now(),
+        },
         runningSessions: {
           ...current.runningSessions,
           [sessionId]: true,
@@ -89,6 +93,10 @@ export function createTranscriptSlice({
             ...current.runningSessions,
             [sessionId]: false,
           },
+          runningSessionStartedAt: withoutRecordKey(
+            current.runningSessionStartedAt,
+            sessionId,
+          ),
         }));
         if ((error as { code?: string })?.code !== "CONTEXT_COMPACTION_FAILED") {
           get().showToast(
@@ -186,6 +194,10 @@ export function createTranscriptSlice({
         errorCode: null,
         errorDetails: null,
         errorRetriable: null,
+        runningSessionStartedAt: {
+          ...current.runningSessionStartedAt,
+          [sessionId]: Date.now(),
+        },
         runningSessions: { ...current.runningSessions, [sessionId]: true },
         latestTurnResults: withoutRecordKey(current.latestTurnResults, sessionId),
         sessionOutcomes: withoutRecordKey(current.sessionOutcomes, sessionId),
@@ -223,6 +235,7 @@ export function createTranscriptSlice({
                 isRunning:
                   current.activeSessionId === sessionId ? false : current.isRunning,
                 runningSessions: { ...current.runningSessions, [sessionId]: false },
+                runningSessionStartedAt: withoutRecordKey(current.runningSessionStartedAt, sessionId),
                 latestTurnResults: withoutRecordKey(current.latestTurnResults, sessionId),
                 sessionOutcomes: withoutRecordKey(current.sessionOutcomes, sessionId),
                 error: null,
@@ -238,6 +251,7 @@ export function createTranscriptSlice({
                 isRunning:
                   current.activeSessionId === sessionId ? false : current.isRunning,
                 runningSessions: { ...current.runningSessions, [sessionId]: false },
+                runningSessionStartedAt: withoutRecordKey(current.runningSessionStartedAt, sessionId),
                 latestTurnResults: {
                   ...current.latestTurnResults,
                   [sessionId]: {
@@ -257,6 +271,7 @@ export function createTranscriptSlice({
                 isRunning:
                   current.activeSessionId === sessionId ? false : current.isRunning,
                 runningSessions: { ...current.runningSessions, [sessionId]: false },
+                runningSessionStartedAt: withoutRecordKey(current.runningSessionStartedAt, sessionId),
                 latestTurnResults: withoutRecordKey(current.latestTurnResults, sessionId),
                 sessionOutcomes: withoutRecordKey(current.sessionOutcomes, sessionId),
                 error: null,
@@ -268,6 +283,7 @@ export function createTranscriptSlice({
                 isRunning:
                   current.activeSessionId === sessionId ? false : current.isRunning,
                 runningSessions: { ...current.runningSessions, [sessionId]: false },
+                runningSessionStartedAt: withoutRecordKey(current.runningSessionStartedAt, sessionId),
                 latestTurnResults: {
                   ...current.latestTurnResults,
                   [sessionId]: {
@@ -319,6 +335,10 @@ export function createTranscriptSlice({
         }
         set((current) => ({
           isRunning: current.activeSessionId === sessionId ? true : current.isRunning,
+          runningSessionStartedAt: {
+            ...current.runningSessionStartedAt,
+            [sessionId]: Date.now(),
+          },
           runningSessions: { ...current.runningSessions, [sessionId]: true },
           error: null,
           errorCode: null,
@@ -343,6 +363,7 @@ export function createTranscriptSlice({
               messages: current.activeSessionId === sessionId ? recovered : current.messages,
               isRunning: current.activeSessionId === sessionId ? false : current.isRunning,
               runningSessions: { ...current.runningSessions, [sessionId]: false },
+              runningSessionStartedAt: withoutRecordKey(current.runningSessionStartedAt, sessionId),
               error: null,
               errorCode: null,
               errorDetails: null,
@@ -370,6 +391,7 @@ export function createTranscriptSlice({
           set((current) => ({
             isRunning: current.activeSessionId === sessionId ? false : current.isRunning,
             runningSessions: { ...current.runningSessions, [sessionId]: false },
+            runningSessionStartedAt: withoutRecordKey(current.runningSessionStartedAt, sessionId),
             latestTurnResults: withoutRecordKey(current.latestTurnResults, sessionId),
             sessionOutcomes: withoutRecordKey(current.sessionOutcomes, sessionId),
             error: null,
@@ -384,6 +406,7 @@ export function createTranscriptSlice({
             set((current) => ({
               isRunning: current.activeSessionId === sessionId ? false : current.isRunning,
               runningSessions: { ...current.runningSessions, [sessionId]: false },
+              runningSessionStartedAt: withoutRecordKey(current.runningSessionStartedAt, sessionId),
               error: null,
               errorCode: null,
               errorDetails: null,
@@ -397,6 +420,7 @@ export function createTranscriptSlice({
           set((current) => ({
             isRunning: current.activeSessionId === sessionId ? false : current.isRunning,
             runningSessions: { ...current.runningSessions, [sessionId]: false },
+            runningSessionStartedAt: withoutRecordKey(current.runningSessionStartedAt, sessionId),
             latestTurnResults: {
               ...current.latestTurnResults,
               [sessionId]: {
@@ -440,6 +464,10 @@ export function createTranscriptSlice({
         errorCode: null,
         errorDetails: null,
         errorRetriable: null,
+        runningSessionStartedAt: {
+          ...current.runningSessionStartedAt,
+          [sessionId]: Date.now(),
+        },
         runningSessions: { ...current.runningSessions, [sessionId]: true },
         latestTurnResults: withoutRecordKey(current.latestTurnResults, sessionId),
         sessionOutcomes: withoutRecordKey(current.sessionOutcomes, sessionId),
@@ -457,6 +485,7 @@ export function createTranscriptSlice({
           isRunning:
             current.activeSessionId === sessionId ? false : current.isRunning,
           runningSessions: { ...current.runningSessions, [sessionId]: false },
+          runningSessionStartedAt: withoutRecordKey(current.runningSessionStartedAt, sessionId),
           latestTurnResults: {
             ...current.latestTurnResults,
             [sessionId]: {
@@ -670,6 +699,7 @@ export function createTranscriptSlice({
         if (messages) runtime.cacheSessionTranscript(sessionId, messages);
         set((current) => ({
           runningSessions: { ...current.runningSessions, [sessionId]: false },
+          runningSessionStartedAt: withoutRecordKey(current.runningSessionStartedAt, sessionId),
           ...(messages ? { retainedTranscripts: { ...current.retainedTranscripts, [sessionId]: messages } } : {}),
           ...(current.activeSessionId === sessionId ? { isRunning: false, ...(messages ? { messages } : {}) } : {}),
         }));
@@ -713,6 +743,7 @@ export function createTranscriptSlice({
         runtime.submittedComposerDrafts.delete(sessionId);
         set((current) => ({
           runningSessions: { ...current.runningSessions, [sessionId]: false },
+          runningSessionStartedAt: withoutRecordKey(current.runningSessionStartedAt, sessionId),
         }));
         return;
       }
@@ -761,6 +792,7 @@ export function createTranscriptSlice({
                 composerPrefill: { ...fullStop.draft, sessionId },
                 isRunning: current.activeSessionId === sessionId ? false : current.isRunning,
                 runningSessions: { ...current.runningSessions, [sessionId]: false },
+                runningSessionStartedAt: withoutRecordKey(current.runningSessionStartedAt, sessionId),
               }));
             }
             void flushPendingSessionConfiguration(sessionId);
@@ -828,6 +860,7 @@ export function createTranscriptSlice({
             : current.messages,
         isRunning: false,
         runningSessions: { ...current.runningSessions, [sessionId]: false },
+        runningSessionStartedAt: withoutRecordKey(current.runningSessionStartedAt, sessionId),
       }));
       void flushPendingSessionConfiguration(sessionId);
     },
