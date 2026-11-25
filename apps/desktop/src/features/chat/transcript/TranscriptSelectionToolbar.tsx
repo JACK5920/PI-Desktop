@@ -15,10 +15,9 @@ import { useAppStore } from "../../../stores/app-store";
 type TranscriptSelectionToolbarProps = {
   transcriptRoot: HTMLElement | null;
   sessionId?: string;
-  /** Route new assistant excerpts to the visible side-chat composer when selected. */
-  sideChatId?: string;
+  /** Keep selection actions attached to the owning main conversation draft. */
+  composerSessionId?: string;
   onAskInSideChat?: (selection: TranscriptSelection) => void;
-  onAppendUserSelection?: (selection: TranscriptSelection) => void;
 };
 
 const EMPTY_RESPONSE_ANNOTATIONS: ResponseAnnotation[] = [];
@@ -36,9 +35,8 @@ function sameSelection(left: TranscriptSelection, right: TranscriptSelection): b
 export function TranscriptSelectionToolbar({
   transcriptRoot,
   sessionId,
-  sideChatId,
+  composerSessionId,
   onAskInSideChat,
-  onAppendUserSelection,
 }: TranscriptSelectionToolbarProps) {
   const { t } = useTranslation();
   const toolbarRef = useRef<HTMLDivElement>(null);
@@ -49,29 +47,17 @@ export function TranscriptSelectionToolbar({
   const [selection, setSelection] = useState<TranscriptSelection | null>(null);
   const [editingComment, setEditingComment] = useState(false);
   const [comment, setComment] = useState("");
-  const pendingSideChatReferences = useAppStore((state) =>
-    sideChatId ? state.sideChats[sideChatId]?.references ?? EMPTY_RESPONSE_ANNOTATIONS : EMPTY_RESPONSE_ANNOTATIONS,
-  );
-  const sentSideChatReferences = useAppStore((state) => {
-    const childSessionId = sideChatId ? state.sideChats[sideChatId]?.childSessionId : undefined;
-    return childSessionId ? state.responseAnnotations[childSessionId] ?? EMPTY_RESPONSE_ANNOTATIONS : EMPTY_RESPONSE_ANNOTATIONS;
-  });
+  const targetSessionId = composerSessionId ?? sessionId;
   const sessionReferences = useAppStore((state) =>
-    selection ? state.responseAnnotations[selection.sessionId] ?? EMPTY_RESPONSE_ANNOTATIONS : EMPTY_RESPONSE_ANNOTATIONS,
+    targetSessionId ? state.responseAnnotations[targetSessionId] ?? EMPTY_RESPONSE_ANNOTATIONS : EMPTY_RESPONSE_ANNOTATIONS,
   );
-  const responseAnnotations = useMemo(
-    () => sideChatId
-      ? [...pendingSideChatReferences, ...sentSideChatReferences]
-      : sessionReferences,
-    [pendingSideChatReferences, sentSideChatReferences, sessionReferences, sideChatId],
-  );
+  const responseAnnotations = sessionReferences;
   const addResponseAnnotation = useAppStore((state) => state.addResponseAnnotation);
   const editResponseAnnotation = useAppStore((state) => state.editResponseAnnotation);
-  const addSideChatReference = useAppStore((state) => state.addSideChatReference);
-  const editSideChatReference = useAppStore((state) => state.editSideChatReference);
   const showToast = useAppStore((state) => state.showToast);
   const duplicate = useMemo(() => selection?.role === "assistant"
     ? responseAnnotations.find((item) =>
+      (item.sourceSessionId ?? targetSessionId) === selection.sessionId &&
       item.sourceMessageId === selection.messageId &&
       item.excerpt === selection.excerpt &&
       (item.sourceMessageIds ?? [item.sourceMessageId]).length === selection.messageIds.length &&
@@ -81,7 +67,7 @@ export function TranscriptSelectionToolbar({
       item.anchorStart === selection.anchorStart &&
       item.anchorEnd === selection.anchorEnd,
     )
-    : undefined, [responseAnnotations, selection]);
+    : undefined, [responseAnnotations, selection, targetSessionId]);
 
   const dismiss = useCallback((
     restoreFocus = false,
@@ -240,15 +226,11 @@ export function TranscriptSelectionToolbar({
 
   const addToChat = () => {
     if (!selection) return;
+    const targetSessionId = composerSessionId ?? selection.sessionId;
     if (selection.role === "user") {
       try {
-        if (onAppendUserSelection) {
-          onAppendUserSelection(selection);
-          dismiss(true);
-          return;
-        }
         composerDraftBridge.appendTextForSession(
-          selection.sessionId,
+          targetSessionId,
           formatUserSelectionQuote(
             selection.excerpt,
             transcriptSelectionSourceAttribution(selection.messageIds, t("chat.selectionSourceUser")),
@@ -266,38 +248,22 @@ export function TranscriptSelectionToolbar({
 
   const saveAnnotation = () => {
     if (!selection || selection.role !== "assistant") return;
-    const annotationId = sideChatId
-      ? addSideChatReference(
-        sideChatId,
-        selection.messageId,
-        selection.excerpt,
-        selection.anchorStart === undefined || selection.anchorEnd === undefined
-          ? undefined
-          : { anchorStart: selection.anchorStart, anchorEnd: selection.anchorEnd },
-        selection.messageIds,
-      )
-      : addResponseAnnotation(
-      selection.sessionId,
+    const targetSessionId = composerSessionId ?? selection.sessionId;
+    const annotationId = addResponseAnnotation(
+      targetSessionId,
       selection.messageId,
       selection.excerpt,
       selection.anchorStart === undefined || selection.anchorEnd === undefined
         ? undefined
         : { anchorStart: selection.anchorStart, anchorEnd: selection.anchorEnd },
       selection.messageIds,
-      );
+      selection.sessionId,
+    );
     if (!annotationId) {
       showToast(t("chat.selectionAddFailed"), { variant: "error" });
       return;
     }
-    if (sideChatId) {
-      const childSessionId = useAppStore.getState().sideChats[sideChatId]?.childSessionId;
-      const childOwnsReference = childSessionId !== undefined &&
-        useAppStore.getState().responseAnnotations[childSessionId]?.some((item) => item.id === annotationId);
-      if (childOwnsReference && childSessionId) editResponseAnnotation(childSessionId, annotationId, comment);
-      else editSideChatReference(sideChatId, annotationId, comment);
-    } else {
-      editResponseAnnotation(selection.sessionId, annotationId, comment);
-    }
+    editResponseAnnotation(targetSessionId, annotationId, comment);
     dismiss(true);
   };
 

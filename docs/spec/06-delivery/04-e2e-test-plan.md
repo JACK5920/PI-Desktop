@@ -5958,19 +5958,21 @@ window; opening a normal panel afterward must still work.
 - **Preconditions:** Isolated Chromium renderer with a completed parent reply,
   deterministic fork/send store actions, and mocked file picker/import IPC.
 - **Steps:** Open Ask in side chat and inspect the empty surface. Confirm the
-  source excerpt is held in one context chip, with no raw message id or separate
-  excerpt panel. Preview the chip and navigate back to the parent source. Select
-  a file and verify one non-activating child is created and the file is imported
-  into that child's scratch path. Send text and image/file references, then
+  source excerpt is shown as a regular editable reference attachment, not a
+  pinned context chip or separate excerpt panel. Preview the reference card and
+  navigate back to the parent source. Select a file and verify one
+  non-activating child is created and the file is imported into that child's
+  scratch path. Send text and image/file references, then
   verify they reach only the child prompt. Exercise Enter, Shift+Enter, IME
   composition Enter, and the global Enter-to-send-off Ctrl/Meta+Enter path.
   Resolve child Stop/error actions and verify the parent session/draft is
   unchanged.
 - **Expected:** Opening or canceling the picker creates no child. A real file
   selection creates at most one child, and imports never target the parent.
-  The context/reference/files/input/send controls share one rounded composer;
-  the source context remains previewable and navigable without duplicating it in
-  editable prompt text. Enter follows the global setting, Shift+Enter never
+  The reference/files/input/send controls share one rounded composer; the
+  selected excerpt is previewable and navigable through the normal reference
+  card without a second context chip or duplication into editable prompt text.
+  Enter follows the global setting, Shift+Enter never
   sends, and IME composition never submits. Child files are cleared only after
   accepted admission; rejected sends retain them. The parent remains active and
   retains its draft.
@@ -5986,29 +5988,39 @@ window; opening a normal panel afterward must still work.
 
 - **Preconditions**: A completed assistant reply in a forkable local session;
   the user can open and prompt a child session.
-- **Steps**: 1) Select assistant text and open Ask in side chat; verify the
-  selected excerpt is retained separately as context, the editable prompt is
-  empty, and no child session or prompt exists before Send. Open the file picker
-  and cancel; verify this remains draft-only. Then select a file and verify one
-  child is created and the file is staged there, without submitting a prompt.
-  2) Enter only a non-empty user prompt and Send; verify the excerpt is still
-  passed through the fork context while the submitted request contains only the
-  typed prompt and the staged file reference.
+- **Steps**: 1) Select assistant text and choose Ask in side chat; verify the
+  excerpt appears as a normal editable/removable reference attachment, no pinned
+  source-context chip is shown, the editable prompt is empty, and no child or
+  prompt exists before Send. Open the file picker and cancel; verify the draft
+  remains child-free. While this chat is active, select another excerpt and
+  choose Ask in side chat; verify it appends to the same tab without replacing
+  the draft or creating another chat. Select text again and choose Add to
+  conversation; verify it appears in the main Composer and does not modify the
+  side-chat references. Then select a file and verify one child is created and
+  the file is staged there without submitting a prompt. 2) Enter only a
+  non-empty user prompt and Send; verify selected excerpts transfer through the
+  ordinary annotation envelope while the submitted request contains only the
+  typed prompt and staged file reference.
   3) While the child streams, inspect its transcript and resolve a child-scoped
   permission request and AskTool card. 4) Add the result to the main Composer.
   5) Open one child as a conversation; open and send another side chat, then
-  close its tab. 6) In the child transcript, append selected user text to its
-  compact draft and attach/review a selected assistant annotation; verify nested
-  Ask in side chat is not offered and history mutation actions are hidden while
-  docked. Verify Continue on a child error targets the child, not the active
+  close its tab. 6) In the child transcript, use Add to conversation on selected
+  user text and assistant text; verify both are routed to the parent Composer,
+  with assistant references retaining the child as their source session. Verify
+  nested Ask in side chat is not offered and history mutation actions are hidden
+  while docked. Verify Continue on a child error targets the child, not the active
   parent. 7) Request promotion during a deferred first send, reject the send,
   and verify the unsent text survives in the child Composer; also exercise
   retry and close/session-switch races.
 - **Expected**: A real file selection or explicit Send may create the child,
   using the selected assistant message as the anchor; only explicit Send
-  submits a prompt. The selected excerpt is retained as side-chat
-  source context and in the forked parent transcript, not duplicated into the
-  editable prompt or submitted user request. The parent remains active with its
+  submits a prompt. The selected excerpt is retained in durable fork provenance
+  and in the ordinary editable reference list, not rendered as a pinned source
+  chip or duplicated into prompt text. Add to conversation always targets the
+  parent Composer, including while the side-chat panel is open and from a child
+  transcript. Ask in side chat creates one tab when none is active and appends
+  references to the current tab when it is. A direct WorkPanel side chat can
+  still start with no reference and use full parent context. The parent remains active with its
   original transcript position and draft. Child events, permission resolution,
   and AskTool answers are scoped to the child id and use the existing Host-owned
   path. Add to main chat appends without replacing the parent draft; promotion
@@ -6019,14 +6031,17 @@ window; opening a normal panel afterward must still work.
   different session's draft. Promotion waits for an in-flight first send to
   settle; if it is rejected, the retained side-chat draft is appended to the
   child Composer without replacing its existing text or file references. Child
-  transcript selection actions target the child draft and annotation list; a
-  nested docked tab is not created under a hidden WorkPanel context.
+  transcript Add-to-conversation actions still target the parent draft and
+  preserve the child source session on reference attachments; a nested docked
+  tab is not created under a hidden WorkPanel context.
 - **Coverage**: `node scripts/e2e-selection-reference-workflow.mjs` exercises
   first-send fork/send, child streaming, permission and AskTool UI/resolution,
   parent selection, Add to main chat, promotion, and close retention with a
-  deterministic Host/store fixture in real Chromium. It also selects child
-  transcript text, appends into the compact child draft, attaches/reviews a
-  child annotation, and verifies that nested Ask in side chat is not exposed.
+  deterministic Host/store fixture in real Chromium. It verifies that the
+  initial excerpt is a standard side-chat reference, a second Ask in side chat
+  appends to the active tab, Add to conversation routes to the main draft, and
+  child transcript selections still target the main draft with cross-session
+  source provenance. It also verifies nested Ask in side chat is not exposed.
   `side-chat-store.test.mjs` verifies that promotion waits for a rejected first
   send and retains its draft alongside existing child-composer content.
   `node --test

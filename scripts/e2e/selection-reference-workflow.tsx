@@ -204,15 +204,34 @@ function Fixture() {
           <TranscriptSelectionToolbar
             transcriptRoot={transcriptRoot}
             sessionId="parent"
-          sideChatId={sideChatId ?? undefined}
+            composerSessionId="parent"
             onAskInSideChat={(selection) => {
-              const id = useAppStore.getState().openSideChat(
-                selection.sessionId,
-                selection.messageId,
-                selection.excerpt,
-                selection.messageIds,
-              );
-              if (id) setSideChatId(id);
+              const anchor = selection.anchorStart === undefined || selection.anchorEnd === undefined
+                ? undefined
+                : { anchorStart: selection.anchorStart, anchorEnd: selection.anchorEnd };
+              const state = useAppStore.getState();
+              const activeSideChatId = sideChatId &&
+                state.sideChats[sideChatId]?.parentSessionId === selection.sessionId
+                ? sideChatId
+                : null;
+              if (activeSideChatId) {
+                useAppStore.getState().addSideChatReference(
+                  activeSideChatId,
+                  selection.messageId,
+                  selection.excerpt,
+                  anchor,
+                  selection.messageIds,
+                );
+              } else {
+                const id = useAppStore.getState().openSideChat(
+                  selection.sessionId,
+                  selection.messageId,
+                  selection.excerpt,
+                  selection.messageIds,
+                  anchor,
+                );
+                if (id) setSideChatId(id);
+              }
             }}
           />
         ) : null}
@@ -416,7 +435,7 @@ globalThis.selectionReferenceProbe = async () => {
                     {
                       id: `assistant-side-${forkCount}`,
                       role: "assistant",
-                      content: 'Side result for the selected excerpt. :codex-annotation{index="1"}',
+                      content: `Side result for the selected excerpt. :codex-annotation{index="${Math.max(1, childAnnotations.length)}"}`,
                       status: "complete",
                       createdAt: "2026-11-04T00:00:04.000Z",
                     } as AppState["messages"][number],
@@ -801,53 +820,65 @@ globalThis.selectionReferenceProbe = async () => {
     assert(!firstSideChat.childSessionId && forkCount === 0 && sends.length === 0, "opening a side chat forked or sent without user Send");
     assert(useAppStore.getState().activeSessionId === "parent", "opening a side chat switched away from the parent");
     assert(firstSideChat.excerpt === quote, "side-chat draft did not retain the selected excerpt as source context");
+    assert(firstSideChat.references.length === 1 && firstSideChat.references[0]?.excerpt === quote, "the selected excerpt was not added as an ordinary side-chat reference");
     assert(firstSideChat.draftText === "", "side-chat input duplicated the selected excerpt");
     const openedSideChatPane = host.querySelector<HTMLElement>(`.side-chat-tab[data-side-chat-id="${firstSideChat.id}"]`);
     assert(openedSideChatPane?.querySelector('[data-testid="side-chat-empty"]'), "the empty side chat does not use a centered welcome state");
     assert(!openedSideChatPane?.textContent?.includes("answer-parent"), "the side-chat header exposes a raw source message id");
-    assert(!openedSideChatPane?.querySelector(".side-chat-excerpt"), "the side chat repeats its selected excerpt outside the composer context chip");
+    assert(!openedSideChatPane?.querySelector('[data-testid="side-chat-context-chip"]'), "the side chat rendered the removed pinned source-context mode");
+    const initialSideChatReferenceChip = openedSideChatPane?.querySelector<HTMLButtonElement>(".composer-annotation-chip");
+    assert(initialSideChatReferenceChip?.textContent?.includes("(1)"), "the selection-created side chat does not use the standard reference attachment control");
+    initialSideChatReferenceChip.click();
+    await settleAfterFocus();
+    const initialSideChatReferenceCard = openedSideChatPane?.querySelector<HTMLElement>("[data-testid='composer-annotation-card']");
+    assert(initialSideChatReferenceCard?.textContent?.includes(quote), "the standard side-chat reference preview omitted the initial selection");
     buttonNamed("Add files").click();
     await settleAfterFocus();
     assert(forkCount === 0 && !useAppStore.getState().sideChats[firstSideChat.id]?.childSessionId, "canceling the side-chat file picker created a child session");
     assert(sends.length === 0, "canceling the side-chat file picker submitted a prompt");
-    const sourceContextChip = openedSideChatPane?.querySelector<HTMLButtonElement>('[data-testid="side-chat-context-chip"]');
-    assert(sourceContextChip, "the source excerpt is not attached to the unified side-chat composer");
-    sourceContextChip.click();
-    await settleAfterFocus();
-    const sourceContextPreview = openedSideChatPane?.querySelector<HTMLElement>('[data-testid="side-chat-source-preview"]');
-    assert(sourceContextPreview?.textContent?.includes(quote), "source context preview does not show the selected excerpt");
-    buttonNamed("Go to source").click();
-    await settleAfterFocus();
-    assert(navigationTargets.at(-1)?.sessionId === "parent" && navigationTargets.at(-1)?.messageId === "answer-parent", "the source context chip did not return to the selected parent message");
-    assert(navigationTargets.at(-1)?.query === quote, "the source context navigation lost the selected excerpt");
     const mainDraftBeforeSideReference = liveDraft.text;
 
     const additionalExcerpt = "A different answer must never replace the captured excerpt.";
     clearSelection();
     selectText(otherAssistantNode, 0, additionalExcerpt.length);
     await waitForToolbar(additionalExcerpt);
-    buttonNamed("Add to chat").click();
+    buttonNamed("Ask in side chat").click();
     await settle();
-    setTextareaValue(textareaNamed("Add a note to this excerpt (optional)"), "First side-chat reference note.");
-    buttonNamed("Attach excerpt").click();
-    await settle();
-    let sideChatReference = useAppStore.getState().sideChats[firstSideChat.id]?.references[0];
-    assert(sideChatReference, "selecting from the parent transcript did not attach a reference to the active side chat");
+    let sideChatReference = useAppStore.getState().sideChats[firstSideChat.id]?.references[1];
+    assert(sideChatReference, "Ask in side chat did not append a reference to the active side chat");
     assert(sideChatReference.sourceSessionId === "parent", "the side-chat reference lost its parent source session");
     assert(sideChatReference.excerpt === additionalExcerpt, "the side-chat reference lost the captured excerpt");
+    assert(Object.keys(useAppStore.getState().sideChats).length === 1, "Ask in side chat opened another tab instead of appending to the active side chat");
     assert(liveDraft.text === mainDraftBeforeSideReference, "a side-chat reference polluted the main conversation draft");
     assert(useAppStore.getState().sideChats[firstSideChat.id]?.draftText === "", "the selected excerpt was duplicated into the side-chat prompt text");
+
+    const sideReferencesBeforeMainAdd = useAppStore.getState().sideChats[firstSideChat.id]?.references.map((item) => item.id);
+    const mainReferenceCountBeforeAdd = useAppStore.getState().responseAnnotations.parent?.length ?? 0;
+    clearSelection();
+    selectText(otherAssistantNode, 0, additionalExcerpt.length);
+    await waitForToolbar(additionalExcerpt);
+    buttonNamed("Add to chat").click();
+    await settleAfterFocus();
+    setTextareaValue(textareaNamed("Add a note to this excerpt (optional)"), "This reference belongs to the main draft.");
+    buttonNamed("Attach excerpt").click();
+    await settleAfterFocus();
+    const mainDraftReference = useAppStore.getState().responseAnnotations.parent?.at(-1);
+    assert(mainDraftReference?.excerpt === additionalExcerpt, "Add to chat did not attach the selected excerpt to the main conversation");
+    assert(mainDraftReference.comment === "This reference belongs to the main draft.", "the main-draft reference lost its optional note");
+    assert((useAppStore.getState().responseAnnotations.parent?.length ?? 0) === mainReferenceCountBeforeAdd + 1, "Add to chat changed a different conversation's reference list");
+    assert(JSON.stringify(useAppStore.getState().sideChats[firstSideChat.id]?.references.map((item) => item.id)) === JSON.stringify(sideReferencesBeforeMainAdd), "Add to chat polluted the active side-chat references");
 
     const draftSideChatPane = host.querySelector<HTMLElement>(`.side-chat-tab[data-side-chat-id="${firstSideChat.id}"]`);
     assert(draftSideChatPane, "side-chat pane is missing before its first send");
     let sideReferenceChip = draftSideChatPane.querySelector<HTMLButtonElement>(".composer-annotation-chip");
-    assert(sideReferenceChip?.textContent?.includes("(1)"), "the side-chat composer does not show its attached-reference count");
+    assert(sideReferenceChip?.textContent?.includes("(2)"), "the side-chat composer does not show both references in the standard attachment control");
     sideReferenceChip?.click();
     await settleAfterFocus();
     let sideReferenceCard = draftSideChatPane.querySelector<HTMLElement>("[data-testid='composer-annotation-card']");
     assert(sideReferenceCard?.textContent?.includes(additionalExcerpt), "hovering side-chat references did not preview the selected excerpt");
-    assert(sideReferenceCard?.textContent?.includes("First side-chat reference note."), "side-chat reference preview omitted its note");
-    sideReferenceCard?.querySelector<HTMLButtonElement>(".composer-annotation-source-button")?.click();
+    const additionalReferencePreviewRow = [...(sideReferenceCard?.querySelectorAll<HTMLElement>(".composer-annotation-item") ?? [])]
+      .find((row) => row.textContent?.includes(additionalExcerpt));
+    additionalReferencePreviewRow?.querySelector<HTMLButtonElement>(".composer-annotation-source-button")?.click();
     await settleAfterFocus();
     assert(navigationTargets.at(-1)?.sessionId === "parent", "side-chat reference did not return to its parent source session");
     assert(navigationTargets.at(-1)?.messageId === "answer-other", "side-chat reference navigated to the wrong source message");
@@ -856,14 +887,16 @@ globalThis.selectionReferenceProbe = async () => {
     sideReferenceChip?.click();
     await settleAfterFocus();
     sideReferenceCard = draftSideChatPane.querySelector<HTMLElement>("[data-testid='composer-annotation-card']");
-    sideReferenceCard?.querySelector<HTMLButtonElement>("[aria-label='Edit note']")?.click();
+    const additionalReferenceRow = [...(sideReferenceCard?.querySelectorAll<HTMLElement>(".composer-annotation-item") ?? [])]
+      .find((row) => row.textContent?.includes(additionalExcerpt));
+    additionalReferenceRow?.querySelector<HTMLButtonElement>("[aria-label='Edit note']")?.click();
     await settleAfterFocus();
     const sideReferenceEditor = draftSideChatPane.querySelector<HTMLTextAreaElement>(".composer-annotation-edit textarea");
     assert(sideReferenceEditor, "side-chat reference has no editable note control");
     setTextareaValue(sideReferenceEditor, "Edited side-chat reference note.");
     buttonNamed("Attach excerpt").click();
     await settleAfterFocus();
-    sideChatReference = useAppStore.getState().sideChats[firstSideChat.id]?.references[0];
+    sideChatReference = useAppStore.getState().sideChats[firstSideChat.id]?.references[1];
     assert(sideChatReference?.comment === "Edited side-chat reference note.", "editing a side-chat reference note did not save");
 
     const removableExcerpt = "The accepted branch keeps the";
@@ -876,21 +909,23 @@ globalThis.selectionReferenceProbe = async () => {
     );
     assert(removableReferenceId, "could not stage a second side-chat reference for remove-control verification");
     await settleAfterFocus();
-    assert(useAppStore.getState().sideChats[firstSideChat.id]?.references.length === 2, "a second reference was not attached for removal verification");
+    assert(useAppStore.getState().sideChats[firstSideChat.id]?.references.length === 3, "a third reference was not attached for removal verification");
     sideReferenceCard = draftSideChatPane.querySelector<HTMLElement>("[data-testid='composer-annotation-card']");
     const sideReferenceRows = [...(sideReferenceCard?.querySelectorAll<HTMLElement>(".composer-annotation-item") ?? [])];
-    assert(sideReferenceRows.length === 2, "two side-chat references are not shown as distinct rows");
+    assert(sideReferenceRows.length === 3, "three side-chat references are not shown as distinct rows");
     assert(
       getComputedStyle(sideReferenceRows[0]).borderBottomWidth === "1px" &&
-        getComputedStyle(sideReferenceRows[1]).borderBottomWidth === "0px",
+        getComputedStyle(sideReferenceRows[1]).borderBottomWidth === "1px" &&
+        getComputedStyle(sideReferenceRows[2]).borderBottomWidth === "0px",
       "multiple references are not separated by a single lightweight divider",
     );
     const removableReferenceRow = [...(sideReferenceCard?.querySelectorAll<HTMLElement>(".composer-annotation-item") ?? [])]
-      .find((row) => row.textContent?.includes(removableExcerpt));
+      .find((row) => row.querySelector(".composer-annotation-source-button")?.textContent?.trim() === removableExcerpt);
     removableReferenceRow?.querySelector<HTMLButtonElement>("[aria-label='Remove reference']")?.click();
     await settleAfterFocus();
-    assert(useAppStore.getState().sideChats[firstSideChat.id]?.references.length === 1, "removing a pending side-chat reference did not remove only that reference");
-    assert(useAppStore.getState().sideChats[firstSideChat.id]?.references[0]?.id === sideChatReference?.id, "removing one pending reference also removed the remaining one");
+    assert(useAppStore.getState().sideChats[firstSideChat.id]?.references.length === 2, "removing a pending side-chat reference did not remove only that reference");
+    assert(useAppStore.getState().sideChats[firstSideChat.id]?.references.some((item) => item.id === sideChatReference?.id), "removing one pending reference also removed the remaining references");
+    assert(useAppStore.getState().responseAnnotations.parent?.some((item) => item.id === mainDraftReference.id), "removing a side-chat reference changed the main draft's reference");
 
     buttonNamed("Add files").click();
     for (let index = 0; index < 120 && !useAppStore.getState().sideChats[firstSideChat.id]?.fileReferences.length; index += 1) await settleAfterFocus();
@@ -920,10 +955,13 @@ globalThis.selectionReferenceProbe = async () => {
       sentSideChatAnnotations[0]?.childSessionId === useAppStore.getState().sideChats[firstSideChat.id]?.childSessionId,
       "the side-chat send captured the wrong child id",
     );
-    assert(sentSideChatAnnotations[0]?.annotations.length === 1, "the side-chat prompt did not transfer exactly one reference");
-    assert(sentSideChatAnnotations[0]?.annotations[0]?.sourceSessionId === "parent", "the sent side-chat reference lost its source session");
-    assert(sentSideChatAnnotations[0]?.annotations[0]?.sourceMessageId === "answer-other", "the sent side-chat reference lost its source message");
-    assert(sentSideChatAnnotations[0]?.annotations[0]?.comment === "Edited side-chat reference note.", "the sent side-chat reference lost its note");
+    assert(sentSideChatAnnotations[0]?.annotations.length === 2, "the side-chat prompt did not transfer both selected references");
+    assert(sentSideChatAnnotations[0]?.annotations[0]?.sourceSessionId === "parent", "the initial sent side-chat reference lost its source session");
+    assert(sentSideChatAnnotations[0]?.annotations[0]?.sourceMessageId === "answer-parent", `the initial sent side-chat reference lost its source message: ${JSON.stringify(sentSideChatAnnotations[0]?.annotations)}`);
+    assert(sentSideChatAnnotations[0]?.annotations[0]?.excerpt === quote, "the initial selection was not transferred as a regular reference");
+    assert(sentSideChatAnnotations[0]?.annotations[1]?.sourceSessionId === "parent", "the appended side-chat reference lost its source session");
+    assert(sentSideChatAnnotations[0]?.annotations[1]?.sourceMessageId === "answer-other", "the appended side-chat reference lost its source message");
+    assert(sentSideChatAnnotations[0]?.annotations[1]?.comment === "Edited side-chat reference note.", "the sent side-chat reference lost its note");
     assert(
       !listableSessions(useAppStore.getState().sessions).some((session) => session.sideChat?.parentSessionId === "parent"),
       "an unpromoted sent side chat appeared in the ordinary session list",
@@ -977,6 +1015,7 @@ globalThis.selectionReferenceProbe = async () => {
       sideChatPane.querySelector('[data-selection-message-id="assistant-side-1"]') ?? sideChatPane,
       "Side result for the selected excerpt.",
     );
+    const mainReferencesBeforeChildSelection = useAppStore.getState().responseAnnotations.parent?.length ?? 0;
     const childAnswerStart = childAnswerNode.data.indexOf("Side result for the selected excerpt.");
     selectText(childAnswerNode, childAnswerStart, childAnswerStart + "Side result for the selected excerpt.".length);
     await waitForToolbar("Side result for the selected excerpt.");
@@ -985,15 +1024,18 @@ globalThis.selectionReferenceProbe = async () => {
     setTextareaValue(textareaNamed("Add a note to this excerpt (optional)"), "This follow-up belongs to the child answer.");
     buttonNamed("Attach excerpt").click();
     await settleAfterFocus();
-    const childAnswerReference = useAppStore.getState().responseAnnotations[firstChildId]?.[0];
+    const childAnswerReference = useAppStore.getState().responseAnnotations.parent?.at(-1);
+    assert(childAnswerReference, "Add to chat from the side-chat transcript created no main reference");
+    assert((useAppStore.getState().responseAnnotations.parent?.length ?? 0) === mainReferencesBeforeChildSelection + 1, "Add to chat from the side-chat transcript did not target the main Composer");
+    assert(childAnswerReference?.sourceSessionId === firstChildId, "the main reference lost the child transcript source session");
     assert(childAnswerReference?.sourceMessageId === "assistant-side-1", "selecting from the child transcript did not attach to its own source message");
     assert(childAnswerReference?.excerpt === "Side result for the selected excerpt.", "the child quote did not preserve the captured answer excerpt");
     assert(childAnswerReference?.comment === "This follow-up belongs to the child answer.", "the child quote did not preserve its optional note");
-    sideChatPane.querySelector<HTMLButtonElement>(".composer-annotation-chip")?.focus();
+    host.querySelector<HTMLButtonElement>(".annotation-composer-fixture .composer-annotation-chip")?.click();
     await settleAfterFocus();
     assert(
-      sideChatPane.querySelector("[data-testid='composer-annotation-card']")?.textContent?.includes(childAnswerReference.excerpt),
-      "child-transcript references were not reviewable in the side-chat composer",
+      host.querySelector(".annotation-composer-fixture [data-testid='composer-annotation-card']")?.textContent?.includes(childAnswerReference.excerpt),
+      "child-transcript references were not reviewable in the main Composer",
     );
     assert(liveDraft.text === mainDraftBeforeSideReference, "a child-transcript reference polluted the main conversation draft");
 
@@ -1012,9 +1054,10 @@ globalThis.selectionReferenceProbe = async () => {
     buttonNamed("Add to chat").click();
     await settle();
     assert(
-      useAppStore.getState().sideChats[firstSideChat.id]?.draftText.includes("> Explain the selected result."),
-      "selected user text was not appended to the compact side-chat draft",
+      liveDraft.text.includes("> Explain the selected result."),
+      "Add to chat from a side-chat user message did not append to the main conversation Composer",
     );
+    assert(!useAppStore.getState().sideChats[firstSideChat.id]?.draftText.includes("Explain the selected result."), "Add to chat from the side-chat transcript polluted the side-chat draft");
 
     buttonNamed("Add to main chat").click();
     assert(liveDraft.text.includes("Side result for the selected excerpt."), "side-chat answer was not appended to the parent draft");
@@ -1139,10 +1182,12 @@ globalThis.selectionReferenceProbe = async () => {
     pendingResolvers.shift()?.(true);
     await settleAfterFocus();
 
-    clearTrigger.focus();
-    await waitForClearIconVisible(clearTrigger);
-    assert(getComputedStyle(clearTrigger).opacity === "1", "keyboard navigation did not reveal the focused clear icon");
-    clearTrigger.click();
+    const finalClearTrigger = host.querySelector<HTMLButtonElement>(".annotation-composer-fixture .composer-annotation-clear-trigger");
+    assert(finalClearTrigger, "the main Composer clear icon disappeared before the final clear action");
+    finalClearTrigger.focus();
+    await waitForClearIconVisible(finalClearTrigger);
+    assert(getComputedStyle(finalClearTrigger).opacity === "1", "keyboard navigation did not reveal the focused clear icon");
+    finalClearTrigger.click();
     await settleAfterFocus();
     assert((useAppStore.getState().responseAnnotations.parent ?? []).length === 0, "the chip clear icon did not clear all pending references");
     assert(!host.querySelector('[data-testid="composer-annotation-card"]'), "clearing references left the hover preview open");

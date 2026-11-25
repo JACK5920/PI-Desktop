@@ -152,7 +152,7 @@ export function createSideChatSlice({ get, set, getCachedTranscript, getSessionD
   };
 
   return {
-    openSideChat: (parentSessionId, sourceMessageId, excerpt, sourceMessageIds) => {
+    openSideChat: (parentSessionId, sourceMessageId, excerpt, sourceMessageIds, sourceAnchor) => {
       const state = get();
       const session = state.sessions.find((candidate) => candidate.id === parentSessionId);
       if (
@@ -167,6 +167,13 @@ export function createSideChatSlice({ get, set, getCachedTranscript, getSessionD
       const normalizedExcerpt = excerpt?.trim();
       const hasSourceAnchor = Boolean(sourceMessageId?.trim() && normalizedExcerpt);
       if (Boolean(sourceMessageId?.trim()) !== Boolean(normalizedExcerpt)) return null;
+      const validSourceAnchor = sourceAnchor &&
+        Number.isSafeInteger(sourceAnchor.anchorStart) &&
+        Number.isSafeInteger(sourceAnchor.anchorEnd) &&
+        sourceAnchor.anchorStart >= 0 &&
+        sourceAnchor.anchorEnd > sourceAnchor.anchorStart
+        ? sourceAnchor
+        : undefined;
       let normalizedSourceIds: string[] | undefined;
       if (hasSourceAnchor) {
         const source = transcript.find((message) => message.id === sourceMessageId);
@@ -185,6 +192,16 @@ export function createSideChatSlice({ get, set, getCachedTranscript, getSessionD
       }
 
       const sideChatId = `side-chat:${crypto.randomUUID()}`;
+      const initialReference = hasSourceAnchor
+        ? {
+          id: crypto.randomUUID(),
+          sourceSessionId: parentSessionId,
+          sourceMessageId: sourceMessageId!,
+          ...(normalizedSourceIds!.length > 1 ? { sourceMessageIds: normalizedSourceIds } : {}),
+          excerpt: normalizedExcerpt!,
+          ...(validSourceAnchor ?? {}),
+        }
+        : undefined;
       const sideChat: SideChatState = {
         id: sideChatId,
         parentSessionId,
@@ -193,7 +210,7 @@ export function createSideChatSlice({ get, set, getCachedTranscript, getSessionD
           ...(normalizedSourceIds!.length > 1 ? { sourceMessageIds: normalizedSourceIds } : {}),
           excerpt: normalizedExcerpt,
         } : {}),
-        references: [],
+        references: initialReference ? [initialReference] : [],
         fileReferences: [],
         messages: [],
         operationId: 0,

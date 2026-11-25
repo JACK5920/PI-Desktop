@@ -112,6 +112,32 @@ test("opening a side chat creates only a transient work-panel draft", () => {
   assert.equal(h.sendCalls.length, 0);
   assert.equal(h.get().sideChats[sideChatId].draftText, "");
   assert.equal(h.get().sideChats[sideChatId].excerpt, "quote");
+  assert.equal(h.get().sideChats[sideChatId].references.length, 1);
+  assert.equal(h.get().sideChats[sideChatId].references[0].excerpt, "quote");
+  assert.equal(h.get().sideChats[sideChatId].references[0].sourceSessionId, "parent");
+});
+
+test("selection-created side chats store their entry excerpt as a normal editable reference", () => {
+  const h = fixture();
+  const sideChatId = h.slice.openSideChat(
+    "parent",
+    "answer-1",
+    "selected passage",
+    ["answer-1"],
+    { anchorStart: 4, anchorEnd: 20 },
+  );
+  assert.ok(sideChatId);
+  const sideChat = h.get().sideChats[sideChatId];
+  assert.equal(sideChat.sourceMessageId, "answer-1", "fork provenance was not retained");
+  assert.deepEqual(sideChat.references, [{
+    id: sideChat.references[0].id,
+    sourceSessionId: "parent",
+    sourceMessageId: "answer-1",
+    excerpt: "selected passage",
+    anchorStart: 4,
+    anchorEnd: 20,
+  }]);
+  assert.equal(sideChat.draftText, "", "the excerpt was duplicated into editable prompt text");
 });
 
 test("opening without a selection creates an unanchored draft and forks the full parent on first send", async () => {
@@ -165,7 +191,7 @@ test("opening a side chat remains unavailable for an engine without generic fork
 
 test("side-chat references support edit, remove, clear, and transfer once into the fork child", async () => {
   const h = fixture();
-  const sideChatId = h.slice.openSideChat("parent", "answer-1", "fork context");
+  const sideChatId = h.slice.openSideChat("parent");
   assert.ok(sideChatId);
 
   const referenceId = h.slice.addSideChatReference(

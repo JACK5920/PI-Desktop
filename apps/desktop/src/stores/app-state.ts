@@ -233,6 +233,7 @@ export type AppState = {
     sourceMessageId?: string,
     excerpt?: string,
     sourceMessageIds?: string[],
+    sourceAnchor?: { anchorStart: number; anchorEnd: number },
   ) => string | null;
   reopenSideChat: (childSessionId: string) => Promise<void>;
   ensureSideChatChild: (sideChatId: string) => Promise<string | null>;
@@ -264,6 +265,7 @@ export type AppState = {
     excerpt: string,
     anchor?: { anchorStart: number; anchorEnd: number },
     sourceMessageIds?: string[],
+    sourceSessionId?: string,
   ) => string | null;
   editResponseAnnotation: (
     sessionId: string,

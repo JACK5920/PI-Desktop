@@ -7,6 +7,7 @@ import type { StoreAccess } from "./types";
 
 function sameAnnotation(left: ResponseAnnotation, right: ResponseAnnotation): boolean {
   return left.id === right.id &&
+    left.sourceSessionId === right.sourceSessionId &&
     left.sourceMessageId === right.sourceMessageId &&
     (left.sourceMessageIds ?? [left.sourceMessageId]).length ===
       (right.sourceMessageIds ?? [right.sourceMessageId]).length &&
@@ -33,13 +34,14 @@ export function createAnnotationSlice({ get, set }: StoreAccess): Pick<
   | "consumeAcceptedAnnotations"
 > {
   return {
-    addResponseAnnotation: (sessionId, sourceMessageId, rawExcerpt, anchor, sourceMessageIds) => {
+    addResponseAnnotation: (sessionId, sourceMessageId, rawExcerpt, anchor, sourceMessageIds, sourceSessionId) => {
       const state = get();
       const session = state.sessions.find((item) => item.id === sessionId);
       if (!sessionAllows(session, "canEditMessages")) return null;
       const excerpt = normalizeTranscriptExcerpt(rawExcerpt);
       if (!excerpt) return null;
-      const sourceMessages = transcriptMessagesForSession(state, sessionId);
+      const owningSourceSessionId = sourceSessionId ?? sessionId;
+      const sourceMessages = transcriptMessagesForSession(state, owningSourceSessionId);
       const normalizedSourceIds = sourceMessageIds?.length
         ? [...new Set(sourceMessageIds)]
         : [sourceMessageId];
@@ -56,6 +58,7 @@ export function createAnnotationSlice({ get, set }: StoreAccess): Pick<
         ? anchor
         : undefined;
       const existing = current.find((item) =>
+        (item.sourceSessionId ?? sessionId) === owningSourceSessionId &&
         item.sourceMessageId === sourceMessageId &&
         item.excerpt === excerpt &&
         (item.sourceMessageIds ?? [item.sourceMessageId]).length === normalizedSourceIds.length &&
@@ -68,6 +71,7 @@ export function createAnnotationSlice({ get, set }: StoreAccess): Pick<
       if (existing) return existing.id;
       const annotation: ResponseAnnotation = {
         id: crypto.randomUUID(),
+        ...(owningSourceSessionId !== sessionId ? { sourceSessionId: owningSourceSessionId } : {}),
         sourceMessageId,
         ...(normalizedSourceIds.length > 1 ? { sourceMessageIds: normalizedSourceIds } : {}),
         excerpt,

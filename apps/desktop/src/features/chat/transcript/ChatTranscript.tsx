@@ -60,7 +60,6 @@ import {
 } from "../../../lib/radial-menu";
 import { SlotSessionProvider } from "../../../plugins/renderer-slots/use-slots";
 import { TranscriptSelectionToolbar } from "./TranscriptSelectionToolbar";
-import type { TranscriptSelection } from "../../../lib/transcript-selection";
 import { TranscriptHistoryActionsContext } from "./transcript-action-scope";
 
 type ChatTranscriptProps = {
@@ -96,8 +95,8 @@ type ChatTranscriptProps = {
   navigationLoading?: boolean;
   /** Disable starting a nested docked chat when this transcript is already in one. */
   allowSideChatSelection?: boolean;
-  /** Append a selected user excerpt to a compact pane-owned draft instead of the main Composer. */
-  onAppendUserSelection?: (selection: TranscriptSelection) => void;
+  /** Route selection attachments to the owning main conversation Composer. */
+  composerSessionId?: string;
   /** Hide history mutations when this transcript is a docked, non-active child. */
   allowHistoryMutations?: boolean;
 };
@@ -142,7 +141,7 @@ function TranscriptBody({
   onPrepareReturnToLatest,
   navigationLoading = false,
   allowSideChatSelection = true,
-  onAppendUserSelection,
+  composerSessionId,
 }: ChatTranscriptProps) {
   const { t } = useTranslation();
   const openTranscriptMenu = useTranscriptMenu();
@@ -613,8 +612,7 @@ function TranscriptBody({
       <TranscriptSelectionToolbar
         transcriptRoot={selectionRoot}
         sessionId={sessionId}
-        sideChatId={activeSideChatId}
-        onAppendUserSelection={onAppendUserSelection}
+        composerSessionId={composerSessionId}
         onAskInSideChat={
           allowSideChatSelection &&
           sessionSummary &&
@@ -622,12 +620,24 @@ function TranscriptBody({
           sessionAllows(sessionSummary, "canEditMessages") &&
           sessionAllows(sessionSummary, "canPrompt")
             ? (selection) => {
-              const sideChatId = openSideChat(
-                selection.sessionId,
-                selection.messageId,
-                selection.excerpt,
-                selection.messageIds,
-              );
+              const anchor = selection.anchorStart === undefined || selection.anchorEnd === undefined
+                ? undefined
+                : { anchorStart: selection.anchorStart, anchorEnd: selection.anchorEnd };
+              const sideChatId = activeSideChatId
+                ? useAppStore.getState().addSideChatReference(
+                  activeSideChatId,
+                  selection.messageId,
+                  selection.excerpt,
+                  anchor,
+                  selection.messageIds,
+                )
+                : openSideChat(
+                  selection.sessionId,
+                  selection.messageId,
+                  selection.excerpt,
+                  selection.messageIds,
+                  anchor,
+                );
               if (!sideChatId) {
                 showToast(t("chat.sideChatOpenFailed"), { variant: "error" });
               }

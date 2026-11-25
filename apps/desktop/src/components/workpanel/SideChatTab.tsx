@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent, KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { AskToolCard } from "../AskToolCard";
-import { Button, Textarea, TooltipButton } from "../ui";
+import { Textarea, TooltipButton } from "../ui";
 import {
   IconArrowUp,
   IconClose,
@@ -13,7 +13,6 @@ import {
   IconNewSession,
   IconPlus,
   IconStop,
-  IconTextSelect,
 } from "../icons";
 import { ChatTranscript } from "../../features/chat/transcript/ChatTranscript";
 import { ComposerAnnotationAttachments } from "../../features/chat/composer/ComposerAnnotationAttachments";
@@ -25,11 +24,9 @@ import { headPermission, queuedPermissionCount } from "../../lib/pending-permiss
 import { requestTextWithoutAnnotations } from "../../lib/response-annotations";
 import type { ResponseAnnotation } from "../../lib/response-annotations";
 import {
-  appendSideChatDraftText,
   formatSideChatResultQuote,
 } from "../../lib/side-chat-lifecycle";
 import { sessionAllows } from "../../lib/remote-session-safety";
-import { transcriptSelectionSourceAttribution } from "../../lib/transcript-selection";
 import type { TranscriptSearchTarget } from "../../lib/transcript-reading";
 import {
   navigateToAnnotationSource,
@@ -44,11 +41,9 @@ export function SideChatTab({ sideChatId }: { sideChatId: string }) {
   const { t } = useTranslation();
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
-  const sourceContextRef = useRef<HTMLDivElement>(null);
   const pickerInFlight = useRef(false);
   const nextSourceRequestId = useRef(0);
   const [sourceSearchTarget, setSourceSearchTarget] = useState<TranscriptSearchTarget | null>(null);
-  const [sourcePreviewOpen, setSourcePreviewOpen] = useState(false);
   const [preparingAttachments, setPreparingAttachments] = useState(false);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -108,22 +103,6 @@ export function SideChatTab({ sideChatId }: { sideChatId: string }) {
     () => [...childReferences, ...sideChatReferences],
     [childReferences, sideChatReferences],
   );
-
-  useEffect(() => {
-    if (!sourcePreviewOpen) return;
-    const outside = (event: PointerEvent) => {
-      if (!sourceContextRef.current?.contains(event.target as Node)) setSourcePreviewOpen(false);
-    };
-    const keyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key === "Escape") setSourcePreviewOpen(false);
-    };
-    document.addEventListener("pointerdown", outside, true);
-    document.addEventListener("keydown", keyDown, true);
-    return () => {
-      document.removeEventListener("pointerdown", outside, true);
-      document.removeEventListener("keydown", keyDown, true);
-    };
-  }, [sourcePreviewOpen]);
 
   useEffect(() => {
     const textarea = promptRef.current;
@@ -266,16 +245,6 @@ export function SideChatTab({ sideChatId }: { sideChatId: string }) {
     }
   };
 
-  const navigateToOriginalSelection = () => {
-    if (!sideChat.sourceMessageId || !sideChat.excerpt) return;
-    setSourcePreviewOpen(false);
-    navigateWithinSideChat({
-      sessionId: sideChat.parentSessionId,
-      messageId: sideChat.sourceMessageId,
-      query: sideChat.excerpt,
-    });
-  };
-
   return (
     <div className="side-chat-tab" data-testid="side-chat-tab" data-side-chat-id={sideChatId}>
       {childSessionId ? (
@@ -328,23 +297,9 @@ export function SideChatTab({ sideChatId }: { sideChatId: string }) {
             paneVisible
             liveTail
             allowHistoryMutations={false}
+            composerSessionId={sideChat.parentSessionId}
             permissionFocusTarget={() => promptRef.current}
             allowSideChatSelection={false}
-            onAppendUserSelection={(selection) => {
-              const current = useAppStore.getState().sideChats[sideChatId];
-              if (!current || current.childSessionId !== selection.sessionId) return;
-              setDraft(
-                sideChatId,
-                appendSideChatDraftText(
-                  current.draftText,
-                  selection.excerpt,
-                  transcriptSelectionSourceAttribution(
-                    selection.messageIds,
-                    t("chat.selectionSourceUser"),
-                  ),
-                ),
-              );
-            }}
           />
           {pendingAsk ? <AskToolCard request={pendingAsk} queued={queuedAsks} /> : null}
         </div>
@@ -365,53 +320,6 @@ export function SideChatTab({ sideChatId }: { sideChatId: string }) {
       >
         <div className="side-chat-composer-shell">
           <div className="side-chat-composer-contexts">
-            {hasSourceContext ? (
-              <div
-                className="side-chat-source-context"
-                ref={sourceContextRef}
-                onPointerEnter={() => setSourcePreviewOpen(true)}
-                onPointerLeave={(event) => {
-                  if (
-                    !sourceContextRef.current?.contains(event.relatedTarget as Node | null) &&
-                    !sourceContextRef.current?.matches(":focus-within")
-                  ) setSourcePreviewOpen(false);
-                }}
-                onFocusCapture={() => setSourcePreviewOpen(true)}
-                onBlur={(event) => {
-                  if (
-                    !sourceContextRef.current?.matches(":hover") &&
-                    !sourceContextRef.current?.contains(event.relatedTarget as Node | null)
-                  ) setSourcePreviewOpen(false);
-                }}
-              >
-                <button
-                  type="button"
-                  className="side-chat-source-context-chip"
-                  aria-expanded={sourcePreviewOpen}
-                  aria-haspopup="dialog"
-                  aria-label={t("chat.sideChatContextLabel")}
-                  data-testid="side-chat-context-chip"
-                  onClick={() => setSourcePreviewOpen(true)}
-                >
-                  <IconTextSelect size={13} aria-hidden />
-                  <span>{t("chat.sideChatContextLabel")}</span>
-                </button>
-                {sourcePreviewOpen ? (
-                  <div
-                    className="side-chat-source-preview"
-                    role="dialog"
-                    aria-label={t("chat.sideChatContextPreview")}
-                    data-testid="side-chat-source-preview"
-                  >
-                    <div className="side-chat-source-preview-label">{t("chat.sideChatContextPreview")}</div>
-                    <p>{sideChat.excerpt}</p>
-                    <Button type="button" size="sm" onClick={navigateToOriginalSelection}>
-                      {t("chat.sideChatOpenSource")}
-                    </Button>
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
             <ComposerAnnotationAttachments
               sessionId={childSessionId ?? sideChat.parentSessionId}
               annotations={referenceAttachments}
