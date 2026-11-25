@@ -7,6 +7,7 @@ const {
   buildAnnotatedPrompt,
   parseAnnotatedPrompt,
   prepareAnnotatedPromptEdit,
+  pendingSourceAnnotationsForMessage,
   requestTextWithoutAnnotations,
 } = await import("../src/lib/response-annotations.ts");
 
@@ -92,6 +93,34 @@ test("multi-message annotation source ids survive serialization and edit round-t
   assert.deepEqual(prepareAnnotatedPromptEdit(serialized), expected);
 });
 
+test("cross-session source ids survive the annotation envelope exactly once", () => {
+  const source = [{
+    sourceSessionId: "parent-session",
+    sourceMessageId: "parent-answer",
+    excerpt: "A selected parent passage.",
+    comment: "Keep the original conversation visible.",
+    anchorStart: 18,
+    anchorEnd: 43,
+  }];
+  const prompt = buildAnnotatedPrompt("Explain this passage.", source);
+  const parsed = parseAnnotatedPrompt(prompt);
+
+  assert.deepEqual(parsed, { annotations: source, requestText: "Explain this passage." });
+  assert.equal((prompt.match(/parent-answer/g) ?? []).length, 1, "the source was serialized more than once");
+  assert.equal(requestTextWithoutAnnotations(prompt), "Explain this passage.");
+});
+
+test("an empty cross-session source id makes the annotation envelope inert", () => {
+  const prompt = buildAnnotatedPrompt("Review", [{
+    sourceSessionId: "parent-session",
+    sourceMessageId: "parent-answer",
+    excerpt: "selected",
+  }]);
+  const malformed = prompt.replace('"sourceSessionId":"parent-session"', '"sourceSessionId":" "');
+  assert.equal(parseAnnotatedPrompt(malformed), null);
+  assert.equal(requestTextWithoutAnnotations(malformed), malformed);
+});
+
 test("invalid multi-message source metadata keeps the envelope inert", () => {
   const serialized = buildAnnotatedPrompt("Review", [{
     sourceMessageId: "assistant-1",
@@ -137,6 +166,27 @@ test("annotation citation indices follow attachment order and malformed payloads
   );
   assert.equal(parseAnnotatedPrompt(malformed), null);
   assert.equal(requestTextWithoutAnnotations(malformed), malformed);
+});
+
+test("pending source markers retain the owning session for side-chat references", () => {
+  const annotations = [{
+    id: "cross-session-reference",
+    sourceSessionId: "parent-session",
+    sourceMessageId: "parent-answer",
+    excerpt: "A selected parent passage.",
+    anchorStart: 10,
+    anchorEnd: 36,
+  }];
+
+  assert.deepEqual(pendingSourceAnnotationsForMessage(annotations, "parent-answer"), [{
+    sourceSessionId: "parent-session",
+    sourceMessageId: "parent-answer",
+    excerpt: "A selected parent passage.",
+    anchorStart: 10,
+    anchorEnd: 36,
+    referenceIndex: 1,
+    promptMessageId: "draft",
+  }]);
 });
 
 test("an empty attachment list leaves the user's request unchanged", () => {

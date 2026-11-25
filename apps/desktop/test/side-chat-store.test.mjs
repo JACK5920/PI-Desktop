@@ -28,9 +28,10 @@ function fixture() {
   const fork = deferred();
   let state = {
     activeSessionId: "parent",
-    sessions: [{ id: "parent", source: "local", title: "Parent" }],
+    sessions: [{ id: "parent", source: "local", title: "Parent", capabilities: { canEditMessages: true } }],
     messages: [assistant],
     retainedTranscripts: {},
+    responseAnnotations: {},
     composerPrefill: null,
     sideChats: {},
     openWorkPanelTabForSession: (sessionId, tab) => { opened.push({ sessionId, tab }); },
@@ -103,7 +104,54 @@ test("opening a side chat creates only a transient work-panel draft", () => {
   assert.equal(h.get().sideChats[sideChatId].childSessionId, undefined);
   assert.equal(h.forkCalls.length, 0);
   assert.equal(h.sendCalls.length, 0);
-  assert.match(h.get().sideChats[sideChatId].draftText, /> quote/);
+  assert.equal(h.get().sideChats[sideChatId].draftText, "");
+  assert.equal(h.get().sideChats[sideChatId].excerpt, "quote");
+});
+
+test("side-chat references support edit, remove, clear, and transfer once into the fork child", async () => {
+  const h = fixture();
+  const sideChatId = h.slice.openSideChat("parent", "answer-1", "fork context");
+  assert.ok(sideChatId);
+
+  const referenceId = h.slice.addSideChatReference(
+    sideChatId,
+    "answer-1",
+    " selected passage ",
+    { anchorStart: 0, anchorEnd: 16 },
+  );
+  assert.ok(referenceId);
+  assert.equal(h.get().sideChats[sideChatId].references[0].excerpt, "selected passage");
+  assert.equal(h.get().sideChats[sideChatId].references[0].sourceSessionId, "parent");
+  h.slice.editSideChatReference(sideChatId, referenceId, "\r\n focus here \r\n");
+  assert.equal(h.get().sideChats[sideChatId].references[0].comment, "focus here");
+
+  const send = h.slice.sendSideChatPrompt(sideChatId, "Explain it.");
+  await Promise.resolve();
+  h.fork.resolve("child-reference");
+  assert.equal(await send, true);
+  assert.deepEqual(h.get().responseAnnotations["child-reference"], [{
+    id: referenceId,
+    sourceSessionId: "parent",
+    sourceMessageId: "answer-1",
+    excerpt: "selected passage",
+    comment: "focus here",
+    anchorStart: 0,
+    anchorEnd: 16,
+  }]);
+  assert.deepEqual(h.get().sideChats[sideChatId].references, [], "transferred references remained pending and could be resent");
+
+  const duplicate = h.slice.addSideChatReference(
+    sideChatId,
+    "answer-1",
+    "selected passage",
+    { anchorStart: 0, anchorEnd: 16 },
+  );
+  assert.equal(duplicate, referenceId, "adding a source already attached to the child created a duplicate");
+
+  h.slice.removeSideChatReference(sideChatId, referenceId);
+  assert.equal(h.get().responseAnnotations["child-reference"][0].id, referenceId, "pending-reference removal modified the already-sent child reference");
+  h.slice.clearSideChatReferences(sideChatId);
+  assert.equal(h.get().responseAnnotations["child-reference"].length, 1, "clearing pending references removed references already sent to the child");
 });
 
 test("multi-message side-chat selections keep every source while using the first as fork anchor", () => {
@@ -155,6 +203,84 @@ test("concurrent first sends fork once and use the child while keeping the paren
   assert.equal(h.sendCalls[0][2], "child-1");
   assert.equal(h.get().activeSessionId, "parent");
   assert.equal(h.get().sideChats[sideChatId].childSessionId, "child-1");
+});
+
+test("an attachment-only send uses the child-scoped file references and clears them only after acceptance", async () => {
+  const h = fixture();
+  const sideChatId = h.slice.openSideChat("parent", "answer-1", "quote");
+  assert.ok(sideChatId);
+  const files = [{ path: "C:/scratch/side-chat-child/image.png", name: "image.png", kind: "image", mimeType: "image/png" }];
+  h.set((state) => ({ sideChats: { ...state.sideChats, [sideChatId]: {
+    ...state.sideChats[sideChatId], fileReferences: files,
+  } } }));
+
+  const sending = h.slice.sendSideChatPrompt(sideChatId, "", files);
+  await Promise.resolve();
+  assert.equal(h.forkCalls.length, 1);
+  h.fork.resolve("child-files");
+  assert.equal(await sending, true);
+  assert.equal(h.sendCalls[0][0], "");
+  assert.equal(h.sendCalls[0][1].fileReferences[0].path, files[0].path);
+  assert.equal(h.sendCalls[0][2], "child-files");
+  assert.deepEqual(h.get().sideChats[sideChatId].fileReferences, []);
+});
+
+test("an accepted send clears an unchanged attachment even when store updates clone its reference object", async () => {
+  const h = fixture();
+  const sideChatId = h.slice.openSideChat("parent", "answer-1", "quote");
+  assert.ok(sideChatId);
+  const files = [{ path: "C:/scratch/side-chat-child/image.png", name: "image.png", kind: "image", mimeType: "image/png" }];
+  h.set((state) => ({ sideChats: { ...state.sideChats, [sideChatId]: {
+    ...state.sideChats[sideChatId], fileReferences: files,
+  } } }));
+
+  const sending = h.slice.sendSideChatPrompt(sideChatId, "explain this image", files);
+  await Promise.resolve();
+  h.set((state) => ({ sideChats: { ...state.sideChats, [sideChatId]: {
+    ...state.sideChats[sideChatId], fileReferences: files.map((reference) => ({ ...reference })),
+  } } }));
+  h.fork.resolve("child-cloned-files");
+
+  assert.equal(await sending, true);
+  assert.deepEqual(h.get().sideChats[sideChatId].fileReferences, []);
+});
+
+test("an accepted send preserves attachments added while the first child is being created", async () => {
+  const h = fixture();
+  const sideChatId = h.slice.openSideChat("parent", "answer-1", "quote");
+  assert.ok(sideChatId);
+  const submitted = [{ path: "C:/scratch/side-chat-child/first.png", name: "first.png", kind: "image", mimeType: "image/png" }];
+  const addedLater = { path: "C:/scratch/side-chat-child/later.txt", name: "later.txt", kind: "file" };
+  h.set((state) => ({ sideChats: { ...state.sideChats, [sideChatId]: {
+    ...state.sideChats[sideChatId], fileReferences: submitted,
+  } } }));
+
+  const sending = h.slice.sendSideChatPrompt(sideChatId, "describe", submitted);
+  await Promise.resolve();
+  h.set((state) => ({ sideChats: { ...state.sideChats, [sideChatId]: {
+    ...state.sideChats[sideChatId], fileReferences: [...submitted, addedLater],
+  } } }));
+  h.fork.resolve("child-with-later-file");
+
+  assert.equal(await sending, true);
+  assert.deepEqual(h.get().sideChats[sideChatId].fileReferences, [...submitted, addedLater]);
+});
+
+test("a rejected attachment-only send retains its child files for retry", async () => {
+  const h = fixture();
+  const sideChatId = h.slice.openSideChat("parent", "answer-1", "quote");
+  assert.ok(sideChatId);
+  const files = [{ path: "C:/scratch/side-chat-child/notes.txt", name: "notes.txt", kind: "file" }];
+  h.set((state) => ({ sideChats: { ...state.sideChats, [sideChatId]: {
+    ...state.sideChats[sideChatId], fileReferences: files,
+  } } }));
+  h.sendResults.push(false);
+
+  const sending = h.slice.sendSideChatPrompt(sideChatId, "", files);
+  await Promise.resolve();
+  h.fork.resolve("child-files-rejected");
+  assert.equal(await sending, false);
+  assert.deepEqual(h.get().sideChats[sideChatId].fileReferences, files);
 });
 
 test("send rejection retains the child and draft so retry does not fork again", async () => {

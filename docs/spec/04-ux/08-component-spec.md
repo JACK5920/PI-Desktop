@@ -2075,16 +2075,32 @@ Single message render — either user (plaintext) or assistant (markdown streami
   rendered source text. A source marker is placed beside the excerpt only when
   those offsets still resolve to that exact excerpt; legacy, stale, or
   ambiguous anchors fall back to a message-level marker rather than guessing.
-  Pending Composer references show an excerpt preview on hover/focus while
-  the pointer can move from the trigger into the preview without dismissing it;
-  click remains the explicit review/edit action and opens that manager instead
-  of stacking both surfaces. Unsent references also place a numbered source
-  marker beside their excerpt immediately, before the prompt is sent. Assistant
-  citation controls and source markers preview on hover, keyboard focus, or
-  activation. Popovers
-  render excerpt/comment text inertly, remain usable when pointer/focus moves
-  into them, and dismiss through Escape or an outside press. These previews
-  never submit a prompt.
+  Pending Composer references use one compact card on hover or keyboard focus.
+  Pointer activation is limited to the reference chip and the narrow bridge to
+  its open card; the full-width Composer row is not a trigger. The card remains
+  open while the pointer enters it.
+  Each excerpt is a flat, numbered row with a muted selected-text label, the
+  excerpt, and compact edit/remove icons aligned in its header; rows use a light
+  divider instead of nested rounded cards. The preview has no duplicate text
+  clear action; the chip's hover/focus X is the single clear-all affordance,
+  rendered as a compact white circular button inset at the chip's trailing edge.
+  The same card shows optional comment text, without a second review panel or
+  redundant trigger tooltip.
+  The reference chip aligns with the Composer text inset. Its clear-all icon is
+  hidden at rest and appears on pointer hover or keyboard focus; activating it
+  clears only the pending references owned by that Composer.
+  Clicking an excerpt
+  navigates to its source message and highlights only the captured range when
+  its optional half-open offsets still resolve exactly. Unsent references also
+  place a numbered source marker beside their excerpt immediately, before the
+  prompt is sent. Assistant citation controls and source markers preview the
+  excerpt/comment on hover or keyboard focus. Clicking an answer citation
+  returns to the source message and highlights the exact captured range when
+  valid; the preview never repeats the entire source message. Missing, stale,
+  or invalid offsets land on the source message without guessing among repeated
+  excerpts. Popovers remain usable when pointer/focus moves into them and
+  dismiss through Escape or an outside press. These previews never submit a
+  prompt.
   A sent user message with a valid annotation envelope shows a collapsed,
   localized reference summary; expanding it reveals the quoted excerpts and
   optional comments without exposing the serialized envelope or source ids.
@@ -2094,8 +2110,14 @@ Single message render — either user (plaintext) or assistant (markdown streami
   text. Prompt display, edit, queue, and title projections omit the generated
   envelope; the sent-message reference summary remains available separately.
   **Ask in side chat** opens a WorkPanel draft without a child session or send.
-  The first explicit non-empty Send forks at the selected assistant message
-  without activating the child. The parent transcript and Composer stay active;
+  Its selected excerpt remains in the side-chat source metadata and inherited
+  parent transcript, but is not prefilled into the editable prompt. The first
+  explicit non-empty Send forks at the selected assistant message without
+  activating the child and submits only the user's typed request. Selecting
+  files is also an explicit prompt action: after a non-canceled selection, the
+  child is forked without activation and files are imported into its own scratch
+  space; canceling selection does not fork. A draft containing only file
+  attachments may be sent. The parent transcript and Composer stay active;
   the child reuses the normal transcript, Stop, approval, AskTool, and event
   handling for its own session id. Add to main chat appends the latest child
   answer to the parent draft; Open as a conversation selects the normal child;
@@ -2109,7 +2131,23 @@ Single message render — either user (plaintext) or assistant (markdown streami
   that child explicitly rather than the still-active parent. A stale
   fork/send cannot reopen a closed tab,
   switch the active parent, or overwrite a newer draft. The ordinary Ask-about-
-  selection fork remains a distinct context-menu path (ADR 0346). Unpromoted
+  selection fork remains a distinct context-menu path (ADR 0346). References
+  captured from the parent while this side chat is active stay on the side-chat
+  Composer, not the main Composer, and use the same unified excerpt card and
+  hover/focus preview with edit, remove, and clear actions. Their source session
+  and exact range survive transfer into the child prompt; clicking a reference
+  or child-answer citation returns to the owning source conversation, activating
+  it first when needed. The selected fork excerpt remains contextual metadata
+  and is never duplicated into editable prompt text. Selecting text in the child
+  transcript attaches a separate reference to that child's next prompt.
+  The tab uses a centered empty state and a single rounded composer containing
+  the source-context chip, reference control, file chips, text input and actions;
+  it does not display raw source-message ids or a duplicate excerpt block. The
+  source chip previews the excerpt and returns to its source message. Enter
+  follows the global Enter-to-send setting, Shift+Enter inserts a line break,
+  and IME composition Enter never submits. Model/permission controls are not
+  duplicated; the child inherits the owning conversation's engine settings.
+  Unpromoted
   sent side chats are omitted from top-level session lists and global search;
   the parent session lists them as reopenable entries using the durable child
   transcript and excerpt. “Open as a conversation” persists promotion before

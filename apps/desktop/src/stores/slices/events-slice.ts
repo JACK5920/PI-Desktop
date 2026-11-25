@@ -409,6 +409,11 @@ export function createEventsSlice({
             ...state.runningSessions,
             [envelope.sessionId]: true,
           },
+          runningSessionStartedAt: {
+            ...state.runningSessionStartedAt,
+            [envelope.sessionId]:
+              state.runningSessionStartedAt[envelope.sessionId] ?? envelope.ts,
+          },
           sessionOutcomes: withoutRecordKey(
             state.sessionOutcomes,
             envelope.sessionId,
@@ -424,6 +429,10 @@ export function createEventsSlice({
             ...state.runningSessions,
             [envelope.sessionId]: false,
           },
+          runningSessionStartedAt: withoutRecordKey(
+            state.runningSessionStartedAt,
+            envelope.sessionId,
+          ),
         }));
         void flushPendingSessionConfiguration(envelope.sessionId);
         void get().refreshQueuedPrompts(envelope.sessionId);
@@ -433,6 +442,10 @@ export function createEventsSlice({
             ...state.runningSessions,
             [envelope.sessionId]: false,
           },
+          runningSessionStartedAt: withoutRecordKey(
+            state.runningSessionStartedAt,
+            envelope.sessionId,
+          ),
           agentStatuses: withoutRecordKey(
             state.agentStatuses,
             envelope.sessionId,

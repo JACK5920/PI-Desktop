@@ -553,6 +553,10 @@ export function createQueueSlice({
           errorCode: null,
           errorDetails: null,
           errorRetriable: null,
+          runningSessionStartedAt: {
+            ...state.runningSessionStartedAt,
+            [startedIn]: Date.now(),
+          },
           runningSessions: { ...state.runningSessions, [startedIn]: true },
           latestTurnResults: withoutRecordKey(state.latestTurnResults, startedIn),
           sessionOutcomes: withoutRecordKey(state.sessionOutcomes, startedIn),
@@ -594,6 +598,7 @@ export function createQueueSlice({
               isRunning:
                 state.activeSessionId === startedIn ? false : state.isRunning,
               runningSessions: { ...state.runningSessions, [startedIn]: false },
+              runningSessionStartedAt: withoutRecordKey(state.runningSessionStartedAt, startedIn),
             }));
             return false;
           }
@@ -618,6 +623,7 @@ export function createQueueSlice({
             set((state) => ({
               isRunning: state.activeSessionId === startedIn ? false : state.isRunning,
               runningSessions: { ...state.runningSessions, [startedIn]: false },
+              runningSessionStartedAt: withoutRecordKey(state.runningSessionStartedAt, startedIn),
             }));
             get().consumeAcceptedAnnotations(startedIn, annotationSnapshot);
             onAccepted?.(startedIn);
@@ -678,6 +684,7 @@ export function createQueueSlice({
               isRunning:
                 state.activeSessionId === startedIn ? false : state.isRunning,
               runningSessions: { ...state.runningSessions, [startedIn]: false },
+              runningSessionStartedAt: withoutRecordKey(state.runningSessionStartedAt, startedIn),
               latestTurnResults: {
                 ...state.latestTurnResults,
                 [startedIn]: {

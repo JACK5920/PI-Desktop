@@ -1446,10 +1446,15 @@ Running turns and pending approvals continue to gate the controls.
   only for exact `:codex-annotation{index="N"}` syntax associated with that
   assistant turn's preceding request; activation opens a safe text-only
   excerpt/comment/source card. Unknown citations remain ordinary text.
-- **Ask in side chat** creates an unsent WorkPanel draft. The first explicit
-  non-empty Send creates a normal non-activating child fork and submits only
-  through the existing child-session path. The parent session, reading
-  position, and Composer remain in place. Child streaming, Stop, permissions,
+- **Ask in side chat** creates an unsent WorkPanel draft. Opening alone does
+  not create a child or send. The first explicit non-empty Send creates a
+  normal non-activating child fork and submits only through the existing
+  child-session path. Selecting actual files for an attachment is also an
+  explicit prompt action: after a non-canceled file selection, create the
+  non-activating child first and import only into that child's scratch space;
+  canceling the picker does not create a child. An attachment-only draft may
+  be sent. The parent session, reading position, and Composer remain in place.
+  Child streaming, Stop, permissions,
   and AskTool requests remain scoped to that child and use existing Host-owned
   controls. Add to main chat appends the latest answer to the parent draft; Open
   as a conversation selects the normal child. Promotion waits for an in-flight
@@ -1460,7 +1465,23 @@ Running turns and pending approvals continue to gate the controls.
   session's newer draft. Selection copy, quote-to-draft, and annotations also
   work in the child transcript; child quotes append to its compact input and
   pending annotations are reviewable there. Nested Ask in side chat is not
-  offered from a docked child; promote it to a normal conversation first. Sent,
+  offered from a docked child; promote it to a normal conversation first.
+  The side-chat surface uses a centered empty state and a single rounded
+  composer containing source context, selected references, file chips,
+  multiline input, attachment action, and send/stop actions. It never exposes
+  raw source-message ids or repeats the selected excerpt in a separate content
+  block. The source excerpt remains previewable and can navigate back to its
+  source message. Enter follows the global Enter-to-send preference, Shift+Enter
+  inserts a newline, and IME composition Enter never submits. Model and
+  permission settings are inherited from the parent/engine; the side chat does
+  not show controls that would secretly configure the parent.
+  Parent-source references captured while the side chat is active stay on the
+  side-chat Composer and share the main Composer's single preview/edit/remove
+  card. They retain their source session and exact range in the child request;
+  activating a reference from the child returns to its source conversation.
+  The fork excerpt remains contextual metadata, never duplicated into the
+  editable request. References captured from the child transcript target the
+  child's own next request. Sent,
   unpromoted side chats stay discoverable under the parent and are hidden from
   ordinary session lists and global search. Reopening restores the saved
   excerpt and transcript without activating a fork; promotion makes the child

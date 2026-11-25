@@ -80,6 +80,11 @@
   --ds-sidebar-glass-sheen-top: color-mix(in oklab, var(--gray-0) 7%, transparent);
   --ds-sidebar-glass-sheen-bottom: color-mix(in oklab, var(--gray-0) 4%, transparent);
   --ds-bg-chip: color-mix(in oklab, var(--gray-0) 6%, transparent);
+  /* High-contrast compact controls (e.g. the reference-chip clear affordance). */
+  --ds-bg-contrast-control: var(--gray-0);
+  --ds-fg-contrast-control: var(--gray-1000);
+  --ds-border-contrast-control: color-mix(in oklab, var(--gray-1000) 72%, transparent);
+  --ds-bg-contrast-control-hover: var(--gray-50);
   --ds-text-primary: var(--gray-0);
   /*
     One white-alpha ramp for the whole secondary/muted/faint tier. gray-500 and

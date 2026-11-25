@@ -176,7 +176,10 @@
 .composer-annotation-attachments {
   position: relative;
   display: flex;
+  width: fit-content;
+  max-width: calc(100% - 12px);
   align-items: center;
+  margin-inline-start: 12px;
   min-width: 0;
 }
 
@@ -185,7 +188,7 @@
   z-index: 71;
   top: -8px;
   inset-inline-start: 0;
-  width: min(360px, calc(100vw - 32px));
+  width: min(384px, calc(100vw - 32px));
   height: 8px;
   pointer-events: auto;
   content: "";
@@ -195,7 +198,7 @@
   display: inline-flex;
   align-items: center;
   min-height: 25px;
-  padding: 2px 9px;
+  padding: 2px 28px 2px 9px;
   border: 1px solid var(--ds-border-subtle);
   border-radius: var(--radius-full);
   background: var(--ds-bg-chip);
@@ -205,78 +208,84 @@
   cursor: pointer;
 }
 
+.composer-annotation-trigger {
+  position: relative;
+  display: inline-flex;
+  width: max-content;
+  max-width: 100%;
+  align-items: center;
+}
+
+.composer-annotation-clear-trigger {
+  position: absolute;
+  z-index: 1;
+  inset-inline-end: 4px;
+  display: inline-flex;
+  width: 18px;
+  min-width: 18px;
+  height: 18px;
+  min-height: 18px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--ds-border-contrast-control);
+  border-radius: var(--radius-round, 50%);
+  background: var(--ds-bg-contrast-control);
+  color: var(--ds-fg-contrast-control);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    background var(--motion-duration-fast) var(--motion-ease-out),
+    color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.composer-annotation-trigger:hover .composer-annotation-clear-trigger,
+.composer-annotation-trigger:focus-within .composer-annotation-clear-trigger,
+.composer-annotation-trigger[data-clear-visible="true"] .composer-annotation-clear-trigger {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.composer-annotation-clear-trigger:hover,
+.composer-annotation-clear-trigger:focus-visible {
+  background: var(--ds-bg-contrast-control-hover);
+  color: var(--ds-fg-contrast-control);
+}
+
+.composer-annotation-clear-trigger:focus-visible {
+  outline: 2px solid var(--ds-focus-ring);
+  outline-offset: 2px;
+}
+
 .composer-annotation-chip:hover,
 .composer-annotation-chip:focus-visible {
   color: var(--ds-text-primary);
   background: var(--ds-bg-hover);
 }
 
-.composer-annotation-hover-preview {
+.composer-annotation-card {
   position: absolute;
   z-index: 71;
   inset-inline-start: 0;
   bottom: calc(100% + 8px);
   display: grid;
-  width: min(360px, calc(100vw - 32px));
+  width: min(384px, calc(100vw - 32px));
   box-sizing: border-box;
-  max-height: min(320px, calc(100vh - 48px));
-  gap: 9px;
+  max-height: min(420px, calc(100vh - 180px));
+  gap: 2px;
   overflow: auto;
-  padding: 11px 12px;
+  padding: 6px 9px 4px;
   border: 1px solid var(--ds-border-subtle);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md-plus);
   background: var(--ds-bg-elevated-opaque);
   box-shadow: var(--ds-shadow-dialog);
   color: var(--ds-text-primary);
   font-size: var(--text-sm);
 }
 
-.composer-annotation-hover-item {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 4px 8px;
-  min-width: 0;
-}
-
-.composer-annotation-hover-excerpt,
-.composer-annotation-hover-comment {
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
-}
-
-.composer-annotation-hover-comment {
-  grid-column: 2;
-  color: var(--ds-text-tertiary);
-  font-size: var(--text-xs);
-}
-
-.composer-annotation-hover-more {
-  color: var(--ds-text-tertiary);
-  font-size: var(--text-xs);
-}
-
-.composer-annotation-review {
-  position: absolute;
-  z-index: 70;
-  inset-inline-start: 0;
-  bottom: calc(100% + 8px);
-  display: grid;
-  width: min(420px, calc(100vw - 32px));
-  box-sizing: border-box;
-  max-height: min(420px, calc(100vh - 180px));
-  gap: 10px;
-  overflow: auto;
-  padding: 16px;
-  border: 1px solid var(--ds-border-subtle);
-  border-radius: var(--radius-lg);
-  background: var(--ds-bg-elevated-opaque);
-  box-shadow: var(--ds-shadow-dialog);
-  color: var(--ds-text-primary);
-}
-
 .composer-annotation-list {
   display: grid;
-  gap: 10px;
+  gap: 0;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -284,24 +293,52 @@
 
 .composer-annotation-item {
   display: grid;
-  gap: 6px;
+  grid-template-columns: 20px minmax(0, 1fr);
+  align-items: start;
+  gap: 0 8px;
   min-width: 0;
-  padding: 12px;
-  border: 1px solid var(--ds-border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--ds-bg-secondary);
+  padding: 8px 5px 9px;
+  border: 0;
+  border-bottom: 1px solid color-mix(in oklab, var(--ds-border-subtle) 72%, transparent);
+  border-radius: 0;
+  background: transparent;
+}
+
+.composer-annotation-item:last-child {
+  border-bottom: 0;
+}
+
+.composer-annotation-item:hover,
+.composer-annotation-item:focus-within {
+  background: color-mix(in oklab, var(--ds-bg-hover) 46%, transparent);
 }
 
 .composer-annotation-content {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 6px 8px;
+  min-width: 0;
+  gap: 3px;
+}
+
+.composer-annotation-source-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 21px;
+}
+
+.composer-annotation-source-label {
+  padding-top: 2px;
+  color: var(--ds-text-muted, var(--ds-text-secondary));
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
 }
 
 .composer-annotation-number {
   display: grid;
-  width: 20px;
-  height: 20px;
+  width: 19px;
+  height: 19px;
+  margin-top: 2px;
   place-items: center;
   border-radius: var(--radius-full);
   background: var(--ds-bg-hover);
@@ -310,26 +347,44 @@
   font-weight: var(--font-weight-semibold);
 }
 
-.composer-annotation-excerpt,
 .composer-annotation-comment {
   min-width: 0;
-  margin: 0;
-  color: var(--ds-text-primary);
+  margin: 2px 0 0;
+  color: var(--ds-text-secondary);
   font-size: var(--text-xs);
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
 
-.composer-annotation-excerpt {
-  max-height: 96px;
+.composer-annotation-source-button {
+  display: block;
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--ds-text-primary);
+  font: inherit;
+  font-size: var(--text-xs);
+  text-align: start;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  max-height: 120px;
   overflow: auto;
-  border-inline-start: 2px solid var(--ds-border-strong);
-  padding-inline-start: 7px;
+  cursor: pointer;
+  line-height: var(--leading-body);
 }
 
-.composer-annotation-comment {
-  grid-column: 2;
-  color: var(--ds-text-secondary);
+.composer-annotation-source-button:hover,
+.composer-annotation-source-button:focus-visible {
+  color: var(--ds-accent-text, var(--ds-text-primary));
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.composer-annotation-source-button:focus-visible {
+  outline: 2px solid var(--ds-focus-ring);
+  outline-offset: 2px;
 }
 
 .composer-annotation-actions {
@@ -341,6 +396,19 @@
   gap: 6px;
 }
 
+.composer-annotation-source-header > .composer-annotation-actions {
+  flex-wrap: nowrap;
+  gap: 2px;
+  margin: -2px -3px 0 0;
+}
+
+.composer-annotation-source-header > .composer-annotation-actions .icon-btn {
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  padding: 4px;
+}
+
 .composer-annotation-actions > * {
   flex: 0 0 auto;
 }
@@ -348,10 +416,6 @@
 .composer-annotation-edit {
   display: grid;
   gap: 6px;
-}
-
-.composer-annotation-clear {
-  justify-self: start;
 }
 
 /* Focus deepens the lift; the shell never gains a stroke (D297). */

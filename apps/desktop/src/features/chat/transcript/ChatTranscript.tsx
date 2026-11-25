@@ -34,7 +34,11 @@ import { useTranscriptScroll } from "./hooks/useTranscriptScroll";
 import { useTranscriptContinuation } from "../../../hooks/use-transcript-continuation";
 import type { TranscriptSearchTarget } from "../../../lib/transcript-reading";
 import type { RestoreTranscriptReading } from "../../../hooks/use-transcript-reading-position";
-import { TranscriptSearchContext } from "../../../lib/transcript-search-context";
+import {
+  TranscriptSearchContext,
+  TranscriptSourceNavigationContext,
+  type TranscriptSourceTarget,
+} from "../../../lib/transcript-search-context";
 import { DisclosureAnchorContext } from "../../../lib/disclosure-anchor-context";
 import { api } from "../../../lib/api";
 import { mergeLiveSessionMessages } from "../../../lib/session-transcript";
@@ -48,6 +52,7 @@ import { conversationMenuItems, hasConversationToCopy } from "./menu-items";
 import { browserPluginTab } from "../../../lib/work-panel-tabs";
 import { isRemoteSession, sessionAllows } from "../../../lib/remote-session-safety";
 import { getTranscriptHistoryCapabilities } from "../../../lib/transcript-history-capabilities.mjs";
+import { navigateToAnnotationSource } from "../../../lib/annotation-source-navigation";
 import {
   RADIAL_MENU_ACTION_LABEL_KEYS,
   RADIAL_MENU_DIRECTIONS,
@@ -78,6 +83,8 @@ type ChatTranscriptProps = {
    */
   paneVisible?: boolean;
   searchTarget?: TranscriptSearchTarget | null;
+  /** Route citation navigation to a compact, non-active transcript when needed. */
+  onNavigateToSource?: (target: TranscriptSourceTarget) => void;
   readingWindow?: boolean;
   /** The displayed range includes this session's canonical live tail. */
   liveTail?: boolean;
@@ -125,6 +132,7 @@ function TranscriptBody({
   planningState,
   paneVisible = true,
   searchTarget = null,
+  onNavigateToSource,
   readingWindow = false,
   liveTail = !readingWindow,
   onRestoreReading,
@@ -140,6 +148,13 @@ function TranscriptBody({
   const openTranscriptMenu = useTranscriptMenu();
   const { copyText, selectText } = useChatTextActions();
   const showToast = useAppStore((state) => state.showToast);
+  const activeSideChatId = useAppStore((state) => {
+    if (!sessionId || state.activeSessionId !== sessionId || !state.workPanelOpen) return undefined;
+    const activeTab = state.workPanelTabs.find((tab) => tab.id === state.activeWorkPanelTabId);
+    if (activeTab?.kind !== "side-chat") return undefined;
+    const sideChatId = activeTab.resource ?? activeTab.id;
+    return state.sideChats[sideChatId]?.parentSessionId === sessionId ? sideChatId : undefined;
+  });
   const radialMenu = resolveRadialMenu(
     useAppStore((state) => state.settings),
   );
@@ -166,6 +181,19 @@ function TranscriptBody({
   const latestTurnResult = useAppStore((state) =>
     sessionId ? state.latestTurnResults[sessionId] : undefined,
   );
+  const runningSessionStartedAt = useAppStore((state) =>
+    sessionId ? state.runningSessionStartedAt[sessionId] : undefined,
+  );
+  const navigateToSource = useCallback((target: TranscriptSourceTarget) => {
+    if (!sessionId) return;
+    if (onNavigateToSource) {
+      onNavigateToSource(target);
+      return;
+    }
+    void navigateToAnnotationSource(target, () => useAppStore.getState()).catch((error) => {
+      showToast(error instanceof Error ? error.message : String(error), { variant: "error" });
+    });
+  }, [onNavigateToSource, sessionId, showToast]);
   const approvalPending = useAppStore((state) =>
     Boolean(
       sessionId && state.pendingPlans[sessionId]?.status === "pending",
@@ -453,6 +481,7 @@ function TranscriptBody({
   };
 
   return (
+    <TranscriptSourceNavigationContext.Provider value={navigateToSource}>
     <TranscriptSearchContext.Provider value={searchTarget}>
     <DisclosureAnchorContext.Provider value={disclosureAnchorNotifier}>
     <SlotSessionProvider sessionId={sessionId ?? ""}>
@@ -543,7 +572,7 @@ function TranscriptBody({
                 <RunActivityIndicator activity={specializedActivity} />
               ) : null}
               {showPlanning ? <PlanningIndicator kind={planningKind} /> : null}
-              {showWorking ? <WorkingIndicator /> : null}
+              {showWorking ? <WorkingIndicator startedAt={runningSessionStartedAt} /> : null}
             </div>
           ) : null}
         </div>
@@ -584,6 +613,7 @@ function TranscriptBody({
       <TranscriptSelectionToolbar
         transcriptRoot={selectionRoot}
         sessionId={sessionId}
+        sideChatId={activeSideChatId}
         onAppendUserSelection={onAppendUserSelection}
         onAskInSideChat={
           allowSideChatSelection &&
@@ -627,5 +657,6 @@ function TranscriptBody({
     </SlotSessionProvider>
     </DisclosureAnchorContext.Provider>
     </TranscriptSearchContext.Provider>
+    </TranscriptSourceNavigationContext.Provider>
   );
 }

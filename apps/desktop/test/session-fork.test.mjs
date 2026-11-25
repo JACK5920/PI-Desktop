@@ -53,7 +53,7 @@ test("assistant response fork reuses isolated session snapshots", () => {
   assert.match(store, /api\.forkSession\([\s\S]*?messageId/);
   assert.match(transcript, /forkAssistantMessage\(actionMessage\.id\)/);
   assert.match(transcript, /chat\.forkResponse/);
-  assert.match(readStoreModuleSync("slices/side-chat-slice.ts"), /forkAssistantMessageInSession\([\s\S]*?before\.excerpt/);
+  assert.match(readStoreModuleSync("slices/side-chat-slice.ts"), /forkAssistantMessageInSession\([\s\S]*?current\.excerpt/);
 });
 
 test("session fork labels are localized", () => {

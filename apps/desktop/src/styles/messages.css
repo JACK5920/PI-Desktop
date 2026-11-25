@@ -142,8 +142,7 @@
   white-space: pre-wrap;
 }
 
-.annotation-citation-comment,
-.annotation-citation-source {
+.annotation-citation-comment {
   display: grid;
   gap: 4px;
   min-width: 0;
@@ -155,17 +154,10 @@
   font-weight: var(--font-weight-semibold);
 }
 
-.annotation-citation-comment-text,
-.annotation-citation-source-text {
+.annotation-citation-comment-text {
   display: block;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
-}
-
-.annotation-citation-source-id {
-  color: var(--ds-text-secondary);
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
 }
 
 .message-row {

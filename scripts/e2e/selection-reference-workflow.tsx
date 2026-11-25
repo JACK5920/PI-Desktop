@@ -74,12 +74,12 @@ function finishSelectionDrag(target: Element): void {
 }
 
 async function waitForToolbar(expectedExcerpt?: string): Promise<void> {
-  const deadline = performance.now() + 2_000;
+  const deadline = Date.now() + 2_000;
   const expected = expectedExcerpt ?? window.getSelection()?.toString().trim();
-  while (performance.now() < deadline) {
+  while (Date.now() < deadline) {
     const toolbar = document.querySelector<HTMLElement>('[data-testid="selection-reference-toolbar"]');
     if (toolbar && (!expected || toolbar.dataset.selectionExcerpt === expected)) return;
-    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    await new Promise<void>((resolve) => setTimeout(resolve, 16));
   }
   throw new Error(`Selection toolbar did not appear after the selection settled; expected=${expected}; selected=${window.getSelection()?.toString()}`);
 }
@@ -132,7 +132,22 @@ function setTextareaValue(element: HTMLTextAreaElement, value: string): void {
 }
 
 async function settle(): Promise<void> {
-  await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+  await new Promise<void>((resolve) => setTimeout(resolve, 32));
+}
+
+async function settleAfterFocus(): Promise<void> {
+  await settle();
+}
+
+async function waitForClearIconVisible(button: HTMLButtonElement): Promise<void> {
+  const deadline = Date.now() + 500;
+  while (Date.now() < deadline) {
+    if (Number.parseFloat(getComputedStyle(button).opacity) >= 0.99) return;
+    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(
+    `Clear icon did not become visible (opacity=${getComputedStyle(button).opacity}; visible=${button.parentElement?.getAttribute("data-clear-visible")}; focusWithin=${button.parentElement?.matches(":focus-within")})`,
+  );
 }
 
 let i18n: ReturnType<typeof createInstance>;
@@ -189,6 +204,7 @@ function Fixture() {
           <TranscriptSelectionToolbar
             transcriptRoot={transcriptRoot}
             sessionId="parent"
+          sideChatId={sideChatId ?? undefined}
             onAskInSideChat={(selection) => {
               const id = useAppStore.getState().openSideChat(
                 selection.sessionId,
@@ -266,14 +282,30 @@ globalThis.selectionReferenceProbe = async () => {
     stage: async () => { throw new Error("File staging is outside this text-only fixture"); },
   });
   const originalPromoteSideChat = api.promoteSideChat;
+  const originalPickFiles = api.pickFiles;
+  const originalImportFiles = api.importFiles;
   api.promoteSideChat = async () => ({ ok: true });
+  const importedSideChatFiles: Array<{ sessionId: string; token: string }> = [];
+  let filePickerCalls = 0;
+  api.pickFiles = async () => {
+    filePickerCalls += 1;
+    return filePickerCalls === 1 ? { token: null, canceled: true } : { token: "side-chat-file-picker-token" };
+  };
+  api.importFiles = async (sessionId, token) => {
+    importedSideChatFiles.push({ sessionId, token });
+    return { files: [{ path: `/scratch/${sessionId}/reference.png`, name: "reference.png", kind: "image", mimeType: "image/png" }] };
+  };
 
   let forkCount = 0;
-  const sends: Array<{ content: string; childSessionId: string }> = [];
+  const forkedSideChatExcerpts: Array<string | undefined> = [];
+  const sends: Array<{ content: string; childSessionId: string; fileReferences: Array<{ path: string; name: string; kind?: string }> }> = [];
+  const sentSideChatAnnotations: Array<{ childSessionId: string; annotations: AppState["responseAnnotations"][string] }> = [];
   const selectedSessions: string[] = [];
   const pendingResolvers: Array<(accepted: boolean) => void> = [];
+  const abortedSessions: string[] = [];
   const permissionResolutions: Array<{ sessionId: string; requestId: string; decision: string }> = [];
   const askResolutions: Array<{ sessionId: string; requestId: string; answers: Array<string[] | null> }> = [];
+  const navigationTargets: Array<{ sessionId: string; messageId: string; query: string; anchorStart?: number; anchorEnd?: number }> = [];
   useAppStore.setState({
     activeSessionId: "parent",
     sessions: [parentSession] as AppState["sessions"],
@@ -285,6 +317,7 @@ globalThis.selectionReferenceProbe = async () => {
     forkAssistantMessageInSession: (async (parentSessionId, messageId, excerpt) => {
       assert(parentSessionId === "parent", "side chat fork used a different parent session");
       assert(messageId.startsWith("answer-"), "side chat fork did not use an assistant message anchor");
+      forkedSideChatExcerpts.push(excerpt);
       forkCount += 1;
       const childSessionId = `side-chat-child-${forkCount}`;
       useAppStore.setState((state) => ({
@@ -303,9 +336,14 @@ globalThis.selectionReferenceProbe = async () => {
       }));
       return childSessionId;
     }) as AppState["forkAssistantMessageInSession"],
-    sendPrompt: (async (content, _draft, childSessionId) => {
+    sendPrompt: (async (content, draft, childSessionId) => {
       if (!childSessionId) return false;
-      sends.push({ content, childSessionId });
+      const childAnnotations = useAppStore.getState().responseAnnotations[childSessionId] ?? [];
+      sentSideChatAnnotations.push({
+        childSessionId,
+        annotations: childAnnotations.map((item) => ({ ...item })),
+      });
+      sends.push({ content, childSessionId, fileReferences: draft?.fileReferences ?? [] });
       const sideChatId = Object.values(useAppStore.getState().sideChats).find(
         (sideChat) => sideChat.childSessionId === childSessionId,
       )?.id;
@@ -356,6 +394,7 @@ globalThis.selectionReferenceProbe = async () => {
             if (!sideChat) return {};
             return {
               runningSessions: { ...state.runningSessions, [childSessionId]: false },
+              responseAnnotations: { ...state.responseAnnotations, [childSessionId]: [] },
               sideChats: {
                 ...state.sideChats,
                 [sideChatId]: {
@@ -364,13 +403,13 @@ globalThis.selectionReferenceProbe = async () => {
                     {
                       id: `user-side-${forkCount}`,
                       role: "user",
-                      content,
+                      content: buildAnnotatedPrompt(content, childAnnotations),
                       createdAt: "2026-11-04T00:00:03.000Z",
                     } as AppState["messages"][number],
                     {
                       id: `assistant-side-${forkCount}`,
                       role: "assistant",
-                      content: "Side result for the selected excerpt.",
+                      content: 'Side result for the selected excerpt. :codex-annotation{index="1"}',
                       status: "complete",
                       createdAt: "2026-11-04T00:00:04.000Z",
                     } as AppState["messages"][number],
@@ -387,6 +426,13 @@ globalThis.selectionReferenceProbe = async () => {
       selectedSessions.push(id);
       useAppStore.setState({ activeSessionId: id });
     }) as AppState["selectSession"],
+    abortSession: (async (sessionId) => {
+      abortedSessions.push(sessionId);
+      return {};
+    }) as AppState["abortSession"],
+    navigateTranscript: (async (target) => {
+      navigationTargets.push(target);
+    }) as AppState["navigateTranscript"],
     promoteSideChat: async () => ({ ok: true }),
     resolvePermission: (async (sessionId, requestId, decision) => {
       permissionResolutions.push({ sessionId, requestId, decision });
@@ -563,30 +609,99 @@ globalThis.selectionReferenceProbe = async () => {
     await settle();
 
     const referencesChip = buttonNamed("References (1)");
+    const composerShell = referencesChip.closest<HTMLElement>(".annotation-composer-fixture");
+    assert(composerShell, "the reference trigger is not inside the Composer fixture");
+    const clearTrigger = referencesChip.parentElement?.querySelector<HTMLButtonElement>(".composer-annotation-clear-trigger");
+    assert(clearTrigger, "the reference chip has no hover clear icon");
+    assert(clearTrigger.getAttribute("aria-label") === "Clear all references", "the clear icon has no accessible clear-all label");
+    assert(getComputedStyle(clearTrigger).opacity === "0", "the clear icon is visible before the reference chip is hovered or focused");
+    composerShell.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
+    await settle();
+    assert(
+      !host.querySelector('[data-testid="composer-annotation-card"]'),
+      "hovering the empty Composer row opened the reference preview",
+    );
     referencesChip.focus();
     referencesChip.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
     await settle();
-    assert(host.querySelector('[data-testid="composer-annotation-preview"]')?.textContent?.includes(quote), "keyboard focus did not preview the pending reference in the Composer");
+    assert(host.querySelector('[data-testid="composer-annotation-card"]')?.textContent?.includes(quote), "keyboard focus did not open the unified pending-reference card");
+    await waitForClearIconVisible(clearTrigger);
+    assert(
+      getComputedStyle(clearTrigger).opacity === "1",
+      `keyboard focus did not reveal the clear icon (chipFocused=${referencesChip.matches(":focus")}, triggerFocusWithin=${referencesChip.parentElement?.matches(":focus-within")}, opacity=${getComputedStyle(clearTrigger).opacity})`,
+    );
     referencesChip.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
     await settle();
-    const composerPreview = host.querySelector<HTMLElement>('[data-testid="composer-annotation-preview"]');
-    assert(composerPreview, "hovering the Composer reference control did not open its preview");
-    composerPreview.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
+    const composerCard = host.querySelector<HTMLElement>('[data-testid="composer-annotation-card"]');
+    assert(composerCard, "hovering the Composer reference control did not open its unified card");
+    const attachmentRoot = referencesChip.closest<HTMLElement>(".composer-annotation-attachments");
+    assert(attachmentRoot, "the reference chip has no layout root");
+    const attachmentRect = attachmentRoot.getBoundingClientRect();
+    const triggerRect = referencesChip.getBoundingClientRect();
+    assert(
+      attachmentRect.width <= triggerRect.width + 1 && attachmentRect.width < composerShell.getBoundingClientRect().width / 2,
+      "the reference hover trigger still spans the full Composer row",
+    );
+    assert(Math.abs(triggerRect.left - composerShell.getBoundingClientRect().left - 12) <= 1, "the reference chip is not inset to align with Composer text");
+    assert(
+      Math.abs(composerCard.getBoundingClientRect().left - triggerRect.left) <= 1,
+      "the reference preview is not aligned to its inset trigger",
+    );
+    composerCard.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
     await settle();
-    assert(host.querySelector('[data-testid="composer-annotation-preview"]'), "moving the pointer into the Composer preview dismissed it");
-    const composerHoverBridge = getComputedStyle(referencesChip.parentElement!, "::before");
+    assert(host.querySelector('[data-testid="composer-annotation-card"]') === composerCard, "moving the pointer into the reference card dismissed it");
+    const composerReferenceRow = composerCard.querySelector<HTMLElement>(".composer-annotation-item");
+    assert(composerReferenceRow, "the unified reference card has no excerpt row");
+    assert(
+      composerReferenceRow.querySelector(".composer-annotation-source-label")?.textContent?.trim() === "Selected excerpt:",
+      "the reference row does not identify its selected-text excerpt",
+    );
+    const composerReferenceHeader = composerReferenceRow.querySelector(".composer-annotation-source-header");
+    const composerReferenceActions = composerReferenceHeader?.querySelector(".composer-annotation-actions");
+    assert(composerReferenceActions, "reference edit/remove icons are not aligned in the row header");
+    const composerReferenceRowStyle = getComputedStyle(composerReferenceRow);
+    assert(
+      composerReferenceRowStyle.borderRadius === "0px" &&
+        composerReferenceRowStyle.borderTopWidth === "0px" &&
+        composerReferenceRowStyle.borderInlineStartWidth === "0px" &&
+        composerReferenceRowStyle.borderInlineEndWidth === "0px",
+      "reference excerpts are still rendered as nested rounded cards",
+    );
+    assert(!composerCard.querySelector(".composer-annotation-clear"), "the reference card duplicates the chip clear action with a text footer");
+    const clearTriggerStyle = getComputedStyle(clearTrigger);
+    const clearTriggerBounds = clearTrigger.getBoundingClientRect();
+    assert(
+      clearTriggerStyle.borderTopWidth === "1px" &&
+        clearTriggerStyle.borderRightWidth === "1px" &&
+        clearTriggerStyle.borderBottomWidth === "1px" &&
+        clearTriggerStyle.borderLeftWidth === "1px" &&
+        Number.parseFloat(clearTriggerStyle.borderRadius) >= Math.min(clearTriggerBounds.width, clearTriggerBounds.height) / 2 &&
+        clearTriggerStyle.backgroundColor === "rgb(255, 255, 255)" &&
+        clearTriggerBounds.width >= 16 && clearTriggerBounds.width <= 20 &&
+        clearTriggerBounds.height >= 16 && clearTriggerBounds.height <= 20,
+      `clear-all affordance does not match the compact circular X reference (border=${clearTriggerStyle.borderTopWidth}, radius=${clearTriggerStyle.borderRadius}, bg=${clearTriggerStyle.backgroundColor}, size=${clearTriggerBounds.width}x${clearTriggerBounds.height})`,
+    );
+    const composerHoverBridge = getComputedStyle(attachmentRoot, "::before");
     assert(composerHoverBridge.pointerEvents !== "none" && Number.parseFloat(composerHoverBridge.height) >= 8, "Composer hover preview has no hit-test bridge across the trigger gap");
-    referencesChip.click();
+    assert(!referencesChip.hasAttribute("title"), "the reference chip retained a redundant hover tooltip");
+    assert(!host.querySelector(".composer-annotation-review"), "a separate reference manager is still rendered");
+    const sourceLink = composerCard.querySelector<HTMLButtonElement>(".composer-annotation-source-button");
+    assert(sourceLink, "the unified reference card has no source-navigation action");
+    sourceLink.click();
     await settle();
-    assert(!host.querySelector('[data-testid="composer-annotation-preview"]'), "opening the reference manager left the hover preview open underneath it");
-    assert(host.querySelector(".composer-annotation-review"), "clicking the reference control did not open the reference manager");
-    assert(host.textContent?.includes(quote), "annotation review does not show the captured excerpt");
-    const referenceReview = host.querySelector<HTMLElement>(".composer-annotation-review");
-    const reviewRect = referenceReview?.getBoundingClientRect();
-    assert(reviewRect, "Composer reference review has no measurable layout");
-    assert(reviewRect.left >= 0 && reviewRect.right <= window.innerWidth, "Composer reference review extends beyond the viewport width");
-    const annotationReviewActions = [...referenceReview.querySelectorAll<HTMLButtonElement>(".composer-annotation-actions > button")];
-    assert(annotationReviewActions.length === 2, "Composer reference review does not expose edit and remove controls");
+    assert(!host.querySelector('[data-testid="composer-annotation-card"]'), "source navigation did not dismiss the reference card");
+    assert(navigationTargets.at(-1)?.sessionId === "parent", "reference navigation targeted the wrong session");
+    assert(navigationTargets.at(-1)?.messageId === "answer-parent", "reference navigation targeted the wrong source message");
+    assert(navigationTargets.at(-1)?.query === quote, "reference navigation lost the exact quoted excerpt");
+    assert(navigationTargets.at(-1)?.anchorStart === expectedAnchorStart, "reference navigation lost the exact source offset");
+    referencesChip.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
+    await settle();
+    const referenceCard = host.querySelector<HTMLElement>(".composer-annotation-card");
+    assert(referenceCard, "the reference card could not be reopened for editing");
+    const reviewRect = referenceCard.getBoundingClientRect();
+    assert(reviewRect.left >= 0 && reviewRect.right <= window.innerWidth, "Composer reference card extends beyond the viewport width");
+    const annotationReviewActions = [...referenceCard.querySelectorAll<HTMLButtonElement>(".composer-annotation-actions > button")];
+    assert(annotationReviewActions.length === 2, "Composer reference card does not expose edit and remove controls");
     assert(
       annotationReviewActions.every((button) => {
         const rect = button.getBoundingClientRect();
@@ -601,7 +716,7 @@ globalThis.selectionReferenceProbe = async () => {
     buttonNamed("Edit note").click();
     await settle();
     const annotationEditActions = [
-      ...referenceReview.querySelectorAll<HTMLButtonElement>(".composer-annotation-edit .composer-annotation-actions button"),
+      ...referenceCard.querySelectorAll<HTMLButtonElement>(".composer-annotation-edit .composer-annotation-actions button"),
     ];
     assert(annotationEditActions.length === 2, "Composer annotation editor does not show cancel and save actions");
     assert(
@@ -647,7 +762,7 @@ globalThis.selectionReferenceProbe = async () => {
     const citationDialog = host.querySelector(".annotation-citation-popover");
     assert(citationDialog?.textContent?.includes(quote), "citation popover does not show its excerpt");
     assert(citationDialog?.textContent?.includes("Keep the parent visible while the child runs."), "citation popover does not show its comment");
-    assert(citationDialog?.textContent?.includes("answer-parent"), "citation popover does not retain source-message context");
+    assert(!citationDialog?.textContent?.includes("while review stays beside it."), "citation popover repeats the entire source message instead of the selected excerpt");
     assert(citation.getAttribute("aria-expanded") === "true", "citation hover did not expose its expanded state");
     const citationHoverBridge = getComputedStyle(citation.parentElement!, "::after");
     assert(citationHoverBridge.pointerEvents !== "none" && Number.parseFloat(citationHoverBridge.height) >= 8, "citation hover preview has no hit-test bridge across the trigger gap");
@@ -655,6 +770,13 @@ globalThis.selectionReferenceProbe = async () => {
     citationDialog.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
     await settle();
     assert(host.querySelector(".annotation-citation-popover"), "moving the pointer into the citation preview dismissed it");
+    citation.click();
+    await settle();
+    assert(navigationTargets.at(-1)?.messageId === "answer-parent", "answer citation did not navigate to its source message");
+    assert(navigationTargets.at(-1)?.anchorStart === expectedAnchorStart, "answer citation did not retain its exact source highlight anchor");
+    assert(!host.querySelector(".annotation-citation-popover"), "clicking an answer citation did not close its preview before navigation");
+    citation.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
+    await settle();
     citation.focus();
     citation.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
     citation.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
@@ -671,26 +793,143 @@ globalThis.selectionReferenceProbe = async () => {
     assert(firstSideChat, "Ask in side chat did not create the docked draft tab");
     assert(!firstSideChat.childSessionId && forkCount === 0 && sends.length === 0, "opening a side chat forked or sent without user Send");
     assert(useAppStore.getState().activeSessionId === "parent", "opening a side chat switched away from the parent");
-    assert(firstSideChat.draftText.includes(quote), "side-chat draft omitted the selected excerpt");
+    assert(firstSideChat.excerpt === quote, "side-chat draft did not retain the selected excerpt as source context");
+    assert(firstSideChat.draftText === "", "side-chat input duplicated the selected excerpt");
+    const openedSideChatPane = host.querySelector<HTMLElement>(`.side-chat-tab[data-side-chat-id="${firstSideChat.id}"]`);
+    assert(openedSideChatPane?.querySelector('[data-testid="side-chat-empty"]'), "the empty side chat does not use a centered welcome state");
+    assert(!openedSideChatPane?.textContent?.includes("answer-parent"), "the side-chat header exposes a raw source message id");
+    assert(!openedSideChatPane?.querySelector(".side-chat-excerpt"), "the side chat repeats its selected excerpt outside the composer context chip");
+    buttonNamed("Add files").click();
+    await settleAfterFocus();
+    assert(forkCount === 0 && !useAppStore.getState().sideChats[firstSideChat.id]?.childSessionId, "canceling the side-chat file picker created a child session");
+    assert(sends.length === 0, "canceling the side-chat file picker submitted a prompt");
+    const sourceContextChip = openedSideChatPane?.querySelector<HTMLButtonElement>('[data-testid="side-chat-context-chip"]');
+    assert(sourceContextChip, "the source excerpt is not attached to the unified side-chat composer");
+    sourceContextChip.click();
+    await settleAfterFocus();
+    const sourceContextPreview = openedSideChatPane?.querySelector<HTMLElement>('[data-testid="side-chat-source-preview"]');
+    assert(sourceContextPreview?.textContent?.includes(quote), "source context preview does not show the selected excerpt");
+    buttonNamed("Go to source").click();
+    await settleAfterFocus();
+    assert(navigationTargets.at(-1)?.sessionId === "parent" && navigationTargets.at(-1)?.messageId === "answer-parent", "the source context chip did not return to the selected parent message");
+    assert(navigationTargets.at(-1)?.query === quote, "the source context navigation lost the selected excerpt");
+    const mainDraftBeforeSideReference = liveDraft.text;
+
+    const additionalExcerpt = "A different answer must never replace the captured excerpt.";
+    clearSelection();
+    selectText(otherAssistantNode, 0, additionalExcerpt.length);
+    await waitForToolbar(additionalExcerpt);
+    buttonNamed("Add to chat").click();
+    await settle();
+    setTextareaValue(textareaNamed("Add a note to this excerpt (optional)"), "First side-chat reference note.");
+    buttonNamed("Attach excerpt").click();
+    await settle();
+    let sideChatReference = useAppStore.getState().sideChats[firstSideChat.id]?.references[0];
+    assert(sideChatReference, "selecting from the parent transcript did not attach a reference to the active side chat");
+    assert(sideChatReference.sourceSessionId === "parent", "the side-chat reference lost its parent source session");
+    assert(sideChatReference.excerpt === additionalExcerpt, "the side-chat reference lost the captured excerpt");
+    assert(liveDraft.text === mainDraftBeforeSideReference, "a side-chat reference polluted the main conversation draft");
+    assert(useAppStore.getState().sideChats[firstSideChat.id]?.draftText === "", "the selected excerpt was duplicated into the side-chat prompt text");
+
+    const draftSideChatPane = host.querySelector<HTMLElement>(`.side-chat-tab[data-side-chat-id="${firstSideChat.id}"]`);
+    assert(draftSideChatPane, "side-chat pane is missing before its first send");
+    let sideReferenceChip = draftSideChatPane.querySelector<HTMLButtonElement>(".composer-annotation-chip");
+    assert(sideReferenceChip?.textContent?.includes("(1)"), "the side-chat composer does not show its attached-reference count");
+    sideReferenceChip?.click();
+    await settleAfterFocus();
+    let sideReferenceCard = draftSideChatPane.querySelector<HTMLElement>("[data-testid='composer-annotation-card']");
+    assert(sideReferenceCard?.textContent?.includes(additionalExcerpt), "hovering side-chat references did not preview the selected excerpt");
+    assert(sideReferenceCard?.textContent?.includes("First side-chat reference note."), "side-chat reference preview omitted its note");
+    sideReferenceCard?.querySelector<HTMLButtonElement>(".composer-annotation-source-button")?.click();
+    await settleAfterFocus();
+    assert(navigationTargets.at(-1)?.sessionId === "parent", "side-chat reference did not return to its parent source session");
+    assert(navigationTargets.at(-1)?.messageId === "answer-other", "side-chat reference navigated to the wrong source message");
+
+    sideReferenceChip = draftSideChatPane.querySelector<HTMLButtonElement>(".composer-annotation-chip");
+    sideReferenceChip?.click();
+    await settleAfterFocus();
+    sideReferenceCard = draftSideChatPane.querySelector<HTMLElement>("[data-testid='composer-annotation-card']");
+    sideReferenceCard?.querySelector<HTMLButtonElement>("[aria-label='Edit note']")?.click();
+    await settleAfterFocus();
+    const sideReferenceEditor = draftSideChatPane.querySelector<HTMLTextAreaElement>(".composer-annotation-edit textarea");
+    assert(sideReferenceEditor, "side-chat reference has no editable note control");
+    setTextareaValue(sideReferenceEditor, "Edited side-chat reference note.");
+    buttonNamed("Attach excerpt").click();
+    await settleAfterFocus();
+    sideChatReference = useAppStore.getState().sideChats[firstSideChat.id]?.references[0];
+    assert(sideChatReference?.comment === "Edited side-chat reference note.", "editing a side-chat reference note did not save");
+
+    const removableExcerpt = "The accepted branch keeps the";
+    const removableReferenceId = useAppStore.getState().addSideChatReference(
+      firstSideChat.id,
+      "answer-parent",
+      removableExcerpt,
+      { anchorStart: 0, anchorEnd: removableExcerpt.length },
+      ["answer-parent"],
+    );
+    assert(removableReferenceId, "could not stage a second side-chat reference for remove-control verification");
+    await settleAfterFocus();
+    assert(useAppStore.getState().sideChats[firstSideChat.id]?.references.length === 2, "a second reference was not attached for removal verification");
+    sideReferenceCard = draftSideChatPane.querySelector<HTMLElement>("[data-testid='composer-annotation-card']");
+    const sideReferenceRows = [...(sideReferenceCard?.querySelectorAll<HTMLElement>(".composer-annotation-item") ?? [])];
+    assert(sideReferenceRows.length === 2, "two side-chat references are not shown as distinct rows");
+    assert(
+      getComputedStyle(sideReferenceRows[0]).borderBottomWidth === "1px" &&
+        getComputedStyle(sideReferenceRows[1]).borderBottomWidth === "0px",
+      "multiple references are not separated by a single lightweight divider",
+    );
+    const removableReferenceRow = [...(sideReferenceCard?.querySelectorAll<HTMLElement>(".composer-annotation-item") ?? [])]
+      .find((row) => row.textContent?.includes(removableExcerpt));
+    removableReferenceRow?.querySelector<HTMLButtonElement>("[aria-label='Remove reference']")?.click();
+    await settleAfterFocus();
+    assert(useAppStore.getState().sideChats[firstSideChat.id]?.references.length === 1, "removing a pending side-chat reference did not remove only that reference");
+    assert(useAppStore.getState().sideChats[firstSideChat.id]?.references[0]?.id === sideChatReference?.id, "removing one pending reference also removed the remaining one");
+
+    buttonNamed("Add files").click();
+    for (let index = 0; index < 120 && !useAppStore.getState().sideChats[firstSideChat.id]?.fileReferences.length; index += 1) await settleAfterFocus();
+    const sideChatFiles = useAppStore.getState().sideChats[firstSideChat.id]?.fileReferences ?? [];
+    assert(sideChatFiles.length === 1 && sideChatFiles[0]?.kind === "image", "file picker did not attach the selected image to the side-chat draft");
+    assert(forkCount === 1 && sends.length === 0, "adding a selected file did not create exactly one child or sent a prompt unexpectedly");
+    assert(importedSideChatFiles[0]?.sessionId === useAppStore.getState().sideChats[firstSideChat.id]?.childSessionId, "side-chat files were not imported into the side-chat child scratch space");
+    assert(importedSideChatFiles[0]?.sessionId !== "parent", "a side-chat file was imported into the parent session");
+    assert(draftSideChatPane.querySelector(".side-chat-file-chip")?.textContent?.includes("reference.png"), "the side-chat composer does not show its attached file chip");
 
     const sidePrompt = textareaNamed("Side-chat prompt");
-    setTextareaValue(sidePrompt, `${firstSideChat.draftText}Explain the selected result.`);
-    buttonNamed("Send").click();
-    for (let index = 0; index < 120 && sends.length === 0; index += 1) await settle();
+    sidePrompt.focus();
+    setTextareaValue(sidePrompt, "Explain the selected result.");
+    const shiftEnter = new KeyboardEvent("keydown", { key: "Enter", shiftKey: true, bubbles: true, cancelable: true });
+    sidePrompt.dispatchEvent(shiftEnter);
+    assert(!shiftEnter.defaultPrevented && sends.length === 0, "Shift+Enter submitted the side-chat prompt instead of inserting a newline");
+    const composingEnter = new KeyboardEvent("keydown", { key: "Enter", isComposing: true, keyCode: 229, bubbles: true, cancelable: true });
+    sidePrompt.dispatchEvent(composingEnter);
+    assert(!composingEnter.defaultPrevented && sends.length === 0, "IME composition Enter submitted the side-chat prompt");
+    sidePrompt.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    for (let index = 0; index < 120 && sends.length === 0; index += 1) await settleAfterFocus();
     assert(forkCount === 1 && sends.length === 1, "explicit side-chat Send did not create exactly one fork and prompt");
+    assert(forkedSideChatExcerpts[0] === quote, "the selected excerpt was not retained as fork context");
+    assert(sends[0].content === "Explain the selected result.", "the user request duplicated the selected excerpt");
+    assert(sends[0].fileReferences.length === 1 && sends[0].fileReferences[0]?.path === sideChatFiles[0]?.path, "side-chat image references were not passed to the child prompt");
+    assert(
+      sentSideChatAnnotations[0]?.childSessionId === useAppStore.getState().sideChats[firstSideChat.id]?.childSessionId,
+      "the side-chat send captured the wrong child id",
+    );
+    assert(sentSideChatAnnotations[0]?.annotations.length === 1, "the side-chat prompt did not transfer exactly one reference");
+    assert(sentSideChatAnnotations[0]?.annotations[0]?.sourceSessionId === "parent", "the sent side-chat reference lost its source session");
+    assert(sentSideChatAnnotations[0]?.annotations[0]?.sourceMessageId === "answer-other", "the sent side-chat reference lost its source message");
+    assert(sentSideChatAnnotations[0]?.annotations[0]?.comment === "Edited side-chat reference note.", "the sent side-chat reference lost its note");
     assert(
       !listableSessions(useAppStore.getState().sessions).some((session) => session.sideChat?.parentSessionId === "parent"),
       "an unpromoted sent side chat appeared in the ordinary session list",
     );
     assert(useAppStore.getState().activeSessionId === "parent", "side-chat send navigated away from the parent");
-    await settle();
+    await settleAfterFocus();
     assert(host.textContent?.includes("Streaming side answer"), "side-chat transcript did not react to the streaming child update");
     assert(host.querySelector(".permission-card"), "side-chat child permission request was not shown in its transcript");
     assert(host.querySelector('.asktool-card[role="region"]'), "side-chat child AskTool request was not shown beside its transcript");
     const firstChildDuringRun = useAppStore.getState().sideChats[firstSideChat.id]?.childSessionId;
     assert(firstChildDuringRun, "first side-chat child session was not registered before approval");
     buttonNamed("Allow once").click();
-    await settle();
+    await settleAfterFocus();
     assert(permissionResolutions.at(-1)?.sessionId === firstChildDuringRun, "permission resolution did not target the side-chat child session");
     assert(
       document.activeElement === textareaNamed("Side-chat prompt"),
@@ -700,19 +939,57 @@ globalThis.selectionReferenceProbe = async () => {
     const proceedOption = [...host.querySelectorAll<HTMLButtonElement>(".asktool-option")].find((button) => button.textContent?.includes("Proceed"));
     assert(proceedOption, "side-chat child AskTool option is missing");
     proceedOption.click();
-    await settle();
+    await settleAfterFocus();
     buttonNamed("Submit answers").click();
-    await settle();
+    await settleAfterFocus();
     assert(askResolutions.at(-1)?.sessionId === firstChildDuringRun, "AskTool resolution did not target the side-chat child session");
     assert(askResolutions.at(-1)?.answers[0]?.[0] === "Proceed", "side-chat AskTool answer was not preserved");
     pendingResolvers.shift()?.(true);
-    for (let index = 0; index < 120 && !host.textContent?.includes("Side result for the selected excerpt."); index += 1) await settle();
+    for (let index = 0; index < 120 && !host.textContent?.includes("Side result for the selected excerpt."); index += 1) await settleAfterFocus();
+    assert(
+      useAppStore.getState().sideChats[firstSideChat.id]?.fileReferences.length === 0,
+      "accepted child prompt did not consume its unchanged side-chat attachment",
+    );
     assert(host.textContent?.includes("Side result for the selected excerpt."), "completed side-chat answer was not rendered");
     assert(useAppStore.getState().activeSessionId === "parent", "completed side-chat response changed the active parent");
     const firstChildId = useAppStore.getState().sideChats[firstSideChat.id]?.childSessionId;
     assert(firstChildId, "first side-chat child session was not retained before follow-up actions");
     const sideChatPane = host.querySelector<HTMLElement>(`.side-chat-tab[data-side-chat-id="${firstSideChat.id}"]`);
     assert(sideChatPane, "first side-chat tab is not mounted after its response");
+    const sideChatCitation = sideChatPane.querySelector<HTMLButtonElement>('[data-testid="response-annotation-citation"]');
+    assert(sideChatCitation, "side-chat answer did not render its saved reference citation");
+    sideChatCitation.click();
+    await settleAfterFocus();
+    assert(navigationTargets.at(-1)?.sessionId === "parent", "a citation in the side-chat answer did not return to the owning parent conversation");
+    assert(navigationTargets.at(-1)?.messageId === "answer-other", "a side-chat answer citation navigated to the wrong parent message");
+    assert(navigationTargets.at(-1)?.query === additionalExcerpt, "a side-chat answer citation lost the referenced excerpt");
+    assert(navigationTargets.at(-1)?.anchorStart === 0, "a side-chat answer citation lost its exact source highlight start");
+    assert(navigationTargets.at(-1)?.anchorEnd === additionalExcerpt.length, "a side-chat answer citation lost its exact source highlight end");
+
+    const childAnswerNode = textNodeWithin(
+      sideChatPane.querySelector('[data-selection-message-id="assistant-side-1"]') ?? sideChatPane,
+      "Side result for the selected excerpt.",
+    );
+    const childAnswerStart = childAnswerNode.data.indexOf("Side result for the selected excerpt.");
+    selectText(childAnswerNode, childAnswerStart, childAnswerStart + "Side result for the selected excerpt.".length);
+    await waitForToolbar("Side result for the selected excerpt.");
+    buttonNamed("Add to chat").click();
+    await settleAfterFocus();
+    setTextareaValue(textareaNamed("Add a note to this excerpt (optional)"), "This follow-up belongs to the child answer.");
+    buttonNamed("Attach excerpt").click();
+    await settleAfterFocus();
+    const childAnswerReference = useAppStore.getState().responseAnnotations[firstChildId]?.[0];
+    assert(childAnswerReference?.sourceMessageId === "assistant-side-1", "selecting from the child transcript did not attach to its own source message");
+    assert(childAnswerReference?.excerpt === "Side result for the selected excerpt.", "the child quote did not preserve the captured answer excerpt");
+    assert(childAnswerReference?.comment === "This follow-up belongs to the child answer.", "the child quote did not preserve its optional note");
+    sideChatPane.querySelector<HTMLButtonElement>(".composer-annotation-chip")?.focus();
+    await settleAfterFocus();
+    assert(
+      sideChatPane.querySelector("[data-testid='composer-annotation-card']")?.textContent?.includes(childAnswerReference.excerpt),
+      "child-transcript references were not reviewable in the side-chat composer",
+    );
+    assert(liveDraft.text === mainDraftBeforeSideReference, "a child-transcript reference polluted the main conversation draft");
+
     const userExcerptNode = textNodeWithin(
       sideChatPane.querySelector('[data-selection-message-id="user-side-1"]') ?? sideChatPane,
       "Explain the selected result.",
@@ -720,7 +997,7 @@ globalThis.selectionReferenceProbe = async () => {
     const userExcerptStart = userExcerptNode.data.indexOf("Explain the selected result.");
     assert(userExcerptStart >= 0, "the side-chat prompt text is not present in its transcript row");
     selectText(userExcerptNode, userExcerptStart, userExcerptStart + "Explain the selected result.".length);
-    await settle();
+    await waitForToolbar("Explain the selected result.");
     assert(buttonNamed("Add to chat"), "side-chat user excerpt has no append action");
     assert(![...host.querySelectorAll<HTMLButtonElement>(".transcript-selection-toolbar button")]
       .some((button) => button.textContent?.includes("Ask in side chat")),
@@ -731,39 +1008,15 @@ globalThis.selectionReferenceProbe = async () => {
       useAppStore.getState().sideChats[firstSideChat.id]?.draftText.includes("> Explain the selected result."),
       "selected user text was not appended to the compact side-chat draft",
     );
-    const answerExcerptNode = textNodeWithin(
-      sideChatPane.querySelector('[data-selection-message-id="assistant-side-1"]') ?? sideChatPane,
-      "Side result for the selected excerpt.",
-    );
-    selectText(answerExcerptNode, 0, "Side result for the selected excerpt.".length);
-    await settle();
-    buttonNamed("Add to chat").click();
-    await settle();
-    setTextareaValue(
-      textareaNamed("Add a note to this excerpt (optional)"),
-      "This reference belongs to the side-chat child.",
-    );
-    buttonNamed("Attach excerpt").click();
-    await settle();
-    assert(
-      useAppStore.getState().responseAnnotations[firstChildId]?.[0]?.comment ===
-        "This reference belongs to the side-chat child.",
-      "side-chat assistant excerpt did not attach to the child session",
-    );
-    assert(
-      sideChatPane.querySelector('.composer-annotation-attachments [aria-label="References (1)"]'),
-      "side-chat child annotations are not available for review before sending",
-    );
 
     buttonNamed("Add to main chat").click();
-    await settle();
     assert(liveDraft.text.includes("Side result for the selected excerpt."), "side-chat answer was not appended to the parent draft");
     assert(liveDraft.text.includes("> Side result for the selected excerpt."), "side-chat answer was not quoted as its own sourced result");
     assert(liveDraft.text.includes("From message assistant-side-1"), "side-chat result attribution points to the parent excerpt instead of the child answer");
     assert(!liveDraft.text.includes("> The accepted branch keeps the original session active"), "main draft quoted the original prompt excerpt instead of the side-chat answer");
 
     buttonNamed("Open as a conversation").click();
-    for (let index = 0; index < 120 && useAppStore.getState().activeSessionId === "parent"; index += 1) await settle();
+    for (let index = 0; index < 120 && useAppStore.getState().activeSessionId === "parent"; index += 1) await settleAfterFocus();
     assert(firstChildId && selectedSessions.at(-1) === firstChildId, "Open as a conversation did not select the ordinary child session");
     assert(!useAppStore.getState().sideChats[firstSideChat.id], "promotion did not release the transient side-chat tab");
     assert(
@@ -782,12 +1035,31 @@ globalThis.selectionReferenceProbe = async () => {
     assert(secondSideChat, "could not open a second side-chat tab for close-path verification");
     const secondPrompt = textareaNamed("Side-chat prompt");
     setTextareaValue(secondPrompt, `${secondSideChat.draftText}Explain briefly.`);
-    buttonNamed("Send").click();
+    const previousSettings = useAppStore.getState().settings;
+    const settingsForEnterTest = previousSettings ?? ({ enterToSend: true } as NonNullable<AppState["settings"]>);
+    useAppStore.setState({ settings: { ...settingsForEnterTest, enterToSend: false } });
+    const enterWithoutSend = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+    secondPrompt.dispatchEvent(enterWithoutSend);
+    assert(!enterWithoutSend.defaultPrevented && sends.length === 1, "Enter ignored the global Enter-to-send-off preference");
+    const modifiedEnter = new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true, cancelable: true });
+    secondPrompt.dispatchEvent(modifiedEnter);
+    assert(modifiedEnter.defaultPrevented, "Ctrl+Enter did not send when global Enter-to-send is disabled");
     for (let index = 0; index < 120 && sends.length < 2; index += 1) await settle();
+    useAppStore.setState({ settings: previousSettings });
     assert(forkCount === 2 && sends.length === 2, "second side-chat send did not create its durable child");
-    pendingResolvers.shift()?.(true);
-    for (let index = 0; index < 120 && !host.textContent?.includes("Side result for the selected excerpt."); index += 1) await settle();
     const secondChildId = useAppStore.getState().sideChats[secondSideChat.id]?.childSessionId;
+    assert(secondChildId, "second side-chat send did not register its child before streaming");
+    const stopButton = host.querySelector<HTMLButtonElement>('[data-testid="side-chat-stop"]');
+    assert(stopButton, "a running side-chat response did not expose Stop");
+    stopButton.click();
+    await settle();
+    assert(abortedSessions.at(-1) === secondChildId, "side-chat Stop did not target the running child session");
+    pendingResolvers.shift()?.(false);
+    for (let index = 0; index < 120 && !host.querySelector(".side-chat-error"); index += 1) await settle();
+    assert(
+      host.querySelector(".side-chat-error")?.textContent === useAppStore.getState().sideChats[secondSideChat.id]?.error,
+      "a rejected child prompt did not show its inline side-chat error",
+    );
     const persistedSecondChat = useAppStore.getState().sideChats[secondSideChat.id];
     buttonNamed("Close Side chat").click();
     await settle();
@@ -824,6 +1096,14 @@ globalThis.selectionReferenceProbe = async () => {
       api.getSession = originalGetSession;
     }
 
+    clearTrigger.focus();
+    await waitForClearIconVisible(clearTrigger);
+    assert(getComputedStyle(clearTrigger).opacity === "1", "keyboard navigation did not reveal the focused clear icon");
+    clearTrigger.click();
+    await settleAfterFocus();
+    assert((useAppStore.getState().responseAnnotations.parent ?? []).length === 0, "the chip clear icon did not clear all pending references");
+    assert(!host.querySelector('[data-testid="composer-annotation-card"]'), "clearing references left the hover preview open");
+
     return {
       ok: true,
       capturedExcerpt: quote,
@@ -839,6 +1119,8 @@ globalThis.selectionReferenceProbe = async () => {
     };
   } finally {
     api.promoteSideChat = originalPromoteSideChat;
+    api.pickFiles = originalPickFiles;
+    api.importFiles = originalImportFiles;
     unregisterDraft();
     flushSync(() => root.unmount());
     host.remove();

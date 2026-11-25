@@ -1,10 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { annotationSourceTarget, navigateToAnnotationSource } from "../../../lib/annotation-source-navigation";
 import type { ParsedResponseAnnotation } from "../../../lib/response-annotations";
-import {
-  requestTextWithoutAnnotations,
-  transcriptMessagesForSession,
-} from "../../../lib/response-annotations";
+import { TranscriptSourceNavigationContext } from "../../../lib/transcript-search-context";
 import { useAppStore } from "../../../stores/app-store";
 
 export function AnnotationCitation({
@@ -20,11 +18,7 @@ export function AnnotationCitation({
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
-  const sourceMessage = useAppStore((state) => {
-    if (!sessionId) return undefined;
-    const messages = transcriptMessagesForSession(state, sessionId);
-    return messages.find((message) => message.id === annotation.sourceMessageId);
-  });
+  const navigateWithinTranscript = useContext(TranscriptSourceNavigationContext);
 
   useEffect(() => {
     if (!open) return;
@@ -48,9 +42,15 @@ export function AnnotationCitation({
     };
   }, [open]);
 
-  const sourceText = sourceMessage?.role === "assistant"
-    ? requestTextWithoutAnnotations(sourceMessage.content ?? "")
-    : "";
+  const jumpToSource = () => {
+    if (!sessionId) return;
+    const target = annotationSourceTarget(sessionId, annotation);
+    if (navigateWithinTranscript) navigateWithinTranscript(target);
+    else void navigateToAnnotationSource(target, () => useAppStore.getState()).catch((error) => {
+      useAppStore.getState().showToast(error instanceof Error ? error.message : String(error), { variant: "error" });
+    });
+    setOpen(false);
+  };
 
   return (
     <span
@@ -72,7 +72,7 @@ export function AnnotationCitation({
         aria-expanded={open}
         data-testid="response-annotation-citation"
         onFocus={() => setOpen(true)}
-        onClick={() => setOpen(true)}
+        onClick={jumpToSource}
       >
         {index}
       </button>
@@ -93,13 +93,6 @@ export function AnnotationCitation({
               <span className="annotation-citation-comment-text">{annotation.comment}</span>
             </span>
           ) : null}
-          <span className="annotation-citation-source">
-            <span className="annotation-citation-section-label">{t("chat.annotationSourceMessage")}</span>
-            <span className="annotation-citation-source-id">
-              {(annotation.sourceMessageIds ?? [annotation.sourceMessageId]).join(", ")}
-            </span>
-            {sourceText ? <span className="annotation-citation-source-text">{sourceText}</span> : null}
-          </span>
         </span>
       ) : null}
     </span>

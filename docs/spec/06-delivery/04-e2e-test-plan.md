@@ -5887,14 +5887,25 @@ window; opening a normal panel afterward must still work.
 - **Selection and preview steps**: During a pointer drag, assert that no toolbar
   is shown until release; verify the captured offsets across inline formatting
   and Unicode. After attachment but before sending, verify a pending Composer
-  reference places its numbered source marker beside the exact excerpt and
-  opens its text-only preview on hover/focus. Verify the Composer control
-  previews on hover/focus, remains open while the pointer moves into the preview,
-  and click switches to management without stacking both surfaces. Verify a
-  valid answer citation previews on hover/focus and activation, stays open when
-  the pointer enters the card, and dismisses on Escape/outside press. Corrupt or
-  remove an optional source offset and verify that the reference falls back to
-  a message-level marker rather than a guessed text range.
+  reference places its numbered source marker beside the exact excerpt. Hovering
+  the empty Composer row must not open the preview; hovering or focusing the
+  reference chip must open one compact unified card, which remains open while
+  the pointer enters it. The chip aligns with the Composer text inset; its
+  clear-all X appears only on hover or keyboard focus and clears all pending
+  references when activated, as a compact white circular X with a subtle dark
+  outline, without a duplicate footer action.
+  Verify each entry is a flat
+  numbered row with a muted selected-text label, excerpt, header-aligned
+  edit/remove icons, and light separators between multiple rows. Verify there
+  is no redundant trigger tooltip or stacked review panel. Click the excerpt
+  and require navigation to its source
+  message plus a highlight of only the captured range. Verify a valid answer
+  citation previews only the excerpt/comment on hover/focus, remains usable as
+  the pointer enters the card, and dismisses on Escape/outside press; click it
+  and require the same exact source navigation/highlight. Use repeated source
+  text to prove the second occurrence is selected by its stored offsets.
+  Corrupt or remove an optional offset and verify that navigation falls back to
+  the source message without a guessed text range.
 - **Expected**: The Composer exposes ordered, editable, removable references;
   cancelled edits do not attach, duplicate source/excerpt reopens its editor,
   and a reference without a comment is valid. Both comment editors retain
@@ -5912,13 +5923,20 @@ window; opening a normal panel afterward must still work.
   attachments; rejection preserves them, and annotation-only submit is not
   admitted. Editing a queued prompt restores its hidden annotation attachments
   ahead of any newer pending Composer attachments, and a failed queue admission
-  keeps the original attachments. A valid citation opens a safe text-only
-  excerpt/comment/source card; unknown indices and hostile reference text stay
-  inert ordinary text.
+  keeps the original attachments. The Composer renders one unified reference
+  card with preview and management actions; clicking its excerpt and a valid
+  answer citation returns to the captured source message and highlights only a
+  still-valid anchored occurrence. Legacy/stale anchors navigate to the message
+  without a fuzzy match, and the answer popover does not repeat the full source
+  message. Unknown indices and hostile reference text stay inert ordinary text.
 - **Coverage**: `node scripts/e2e-selection-reference-workflow.mjs` covers stable
   selection capture including a range spanning multiple same-role transcript
   messages, source-marker placement, Composer/citation preview, attach,
-  edit, prompt serialization, and the no-auto-send path. The AgentRuntime provider
+  edit, prompt serialization, and the no-auto-send path. It also covers a
+  selected reference staged from the main transcript into a docked side chat,
+  side-chat preview/edit/remove, one-time transfer into the child request,
+  source navigation from both the side-chat composer and child-answer citation,
+  and keeping the selected excerpt out of the editable prompt text. The AgentRuntime provider
   message test verifies the excerpt and request reach the model-facing user
   message. `node --test
   apps/desktop/test/response-annotations.test.mjs
@@ -5935,12 +5953,47 @@ window; opening a normal panel afterward must still work.
 - **Status**: Automated Chromium/store/helper coverage; real-provider acceptance
   is not part of this fixture.
 
+#### E2E-CHAT-docked-side-chat-codex-composer-v1
+
+- **Preconditions:** Isolated Chromium renderer with a completed parent reply,
+  deterministic fork/send store actions, and mocked file picker/import IPC.
+- **Steps:** Open Ask in side chat and inspect the empty surface. Confirm the
+  source excerpt is held in one context chip, with no raw message id or separate
+  excerpt panel. Preview the chip and navigate back to the parent source. Select
+  a file and verify one non-activating child is created and the file is imported
+  into that child's scratch path. Send text and image/file references, then
+  verify they reach only the child prompt. Exercise Enter, Shift+Enter, IME
+  composition Enter, and the global Enter-to-send-off Ctrl/Meta+Enter path.
+  Resolve child Stop/error actions and verify the parent session/draft is
+  unchanged.
+- **Expected:** Opening or canceling the picker creates no child. A real file
+  selection creates at most one child, and imports never target the parent.
+  The context/reference/files/input/send controls share one rounded composer;
+  the source context remains previewable and navigable without duplicating it in
+  editable prompt text. Enter follows the global setting, Shift+Enter never
+  sends, and IME composition never submits. Child files are cleared only after
+  accepted admission; rejected sends retain them. The parent remains active and
+  retains its draft.
+- **Coverage:** `node scripts/e2e-selection-reference-workflow.mjs`,
+  `apps/desktop/test/side-chat-lifecycle.test.mjs`, and
+  `apps/desktop/test/side-chat-store.test.mjs`.
+- **Specs:** `04-ux/08-component-spec.md` §7,
+  `04-ux/09-interaction-patterns.md` §7.6, ADR 0346.
+- **Status:** Automated isolated renderer/store interaction; no Host, account,
+  or real provider request.
+
 #### E2E-CHAT-docked-follow-up-tab-v2: Keep a child follow-up beside its parent
 
 - **Preconditions**: A completed assistant reply in a forkable local session;
   the user can open and prompt a child session.
-- **Steps**: 1) Select assistant text and open Ask in side chat; verify no child
-  session or prompt exists before Send. 2) Enter a non-empty prompt and Send.
+- **Steps**: 1) Select assistant text and open Ask in side chat; verify the
+  selected excerpt is retained separately as context, the editable prompt is
+  empty, and no child session or prompt exists before Send. Open the file picker
+  and cancel; verify this remains draft-only. Then select a file and verify one
+  child is created and the file is staged there, without submitting a prompt.
+  2) Enter only a non-empty user prompt and Send; verify the excerpt is still
+  passed through the fork context while the submitted request contains only the
+  typed prompt and the staged file reference.
   3) While the child streams, inspect its transcript and resolve a child-scoped
   permission request and AskTool card. 4) Add the result to the main Composer.
   5) Open one child as a conversation; open and send another side chat, then
@@ -5951,10 +6004,13 @@ window; opening a normal panel afterward must still work.
   parent. 7) Request promotion during a deferred first send, reject the send,
   and verify the unsent text survives in the child Composer; also exercise
   retry and close/session-switch races.
-- **Expected**: Only explicit Send forks and submits, using the selected
-  assistant message as the anchor. The parent remains active with its original
-  transcript position and draft. Child events, permission resolution, and
-  AskTool answers are scoped to the child id and use the existing Host-owned
+- **Expected**: A real file selection or explicit Send may create the child,
+  using the selected assistant message as the anchor; only explicit Send
+  submits a prompt. The selected excerpt is retained as side-chat
+  source context and in the forked parent transcript, not duplicated into the
+  editable prompt or submitted user request. The parent remains active with its
+  original transcript position and draft. Child events, permission resolution,
+  and AskTool answers are scoped to the child id and use the existing Host-owned
   path. Add to main chat appends without replacing the parent draft; promotion
   activates the normal child and releases only its side-chat projection;
   closing a sent tab preserves the durable child without stopping it. A rejected
@@ -20810,3 +20866,25 @@ permission-request UI below has isolated fixture automation.
   `apps/desktop/test/omp-subagent-turn-card.test.mjs`, Desktop TypeScript
   check/build, and manual Electron verification. No live provider request is
   required.
+
+
+### E2E-chat-running-elapsed-time-survives-session-switch
+
+- **Preconditions:** Two local conversations; one conversation has an active
+  Agent turn. No live provider response is required when using a controlled
+  event fixture.
+- **Path:** Start a turn and record its session start time (the accepted
+  submission time, or the first `agent_start` event when the run is restored).
+  Switch to a second conversation and back several times while the first run
+  remains active.
+  Deliver additional `turn_start` events during the same run, then complete it
+  and start another run. Repeat with an error, manual compaction, and Stop.
+- **Expected:** The active conversation's elapsed indicator keeps counting
+  from its original run start across pane unmount/remount and session
+  selection. Additional turn events do not reset the same run. A new run starts
+  a fresh clock; completion, error, manual compaction completion, or Stop clears
+  that session's start time. A run already active during renderer bootstrap gets
+  one stable local baseline until it ends.
+- **Coverage:** `apps/desktop/test/session-running-bootstrap.test.mjs`,
+  `apps/desktop/test/active-turn-surface.test.mjs`, and Desktop TypeScript
+  check.

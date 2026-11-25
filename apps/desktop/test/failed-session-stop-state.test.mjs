@@ -7,14 +7,30 @@ const { createSessionSlice } = await import("../src/stores/slices/session-slice.
 const { api } = await import("../src/lib/api.ts");
 
 test("a rejected remote stop preserves running state and allows retry", async t => {
-  let state = { activeSessionId: "remote:session", isRunning: true, runningSessions: { "remote:session": true }, sessions: [] };
-  const slice = createSessionSlice({ get: () => state, set: patch => { state = { ...state, ...(typeof patch === "function" ? patch(state) : patch) }; } });
+  let state = {
+    activeSessionId: "remote:session",
+    isRunning: true,
+    runningSessions: { "remote:session": true },
+    runningSessionStartedAt: { "remote:session": 123 },
+    sessions: [],
+  };
+  const slice = createSessionSlice({
+    get: () => state,
+    set: patch => { state = { ...state, ...(typeof patch === "function" ? patch(state) : patch) }; },
+    withoutRecordKey: (record, key) => {
+      const next = { ...record };
+      delete next[key];
+      return next;
+    },
+  });
   t.mock.method(api, "abort", async () => { throw new Error("remote host disconnected"); });
   await assert.rejects(slice.abortSession("remote:session"), /disconnected/);
   assert.equal(state.isRunning, true);
   assert.equal(state.runningSessions["remote:session"], true);
+  assert.equal(state.runningSessionStartedAt["remote:session"], 123);
   t.mock.method(api, "abort", async () => ({ ok: true }));
   await slice.abortSession("remote:session");
   assert.equal(state.isRunning, false);
   assert.equal(state.runningSessions["remote:session"], false);
+  assert.equal("remote:session" in state.runningSessionStartedAt, false);
 });

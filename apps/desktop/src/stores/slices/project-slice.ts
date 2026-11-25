@@ -164,6 +164,7 @@ function clearLocalSessionState(
     const sessions = state.sessions.filter((session) => session.id !== id);
     const runningSessions = { ...state.runningSessions };
     delete runningSessions[id];
+    const runningSessionStartedAt = withoutRecordKey(state.runningSessionStartedAt, id);
     const agentStatuses = { ...state.agentStatuses };
     delete agentStatuses[id];
     const sessionOutcomes = { ...state.sessionOutcomes };
@@ -194,6 +195,7 @@ function clearLocalSessionState(
       sessionMeta,
       sessions,
       runningSessions,
+      runningSessionStartedAt,
       agentStatuses,
       sessionOutcomes,
       queuedPrompts,
