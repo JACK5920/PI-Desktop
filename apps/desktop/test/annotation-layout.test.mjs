@@ -20,8 +20,8 @@ test("selection annotation editor keeps text actions readable while supporting n
 
 test("composer references use one hoverable card for navigation and editing", () => {
   assert.match(composerCss, /\.composer-annotation-card\s*\{[^}]*box-sizing:\s*border-box/s);
-  assert.match(composerCss, /\.composer-annotation-card\s*\{[^}]*padding:\s*16px/s);
-  assert.match(composerCss, /\.composer-annotation-item\s*\{[^}]*padding:\s*12px/s);
+  assert.match(composerCss, /\.composer-annotation-card\s*\{[^}]*padding:\s*6px 9px 4px/s);
+  assert.match(composerCss, /\.composer-annotation-item\s*\{[^}]*padding:\s*8px 5px 9px/s);
   assert.match(composerCss, /\.composer-annotation-source-button\s*\{[^}]*cursor:\s*pointer/s);
   assert.match(composerCss, /\.composer-annotation-actions\s*\{[^}]*flex-wrap:\s*wrap/s);
   assert.match(composerCss, /\.composer-annotation-actions > \*\s*\{[^}]*flex:\s*0 0 auto/s);
