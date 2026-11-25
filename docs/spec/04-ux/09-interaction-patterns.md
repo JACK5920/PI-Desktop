@@ -1460,7 +1460,14 @@ Running turns and pending approvals continue to gate the controls.
   session's newer draft. Selection copy, quote-to-draft, and annotations also
   work in the child transcript; child quotes append to its compact input and
   pending annotations are reviewable there. Nested Ask in side chat is not
-  offered from a docked child; promote it to a normal conversation first. Sent,
+  offered from a docked child; promote it to a normal conversation first.
+  Parent-source references captured while the side chat is active stay on the
+  side-chat Composer and share the main Composer's single preview/edit/remove
+  card. They retain their source session and exact range in the child request;
+  activating a reference from the child returns to its source conversation.
+  The fork excerpt remains contextual metadata, never duplicated into the
+  editable request. References captured from the child transcript target the
+  child's own next request. Sent,
   unpromoted side chats stay discoverable under the parent and are hidden from
   ordinary session lists and global search. Reopening restores the saved
   excerpt and transcript without activating a fork; promotion makes the child

@@ -102,6 +102,8 @@ export type SideChatState = SideChatLifecycle & {
   sourceMessageId: string;
   sourceMessageIds?: string[];
   excerpt: string;
+  /** Additional selected excerpts targeted to this docked chat's next prompt. */
+  references: ResponseAnnotation[];
   messages: UiMessage[];
 };
 
@@ -229,6 +231,16 @@ export type AppState = {
   ) => string | null;
   reopenSideChat: (childSessionId: string) => Promise<void>;
   setSideChatDraft: (sideChatId: string, text: string) => void;
+  addSideChatReference: (
+    sideChatId: string,
+    sourceMessageId: string,
+    excerpt: string,
+    anchor?: { anchorStart: number; anchorEnd: number },
+    sourceMessageIds?: string[],
+  ) => string | null;
+  editSideChatReference: (sideChatId: string, referenceId: string, comment?: string) => void;
+  removeSideChatReference: (sideChatId: string, referenceId: string) => void;
+  clearSideChatReferences: (sideChatId: string) => void;
   sendSideChatPrompt: (sideChatId: string, content: string) => Promise<boolean>;
   closeSideChat: (sideChatId: string) => void;
   promoteSideChatToConversation: (sideChatId: string) => Promise<void>;

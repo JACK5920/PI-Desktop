@@ -2,6 +2,8 @@ import { normalizeTranscriptExcerpt } from "./transcript-selection";
 
 export type ResponseAnnotation = {
   id: string;
+  /** Session that owns the quoted source when the reference is sent elsewhere. */
+  sourceSessionId?: string;
   sourceMessageId: string;
   /** Ordered source set for selections spanning multiple transcript messages. */
   sourceMessageIds?: string[];
@@ -13,7 +15,7 @@ export type ResponseAnnotation = {
 
 export type ParsedResponseAnnotation = Pick<
   ResponseAnnotation,
-  "sourceMessageId" | "sourceMessageIds" | "excerpt" | "comment" | "anchorStart" | "anchorEnd"
+  "sourceSessionId" | "sourceMessageId" | "sourceMessageIds" | "excerpt" | "comment" | "anchorStart" | "anchorEnd"
 >;
 
 export type IndexedSourceResponseAnnotation = ParsedResponseAnnotation & {
@@ -216,6 +218,8 @@ function parsePayload(value: unknown): ParsedResponseAnnotation[] | null {
       : undefined;
     if (
       !isRecord(item) ||
+      (item.sourceSessionId !== undefined &&
+        (typeof item.sourceSessionId !== "string" || !item.sourceSessionId.trim())) ||
       typeof item.sourceMessageId !== "string" ||
       !item.sourceMessageId.trim() ||
       (sourceMessageIds !== undefined && (
@@ -242,6 +246,7 @@ function parsePayload(value: unknown): ParsedResponseAnnotation[] | null {
       return null;
     }
     parsed.push({
+      ...(typeof item.sourceSessionId === "string" ? { sourceSessionId: item.sourceSessionId } : {}),
       sourceMessageId: item.sourceMessageId,
       ...(Array.isArray(sourceMessageIds) ? { sourceMessageIds: [...sourceMessageIds] } : {}),
       excerpt: item.excerpt,
@@ -262,7 +267,8 @@ export function buildAnnotatedPrompt(
   if (annotations.length === 0) return requestText;
   const payload = {
     version: 1,
-    annotations: annotations.map(({ sourceMessageId, sourceMessageIds, excerpt, comment, anchorStart, anchorEnd }) => ({
+    annotations: annotations.map(({ sourceSessionId, sourceMessageId, sourceMessageIds, excerpt, comment, anchorStart, anchorEnd }) => ({
+      ...(sourceSessionId === undefined ? {} : { sourceSessionId }),
       sourceMessageId,
       ...(sourceMessageIds && sourceMessageIds.length > 1 ? { sourceMessageIds } : {}),
       excerpt,
@@ -374,6 +380,7 @@ export function pendingSourceAnnotationsForMessage(
   return annotations.flatMap((annotation, index) =>
     (annotation.sourceMessageIds ?? [annotation.sourceMessageId]).includes(sourceMessageId)
       ? [{
+          ...(annotation.sourceSessionId === undefined ? {} : { sourceSessionId: annotation.sourceSessionId }),
           sourceMessageId: annotation.sourceMessageId,
           ...(annotation.sourceMessageIds === undefined ? {} : { sourceMessageIds: annotation.sourceMessageIds }),
           excerpt: annotation.excerpt,

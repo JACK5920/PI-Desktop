@@ -1,6 +1,6 @@
 import { useContext, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { annotationSourceTarget } from "../../../lib/annotation-source-navigation";
+import { annotationSourceTarget, navigateToAnnotationSource } from "../../../lib/annotation-source-navigation";
 import type { ParsedResponseAnnotation } from "../../../lib/response-annotations";
 import { TranscriptSourceNavigationContext } from "../../../lib/transcript-search-context";
 import { useAppStore } from "../../../stores/app-store";
@@ -18,7 +18,6 @@ export function AnnotationCitation({
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
-  const navigateTranscript = useAppStore((state) => state.navigateTranscript);
   const navigateWithinTranscript = useContext(TranscriptSourceNavigationContext);
 
   useEffect(() => {
@@ -47,7 +46,9 @@ export function AnnotationCitation({
     if (!sessionId) return;
     const target = annotationSourceTarget(sessionId, annotation);
     if (navigateWithinTranscript) navigateWithinTranscript(target);
-    else void navigateTranscript(target);
+    else void navigateToAnnotationSource(target, () => useAppStore.getState()).catch((error) => {
+      useAppStore.getState().showToast(error instanceof Error ? error.message : String(error), { variant: "error" });
+    });
     setOpen(false);
   };
 

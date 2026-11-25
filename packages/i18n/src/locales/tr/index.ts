@@ -504,6 +504,7 @@ export const tr = {
     sideChatTitle: "Yan sohbet",
     sideChatReopenFromParent: "Yan sohbeti yeniden aç",
     sideChatSource: "{{messageId}} numaralı mesajdan",
+    sideChatSelectedTextReferences: "Seçilen metin parçaları ({{count}})",
     sideChatExcerpt: "Seçilen alıntı",
     sideChatPrompt: "Yan sohbet mesajı",
     stop: "Durdur",

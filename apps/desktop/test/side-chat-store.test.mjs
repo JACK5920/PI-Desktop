@@ -28,9 +28,10 @@ function fixture() {
   const fork = deferred();
   let state = {
     activeSessionId: "parent",
-    sessions: [{ id: "parent", source: "local", title: "Parent" }],
+    sessions: [{ id: "parent", source: "local", title: "Parent", capabilities: { canEditMessages: true } }],
     messages: [assistant],
     retainedTranscripts: {},
+    responseAnnotations: {},
     composerPrefill: null,
     sideChats: {},
     openWorkPanelTabForSession: (sessionId, tab) => { opened.push({ sessionId, tab }); },
@@ -105,6 +106,52 @@ test("opening a side chat creates only a transient work-panel draft", () => {
   assert.equal(h.sendCalls.length, 0);
   assert.equal(h.get().sideChats[sideChatId].draftText, "");
   assert.equal(h.get().sideChats[sideChatId].excerpt, "quote");
+});
+
+test("side-chat references support edit, remove, clear, and transfer once into the fork child", async () => {
+  const h = fixture();
+  const sideChatId = h.slice.openSideChat("parent", "answer-1", "fork context");
+  assert.ok(sideChatId);
+
+  const referenceId = h.slice.addSideChatReference(
+    sideChatId,
+    "answer-1",
+    " selected passage ",
+    { anchorStart: 0, anchorEnd: 16 },
+  );
+  assert.ok(referenceId);
+  assert.equal(h.get().sideChats[sideChatId].references[0].excerpt, "selected passage");
+  assert.equal(h.get().sideChats[sideChatId].references[0].sourceSessionId, "parent");
+  h.slice.editSideChatReference(sideChatId, referenceId, "\r\n focus here \r\n");
+  assert.equal(h.get().sideChats[sideChatId].references[0].comment, "focus here");
+
+  const send = h.slice.sendSideChatPrompt(sideChatId, "Explain it.");
+  await Promise.resolve();
+  h.fork.resolve("child-reference");
+  assert.equal(await send, true);
+  assert.deepEqual(h.get().responseAnnotations["child-reference"], [{
+    id: referenceId,
+    sourceSessionId: "parent",
+    sourceMessageId: "answer-1",
+    excerpt: "selected passage",
+    comment: "focus here",
+    anchorStart: 0,
+    anchorEnd: 16,
+  }]);
+  assert.deepEqual(h.get().sideChats[sideChatId].references, [], "transferred references remained pending and could be resent");
+
+  const duplicate = h.slice.addSideChatReference(
+    sideChatId,
+    "answer-1",
+    "selected passage",
+    { anchorStart: 0, anchorEnd: 16 },
+  );
+  assert.equal(duplicate, referenceId, "adding a source already attached to the child created a duplicate");
+
+  h.slice.removeSideChatReference(sideChatId, referenceId);
+  assert.equal(h.get().responseAnnotations["child-reference"][0].id, referenceId, "pending-reference removal modified the already-sent child reference");
+  h.slice.clearSideChatReferences(sideChatId);
+  assert.equal(h.get().responseAnnotations["child-reference"].length, 1, "clearing pending references removed references already sent to the child");
 });
 
 test("multi-message side-chat selections keep every source while using the first as fork anchor", () => {

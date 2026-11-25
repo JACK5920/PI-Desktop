@@ -1,5 +1,6 @@
 import i18n from "i18next";
 import { sessionAllows } from "../../lib/remote-session-safety";
+import { normalizeTranscriptExcerpt } from "../../lib/transcript-selection";
 import {
   beginSideChatSend,
   editSideChatDraft,
@@ -43,11 +44,39 @@ export function createSideChatSlice({ get, set, getCachedTranscript, getSessionD
   | "openSideChat"
   | "reopenSideChat"
   | "setSideChatDraft"
+  | "addSideChatReference"
+  | "editSideChatReference"
+  | "removeSideChatReference"
+  | "clearSideChatReferences"
   | "sendSideChatPrompt"
   | "closeSideChat"
   | "promoteSideChatToConversation"
 > {
   const pendingSends = new Map<string, Promise<boolean>>();
+  const normalizeComment = (comment: string | undefined) => {
+    const normalized = comment?.replace(/\r\n?/g, "\n").trim();
+    return normalized || undefined;
+  };
+  const transferReferencesToChild = (sideChatId: string, childSessionId: string) => {
+    set((state) => {
+      const sideChat = state.sideChats[sideChatId];
+      const references = sideChat?.references ?? [];
+      if (!sideChat || references.length === 0) return {};
+      const current = state.responseAnnotations[childSessionId] ?? [];
+      const ids = new Set(current.map((reference) => reference.id));
+      const next = [...current, ...references.filter((reference) => !ids.has(reference.id))];
+      return {
+        sideChats: {
+          ...state.sideChats,
+          [sideChatId]: { ...sideChat, references: [] },
+        },
+        responseAnnotations: {
+          ...state.responseAnnotations,
+          [childSessionId]: next,
+        },
+      };
+    });
+  };
 
   const closeSideChat = (sideChatId: string) => {
     const current = get().sideChats[sideChatId];
@@ -93,6 +122,7 @@ export function createSideChatSlice({ get, set, getCachedTranscript, getSessionD
         sourceMessageId,
         ...(normalizedSourceIds.length > 1 ? { sourceMessageIds: normalizedSourceIds } : {}),
         excerpt: excerpt.trim(),
+        references: [],
         messages: [],
         operationId: 0,
         status: "draft",
@@ -121,6 +151,7 @@ export function createSideChatSlice({ get, set, getCachedTranscript, getSessionD
         sourceMessageId: origin.sourceMessageId,
         sourceMessageIds: [origin.sourceMessageId],
         excerpt: origin.excerpt,
+        references: [],
         childSessionId,
         messages: detail.messages,
         operationId: 0,
@@ -139,6 +170,107 @@ export function createSideChatSlice({ get, set, getCachedTranscript, getSessionD
         ...sideChat,
         ...editSideChatDraft(sideChat, text),
       })));
+    },
+
+    addSideChatReference: (sideChatId, sourceMessageId, rawExcerpt, anchor, sourceMessageIds) => {
+      const state = get();
+      const sideChat = state.sideChats[sideChatId];
+      if (!sideChat || !sessionAllows(
+        state.sessions.find((session) => session.id === sideChat.parentSessionId),
+        "canEditMessages",
+      )) return null;
+      const excerpt = normalizeTranscriptExcerpt(rawExcerpt);
+      if (!excerpt) return null;
+      const transcript = sideChat.parentSessionId === state.activeSessionId
+        ? state.messages
+        : state.retainedTranscripts[sideChat.parentSessionId] ?? getCachedTranscript(sideChat.parentSessionId);
+      const normalizedSourceIds = sourceMessageIds?.length
+        ? [...new Set(sourceMessageIds)]
+        : [sourceMessageId];
+      if (
+        normalizedSourceIds[0] !== sourceMessageId ||
+        normalizedSourceIds.some((id) =>
+          transcript.find((message) => message.id === id)?.role !== "assistant",
+        )
+      ) return null;
+      const validAnchor = anchor &&
+        Number.isSafeInteger(anchor.anchorStart) &&
+        Number.isSafeInteger(anchor.anchorEnd) &&
+        anchor.anchorStart >= 0 &&
+        anchor.anchorEnd > anchor.anchorStart
+        ? anchor
+        : undefined;
+      const childReferences = sideChat.childSessionId
+        ? state.responseAnnotations[sideChat.childSessionId] ?? []
+        : [];
+      const current = [...(sideChat.references ?? []), ...childReferences];
+      const duplicate = current.find((reference) =>
+        reference.sourceMessageId === sourceMessageId &&
+        (reference.sourceSessionId ?? sideChat.parentSessionId) === sideChat.parentSessionId &&
+        reference.excerpt === excerpt &&
+        (reference.sourceMessageIds ?? [reference.sourceMessageId]).length === normalizedSourceIds.length &&
+        (reference.sourceMessageIds ?? [reference.sourceMessageId]).every(
+          (id, index) => id === normalizedSourceIds[index],
+        ) &&
+        reference.anchorStart === validAnchor?.anchorStart &&
+        reference.anchorEnd === validAnchor?.anchorEnd,
+      );
+      if (duplicate) return duplicate.id;
+      const referenceId = crypto.randomUUID();
+      const reference = {
+        id: referenceId,
+        sourceSessionId: sideChat.parentSessionId,
+        sourceMessageId,
+        ...(normalizedSourceIds.length > 1 ? { sourceMessageIds: normalizedSourceIds } : {}),
+        excerpt,
+        ...(validAnchor ?? {}),
+      };
+      set((latest) => updateSideChat(latest, sideChatId, (currentSideChat) => ({
+        ...currentSideChat,
+        references: [...(currentSideChat.references ?? []), reference],
+      })));
+      return referenceId;
+    },
+
+    editSideChatReference: (sideChatId, referenceId, comment) => {
+      const state = get();
+      const sideChat = state.sideChats[sideChatId];
+      if (!sideChat || !sessionAllows(
+        state.sessions.find((session) => session.id === sideChat.parentSessionId),
+        "canEditMessages",
+      )) return;
+      const normalized = normalizeComment(comment);
+      set((latest) => updateSideChat(latest, sideChatId, (current) => ({
+        ...current,
+        references: (current.references ?? []).map((reference) =>
+          reference.id === referenceId
+            ? { ...reference, ...(normalized ? { comment: normalized } : { comment: undefined }) }
+            : reference,
+        ),
+      })));
+    },
+
+    removeSideChatReference: (sideChatId, referenceId) => {
+      const state = get();
+      const sideChat = state.sideChats[sideChatId];
+      if (!sideChat || !sessionAllows(
+        state.sessions.find((session) => session.id === sideChat.parentSessionId),
+        "canEditMessages",
+      )) return;
+      set((latest) => updateSideChat(latest, sideChatId, (current) => ({
+        ...current,
+        references: (current.references ?? []).filter((reference) => reference.id !== referenceId),
+      })));
+    },
+
+    clearSideChatReferences: (sideChatId) => {
+      const state = get();
+      const sideChat = state.sideChats[sideChatId];
+      if (!sideChat || !sessionAllows(
+        state.sessions.find((session) => session.id === sideChat.parentSessionId),
+        "canEditMessages",
+      )) return;
+      set((latest) => updateSideChat(latest, sideChatId, (current) => ({ ...current, references: [] })));
     },
 
     sendSideChatPrompt: (sideChatId, content) => {
@@ -201,6 +333,7 @@ export function createSideChatSlice({ get, set, getCachedTranscript, getSessionD
         }
 
         if (!childSessionId) return false;
+        transferReferencesToChild(sideChatId, childSessionId);
         try {
           const accepted = await get().sendPrompt(
             content,

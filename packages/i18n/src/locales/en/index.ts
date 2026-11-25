@@ -500,6 +500,7 @@ export const en = {
     sideChatTitle: "Side chat",
     sideChatReopenFromParent: "Reopen side chat",
     sideChatSource: "From message {{messageId}}",
+    sideChatSelectedTextReferences: "Selected text snippets ({{count}})",
     sideChatExcerpt: "Selected excerpt",
     sideChatPrompt: "Side-chat prompt",
     stop: "Stop",

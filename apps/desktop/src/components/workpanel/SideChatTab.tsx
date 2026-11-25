@@ -7,16 +7,22 @@ import { ChatTranscript } from "../../features/chat/transcript/ChatTranscript";
 import { headAsk, queuedAskCount } from "../../lib/pending-asks";
 import { headPermission, queuedPermissionCount } from "../../lib/pending-permissions";
 import { requestTextWithoutAnnotations } from "../../lib/response-annotations";
+import type { ResponseAnnotation } from "../../lib/response-annotations";
 import {
   appendSideChatDraftText,
   formatSideChatResultQuote,
 } from "../../lib/side-chat-lifecycle";
 import { transcriptSelectionSourceAttribution } from "../../lib/transcript-selection";
 import type { TranscriptSearchTarget } from "../../lib/transcript-reading";
-import type { AnnotationSourceTarget } from "../../lib/annotation-source-navigation";
+import {
+  navigateToAnnotationSource,
+  type AnnotationSourceTarget,
+} from "../../lib/annotation-source-navigation";
 import { composerDraftBridge } from "../../features/chat/composer/plugins/draft-bridge";
 import { ComposerAnnotationAttachments } from "../../features/chat/composer/ComposerAnnotationAttachments";
 import { useAppStore } from "../../stores/app-store";
+
+const EMPTY_ANNOTATIONS: readonly ResponseAnnotation[] = [];
 
 export function SideChatTab({ sideChatId }: { sideChatId: string }) {
   const { t } = useTranslation();
@@ -30,6 +36,17 @@ export function SideChatTab({ sideChatId }: { sideChatId: string }) {
   const promote = useAppStore((state) => state.promoteSideChatToConversation);
   const abortSession = useAppStore((state) => state.abortSession);
   const showToast = useAppStore((state) => state.showToast);
+  const sideChatReferences = useAppStore((state) => state.sideChats[sideChatId]?.references ?? EMPTY_ANNOTATIONS);
+  const childReferences = useAppStore((state) => {
+    const childSessionId = state.sideChats[sideChatId]?.childSessionId;
+    return childSessionId ? state.responseAnnotations[childSessionId] ?? EMPTY_ANNOTATIONS : EMPTY_ANNOTATIONS;
+  });
+  const editResponseAnnotation = useAppStore((state) => state.editResponseAnnotation);
+  const removeResponseAnnotation = useAppStore((state) => state.removeResponseAnnotation);
+  const clearResponseAnnotations = useAppStore((state) => state.clearResponseAnnotations);
+  const editSideChatReference = useAppStore((state) => state.editSideChatReference);
+  const removeSideChatReference = useAppStore((state) => state.removeSideChatReference);
+  const clearSideChatReferences = useAppStore((state) => state.clearSideChatReferences);
   const running = useAppStore((state) =>
     sideChat?.childSessionId ? state.runningSessions[sideChat.childSessionId] === true : false,
   );
@@ -52,10 +69,44 @@ export function SideChatTab({ sideChatId }: { sideChatId: string }) {
     ),
     [sideChat?.messages],
   );
+  const referenceAttachments = useMemo(
+    () => [...childReferences, ...sideChatReferences],
+    [childReferences, sideChatReferences],
+  );
 
   const navigateWithinSideChat = (target: AnnotationSourceTarget) => {
-    setSourceSearchTarget({ ...target, requestId: ++nextSourceRequestId.current });
+    const current = useAppStore.getState().sideChats[sideChatId];
+    if (current?.childSessionId && target.sessionId === current.childSessionId) {
+      setSourceSearchTarget({ ...target, requestId: ++nextSourceRequestId.current });
+      return;
+    }
+    void navigateToAnnotationSource(target, () => useAppStore.getState()).catch((error) => {
+      showToast(error instanceof Error ? error.message : String(error), { variant: "error" });
+    });
   };
+
+  const editReference = (referenceId: string, comment?: string) => {
+    const childSessionId = useAppStore.getState().sideChats[sideChatId]?.childSessionId;
+    if (childSessionId && childReferences.some((reference) => reference.id === referenceId)) {
+      editResponseAnnotation(childSessionId, referenceId, comment);
+    } else {
+      editSideChatReference(sideChatId, referenceId, comment);
+    }
+  };
+  const removeReference = (referenceId: string) => {
+    const childSessionId = useAppStore.getState().sideChats[sideChatId]?.childSessionId;
+    if (childSessionId && childReferences.some((reference) => reference.id === referenceId)) {
+      removeResponseAnnotation(childSessionId, referenceId);
+    } else {
+      removeSideChatReference(sideChatId, referenceId);
+    }
+  };
+  const clearReferences = () => {
+    clearSideChatReferences(sideChatId);
+    const childSessionId = useAppStore.getState().sideChats[sideChatId]?.childSessionId;
+    if (childSessionId) clearResponseAnnotations(childSessionId);
+  };
+  const navigateReference = navigateWithinSideChat;
 
   if (!sideChat) return null;
   const childSessionId = sideChat.childSessionId;
@@ -158,12 +209,15 @@ export function SideChatTab({ sideChatId }: { sideChatId: string }) {
           void send(sideChatId, sideChat.draftText).finally(() => setSubmitting(false));
         }}
       >
-        {childSessionId ? (
-          <ComposerAnnotationAttachments
-            sessionId={childSessionId}
-            onNavigateToSource={navigateWithinSideChat}
-          />
-        ) : null}
+        <ComposerAnnotationAttachments
+          sessionId={childSessionId ?? sideChat.parentSessionId}
+          annotations={referenceAttachments}
+          attachmentLabel={t("chat.sideChatSelectedTextReferences", { count: referenceAttachments.length })}
+          onEditAnnotation={editReference}
+          onRemoveAnnotation={removeReference}
+          onClearAnnotations={clearReferences}
+          onNavigateToSource={navigateReference}
+        />
         <Textarea
           ref={promptRef}
           value={sideChat.draftText}

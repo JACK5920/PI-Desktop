@@ -2116,7 +2116,16 @@ Single message render — either user (plaintext) or assistant (markdown streami
   that child explicitly rather than the still-active parent. A stale
   fork/send cannot reopen a closed tab,
   switch the active parent, or overwrite a newer draft. The ordinary Ask-about-
-  selection fork remains a distinct context-menu path (ADR 0346). Unpromoted
+  selection fork remains a distinct context-menu path (ADR 0346). References
+  captured from the parent while this side chat is active stay on the side-chat
+  Composer, not the main Composer, and use the same unified excerpt card and
+  hover/focus preview with edit, remove, and clear actions. Their source session
+  and exact range survive transfer into the child prompt; clicking a reference
+  or child-answer citation returns to the owning source conversation, activating
+  it first when needed. The selected fork excerpt remains contextual metadata
+  and is never duplicated into editable prompt text. Selecting text in the child
+  transcript attaches a separate reference to that child's next prompt.
+  Unpromoted
   sent side chats are omitted from top-level session lists and global search;
   the parent session lists them as reopenable entries using the durable child
   transcript and excerpt. “Open as a conversation” persists promotion before

@@ -15,6 +15,8 @@ import { useAppStore } from "../../../stores/app-store";
 type TranscriptSelectionToolbarProps = {
   transcriptRoot: HTMLElement | null;
   sessionId?: string;
+  /** Route new assistant excerpts to the visible side-chat composer when selected. */
+  sideChatId?: string;
   onAskInSideChat?: (selection: TranscriptSelection) => void;
   onAppendUserSelection?: (selection: TranscriptSelection) => void;
 };
@@ -34,6 +36,7 @@ function sameSelection(left: TranscriptSelection, right: TranscriptSelection): b
 export function TranscriptSelectionToolbar({
   transcriptRoot,
   sessionId,
+  sideChatId,
   onAskInSideChat,
   onAppendUserSelection,
 }: TranscriptSelectionToolbarProps) {
@@ -46,13 +49,26 @@ export function TranscriptSelectionToolbar({
   const [selection, setSelection] = useState<TranscriptSelection | null>(null);
   const [editingComment, setEditingComment] = useState(false);
   const [comment, setComment] = useState("");
-  const responseAnnotations = useAppStore((state) =>
-    selection
-      ? state.responseAnnotations[selection.sessionId] ?? EMPTY_RESPONSE_ANNOTATIONS
-      : EMPTY_RESPONSE_ANNOTATIONS,
+  const pendingSideChatReferences = useAppStore((state) =>
+    sideChatId ? state.sideChats[sideChatId]?.references ?? EMPTY_RESPONSE_ANNOTATIONS : EMPTY_RESPONSE_ANNOTATIONS,
+  );
+  const sentSideChatReferences = useAppStore((state) => {
+    const childSessionId = sideChatId ? state.sideChats[sideChatId]?.childSessionId : undefined;
+    return childSessionId ? state.responseAnnotations[childSessionId] ?? EMPTY_RESPONSE_ANNOTATIONS : EMPTY_RESPONSE_ANNOTATIONS;
+  });
+  const sessionReferences = useAppStore((state) =>
+    selection ? state.responseAnnotations[selection.sessionId] ?? EMPTY_RESPONSE_ANNOTATIONS : EMPTY_RESPONSE_ANNOTATIONS,
+  );
+  const responseAnnotations = useMemo(
+    () => sideChatId
+      ? [...pendingSideChatReferences, ...sentSideChatReferences]
+      : sessionReferences,
+    [pendingSideChatReferences, sentSideChatReferences, sessionReferences, sideChatId],
   );
   const addResponseAnnotation = useAppStore((state) => state.addResponseAnnotation);
   const editResponseAnnotation = useAppStore((state) => state.editResponseAnnotation);
+  const addSideChatReference = useAppStore((state) => state.addSideChatReference);
+  const editSideChatReference = useAppStore((state) => state.editSideChatReference);
   const showToast = useAppStore((state) => state.showToast);
   const duplicate = useMemo(() => selection?.role === "assistant"
     ? responseAnnotations.find((item) =>
@@ -250,7 +266,17 @@ export function TranscriptSelectionToolbar({
 
   const saveAnnotation = () => {
     if (!selection || selection.role !== "assistant") return;
-    const annotationId = addResponseAnnotation(
+    const annotationId = sideChatId
+      ? addSideChatReference(
+        sideChatId,
+        selection.messageId,
+        selection.excerpt,
+        selection.anchorStart === undefined || selection.anchorEnd === undefined
+          ? undefined
+          : { anchorStart: selection.anchorStart, anchorEnd: selection.anchorEnd },
+        selection.messageIds,
+      )
+      : addResponseAnnotation(
       selection.sessionId,
       selection.messageId,
       selection.excerpt,
@@ -258,12 +284,20 @@ export function TranscriptSelectionToolbar({
         ? undefined
         : { anchorStart: selection.anchorStart, anchorEnd: selection.anchorEnd },
       selection.messageIds,
-    );
+      );
     if (!annotationId) {
       showToast(t("chat.selectionAddFailed"), { variant: "error" });
       return;
     }
-    editResponseAnnotation(selection.sessionId, annotationId, comment);
+    if (sideChatId) {
+      const childSessionId = useAppStore.getState().sideChats[sideChatId]?.childSessionId;
+      const childOwnsReference = childSessionId !== undefined &&
+        useAppStore.getState().responseAnnotations[childSessionId]?.some((item) => item.id === annotationId);
+      if (childOwnsReference && childSessionId) editResponseAnnotation(childSessionId, annotationId, comment);
+      else editSideChatReference(sideChatId, annotationId, comment);
+    } else {
+      editResponseAnnotation(selection.sessionId, annotationId, comment);
+    }
     dismiss(true);
   };
 

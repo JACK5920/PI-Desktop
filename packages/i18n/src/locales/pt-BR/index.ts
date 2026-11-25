@@ -491,6 +491,7 @@ export const ptBR = {
     sideChatTitle: "Chat lateral",
     sideChatReopenFromParent: "Reabrir chat lateral",
     sideChatSource: "Da mensagem {{messageId}}",
+    sideChatSelectedTextReferences: "Trechos de texto selecionados ({{count}})",
     sideChatExcerpt: "Trecho selecionado",
     sideChatPrompt: "Mensagem do chat lateral",
     stop: "Parar",

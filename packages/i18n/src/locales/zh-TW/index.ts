@@ -497,6 +497,7 @@ export const zhTW = {
     sideChatTitle: "側邊聊天",
     sideChatReopenFromParent: "重新開啟側聊",
     sideChatSource: "引用自訊息 {{messageId}}",
+    sideChatSelectedTextReferences: "{{count}} 個已選文字片段",
     sideChatExcerpt: "選取的文字",
     sideChatPrompt: "側邊聊天訊息",
     stop: "停止",

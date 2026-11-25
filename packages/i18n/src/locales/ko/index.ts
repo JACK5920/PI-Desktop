@@ -504,6 +504,7 @@ export const ko = {
     sideChatTitle: "사이드 채팅",
     sideChatReopenFromParent: "사이드 채팅 다시 열기",
     sideChatSource: "메시지 {{messageId}}에서 가져옴",
+    sideChatSelectedTextReferences: "선택한 텍스트 발췌 ({{count}})",
     sideChatExcerpt: "선택한 발췌문",
     sideChatPrompt: "사이드 채팅 메시지",
     stop: "중지",

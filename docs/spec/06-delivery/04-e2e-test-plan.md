@@ -5924,7 +5924,11 @@ window; opening a normal panel afterward must still work.
 - **Coverage**: `node scripts/e2e-selection-reference-workflow.mjs` covers stable
   selection capture including a range spanning multiple same-role transcript
   messages, source-marker placement, Composer/citation preview, attach,
-  edit, prompt serialization, and the no-auto-send path. The AgentRuntime provider
+  edit, prompt serialization, and the no-auto-send path. It also covers a
+  selected reference staged from the main transcript into a docked side chat,
+  side-chat preview/edit/remove, one-time transfer into the child request,
+  source navigation from both the side-chat composer and child-answer citation,
+  and keeping the selected excerpt out of the editable prompt text. The AgentRuntime provider
   message test verifies the excerpt and request reach the model-facing user
   message. `node --test
   apps/desktop/test/response-annotations.test.mjs

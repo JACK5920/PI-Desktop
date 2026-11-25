@@ -2,7 +2,12 @@ import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { IconPencil, IconTrash } from "../../../components/icons";
 import { Button, Textarea, TooltipButton } from "../../../components/ui";
-import { annotationSourceTarget, type AnnotationSourceTarget } from "../../../lib/annotation-source-navigation";
+import {
+  type AnnotationSourceTarget,
+  annotationSourceTarget,
+  navigateToAnnotationSource,
+} from "../../../lib/annotation-source-navigation";
+import type { ResponseAnnotation } from "../../../lib/response-annotations";
 import { useAppStore } from "../../../stores/app-store";
 
 const EMPTY_ANNOTATIONS: never[] = [];
@@ -10,20 +15,31 @@ const EMPTY_ANNOTATIONS: never[] = [];
 export function ComposerAnnotationAttachments({
   sessionId: requestedSessionId,
   onNavigateToSource,
+  annotations: controlledAnnotations,
+  onEditAnnotation,
+  onRemoveAnnotation,
+  onClearAnnotations,
+  attachmentLabel,
 }: {
   sessionId?: string;
   onNavigateToSource?: (target: AnnotationSourceTarget) => void;
+  /** Optional host-owned references (used by transient side-chat drafts). */
+  annotations?: readonly ResponseAnnotation[];
+  onEditAnnotation?: (annotationId: string, comment?: string) => void;
+  onRemoveAnnotation?: (annotationId: string) => void;
+  onClearAnnotations?: () => void;
+  attachmentLabel?: string;
 } = {}) {
   const { t } = useTranslation();
   const activeSessionId = useAppStore((state) => state.activeSessionId);
   const sessionId = requestedSessionId ?? activeSessionId;
-  const annotations = useAppStore((state) =>
+  const storedAnnotations = useAppStore((state) =>
     sessionId ? state.responseAnnotations[sessionId] ?? EMPTY_ANNOTATIONS : EMPTY_ANNOTATIONS,
   );
-  const navigateTranscript = useAppStore((state) => state.navigateTranscript);
-  const editAnnotation = useAppStore((state) => state.editResponseAnnotation);
-  const removeAnnotation = useAppStore((state) => state.removeResponseAnnotation);
-  const clearAnnotations = useAppStore((state) => state.clearResponseAnnotations);
+  const annotations = controlledAnnotations ?? storedAnnotations;
+  const editResponseAnnotation = useAppStore((state) => state.editResponseAnnotation);
+  const removeResponseAnnotation = useAppStore((state) => state.removeResponseAnnotation);
+  const clearResponseAnnotations = useAppStore((state) => state.clearResponseAnnotations);
   const [open, setOpen] = useState(false);
   const [pinnedOpen, setPinnedOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -54,6 +70,20 @@ export function ComposerAnnotationAttachments({
 
   if (!sessionId || annotations.length === 0) return null;
 
+  const label = attachmentLabel ?? t("chat.annotationAttachments", { count: annotations.length });
+  const editAnnotation = (annotationId: string, comment?: string) => {
+    if (onEditAnnotation) onEditAnnotation(annotationId, comment);
+    else editResponseAnnotation(sessionId, annotationId, comment);
+  };
+  const removeAnnotation = (annotationId: string) => {
+    if (onRemoveAnnotation) onRemoveAnnotation(annotationId);
+    else removeResponseAnnotation(sessionId, annotationId);
+  };
+  const clearAnnotations = () => {
+    if (onClearAnnotations) onClearAnnotations();
+    else clearResponseAnnotations(sessionId);
+  };
+
   const closeCard = () => {
     setPinnedOpen(false);
     setOpen(false);
@@ -61,7 +91,9 @@ export function ComposerAnnotationAttachments({
   const jumpToSource = (annotation: (typeof annotations)[number]) => {
     const target = annotationSourceTarget(sessionId, annotation);
     if (onNavigateToSource) onNavigateToSource(target);
-    else void navigateTranscript(target);
+    else void navigateToAnnotationSource(target, () => useAppStore.getState()).catch((error) => {
+      useAppStore.getState().showToast(error instanceof Error ? error.message : String(error), { variant: "error" });
+    });
     closeCard();
   };
 
@@ -92,20 +124,20 @@ export function ComposerAnnotationAttachments({
         className="composer-annotation-chip"
         aria-expanded={open}
         aria-controls={cardId}
-        aria-label={t("chat.annotationAttachments", { count: annotations.length })}
+        aria-label={label}
         onClick={() => {
           setOpen(true);
           setPinnedOpen((value) => !value);
         }}
       >
-        {t("chat.annotationAttachments", { count: annotations.length })}
+        {label}
       </button>
       {open ? (
         <div
           id={cardId}
           className="composer-annotation-card"
           role="region"
-          aria-label={t("chat.annotationAttachments", { count: annotations.length })}
+          aria-label={label}
           data-testid="composer-annotation-card"
         >
           <ol className="composer-annotation-list">
@@ -149,7 +181,7 @@ export function ComposerAnnotationAttachments({
                         variant="primary"
                         size="sm"
                         onClick={() => {
-                          editAnnotation(sessionId, annotation.id, comment);
+                          editAnnotation(annotation.id, comment);
                           setEditingId(null);
                         }}
                       >
@@ -176,7 +208,7 @@ export function ComposerAnnotationAttachments({
                       className="icon-btn icon-btn-square"
                       tooltip={t("chat.removeAnnotation")}
                       ariaLabel={t("chat.removeAnnotation")}
-                      onClick={() => removeAnnotation(sessionId, annotation.id)}
+                      onClick={() => removeAnnotation(annotation.id)}
                     >
                       <IconTrash size={14} aria-hidden />
                     </TooltipButton>
@@ -191,7 +223,7 @@ export function ComposerAnnotationAttachments({
             size="sm"
             className="composer-annotation-clear"
             onClick={() => {
-              clearAnnotations(sessionId);
+              clearAnnotations();
               closeCard();
             }}
           >
