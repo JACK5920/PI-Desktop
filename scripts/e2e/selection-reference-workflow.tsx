@@ -139,6 +139,17 @@ async function settleAfterFocus(): Promise<void> {
   await settle();
 }
 
+async function waitForClearIconVisible(button: HTMLButtonElement): Promise<void> {
+  const deadline = Date.now() + 500;
+  while (Date.now() < deadline) {
+    if (Number.parseFloat(getComputedStyle(button).opacity) >= 0.99) return;
+    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(
+    `Clear icon did not become visible (opacity=${getComputedStyle(button).opacity}; visible=${button.parentElement?.getAttribute("data-clear-visible")}; focusWithin=${button.parentElement?.matches(":focus-within")})`,
+  );
+}
+
 let i18n: ReturnType<typeof createInstance>;
 let userNode: Text;
 let assistantNode: Text;
@@ -597,7 +608,11 @@ globalThis.selectionReferenceProbe = async () => {
     referencesChip.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
     await settle();
     assert(host.querySelector('[data-testid="composer-annotation-card"]')?.textContent?.includes(quote), "keyboard focus did not open the unified pending-reference card");
-    assert(getComputedStyle(clearTrigger).opacity === "1", "keyboard focus did not reveal the clear icon");
+    await waitForClearIconVisible(clearTrigger);
+    assert(
+      getComputedStyle(clearTrigger).opacity === "1",
+      `keyboard focus did not reveal the clear icon (chipFocused=${referencesChip.matches(":focus")}, triggerFocusWithin=${referencesChip.parentElement?.matches(":focus-within")}, opacity=${getComputedStyle(clearTrigger).opacity})`,
+    );
     referencesChip.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
     await settle();
     const composerCard = host.querySelector<HTMLElement>('[data-testid="composer-annotation-card"]');
@@ -635,14 +650,19 @@ globalThis.selectionReferenceProbe = async () => {
         composerReferenceRowStyle.borderInlineEndWidth === "0px",
       "reference excerpts are still rendered as nested rounded cards",
     );
-    const clearReferencesButton = [...composerCard.querySelectorAll<HTMLButtonElement>("button")]
-      .find((button) => button.textContent?.trim() === "Clear all references");
-    assert(clearReferencesButton, "the unified reference card has no clear-all action");
+    assert(!composerCard.querySelector(".composer-annotation-clear"), "the reference card duplicates the chip clear action with a text footer");
+    const clearTriggerStyle = getComputedStyle(clearTrigger);
+    const clearTriggerBounds = clearTrigger.getBoundingClientRect();
     assert(
-      clearReferencesButton.classList.contains("btn-ghost") &&
-        Number.parseFloat(getComputedStyle(clearReferencesButton).fontSize) <= 14 &&
-        clearReferencesButton.getBoundingClientRect().height <= 30,
-      "clear-all references is not visually secondary and compact",
+      clearTriggerStyle.borderTopWidth === "1px" &&
+        clearTriggerStyle.borderRightWidth === "1px" &&
+        clearTriggerStyle.borderBottomWidth === "1px" &&
+        clearTriggerStyle.borderLeftWidth === "1px" &&
+        Number.parseFloat(clearTriggerStyle.borderRadius) >= Math.min(clearTriggerBounds.width, clearTriggerBounds.height) / 2 &&
+        clearTriggerStyle.backgroundColor === "rgb(255, 255, 255)" &&
+        clearTriggerBounds.width >= 16 && clearTriggerBounds.width <= 20 &&
+        clearTriggerBounds.height >= 16 && clearTriggerBounds.height <= 20,
+      `clear-all affordance does not match the compact circular X reference (border=${clearTriggerStyle.borderTopWidth}, radius=${clearTriggerStyle.borderRadius}, bg=${clearTriggerStyle.backgroundColor}, size=${clearTriggerBounds.width}x${clearTriggerBounds.height})`,
     );
     const composerHoverBridge = getComputedStyle(attachmentRoot, "::before");
     assert(composerHoverBridge.pointerEvents !== "none" && Number.parseFloat(composerHoverBridge.height) >= 8, "Composer hover preview has no hit-test bridge across the trigger gap");
@@ -1003,7 +1023,7 @@ globalThis.selectionReferenceProbe = async () => {
     }
 
     clearTrigger.focus();
-    await settle();
+    await waitForClearIconVisible(clearTrigger);
     assert(getComputedStyle(clearTrigger).opacity === "1", "keyboard navigation did not reveal the focused clear icon");
     clearTrigger.click();
     await settleAfterFocus();

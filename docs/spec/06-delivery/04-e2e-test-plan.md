@@ -5892,12 +5892,13 @@ window; opening a normal panel afterward must still work.
   reference chip must open one compact unified card, which remains open while
   the pointer enters it. The chip aligns with the Composer text inset; its
   clear-all X appears only on hover or keyboard focus and clears all pending
-  references when activated. Verify each entry is a flat
+  references when activated, as a compact white circular X with a subtle dark
+  outline, without a duplicate footer action.
+  Verify each entry is a flat
   numbered row with a muted selected-text label, excerpt, header-aligned
-  edit/remove icons, and light separators between multiple rows; verify the
-  clear-all footer remains compact and visually secondary. Verify there is no
-  redundant trigger tooltip or stacked review panel. Click the excerpt and
-  require navigation to its source
+  edit/remove icons, and light separators between multiple rows. Verify there
+  is no redundant trigger tooltip or stacked review panel. Click the excerpt
+  and require navigation to its source
   message plus a highlight of only the captured range. Verify a valid answer
   citation previews only the excerpt/comment on hover/focus, remains usable as
   the pointer enters the card, and dismisses on Escape/outside press; click it

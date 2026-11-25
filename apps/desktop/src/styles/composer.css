@@ -220,33 +220,41 @@
   position: absolute;
   z-index: 1;
   inset-inline-end: 4px;
+  display: inline-flex;
   width: 18px;
   min-width: 18px;
   height: 18px;
   min-height: 18px;
-  padding: 2px;
-  border: 1px solid var(--ds-border-subtle);
-  border-radius: var(--radius-full);
-  background: var(--ds-bg-elevated-opaque);
-  color: var(--ds-text-secondary);
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--ds-border-contrast-control);
+  border-radius: var(--radius-round, 50%);
+  background: var(--ds-bg-contrast-control);
+  color: var(--ds-fg-contrast-control);
   opacity: 0;
   pointer-events: none;
   transition:
-    opacity var(--motion-duration-fast) var(--motion-ease-out),
     background var(--motion-duration-fast) var(--motion-ease-out),
     color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .composer-annotation-trigger:hover .composer-annotation-clear-trigger,
-.composer-annotation-trigger:focus-within .composer-annotation-clear-trigger {
+.composer-annotation-trigger:focus-within .composer-annotation-clear-trigger,
+.composer-annotation-trigger[data-clear-visible="true"] .composer-annotation-clear-trigger {
   opacity: 1;
   pointer-events: auto;
 }
 
 .composer-annotation-clear-trigger:hover,
 .composer-annotation-clear-trigger:focus-visible {
-  background: var(--ds-bg-hover);
-  color: var(--ds-text-primary);
+  background: var(--ds-bg-contrast-control-hover);
+  color: var(--ds-fg-contrast-control);
+}
+
+.composer-annotation-clear-trigger:focus-visible {
+  outline: 2px solid var(--ds-focus-ring);
+  outline-offset: 2px;
 }
 
 .composer-annotation-chip:hover,
@@ -408,15 +416,6 @@
 .composer-annotation-edit {
   display: grid;
   gap: 6px;
-}
-
-.composer-annotation-clear {
-  justify-self: start;
-  min-height: 25px;
-  margin: 1px 0 0 -3px;
-  padding: 2px 5px;
-  color: var(--ds-text-secondary);
-  font-size: var(--text-xs);
 }
 
 /* Focus deepens the lift; the shell never gains a stroke (D297). */

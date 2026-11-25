@@ -2081,9 +2081,11 @@ Single message render — either user (plaintext) or assistant (markdown streami
   open while the pointer enters it.
   Each excerpt is a flat, numbered row with a muted selected-text label, the
   excerpt, and compact edit/remove icons aligned in its header; rows use a light
-  divider instead of nested rounded cards. A compact, visually secondary
-  clear-all action sits in the card footer. The same card shows optional
-  comment text, without a second review panel or redundant trigger tooltip.
+  divider instead of nested rounded cards. The preview has no duplicate text
+  clear action; the chip's hover/focus X is the single clear-all affordance,
+  rendered as a compact white circular button inset at the chip's trailing edge.
+  The same card shows optional comment text, without a second review panel or
+  redundant trigger tooltip.
   The reference chip aligns with the Composer text inset. Its clear-all icon is
   hidden at rest and appears on pointer hover or keyboard focus; activating it
   clears only the pending references owned by that Composer.

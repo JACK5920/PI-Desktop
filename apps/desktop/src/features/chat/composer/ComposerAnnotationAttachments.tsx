@@ -42,6 +42,7 @@ export function ComposerAnnotationAttachments({
   const clearResponseAnnotations = useAppStore((state) => state.clearResponseAnnotations);
   const [open, setOpen] = useState(false);
   const [pinnedOpen, setPinnedOpen] = useState(false);
+  const [clearVisible, setClearVisible] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [comment, setComment] = useState("");
   const cardRef = useRef<HTMLDivElement>(null);
@@ -110,16 +111,36 @@ export function ComposerAnnotationAttachments({
           !event.currentTarget.matches(":focus-within")
         ) setOpen(false);
       }}
-      onFocusCapture={() => setOpen(true)}
+      onFocusCapture={() => {
+        setOpen(true);
+        setClearVisible(true);
+      }}
       onBlur={(event) => {
         if (
           !pinnedOpen &&
           !event.currentTarget.matches(":hover") &&
           !event.currentTarget.contains(event.relatedTarget as Node)
-        ) setOpen(false);
+        ) {
+          setOpen(false);
+          setClearVisible(false);
+        }
       }}
     >
-      <div className="composer-annotation-trigger">
+      <div
+        className="composer-annotation-trigger"
+        data-clear-visible={clearVisible ? "true" : "false"}
+        onPointerEnter={() => setClearVisible(true)}
+        onPointerLeave={(event) => {
+          if (!event.currentTarget.matches(":focus-within")) setClearVisible(false);
+        }}
+        onFocusCapture={() => setClearVisible(true)}
+        onBlurCapture={(event) => {
+          if (
+            !event.currentTarget.matches(":hover") &&
+            !event.currentTarget.contains(event.relatedTarget as Node | null)
+          ) setClearVisible(false);
+        }}
+      >
         <button
           type="button"
           className="composer-annotation-chip"
@@ -135,7 +156,7 @@ export function ComposerAnnotationAttachments({
         </button>
         <TooltipButton
           type="button"
-          className="icon-btn icon-btn-square composer-annotation-clear-trigger"
+          className="composer-annotation-clear-trigger"
           tooltip={t("chat.clearAnnotations")}
           ariaLabel={t("chat.clearAnnotations")}
           onClick={(event) => {
@@ -236,18 +257,6 @@ export function ComposerAnnotationAttachments({
               </li>
             ))}
           </ol>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="composer-annotation-clear"
-            onClick={() => {
-              clearAnnotations();
-              closeCard();
-            }}
-          >
-            {t("chat.clearAnnotations")}
-          </Button>
         </div>
       ) : null}
     </div>
