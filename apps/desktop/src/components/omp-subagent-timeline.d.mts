@@ -2,7 +2,13 @@ export function buildOmpSubagentTimeline(messages: unknown[], agentStatus?: stri
 export function ompSubagentIdentity(agent: Record<string, any>, index: number, fallback?: string, peers?: Array<Record<string, any>>): string;
 export function ompSubagentTaskSummary(agent: Record<string, any>): string;
 export function ompSubagentProgressSummary(agent: Record<string, any>): string;
+export function ompSubagentRetryState(agent: Record<string, any>, now?: number): { attempt: number; maxAttempts: number; delayMs: number; startedAtMs?: number; remainingMs: number; errorMessage: string } | null;
+export function ompSubagentRetryFailure(agent: Record<string, any>): { attempt: number; errorMessage: string } | null;
+export function ompSubagentResolvedModel(agent: Record<string, any>): string;
+export function ompSubagentIsFallbackModel(agent: Record<string, any>): boolean;
+export function ompSubagentIsRetrying(agent: Record<string, any>): boolean;
 export function ompSubagentTaskDetail(agent: Record<string, any>): string;
 export function ompSubagentStatusKey(status: unknown): string;
+export function ompSubagentIsWaiting(agent: Record<string, any>): boolean;
 export function ompSubagentLifecycleStatus(agent: Record<string, any> | null | undefined): string;
 export function ompSubagentTranscriptOutcome(messages: unknown): "completed" | "failed" | "aborted" | "";

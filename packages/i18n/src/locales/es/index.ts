@@ -540,6 +540,7 @@ export const es = {
     "diagramTooLarge": "Este diagrama es demasiado grande para representarlo de forma segura. Mostrando la fuente en su lugar.",
     "responseError": "No se pudo finalizar esta respuesta",
     "responseFailed": "El asistente no pudo completar esta respuesta.",
+    "OMP_AGENT_LOOP_ERROR": "El ciclo del agente terminó sin que fallara una solicitud al proveedor. Consulta los detalles para conocer el motivo.",
     "showErrorDetails": "Mostrar detalles",
     "hideErrorDetails": "Ocultar detalles",
     "dismissError": "Cerrar mensaje de error",
@@ -730,6 +731,7 @@ export const es = {
     "subagentCreating": "Iniciando subagente…",
     "subagentStatus": {
       "running": "En ejecución",
+      "waiting": "Esperando a sus propios subagentes o tareas",
       "completed": "Completado",
       "timed_out": "Tiempo de espera agotado",
       "aborted": "Detenido",

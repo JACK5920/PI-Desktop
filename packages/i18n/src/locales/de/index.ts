@@ -540,6 +540,7 @@ export const de = {
     "diagramTooLarge": "Dieses Diagramm ist zu groß, um sicher gerendert zu werden. Stattdessen wird die Quelle angezeigt.",
     "responseError": "Diese Antwort konnte nicht fertiggestellt werden.",
     "responseFailed": "Der Assistent konnte diese Antwort nicht fertigstellen.",
+    "OMP_AGENT_LOOP_ERROR": "Der Agentenlauf endete ohne Fehler einer Anbieteranfrage. Details enthalten den Grund.",
     "showErrorDetails": "Details anzeigen",
     "hideErrorDetails": "Details ausblenden",
     "dismissError": "Fehlermeldung schließen",
@@ -730,6 +731,7 @@ export const de = {
     "subagentCreating": "Starte Subagent…",
     "subagentStatus": {
       "running": "Läuft",
+      "waiting": "Wartet auf eigene Subagenten oder Aufgaben",
       "completed": "Abgeschlossen",
       "timed_out": "Zeitüberschreitung",
       "aborted": "Angehalten",

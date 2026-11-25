@@ -1,4 +1,4 @@
-const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+const THINKING_LEVELS = new Set(["auto", "off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 
 function asRecord(value) {
   return value !== null && typeof value === "object" ? value : null;
@@ -14,13 +14,34 @@ export async function selectOmpModelAndRefreshThinkingLevels({
   sessionId,
   provider,
   modelId,
+  role,
+  thinkingLevel,
   onModelApplied,
   onThinkingLevels,
+  onThinkingLevelsError,
 }) {
-  await rpcCommand({ sessionId, command: "set_model", fields: { provider, modelId } });
+  await rpcCommand({
+    sessionId,
+    command: "set_model",
+    fields: {
+      provider,
+      modelId,
+      ...(typeof role === "string" && role ? { role } : {}),
+      ...(typeof thinkingLevel === "string" && thinkingLevel ? { thinkingLevel } : {}),
+    },
+  });
   onModelApplied?.();
 
-  return readOmpThinkingLevels({ rpcCommand, sessionId, onThinkingLevels });
+  try {
+    return await readOmpThinkingLevels({ rpcCommand, sessionId, onThinkingLevels });
+  } catch (error) {
+    // The model switch is already committed by OMP. A follow-up capability
+    // lookup failure must not be reported as if the selected model was
+    // rejected, and the old model's reasoning options must not remain visible.
+    onThinkingLevels?.([]);
+    onThinkingLevelsError?.(error);
+    return [];
+  }
 }
 
 export async function readOmpThinkingLevels({ rpcCommand, sessionId, onThinkingLevels }) {
@@ -80,6 +101,28 @@ export function groupOmpModelsByProvider(models) {
     displayName: groupedModels[0] ? ompProviderDisplayName(groupedModels[0]) : provider,
     models: groupedModels,
   }));
+}
+
+/** Accept only model-picker rows with a usable native identity; newer OMP rows
+ * may carry a quick role and role-specific effort that must survive selection. */
+export function normalizeOmpModelPickerRows(value) {
+  const data = asRecord(value?.data) ?? asRecord(value);
+  if (!Array.isArray(data?.rows)) return [];
+  return data.rows.flatMap((value) => {
+    const row = asRecord(value);
+    if (typeof row?.provider !== "string" || typeof row.id !== "string" || !row.provider || !row.id) return [];
+    const normalized = {
+      provider: row.provider,
+      id: row.id,
+      name: typeof row.name === "string" ? row.name : row.id,
+      ...(typeof row.role === "string" && row.role ? { role: row.role } : {}),
+      ...(typeof row.thinkingLevel === "string" && THINKING_LEVELS.has(row.thinkingLevel) ? { thinkingLevel: row.thinkingLevel } : {}),
+      ...(row.current === true ? { current: true } : {}),
+      ...(Array.isArray(row.roles) ? { roles: row.roles.filter((role) => asRecord(role) && typeof role.role === "string") } : {}),
+      ...(Array.isArray(row.thinking) ? { thinking: row.thinking.filter((level) => typeof level === "string" && THINKING_LEVELS.has(level)) } : {}),
+    };
+    return [normalized];
+  });
 }
 
 /** The provider string sent to OMP is always its native ID, never its label. */

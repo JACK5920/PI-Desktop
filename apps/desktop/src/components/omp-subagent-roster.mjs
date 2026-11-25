@@ -271,7 +271,7 @@ export function applyOmpSubagentFrame(sessionId, frame) {
     id,
     status: rawStatus === "started" ? "running" : rawStatus,
   };
-  const active = incoming.status === "running" || incoming.status === "pending";
+  const active = ["running", "pending", "waiting"].includes(String(incoming.status).toLowerCase());
   // A late "running" frame from OMP's event stream must not undo an outcome
   // already confirmed by a delivered receipt or the child's own transcript.
   const delivered = terminalStatus(previous?.deliveryOutcome);
@@ -299,7 +299,7 @@ export function summarizeOmpBatchRoster(roster, toolCallIds) {
   const outcomes = new Map(agents.map((agent) => [agent, agentOutcome(agent)]));
   const running = agents.filter((agent) => !outcomes.get(agent)
     && agent.observedActive !== false
-    && ["running", "pending", "started"].includes(String(agent.status ?? "").toLowerCase())).length;
+    && ["running", "pending", "started", "waiting"].includes(String(agent.status ?? "").toLowerCase())).length;
   const completed = agents.filter((agent) => outcomes.get(agent) === "completed").length;
   const aborted = agents.filter((agent) => outcomes.get(agent) === "aborted").length;
   const failed = agents.filter((agent) => outcomes.get(agent) === "failed").length;

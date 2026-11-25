@@ -4,7 +4,7 @@ import { api } from "../../lib/api";
 import { useAppStore } from "../../stores/app-store";
 import { agentsForOmpToolCall, getOmpSubagentRoster, recordOmpSubagentRoster, recordOmpSubagentTranscriptOutcome, subscribeOmpSubagentRoster } from "../omp-subagent-roster.mjs";
 import { SubagentTranscriptContent } from "./SubagentTranscriptContent";
-import { ompSubagentIdentity, ompSubagentLifecycleStatus, ompSubagentProgressSummary, ompSubagentStatusKey, ompSubagentTaskDetail, ompSubagentTaskSummary, ompSubagentTranscriptOutcome } from "../omp-subagent-timeline.mjs";
+import { ompSubagentIdentity, ompSubagentIsFallbackModel, ompSubagentIsRetrying, ompSubagentIsWaiting, ompSubagentLifecycleStatus, ompSubagentProgressSummary, ompSubagentResolvedModel, ompSubagentRetryFailure, ompSubagentRetryState, ompSubagentStatusKey, ompSubagentTaskDetail, ompSubagentTaskSummary, ompSubagentTranscriptOutcome } from "../omp-subagent-timeline.mjs";
 import { buildOmpSubagentTranscriptTurns, getOmpSubagentConclusion } from "../omp-subagent-transcript.mjs";
 import { useFollowScroll } from "../../hooks/use-follow-scroll";
 import { useOmpSubagentRosterPolling } from "../omp-subagent-roster-polling";
@@ -25,6 +25,18 @@ export function OmpSubagentBatchTab({ toolCallId, selectedAgentId }: { toolCallI
   const agentLifecycleLabel = (agent: OmpAgent) => {
     const status = ompSubagentLifecycleStatus(agent);
     const key = ompSubagentStatusKey(status);
+    const retry = ompSubagentRetryState(agent);
+    const retryFailure = ompSubagentRetryFailure(agent);
+    if (ompSubagentIsRetrying(agent) && retry) return t("settings.omp.subagentRetrying", {
+      attempt: retry.attempt,
+      max: retry.maxAttempts,
+      seconds: Math.ceil(retry.remainingMs / 1000),
+      reason: retry.errorMessage || t("settings.omp.subagentRetryReasonUnavailable"),
+    });
+    if (ompSubagentIsWaiting(agent)) return t("settings.omp.subagentWaitingOnOwnWork");
+    if (agent.observedActive === false && retryFailure && ["failed", "aborted"].includes(key)) {
+      return t("settings.omp.subagentRetryFailed", { attempt: retryFailure.attempt, reason: retryFailure.errorMessage || t("settings.omp.subagentRetryReasonUnavailable") });
+    }
     if (agent.observedActive === false && (!key || key === "running")) {
       return t("settings.omp.subagentNoLongerRunning");
     }
@@ -62,6 +74,8 @@ export function OmpSubagentBatchTab({ toolCallId, selectedAgentId }: { toolCallI
   const selectedAgentIndex = selectedAgent ? Math.max(0, visibleAgents.findIndex((agent) => agent.id === selectedAgent.id)) : 0;
   const selectedAgentLabel = selectedAgent ? ompSubagentIdentity(selectedAgent, selectedAgentIndex, t("settings.omp.subagentNumber", { number: selectedAgentIndex + 1 }), visibleAgents) : "";
   const selectedAgentProgress = selectedAgent && selectedAgent.observedActive !== false ? ompSubagentProgressSummary(selectedAgent) : "";
+  const selectedAgentModel = selectedAgent ? ompSubagentResolvedModel(selectedAgent) : "";
+  const selectedAgentFallback = selectedAgent ? ompSubagentIsFallbackModel(selectedAgent) : false;
   const selectedAgentTask = selectedAgent ? ompSubagentTaskDetail(selectedAgent) : "";
   const selectedAgentTimelineStatus = selectedAgent ? ompSubagentLifecycleStatus(selectedAgent) : "";
   const selectedAgentDeliveryOutput = selectedAgent && typeof selectedAgent.deliveryOutput === "string" ? selectedAgent.deliveryOutput : "";
@@ -240,9 +254,12 @@ export function OmpSubagentBatchTab({ toolCallId, selectedAgentId }: { toolCallI
       const taskSummary = ompSubagentTaskSummary(agent);
       const taskDetail = ompSubagentTaskDetail(agent);
       const progress = agent.observedActive === false ? "" : ompSubagentProgressSummary(agent);
+      const resolvedModel = ompSubagentResolvedModel(agent);
+      const fallbackModel = ompSubagentIsFallbackModel(agent);
       return <button type="button" key={agent.id} className={selected?.id === agent.id ? "is-selected" : ""} onClick={() => choose(agent)} title={[identity, taskDetail, progress].filter(Boolean).join(" · ")}>
         <strong>{identity}</strong>
-        <small>{agentLifecycleLabel(agent)}{progress ? ` · ${progress}` : ""}</small>
+        <small>{agentLifecycleLabel(agent)}{fallbackModel ? ` · ${t("settings.omp.subagentFallbackModel")}` : ""}{progress ? ` · ${progress}` : ""}</small>
+        {resolvedModel ? <small className="omp-native-agent-model">{resolvedModel}</small> : null}
         {taskSummary ? <span className="omp-native-agent-task-summary">{taskSummary}</span> : null}
       </button>;
     })}</div> : !focusedAgentView ? <p>{agents.length ? t("settings.omp.noCorrelatedSubagents") : t("settings.omp.noSubagents")}</p> : null}
@@ -251,6 +268,8 @@ export function OmpSubagentBatchTab({ toolCallId, selectedAgentId }: { toolCallI
       {focusedAgentView ? <div className="omp-native-agent-live-status" role="status" aria-live="polite">
         <span className={`omp-native-agent-status-dot${selectedAgentRunning ? " is-running" : ""}`} aria-hidden="true" />
         <span title={agentLifecycleLabel(selectedAgent)}>{agentLifecycleLabel(selectedAgent)}</span>
+        {selectedAgentFallback ? <span>{t("settings.omp.subagentFallbackModel")}</span> : null}
+        {selectedAgentModel ? <span title={selectedAgentModel}>{selectedAgentModel}</span> : null}
         {selectedAgentProgress ? <span className="omp-native-agent-live-progress">{selectedAgentProgress}</span> : null}
       </div> : null}
       <div className="omp-native-agent-detail-tabs" role="tablist" aria-label={t("settings.omp.subagentDetailViews")} onKeyDown={handleDetailTabKeyDown}>

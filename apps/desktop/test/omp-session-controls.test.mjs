@@ -125,3 +125,16 @@ test("OMP session panel routes mutations through native RPC and clearly separate
   assert.match(component, /excludeFromContext: true/);
   assert.match(component, /supportsBashExcludeFromContext/);
 });
+
+test("OMP 19.2 session actions expose native resume and abort-then-deliver queue controls", async () => {
+  const component = await readFile(new URL("../src/components/OmpSessionControls.tsx", import.meta.url), "utf8");
+  const allowlist = await readFile(new URL("../electron/main/ipc/register.ts", import.meta.url), "utf8");
+
+  for (const command of ["abort_and_deliver_queue", "resume"]) {
+    assert.ok(component.includes(`run("${command}")`), `the session panel should expose ${command}`);
+    assert.ok(allowlist.includes(`"${command}"`), `IPC should allow ${command}`);
+  }
+  assert.match(component, /isBusy && \(queue\.steering\.length > 0 \|\| queue\.followUp\.length > 0\)/);
+  assert.match(component, /!isBusy && \(Number\(state\.messageCount\) \|\| 0\) > 0/);
+  assert.match(component, /result\?\.aborted === false/);
+});

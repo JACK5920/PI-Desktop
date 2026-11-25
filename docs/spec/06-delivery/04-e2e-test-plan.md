@@ -20903,3 +20903,25 @@ permission-request UI below has isolated fixture automation.
 - **Coverage:** `apps/desktop/test/session-running-bootstrap.test.mjs`,
   `apps/desktop/test/active-turn-surface.test.mjs`, and Desktop TypeScript
   check.
+
+### E2E-OMP-19.2-rpc-gui-parity
+
+- **Preconditions:** OMP 19.2.0 executable with a temporary profile, synthetic
+  model catalog and temporary session directories. No real account, external
+  provider request, model generation or user transcript.
+- **Steps:** Negotiate RPC v2; read state and the command catalog; query a
+  configured `@role`; apply its role and `auto` effort; inspect empty-queue
+  abort/delivery and empty-session resume responses. Feed retry-fallback,
+  agent-loop-error and subagent waiting/retry/model progress fixtures through
+  the production adapters and presentation models.
+- **Expected:** The native picker returns and applies the configured role;
+  post-selection capability-refresh failure does not report the model switch as
+  rejected; native no-op/error outcomes remain visible; agent-loop failure is
+  distinct from provider failure; subagent waiting/retry/fallback metadata is
+  shown only when supplied. No external model request occurs.
+- **Automated coverage:** `omp-rpc-command-parity.test.mjs`,
+  `omp-rpc-frame-parity.test.mjs`, `omp-rpc-native-integration.test.mjs`,
+  `omp-thinking-level-refresh.test.mjs`, `omp-session-controls.test.mjs`,
+  `omp-subagent-progress.test.mjs`, and `omp-subagent-turn-group.test.mjs`.
+- **Specs:** `03-runtime/23-omp-rpc-gui-parity.md` and
+  `03-runtime/08-error-codes.md`.

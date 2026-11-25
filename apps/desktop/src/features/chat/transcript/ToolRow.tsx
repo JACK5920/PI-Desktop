@@ -20,7 +20,7 @@ import { useTranslation } from "react-i18next";
 import type { UiMessage } from "@pi-desktop/shared";
 import { agentsForOmpToolCall, getOmpSubagentRoster, isOmpTaskBatch, subscribeOmpSubagentRoster } from "../../../components/omp-subagent-roster.mjs";
 import { useOmpSubagentRosterPolling } from "../../../components/omp-subagent-roster-polling";
-import { ompSubagentIdentity, ompSubagentLifecycleStatus, ompSubagentProgressSummary, ompSubagentStatusKey, ompSubagentTaskDetail, ompSubagentTaskSummary } from "../../../components/omp-subagent-timeline.mjs";
+import { ompSubagentIdentity, ompSubagentIsFallbackModel, ompSubagentIsRetrying, ompSubagentIsWaiting, ompSubagentLifecycleStatus, ompSubagentProgressSummary, ompSubagentResolvedModel, ompSubagentRetryFailure, ompSubagentRetryState, ompSubagentStatusKey, ompSubagentTaskDetail, ompSubagentTaskSummary } from "../../../components/omp-subagent-timeline.mjs";
 import { useOpenPreviewTarget } from "../../../hooks/use-preview-target";
 
 const EMPTY_OMP_ROSTER: readonly Record<string, unknown>[] = [];
@@ -529,24 +529,44 @@ function HostToolRow({
             const taskDetail = ompSubagentTaskDetail(agent);
             const progress = ompSubagentProgressSummary(agent);
             const rawStatus = ompSubagentLifecycleStatus(agent).toLowerCase();
+            const waiting = ompSubagentIsWaiting(agent);
+            const retrying = ompSubagentIsRetrying(agent);
+            const retry = ompSubagentRetryState(agent);
+            const retryFailure = ompSubagentRetryFailure(agent);
+            const resolvedModel = ompSubagentResolvedModel(agent);
+            const fallbackModel = ompSubagentIsFallbackModel(agent);
             const nodeStatus = agent.observedActive === false
               ? ["completed", "complete", "failed", "error", "cancelled", "canceled", "stopped", "aborted", "timed_out"].includes(rawStatus)
                 ? rawStatus === "completed" || rawStatus === "complete" ? "completed" : rawStatus === "stopped" ? "stopped" : rawStatus === "aborted" || rawStatus === "cancelled" || rawStatus === "canceled" ? "aborted" : "failed"
                 : "unknown"
-              : ["running", "pending", "started"].includes(rawStatus) ? "running" : "unknown";
-            const statusKey = ompSubagentStatusKey(rawStatus);
+              : waiting ? "waiting" : retrying ? "retrying" : ["running", "pending", "started"].includes(rawStatus) ? "running" : "unknown";
+            const statusKey = waiting ? "waiting" : ompSubagentStatusKey(rawStatus);
             const readableStatus = statusKey ? t(`chat.subagentStatus.${statusKey}`) : t("settings.omp.subagentStatusUnknown");
-            const nodeStatusLabel = agent.observedActive === false && (!statusKey || statusKey === "running")
+            const nodeStatusLabel = retrying && retry
+              ? t("settings.omp.subagentRetrying", {
+                attempt: retry.attempt,
+                max: retry.maxAttempts,
+                seconds: Math.ceil(retry.remainingMs / 1000),
+                reason: retry.errorMessage || t("settings.omp.subagentRetryReasonUnavailable"),
+              })
+              : waiting ? t("settings.omp.subagentWaitingOnOwnWork")
+              : agent.observedActive === false && retryFailure && ["failed", "aborted"].includes(statusKey)
+                ? t("settings.omp.subagentRetryFailed", { attempt: retryFailure.attempt, reason: retryFailure.errorMessage || t("settings.omp.subagentRetryReasonUnavailable") })
+                : agent.observedActive === false && (!statusKey || statusKey === "running")
               ? t("settings.omp.subagentNoLongerRunning")
               : readableStatus;
+            const readableStatusLabel = fallbackModel
+              ? `${nodeStatusLabel} · ${t("settings.omp.subagentFallbackModel")}`
+              : nodeStatusLabel;
             return <div role="listitem" key={agent.id} className="subagent-topology-node omp-batch-child-agent">
               <SubagentNodeCard
                 title={label}
                 summary={taskSummary || undefined}
                 summaryDetail={taskDetail || undefined}
+                model={resolvedModel || undefined}
                 activity={progress || undefined}
-                status={nodeStatus as "running" | "completed" | "aborted" | "stopped" | "failed" | "unknown"}
-                statusLabel={nodeStatusLabel}
+                status={nodeStatus as "running" | "waiting" | "retrying" | "completed" | "aborted" | "stopped" | "failed" | "unknown"}
+                statusLabel={readableStatusLabel}
                 onClick={() => {
                   onUserInteraction?.();
                   if (localToolsAllowed) openOmpSubagentBatchTab(ompBatchToolCallId, String(agent.id), label);

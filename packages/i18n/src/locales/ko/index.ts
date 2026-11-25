@@ -552,6 +552,7 @@ export const ko = {
     diagramTooLarge: "이 다이어그램은 안전하게 렌더링하기에 너무 큽니다. 대신 소스를 표시합니다.",
     responseError: "이 답변을 완료할 수 없습니다",
     responseFailed: "어시스턴트가 이 답변을 완료하지 못했습니다.",
+    OMP_AGENT_LOOP_ERROR: "공급자 요청 실패 없이 에이전트 루프가 종료되었습니다. 자세한 이유를 확인하세요.",
     showErrorDetails: "세부 정보 표시",
     hideErrorDetails: "세부 정보 숨기기",
     dismissError: "오류 메시지 닫기",
@@ -739,6 +740,7 @@ export const ko = {
     subagentCreating: "하위 에이전트 생성 중…",
     subagentStatus: {
       running: "실행 중",
+      waiting: "자체 하위 에이전트 또는 작업 대기 중",
       completed: "완료",
       timed_out: "시간 초과",
       aborted: "중지됨",

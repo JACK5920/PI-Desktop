@@ -56,6 +56,40 @@ test("a subagent that left the active roster is not presented as running without
   assert.equal(group.unknownCount, 1);
 });
 
+test("a running subagent waiting on its own wait tool is shown separately from active work", () => {
+  const group = buildOmpSubagentTurnGroup([batch("call-a")], [
+    { id: "agent-waiting", parentToolCallId: "call-a", status: "running", observedActive: true, progress: { currentTool: "wait" } },
+  ]);
+
+  assert.equal(group.agents[0].status, "waiting");
+  assert.equal(group.agents[0].statusKey, "waiting");
+  assert.equal(group.runningCount, 0);
+  assert.equal(group.waitingCount, 1);
+  assert.equal(group.unknownCount, 0);
+});
+
+test("OMP 19.2 retry backoff is separate from active work and its native stage remains visible", () => {
+  const group = buildOmpSubagentTurnGroup([batch("call-a")], [
+    {
+      id: "agent-retrying",
+      parentToolCallId: "call-a",
+      status: "running",
+      observedActive: true,
+      progress: {
+        currentTool: "bash",
+        stage: "Inspecting failing test",
+        retryState: { attempt: 2, maxAttempts: 5, delayMs: 12_000, startedAtMs: 1_000, errorMessage: "HTTP 429" },
+      },
+    },
+  ]);
+
+  assert.equal(group.agents[0].status, "retrying");
+  assert.equal(group.runningCount, 0);
+  assert.equal(group.retryingCount, 1);
+  assert.equal(group.waitingCount, 0);
+  assert.equal(group.unknownCount, 0);
+});
+
 test("turn group excludes ordinary tools and unlinked roster entries", () => {
   const group = buildOmpSubagentTurnGroup([
     { message: { id: "omp-bash", engineOrigin: "omp", toolName: "bash", toolArgs: { command: "echo hi" } } },

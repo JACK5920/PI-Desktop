@@ -3084,6 +3084,28 @@
   background: var(--ds-success);
 }
 
+.subagent-topology-node.outcome-waiting .subagent-topology-status-icon,
+.subagent-topology-node-header.outcome-waiting .subagent-topology-status-icon {
+  background: var(--ds-warning);
+  color: var(--ds-bg-primary);
+}
+
+.subagent-topology-node.outcome-retrying .subagent-topology-status-icon,
+.subagent-topology-node-header.outcome-retrying .subagent-topology-status-icon {
+  background: var(--ds-warning);
+  color: var(--ds-bg-primary);
+}
+
+.subagent-topology-node.outcome-waiting .subagent-topology-node-status,
+.subagent-topology-node-header.outcome-waiting .subagent-topology-node-status {
+  color: var(--ds-warning);
+}
+
+.subagent-topology-node.outcome-retrying .subagent-topology-node-status,
+.subagent-topology-node-header.outcome-retrying .subagent-topology-node-status {
+  color: var(--ds-warning);
+}
+
 .subagent-topology-node.outcome-truncated .subagent-topology-status-icon {
   background: var(--ds-warning);
 }

@@ -12,7 +12,7 @@ import {
   recordOmpSubagentTranscriptOutcome,
   summarizeOmpBatchRoster,
 } from "../src/components/omp-subagent-roster.mjs";
-import { ompSubagentLifecycleStatus } from "../src/components/omp-subagent-timeline.mjs";
+import { ompSubagentIsFallbackModel, ompSubagentIsRetrying, ompSubagentIsWaiting, ompSubagentLifecycleStatus, ompSubagentProgressSummary, ompSubagentResolvedModel, ompSubagentRetryFailure, ompSubagentRetryState, ompSubagentStatusKey } from "../src/components/omp-subagent-timeline.mjs";
 
 const receipt = (id, status, output = "") =>
   `<task-result id="${id}" agent="task" status="${status}" duration="1m">\n<output>\n${output}\n</output>\n</task-result>`;
@@ -60,6 +60,39 @@ test("a live agent's transcript is not terminal evidence", () => {
   // OMP's own status stays untouched: the transcript outcome is separate
   // evidence, and every reader prefers it when present.
   assert.equal(agent.status, "running");
+});
+
+test("OMP 19.2 waiting state is derived from the native wait tool without making the child terminal", () => {
+  const waiting = { status: "running", observedActive: true, progress: { currentTool: "vibe_wait" } };
+  assert.equal(ompSubagentIsWaiting(waiting), true);
+  assert.equal(ompSubagentStatusKey("waiting"), "waiting");
+  assert.equal(ompSubagentIsWaiting({ ...waiting, observedActive: false }), false);
+  assert.equal(ompSubagentIsWaiting({ ...waiting, progress: { currentTool: "bash" } }), false);
+  assert.equal(ompSubagentIsWaiting({ ...waiting, status: "completed" }), false);
+});
+
+test("OMP 19.2 task progress displays native stage, retry, and resolved fallback-model metadata", () => {
+  const agent = {
+    status: "running",
+    observedActive: true,
+    progress: {
+      stage: "Inspecting test output",
+      retryState: { attempt: 2, maxAttempts: 4, delayMs: 5_000, startedAtMs: 1_000, errorMessage: "HTTP 429" },
+      resolvedModel: "openai/gpt-6.2-sol",
+      resolvedModelIsFallback: true,
+    },
+  };
+  assert.equal(ompSubagentProgressSummary(agent), "Inspecting test output");
+  assert.equal(ompSubagentIsRetrying(agent), true);
+  assert.deepEqual(ompSubagentRetryState(agent, 2_000), {
+    attempt: 2, maxAttempts: 4, delayMs: 5_000, startedAtMs: 1_000, remainingMs: 4_000, errorMessage: "HTTP 429",
+  });
+  assert.equal(ompSubagentResolvedModel(agent), "openai/gpt-6.2-sol");
+  assert.equal(ompSubagentIsFallbackModel(agent), true);
+  assert.deepEqual(ompSubagentRetryFailure({ progress: { retryFailure: { attempt: 4, errorMessage: "quota exhausted" } } }), {
+    attempt: 4, errorMessage: "quota exhausted",
+  });
+  assert.equal(ompSubagentIsRetrying({ ...agent, observedActive: false }), false);
 });
 
 test("the roster poller is shared beyond the subagent pane", async () => {

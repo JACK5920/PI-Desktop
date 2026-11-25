@@ -840,8 +840,13 @@ function isGoalProgressEvent(value: unknown): value is GoalProgressEvent {
   );
 }
 
+/** Explicit effort values used by app-owned custom-model settings. */
 export const OMP_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 export type OmpThinkingLevel = (typeof OMP_THINKING_LEVELS)[number];
+
+/** OMP RPC's configured level also includes the native `auto` selector. */
+export const OMP_RPC_THINKING_LEVELS = ["auto", ...OMP_THINKING_LEVELS] as const;
+export type OmpRpcThinkingLevel = (typeof OMP_RPC_THINKING_LEVELS)[number];
 
 /** Per-model settings kept app-side; only app-owned providers push them to the engine. */
 export type OmpModelOverride = {

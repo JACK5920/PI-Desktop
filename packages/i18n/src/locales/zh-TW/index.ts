@@ -545,6 +545,7 @@ export const zhTW = {
     diagramTooLarge: "此圖表過大，無法安全渲染，已改為顯示原始碼。",
     responseError: "這次回覆未能完成",
     responseFailed: "助手沒能完成這次回覆。",
+    OMP_AGENT_LOOP_ERROR: "代理循環結束，但並非提供者請求失敗。請查看詳細原因。",
     showErrorDetails: "顯示詳情",
     hideErrorDetails: "隱藏詳情",
     dismissError: "關閉錯誤訊息",
@@ -735,6 +736,7 @@ export const zhTW = {
     subagentCreating: "正在建立子智能體…",
     subagentStatus: {
       running: "執行中",
+      waiting: "等待自己的子代理或工作",
       completed: "已完成",
       timed_out: "已超時",
       aborted: "已停止",

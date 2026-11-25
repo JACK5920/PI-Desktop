@@ -8,10 +8,12 @@ export function buildOmpSubagentTurnGroup(
   agents: Array<{
     agent: Record<string, any> & { id: string };
     toolCallId: string;
-    status: "running" | "completed" | "timed_out" | "aborted" | "stopped" | "failed" | "denied" | "unknown";
+    status: "running" | "waiting" | "retrying" | "completed" | "timed_out" | "aborted" | "stopped" | "failed" | "denied" | "unknown";
     statusKey: string;
   }>;
   runningCount: number;
+  waitingCount: number;
+  retryingCount: number;
   completedCount: number;
   failedCount: number;
   abortedCount: number;

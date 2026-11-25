@@ -4,13 +4,14 @@ import { type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, useCallba
 import { IconBot, IconCheck, IconChevronDown, IconSearch, IconX } from "../../../components/icons";
 import { AnchoredMenu } from "../../../components/settings/AnchoredMenu";
 import { TooltipButton } from "../../../components/ui";
-import { api, type OmpModelOverride } from "../../../lib/api";
+import { api, type OmpModelOverride, type OmpRpcThinkingLevel } from "../../../lib/api";
 import { type OmpModelRecoveryInfo, type OmpRecoveryCandidate, readOmpModelRecovery } from "../../../lib/omp-model-recovery";
 import { useAppStore } from "../../../stores/app-store";
 import {
   filterOmpModelsBySearch,
   groupOmpModelsByProvider,
   mapOmpProviderDisplayNames,
+  normalizeOmpModelPickerRows,
   type OmpModelOption,
   ompProviderDisplayName,
   readOmpThinkingLevels,
@@ -19,7 +20,6 @@ import {
 } from "./omp-model-selection.mjs";
 
 type OmpModel = OmpModelOption;
-type OmpThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 function modelVisibilityKey(provider: string, id: string): string {
   return `${encodeURIComponent(provider)}::${encodeURIComponent(id)}`;
@@ -28,8 +28,8 @@ function modelVisibilityKey(provider: string, id: string): string {
 type PickerCache = {
   model: OmpModel | null;
   models: OmpModel[];
-  thinkingLevels: OmpThinkingLevel[];
-  thinkingLevel: OmpThinkingLevel | null;
+  thinkingLevels: OmpRpcThinkingLevel[];
+  thinkingLevel: OmpRpcThinkingLevel | null;
   fastMode: boolean;
   slowMode: boolean;
   slowModeSupported: boolean;
@@ -126,7 +126,7 @@ function readRecentSessionModel(): OmpModel | null {
   return null;
 }
 
-function readStoredCatalog(): { models: OmpModel[]; thinkingLevels: OmpThinkingLevel[] } | null {
+function readStoredCatalog(): { models: OmpModel[]; thinkingLevels: OmpRpcThinkingLevel[] } | null {
   try {
     const parsed = JSON.parse(localStorage.getItem(CATALOG_STORAGE_KEY) ?? "null") as
       | { models?: unknown; thinkingLevels?: unknown }
@@ -134,14 +134,14 @@ function readStoredCatalog(): { models: OmpModel[]; thinkingLevels: OmpThinkingL
     if (!parsed || !Array.isArray(parsed.models)) return null;
     return {
       models: parsed.models as OmpModel[],
-      thinkingLevels: Array.isArray(parsed.thinkingLevels) ? (parsed.thinkingLevels as OmpThinkingLevel[]) : [],
+      thinkingLevels: Array.isArray(parsed.thinkingLevels) ? (parsed.thinkingLevels as OmpRpcThinkingLevel[]) : [],
     };
   } catch {
     return null;
   }
 }
 
-function writeStoredCatalog(models: OmpModel[], thinkingLevels: OmpThinkingLevel[]): void {
+function writeStoredCatalog(models: OmpModel[], thinkingLevels: OmpRpcThinkingLevel[]): void {
   try {
     localStorage.setItem(CATALOG_STORAGE_KEY, JSON.stringify({ models, thinkingLevels }));
   } catch {
@@ -192,10 +192,13 @@ export function ComposerOmpModelPicker({
   const [model, setModel] = useState<OmpModel | null>(null);
   const [models, setModels] = useState<OmpModel[]>([]);
   const [modelQuery, setModelQuery] = useState("");
+  const [nativePickerRows, setNativePickerRows] = useState<OmpModel[]>([]);
+  const [quickRoleLoading, setQuickRoleLoading] = useState(false);
+  const [quickRoleError, setQuickRoleError] = useState<string | null>(null);
   const [recent, setRecent] = useState<RecentModel[]>(() => readRecentModels());
   const [activeSection, setActiveSection] = useState("recent");
-  const [thinkingLevels, setThinkingLevels] = useState<OmpThinkingLevel[]>([]);
-  const [thinkingLevel, setThinkingLevel] = useState<OmpThinkingLevel | null>(null);
+  const [thinkingLevels, setThinkingLevels] = useState<OmpRpcThinkingLevel[]>([]);
+  const [thinkingLevel, setThinkingLevel] = useState<OmpRpcThinkingLevel | null>(null);
   const [fastMode, setFastMode] = useState(false);
   const [slowMode, setSlowMode] = useState(false);
   const [slowModeSupported, setSlowModeSupported] = useState(false);
@@ -215,8 +218,9 @@ export function ComposerOmpModelPicker({
   // Rapid reopen-close-reopen cycles fire overlapping loads; only the newest
   // answer may paint, otherwise a slow cold start lands last and wins.
   const loadSeqRef = useRef(0);
+  const roleQuerySeqRef = useRef(0);
   // Mirrors the painted ladder for loads that run before React flushed state.
-  const thinkingLevelsRef = useRef<OmpThinkingLevel[]>([]);
+  const thinkingLevelsRef = useRef<OmpRpcThinkingLevel[]>([]);
 
   const hydrate = useCallback((cached: PickerCache) => {
     setModel(cached.model);
@@ -241,7 +245,7 @@ export function ComposerOmpModelPicker({
     try {
       const attached = await api.attachOmpRpc({ sessionId: rpcSessionId, skipMessages: true });
       if (loadSeqRef.current !== seq) return false;
-      const state = attached.state as { model?: OmpModel; thinkingLevel?: OmpThinkingLevel; fastModeEnabled?: boolean; slowModeEnabled?: boolean; slowModeSupported?: boolean } | null;
+      const state = attached.state as { model?: OmpModel; thinkingLevel?: OmpRpcThinkingLevel; fastModeEnabled?: boolean; slowModeEnabled?: boolean; slowModeSupported?: boolean } | null;
       // A cold or restarting engine answers with a null state. Adopting that
       // repainted the menu without thinking levels or the slow-mode toggle, so
       // only a live state may replace what the user already sees.
@@ -259,7 +263,7 @@ export function ComposerOmpModelPicker({
       // finish before anything else targets the same child process.
       const result = await api.ompRpcCommand({ sessionId: rpcSessionId, command: "get_available_models" }) as { data?: { models?: OmpModel[] } };
       const [levels, visibility, overrideState, customModelState] = await Promise.all([
-        api.ompRpcCommand({ sessionId: rpcSessionId, command: "get_available_thinking_levels" }) as Promise<{ data?: { levels?: OmpThinkingLevel[] } }>,
+        api.ompRpcCommand({ sessionId: rpcSessionId, command: "get_available_thinking_levels" }) as Promise<{ data?: { levels?: OmpRpcThinkingLevel[] } }>,
         api.getOmpHiddenModels(),
         api.getOmpModelOverrides(),
         api.getOmpCustomModels().catch(() => ({ providers: [] })),
@@ -400,6 +404,7 @@ export function ComposerOmpModelPicker({
   }, [cacheKey, hydrate, draft]);
 
   const normalizedModelQuery = modelQuery.trim().toLocaleLowerCase();
+  const quickRoleQuery = normalizedModelQuery.startsWith("@");
   const filteredModels = filterOmpModelsBySearch(models, normalizedModelQuery);
   const searching = normalizedModelQuery.length > 0;
 
@@ -436,8 +441,9 @@ export function ComposerOmpModelPicker({
         models: currentSection.models,
       }] : [];
     }
+    if (quickRoleQuery) return groupOmpModelsByProvider(nativePickerRows);
     return groupOmpModelsByProvider(filteredModels);
-  }, [currentSection, filteredModels, searching]);
+  }, [currentSection, filteredModels, nativePickerRows, quickRoleQuery, searching]);
 
   const paneEmpty = paneGroups.every((group) => group.models.length === 0);
   const railIndex = Math.max(sections.findIndex((section) => section.id === currentSection?.id), 0);
@@ -449,6 +455,46 @@ export function ComposerOmpModelPicker({
   useEffect(() => {
     if (open) loadPromiseRef.current = load();
   }, [open, load]);
+
+  // OMP 19.2 owns the ranking and role semantics of `@` model-picker queries.
+  // Keep ordinary catalog search local, but pass quick-role syntax through the
+  // native picker and preserve its current-row and role-effort metadata.
+  useEffect(() => {
+    const query = modelQuery.trim();
+    const sequence = ++roleQuerySeqRef.current;
+    if (!open || !query.startsWith("@")) {
+      setNativePickerRows([]);
+      setQuickRoleLoading(false);
+      setQuickRoleError(null);
+      return;
+    }
+    setQuickRoleLoading(true);
+    setQuickRoleError(null);
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          await loadPromiseRef.current?.catch(() => false);
+          const result = await api.ompRpcCommand({
+            sessionId: rpcSessionId,
+            command: "get_model_picker",
+            fields: { query, limit: 100 },
+          });
+          if (sequence !== roleQuerySeqRef.current) return;
+          setNativePickerRows(normalizeOmpModelPickerRows(result));
+        } catch (cause) {
+          if (sequence !== roleQuerySeqRef.current) return;
+          const message = cause instanceof Error ? cause.message : String(cause);
+          setNativePickerRows([]);
+          setQuickRoleError(/unknown (?:rpc )?command|not exposed/i.test(message)
+            ? t("settings.omp.quickRoleUnavailable")
+            : message);
+        } finally {
+          if (sequence === roleQuerySeqRef.current) setQuickRoleLoading(false);
+        }
+      })();
+    }, 160);
+    return () => window.clearTimeout(timer);
+  }, [modelQuery, open, rpcSessionId, t]);
 
   // Native slash commands and OMP-side automations can change model settings
   // without going through this picker. Treat get_state as the authority and
@@ -463,7 +509,7 @@ export function ComposerOmpModelPicker({
       if (refreshing) { refreshAgain = true; return; }
       refreshing = true;
       try {
-        const result = await api.ompRpcCommand({ sessionId, command: "get_state" }) as { data?: { model?: OmpModel | null; thinkingLevel?: OmpThinkingLevel | null; fastModeEnabled?: boolean; slowModeEnabled?: boolean; slowModeSupported?: boolean } };
+        const result = await api.ompRpcCommand({ sessionId, command: "get_state" }) as { data?: { model?: OmpModel | null; thinkingLevel?: OmpRpcThinkingLevel | null; fastModeEnabled?: boolean; slowModeEnabled?: boolean; slowModeSupported?: boolean } };
         if (disposed || useAppStore.getState().activeSessionId !== sessionId) return;
         // A reconnect can answer without data; blanking modes on that would
         // drop the slow-mode toggle for no real reason.
@@ -550,6 +596,7 @@ export function ComposerOmpModelPicker({
       if (!window.confirm(t("errors.crossProviderConfirm", { provider: ompProviderDisplayName(candidate) }))) return;
     }
     setLoading(true);
+    let modelApplied = false;
     try {
       await loadPromiseRef.current?.catch(() => false);
       let nextThinkingLevels = thinkingLevels;
@@ -558,15 +605,25 @@ export function ComposerOmpModelPicker({
         rpcCommand: api.ompRpcCommand,
         sessionId: rpcSessionId,
         ...toOmpRpcModelIdentity(candidate),
+        role: candidate.role,
+        thinkingLevel: candidate.thinkingLevel,
         onModelApplied: () => {
-          setModel(candidate);
-          writeStoredModel(cacheKey, candidate);
+          modelApplied = true;
+          const selectedModel = {
+            provider: candidate.provider,
+            id: candidate.id,
+            ...(candidate.name ? { name: candidate.name } : {}),
+            ...(candidate.providerName ? { providerName: candidate.providerName } : {}),
+            ...(candidate.contextWindow ? { contextWindow: candidate.contextWindow } : {}),
+          };
+          setModel(selectedModel);
+          writeStoredModel(cacheKey, selectedModel);
           nextThinkingLevels = [];
-          nextThinkingLevel = null;
+          nextThinkingLevel = candidate.role ? candidate.thinkingLevel ?? null : null;
           thinkingLevelsRef.current = [];
           setThinkingLevels([]);
-          setThinkingLevel(null);
-          patchCache({ model: candidate, thinkingLevel: null, thinkingLevels: [] });
+          setThinkingLevel(nextThinkingLevel);
+          patchCache({ model: selectedModel, thinkingLevel: nextThinkingLevel, thinkingLevels: [] });
           writeStoredCatalog(models, []);
         },
         onThinkingLevels: (levels) => {
@@ -576,7 +633,18 @@ export function ComposerOmpModelPicker({
           patchCache({ thinkingLevels: levels });
           writeStoredCatalog(models, levels);
         },
+        onThinkingLevelsError: () => {
+          setError(t("settings.omp.modelAppliedButRefreshFailed"));
+        },
       });
+      if (candidate.role && quickRoleQuery) {
+        try {
+          const picker = await api.ompRpcCommand({ sessionId: rpcSessionId, command: "get_model_picker", fields: { query: modelQuery.trim(), limit: 100 } });
+          setNativePickerRows(normalizeOmpModelPickerRows(picker));
+        } catch (cause) {
+          setQuickRoleError(cause instanceof Error ? cause.message : String(cause));
+        }
+      }
       const nextRecent = [
         { provider: candidate.provider, id: candidate.id },
         ...recent.filter((entry) => !(entry.provider === candidate.provider && entry.id === candidate.id)),
@@ -584,24 +652,28 @@ export function ComposerOmpModelPicker({
       setRecent(nextRecent);
       writeRecentModels(nextRecent);
       if (!draft) {
-        const refreshed = await api.ompRpcCommand({ sessionId: rpcSessionId, command: "get_state" }) as {
-          data?: {
-            thinkingLevel?: OmpThinkingLevel | null;
-            slowModeEnabled?: boolean;
-            slowModeSupported?: boolean;
+        try {
+          const refreshed = await api.ompRpcCommand({ sessionId: rpcSessionId, command: "get_state" }) as {
+            data?: {
+              thinkingLevel?: OmpRpcThinkingLevel | null;
+              slowModeEnabled?: boolean;
+              slowModeSupported?: boolean;
+            };
           };
-        };
-        const nativeState = refreshed.data;
-        if (nativeState) {
-          nextThinkingLevel = nativeState.thinkingLevel ?? null;
-          setThinkingLevel(nextThinkingLevel);
-          setSlowMode(nativeState.slowModeEnabled === true);
-          setSlowModeSupported(nativeState.slowModeSupported === true);
-          patchCache({
-            thinkingLevel: nextThinkingLevel,
-            slowMode: nativeState.slowModeEnabled === true,
-            slowModeSupported: nativeState.slowModeSupported === true,
-          });
+          const nativeState = refreshed.data;
+          if (nativeState) {
+            nextThinkingLevel = nativeState.thinkingLevel ?? null;
+            setThinkingLevel(nextThinkingLevel);
+            setSlowMode(nativeState.slowModeEnabled === true);
+            setSlowModeSupported(nativeState.slowModeSupported === true);
+            patchCache({
+              thinkingLevel: nextThinkingLevel,
+              slowMode: nativeState.slowModeEnabled === true,
+              slowModeSupported: nativeState.slowModeSupported === true,
+            });
+          }
+        } catch {
+          setError(t("settings.omp.modelAppliedButRefreshFailed"));
         }
       }
       // A model-level default thinking level is applied right after switching,
@@ -609,14 +681,22 @@ export function ComposerOmpModelPicker({
       // live turn yet, so the engine picks its default when the chat starts.
       const preferred = overridesRef.current[modelVisibilityKey(candidate.provider, candidate.id)]?.defaultThinkingLevel;
       if (!draft && preferred && nextThinkingLevels.includes(preferred) && preferred !== nextThinkingLevel) {
-        await api.ompRpcCommand({ sessionId: rpcSessionId, command: "set_thinking_level", fields: { level: preferred } });
-        setThinkingLevel(preferred);
-        patchCache({ thinkingLevel: preferred });
+        try {
+          await api.ompRpcCommand({ sessionId: rpcSessionId, command: "set_thinking_level", fields: { level: preferred } });
+          setThinkingLevel(preferred);
+          patchCache({ thinkingLevel: preferred });
+        } catch {
+          setError(t("settings.omp.modelAppliedButRefreshFailed"));
+        }
       }
       // Keep the menu open after a pick: the user often wants to set the
       // reasoning level right after, and reopening the picker was making that
       // a two-step dance. The menu closes when the click lands outside it.
     } catch (cause) {
+      if (modelApplied) {
+        setError(t("settings.omp.modelAppliedButRefreshFailed"));
+        return;
+      }
       if ((cause as { code?: string } | null)?.code === "MODEL_UNAVAILABLE") {
         // The engine refused to restore the old model before `set_model` could
         // run. Reopening with the picked pair applies it in one step.
@@ -644,7 +724,7 @@ export function ComposerOmpModelPicker({
     items[next]?.focus();
   };
 
-  const chooseThinking = async (level: OmpThinkingLevel) => {
+  const chooseThinking = async (level: OmpRpcThinkingLevel) => {
     if (!sessionId) return;
     setLoading(true);
     try {
@@ -691,7 +771,7 @@ export function ComposerOmpModelPicker({
       className="composer-omp-model"
       open={open}
       onClose={() => setOpen(false)}
-      menuClassName={`composer-mode-menu composer-omp-model-menu ${sections.length > 1 ? "has-rail" : ""}`}
+      menuClassName={`composer-mode-menu composer-omp-model-menu ${sections.length > 1 && !quickRoleQuery ? "has-rail" : ""}`}
       label={t("settings.omp.model")}
       role="menu"
       align="end"
@@ -762,9 +842,9 @@ export function ComposerOmpModelPicker({
       ) : null}
       <div
         className="composer-model-body"
-        data-rail={sections.length > 1 ? "true" : undefined}
+        data-rail={sections.length > 1 && !quickRoleQuery ? "true" : undefined}
       >
-        {sections.length > 1 ? (
+        {sections.length > 1 && !quickRoleQuery ? (
           <div className="composer-model-rail" role="group" aria-label={t("chat.modelSources")}>
             <span
               className="composer-model-rail-indicator"
@@ -802,7 +882,9 @@ export function ComposerOmpModelPicker({
               <div key={group.provider || "recent"} className="composer-model-group" role="group" aria-label={group.displayName || undefined}>
                 {searching && group.displayName ? <div className="composer-model-group-label">{group.displayName}</div> : null}
                 {group.models.map((candidate) => {
-                  const selected = model?.provider === candidate.provider && model?.id === candidate.id;
+                  const selected = quickRoleQuery
+                    ? candidate.current === true
+                    : model?.provider === candidate.provider && model?.id === candidate.id;
                   // One dense line per model: the rail already names the source,
                   // so repeating it under every row only wasted vertical space.
                   return (
@@ -817,13 +899,16 @@ export function ComposerOmpModelPicker({
                       onClick={() => void choose(candidate)}
                     >
                       <span className="composer-agent-engine-option-title">{candidate.name || candidate.id}</span>
+                      {quickRoleQuery && candidate.role ? <small className="composer-omp-role-meta">@{candidate.role}{candidate.thinkingLevel ? ` · ${candidate.thinkingLevel}` : ""}</small> : null}
                       {selected ? <IconCheck size={13} /> : null}
                     </button>
                   );
                 })}
               </div>
             ))}
-            {!loading && paneEmpty ? (
+            {quickRoleLoading ? <div className="composer-model-empty" role="status">{t("settings.omp.modelsLoading")}</div> : null}
+            {quickRoleError ? <div className="composer-model-empty" role="status">{quickRoleError}</div> : null}
+            {!loading && !quickRoleLoading && !quickRoleError && paneEmpty ? (
               <div className="composer-model-empty" role="status">
                 {searching ? t("settings.omp.noModelsMatch", { query: modelQuery.trim() }) : t("settings.omp.noModels")}
               </div>

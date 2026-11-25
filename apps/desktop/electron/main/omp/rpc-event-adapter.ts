@@ -145,6 +145,7 @@ export function ompMessageToUiMessage(value: unknown, messageId: string, status:
     ? new Date(message.timestamp).toISOString()
     : typeof message.createdAt === "string" ? message.createdAt : new Date().toISOString();
   const isAssistant = message.role === "assistant";
+  const agentLoopError = isAssistant && message.errorFromAgentLoop === true;
   const usage = isAssistant ? ompUsage(message.usage) : undefined;
   const orderedContent = orderedInlineContent(message.content);
   const inlineImages = orderedContent.flatMap((block) => block.type === "image"
@@ -157,11 +158,20 @@ export function ompMessageToUiMessage(value: unknown, messageId: string, status:
     id: messageId,
     role: message.role,
     content: textContent(message.content),
+    ...(agentLoopError ? {
+      error: {
+        code: "OMP_AGENT_LOOP_ERROR",
+        message: typeof message.errorMessage === "string" && message.errorMessage.trim()
+          ? message.errorMessage
+          : "The agent loop ended without a provider request failure.",
+        retriable: false,
+      },
+    } : {}),
     ...(thinkingContent(message.content) ? { thinking: thinkingContent(message.content) } : {}),
     ...(inlineImages.length ? { inlineImages } : {}),
     ...(orderedContent.some((block) => block.type === "image") ? { inlineContent: orderedContent } : {}),
     createdAt,
-    status,
+    status: agentLoopError ? "error" : status,
     // Both fields are set so the footer renders even when the two names agree;
     // `modelId` alone used to be the only gate, which hid every OMP reply.
     ...(typeof message.model === "string"

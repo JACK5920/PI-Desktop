@@ -657,7 +657,7 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     const context = await ompSessionContext(event, input);
     const command = typeof input?.command === "string" ? input.command : "";
     if (context.sessionId === OMP_SETTINGS_RPC_SESSION_ID) {
-      const managementCommands = new Set(["get_state", "get_available_models", "get_available_thinking_levels", "get_login_providers", "get_logout_accounts", "login", "logout", "set_model"]);
+      const managementCommands = new Set(["get_state", "get_available_models", "get_model_picker", "get_available_thinking_levels", "get_login_providers", "get_logout_accounts", "login", "logout", "set_model"]);
       if (!managementCommands.has(command)) throw new Error(`OMP settings cannot run RPC command: ${command}`);
       await ompRpcRuntime!.connect(context);
       const result = await ompRpcRuntime!.command(context.sessionId, command, input?.fields && typeof input.fields === "object" ? input.fields : {});
@@ -668,9 +668,9 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     }
     const allowedCommands = new Set([
       "get_state", "get_messages", "get_messages_page", "get_entries", "get_tree", "get_branch_messages", "get_last_assistant_text", "get_session_stats",
-      "get_available_commands", "get_available_models", "get_available_thinking_levels", "set_model", "cycle_model", "set_thinking_level", "cycle_thinking_level",
+      "get_available_commands", "get_available_models", "get_model_picker", "get_available_thinking_levels", "set_model", "cycle_model", "set_thinking_level", "cycle_thinking_level",
       "set_fast_mode", "set_slow_mode", "set_steering_mode", "set_follow_up_mode", "set_interrupt_mode", "set_auto_compaction", "set_auto_retry", "set_cache_warming",
-      "prompt", "steer", "follow_up", "abort", "abort_and_prompt", "abort_and_restore_queue", "remove_queued_message", "promote_queued_message",
+      "prompt", "steer", "follow_up", "abort", "abort_and_prompt", "abort_and_restore_queue", "abort_and_deliver_queue", "resume", "remove_queued_message", "promote_queued_message",
       "new_session", "switch_session", "branch", "fork", "open_session", "abort_branch_summary", "set_label", "set_session_name", "export_html", "handoff",
       "goal", "set_todos", "compact", "bash", "get_subagents", "get_subagent_messages", "cancel_subagent", "steer_subagent",
       "get_login_providers", "login", "get_logout_accounts", "logout", "set_ask_dialog", "get_btw_history", "btw", "btw_cancel",

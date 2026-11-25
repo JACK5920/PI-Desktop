@@ -276,6 +276,11 @@ export function OmpSessionControls({ sessionId, t }: { sessionId: string | null;
     if (result?.removed === false) showToast(t("settings.omp.queuedMessageAlreadyDelivered"), { variant: "info" });
   };
 
+  const deliverQueuedAndContinue = async () => {
+    const result = await run("abort_and_deliver_queue");
+    if (result?.aborted === false) showToast(t("settings.omp.noQueuedMessageToDeliver"), { variant: "info" });
+  };
+
   const toggle = async (command: string, value: string | boolean) => {
     await run(command, typeof value === "boolean" ? { enabled: value } : { mode: value });
   };
@@ -389,6 +394,8 @@ export function OmpSessionControls({ sessionId, t }: { sessionId: string | null;
       </section>
       <section className="omp-session-section"><strong>{t("settings.omp.sessionActions")}</strong>
         {state.sessionId ? <small role="status">{t("settings.omp.sessionLease", { state: t(`settings.omp.sessionLeaseState.${state.leaseState ?? "unknown"}`) })}</small> : null}
+        {isBusy && (queue.steering.length > 0 || queue.followUp.length > 0) ? <button type="button" disabled={busy} onClick={() => void deliverQueuedAndContinue()}>{t("settings.omp.abortAndDeliverQueued")}</button> : null}
+        {!isBusy && (Number(state.messageCount) || 0) > 0 ? <button type="button" disabled={busy} onClick={() => void run("resume")}>{t("settings.omp.resumeNativeSession")}</button> : null}
         <label>{t("settings.omp.renameNativeSession")}<span className="omp-session-inline"><input value={sessionName} onChange={(event) => setSessionName(event.target.value)} maxLength={120} /><button type="button" disabled={busy || !sessionName.trim()} onClick={() => void run("set_session_name", { name: sessionName.trim() })}>{t("common.save")}</button></span></label>
         <label>{t("settings.omp.compactInstructions")}<input value={compactInstructions} onChange={(event) => setCompactInstructions(event.target.value)} placeholder={t("settings.omp.compactInstructionsOptional")} /></label>
         <button type="button" disabled={busy || isBusy} onClick={() => void run("compact", compactInstructions.trim() ? { customInstructions: compactInstructions.trim() } : {})}>{state.isCompacting ? t("settings.omp.compacting") : t("settings.omp.compactNow")}</button>

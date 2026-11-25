@@ -50,6 +50,7 @@
 - [live-work-session.md](/zh-CN/spec/03-runtime/live-work-session)
 - [21-image-generation.md](/zh-CN/spec/03-runtime/21-image-generation)
 - [22-config-sync.md](/zh-CN/spec/03-runtime/22-config-sync)
+- [23-omp-rpc-gui-parity.md](/zh-CN/spec/03-runtime/23-omp-rpc-gui-parity)
 - [computer-use.md](/zh-CN/spec/03-runtime/computer-use)
 - [svg-attachment-input.md](/zh-CN/spec/03-runtime/svg-attachment-input)
 

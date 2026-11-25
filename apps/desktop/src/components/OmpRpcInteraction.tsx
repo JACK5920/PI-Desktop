@@ -23,6 +23,43 @@ function targetHost(value: unknown): string | null {
 
 type OmpRpcInteractionContext = "chat" | "provider-management";
 
+type OmpRetryFallback = { from: string; to: string; reason: string };
+
+function boundedOmpText(value: unknown, limit = 240): string {
+  const text = typeof value === "string" ? value.trim() : "";
+  if (!text) return "";
+  return text.length > limit ? `${text.slice(0, limit - 1)}…` : text;
+}
+
+function ompModelSelectorLabel(value: unknown): string {
+  if (typeof value === "string") return boundedOmpText(value, 120);
+  if (!value || typeof value !== "object") return "";
+  const model = value as Record<string, unknown>;
+  const provider = boundedOmpText(model.provider, 60);
+  const id = boundedOmpText(model.modelId ?? model.id ?? model.model, 80);
+  if (provider && id) return `${provider}/${id}`;
+  return id || boundedOmpText(model.name ?? model.label, 120);
+}
+
+function ompFallbackReason(value: unknown): string {
+  if (typeof value === "string") return boundedOmpText(value, 240);
+  if (!value || typeof value !== "object") return "";
+  const reason = value as Record<string, unknown>;
+  return boundedOmpText(reason.message ?? reason.reason ?? reason.code, 240);
+}
+
+function ompConfigWarningSummary(frame: Record<string, any>, t: (key: string) => string): string {
+  const values = Array.isArray(frame.warnings) ? frame.warnings : Array.isArray(frame.configWarnings) ? frame.configWarnings : [];
+  const messages = values.map((value: unknown) => {
+    if (typeof value === "string") return boundedOmpText(value, 160);
+    if (!value || typeof value !== "object") return "";
+    const warning = value as Record<string, unknown>;
+    return boundedOmpText(warning.message ?? warning.warning ?? warning.description ?? warning.code, 160);
+  }).filter(Boolean);
+  if (!messages.length) return t("settings.omp.configWarningsChanged");
+  return `${t("settings.omp.configWarningsChanged")} · ${boundedOmpText(messages.join(" · "), 360)}`;
+}
+
 export function OmpRpcInteraction({ sessionId, onPendingChange, resetSignal = 0, context = "chat" }: { sessionId: string | null; onPendingChange?: (pending: boolean) => void; resetSignal?: number; context?: OmpRpcInteractionContext }) {
   const { t } = useTranslation();
   const showToast = useAppStore((state) => state.showToast);
@@ -39,6 +76,7 @@ export function OmpRpcInteraction({ sessionId, onPendingChange, resetSignal = 0,
   const [editorText, setEditorText] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const authorizationUrlSeen = useRef(false);
+  const retryFallback = useRef<OmpRetryFallback | null>(null);
   const clearRequests = () => setQueue([]);
   const dropRequest = (id?: string) => setQueue((current) => (id ? current.filter((item) => item.id !== id) : current.slice(1)));
 
@@ -81,10 +119,20 @@ export function OmpRpcInteraction({ sessionId, onPendingChange, resetSignal = 0,
     setWidgets({});
     setEditorText(null);
     setBusy(false);
+    retryFallback.current = null;
     if (!sessionId) return;
     return api.onOmpRpcEvent((event) => {
       if (event.sessionId !== sessionId) return;
       const frame = event.frame;
+      if (frame.type === "config_warnings_changed") {
+        setStatuses((current) => updateOmpStatusMap(current, "config-warnings", ompConfigWarningSummary(frame, t)));
+      }
+      if (frame.type === "advisor_cost_changed") {
+        setStatuses((current) => updateOmpStatusMap(current, "advisor-cost", t("settings.omp.advisorCostChanged")));
+      }
+      if (frame.type === "advisor_yielded") {
+        setStatuses((current) => updateOmpStatusMap(current, "advisor", t("settings.omp.advisorYielded")));
+      }
       if (frame.type === "extension_ui_request") {
         const method = frame.method;
         if (method === "notify") {
@@ -157,6 +205,25 @@ export function OmpRpcInteraction({ sessionId, onPendingChange, resetSignal = 0,
         setStatuses((current) => updateOmpStatusMap(current, "retry", undefined));
         if (frame.success === false && typeof frame.finalError === "string") showToast(frame.finalError, { variant: "error" });
       }
+      if (frame.type === "retry_fallback_applied") {
+        const fallback = {
+          from: ompModelSelectorLabel(frame.from) || t("settings.omp.retryFallbackUnknownModel"),
+          to: ompModelSelectorLabel(frame.to) || t("settings.omp.retryFallbackUnknownModel"),
+          reason: ompFallbackReason(frame.reason) || t("settings.omp.retryFallbackReasonUnavailable"),
+        };
+        retryFallback.current = fallback;
+        setStatuses((current) => updateOmpStatusMap(current, "retry-fallback", t("settings.omp.retryFallbackApplied", fallback)));
+      }
+      if (frame.type === "retry_fallback_succeeded") {
+        const fallback = retryFallback.current;
+        const model = ompModelSelectorLabel(frame.model) || fallback?.to || t("settings.omp.retryFallbackUnknownModel");
+        setStatuses((current) => updateOmpStatusMap(current, "retry-fallback", t("settings.omp.retryFallbackSucceeded", {
+          from: fallback?.from || model,
+          to: fallback?.to || model,
+          model,
+          reason: fallback?.reason || t("settings.omp.retryFallbackReasonUnavailable"),
+        })));
+      }
       if (frame.type === "dictation_state") setStatuses((current) => updateOmpStatusMap(current, "dictation", t("settings.omp.dictationState", { state: String(frame.state ?? "") })));
       if (frame.type === "dictation_transcript") setStatuses((current) => updateOmpStatusMap(current, "dictation-transcript", String(frame.text ?? "")));
       if (frame.type === "process_exit" || frame.type === "runtime_error") {
@@ -172,6 +239,7 @@ export function OmpRpcInteraction({ sessionId, onPendingChange, resetSignal = 0,
         setWidgets({});
         setEditorText(null);
         setBusy(false);
+        retryFallback.current = null;
       }
       if (frame.type === "login_failed") {
         // A failed provider exchange (for example an upstream 403) cannot use

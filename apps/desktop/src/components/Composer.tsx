@@ -871,6 +871,7 @@ export function Composer({
             controlsBlocked={controlsBlocked}
             engineSwitchBlocked={controlsBlocked || isRunning}
             localToolsAllowed={localToolsAllowed}
+            ompControlsAvailable={agentEngine === "omp" && !remoteSession && !nativeSession}
             attachmentsAllowed={attachmentsAllowed}
             stopAllowed={agentEngine === "omp" ? !remoteSession && !nativeSession : sessionAllows(capabilitySession, "canStop")}
             pasting={pasting}

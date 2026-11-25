@@ -152,14 +152,73 @@ export function ompSubagentTaskSummary(agent) {
 
 /** Current native progress is kept separate from the originally assigned task. */
 export function ompSubagentProgressSummary(agent) {
-  const value = [agent?.progress?.message, agent?.progress?.activity, agent?.currentAction, agent?.current_action]
+  const progress = agent?.progress && typeof agent.progress === "object" ? agent.progress : {};
+  const currentTool = String(progress.currentTool ?? progress.current_tool ?? "").trim();
+  const waitingTool = currentTool.toLowerCase() === "wait" || currentTool.toLowerCase() === "vibe_wait";
+  const toolIntent = [progress.currentToolIntent, progress.current_tool_intent].find((item) => typeof item === "string" && item.trim());
+  const value = [
+    progress.stage,
+    !waitingTool && currentTool && toolIntent ? `${currentTool}: ${toolIntent}` : !waitingTool ? currentTool : "",
+    progress.lastIntent,
+    progress.message,
+    progress.activity,
+    agent?.currentAction,
+    agent?.current_action,
+  ]
     .find((item) => typeof item === "string" && item.trim());
   return compactText(value, 112);
+}
+
+export function ompSubagentRetryState(agent, now = Date.now()) {
+  if (!agent || agent.observedActive === false) return null;
+  const progress = agent.progress && typeof agent.progress === "object" ? agent.progress : {};
+  const retry = progress.retryState ?? progress.retry_state;
+  if (!retry || typeof retry !== "object") return null;
+  const attempt = Number(retry.attempt);
+  const maxAttempts = Number(retry.maxAttempts ?? retry.max_attempts);
+  const delayMs = Number(retry.delayMs ?? retry.delay_ms);
+  const startedAtMs = Number(retry.startedAtMs ?? retry.started_at_ms);
+  if (!Number.isFinite(attempt) || !Number.isFinite(maxAttempts) || !Number.isFinite(delayMs)) return null;
+  return {
+    attempt: Math.max(0, attempt),
+    maxAttempts: Math.max(0, maxAttempts),
+    delayMs: Math.max(0, delayMs),
+    startedAtMs: Number.isFinite(startedAtMs) ? startedAtMs : undefined,
+    remainingMs: Number.isFinite(startedAtMs) ? Math.max(0, startedAtMs + Math.max(0, delayMs) - now) : Math.max(0, delayMs),
+    errorMessage: compactText(retry.errorMessage ?? retry.error_message, 160),
+  };
+}
+
+export function ompSubagentRetryFailure(agent) {
+  const progress = agent?.progress && typeof agent.progress === "object" ? agent.progress : {};
+  const failure = progress.retryFailure ?? progress.retry_failure;
+  if (!failure || typeof failure !== "object") return null;
+  const attempt = Number(failure.attempt);
+  const errorMessage = compactText(failure.errorMessage ?? failure.error_message, 240);
+  if (!Number.isFinite(attempt) && !errorMessage) return null;
+  return { attempt: Number.isFinite(attempt) ? Math.max(0, attempt) : 0, errorMessage };
+}
+
+export function ompSubagentResolvedModel(agent) {
+  const progress = agent?.progress && typeof agent.progress === "object" ? agent.progress : {};
+  const model = progress.resolvedModelIdentity ?? progress.resolvedModel ?? progress.resolved_model_identity ?? progress.resolved_model;
+  return typeof model === "string" ? compactText(model, 96) : "";
+}
+
+export function ompSubagentIsFallbackModel(agent) {
+  const progress = agent?.progress && typeof agent.progress === "object" ? agent.progress : {};
+  return progress.resolvedModelIsFallback === true || progress.resolved_model_is_fallback === true;
+}
+
+export function ompSubagentIsRetrying(agent) {
+  if (!agent || agent.observedActive === false) return false;
+  return ompSubagentStatusKey(ompSubagentLifecycleStatus(agent)) === "running" && Boolean(ompSubagentRetryState(agent));
 }
 
 export function ompSubagentStatusKey(status) {
   const value = String(status ?? "").toLowerCase().replace(/[\s-]+/g, "_");
   if (["running", "started", "pending", "in_progress"].includes(value)) return "running";
+  if (["waiting", "waiting_on_own_work", "waiting_for_subagents", "waiting_for_jobs"].includes(value)) return "waiting";
   if (["complete", "completed", "success", "succeeded"].includes(value)) return "completed";
   if (["timeout", "timed_out"].includes(value)) return "timed_out";
   if (["cancelled", "canceled", "aborted"].includes(value)) return "aborted";
@@ -167,6 +226,19 @@ export function ompSubagentStatusKey(status) {
   if (["failed", "failure", "error"].includes(value)) return "failed";
   if (value === "denied") return "denied";
   return "";
+}
+
+/** OMP keeps a waiting agent's lifecycle status as running; its active tool
+ * identifies the two calls that mean it is waiting on its own agents/jobs. */
+export function ompSubagentIsWaiting(agent) {
+  if (!agent || agent.observedActive === false) return false;
+  const status = ompSubagentLifecycleStatus(agent);
+  if (ompSubagentStatusKey(status) === "waiting") return true;
+  if (ompSubagentStatusKey(status) !== "running") return false;
+  const progress = agent.progress && typeof agent.progress === "object" ? agent.progress : {};
+  const tool = String(progress.currentTool ?? progress.current_tool ?? agent.currentTool ?? agent.current_tool ?? "")
+    .toLowerCase();
+  return tool === "wait" || tool === "vibe_wait";
 }
 
 /**

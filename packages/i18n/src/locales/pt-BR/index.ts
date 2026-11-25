@@ -539,6 +539,7 @@ export const ptBR = {
     diagramTooLarge: "Este diagrama é grande demais para ser renderizado com segurança. Exibindo o código-fonte.",
     responseError: "Não foi possível concluir esta resposta",
     responseFailed: "O assistente não conseguiu concluir esta resposta.",
+    OMP_AGENT_LOOP_ERROR: "O ciclo do agente terminou sem falha na solicitação ao provedor. Consulte os detalhes para saber o motivo.",
     showErrorDetails: "Mostrar detalhes",
     hideErrorDetails: "Ocultar detalhes",
     dismissError: "Dispensar mensagem de erro",
@@ -729,6 +730,7 @@ export const ptBR = {
     subagentCreating: "Iniciando subagente…",
     subagentStatus: {
       running: "Em execução",
+      waiting: "Aguardando seus próprios subagentes ou tarefas",
       completed: "Concluído",
       timed_out: "Tempo limite esgotado",
       aborted: "Interrompido",

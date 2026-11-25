@@ -552,6 +552,7 @@ export const tr = {
     diagramTooLarge: "Bu diyagram güvenle oluşturulmak için çok büyük. Bunun yerine kaynak gösteriliyor.",
     responseError: "Bu yanıt tamamlanamadı",
     responseFailed: "Asistan bu yanıtı tamamlayamadı.",
+    OMP_AGENT_LOOP_ERROR: "Ajan döngüsü sağlayıcı isteği başarısız olmadan sona erdi. Nedeni ayrıntılarda görebilirsiniz.",
     showErrorDetails: "Ayrıntıları göster",
     hideErrorDetails: "Ayrıntıları gizle",
     dismissError: "Hata mesajını kapat",
@@ -739,6 +740,7 @@ export const tr = {
     subagentCreating: "Alt ajan başlatılıyor…",
     subagentStatus: {
       running: "Çalışıyor",
+      waiting: "Kendi alt ajanlarını veya görevlerini bekliyor",
       completed: "Tamamlandı",
       timed_out: "Zaman aşımı",
       aborted: "Durduruldu",

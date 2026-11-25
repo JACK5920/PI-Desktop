@@ -1,4 +1,4 @@
-import type { OmpThinkingLevel } from "../../../lib/api";
+import type { OmpRpcThinkingLevel } from "../../../lib/api";
 
 type OmpRpcCommandInput = {
   sessionId: string;
@@ -11,15 +11,18 @@ export function selectOmpModelAndRefreshThinkingLevels(input: {
   sessionId: string;
   provider: string;
   modelId: string;
+  role?: string;
+  thinkingLevel?: OmpRpcThinkingLevel;
   onModelApplied?: () => void;
-  onThinkingLevels?: (levels: OmpThinkingLevel[]) => void;
-}): Promise<OmpThinkingLevel[]>;
+  onThinkingLevels?: (levels: OmpRpcThinkingLevel[]) => void;
+  onThinkingLevelsError?: (error: unknown) => void;
+}): Promise<OmpRpcThinkingLevel[]>;
 
 export function readOmpThinkingLevels(input: {
   rpcCommand: (input: OmpRpcCommandInput) => Promise<unknown>;
   sessionId: string;
-  onThinkingLevels?: (levels: OmpThinkingLevel[]) => void;
-}): Promise<OmpThinkingLevel[]>;
+  onThinkingLevels?: (levels: OmpRpcThinkingLevel[]) => void;
+}): Promise<OmpRpcThinkingLevel[]>;
 
 export type OmpModelOption = {
   provider: string;
@@ -27,6 +30,11 @@ export type OmpModelOption = {
   name?: string;
   providerName?: string;
   contextWindow?: number;
+  role?: string;
+  roles?: Array<{ role: string; label?: string; auto?: boolean }>;
+  thinking?: OmpRpcThinkingLevel[];
+  thinkingLevel?: OmpRpcThinkingLevel;
+  current?: boolean;
 };
 
 export type OmpCustomProviderDisplayName = {
@@ -46,3 +54,4 @@ export function groupOmpModelsByProvider(models: readonly OmpModelOption[]): Arr
   models: OmpModelOption[];
 }>;
 export function toOmpRpcModelIdentity(model: OmpModelOption): { provider: string; modelId: string };
+export function normalizeOmpModelPickerRows(value: unknown): OmpModelOption[];

@@ -52,6 +52,7 @@ export type ComposerToolbarProps = {
   controlsBlocked: boolean;
   engineSwitchBlocked?: boolean;
   localToolsAllowed?: boolean;
+  ompControlsAvailable?: boolean;
   attachmentsAllowed?: boolean;
   stopAllowed?: boolean;
   pasting: boolean;
@@ -106,6 +107,7 @@ export function ComposerToolbar({
   controlsBlocked,
   engineSwitchBlocked = controlsBlocked,
   localToolsAllowed = true,
+  ompControlsAvailable = false,
   attachmentsAllowed = true,
   stopAllowed = true,
   pasting,
@@ -180,7 +182,7 @@ export function ComposerToolbar({
           </TooltipButton>
         </div>
         {localToolsAllowed && selectedEngine !== "omp" ? <LiveVoiceControls t={t} workSessionId={workSessionId} /> : null}
-        {localToolsAllowed && selectedEngine === "omp" ? <OmpNativeControls sessionId={activeSessionId ?? null} t={t} /> : null}
+        {selectedEngine === "omp" && ompControlsAvailable ? <OmpNativeControls sessionId={activeSessionId ?? null} t={t} /> : null}
         {selectedEngine !== "omp" ? <ComposerModePicker
           t={t}
           mode={mode}
