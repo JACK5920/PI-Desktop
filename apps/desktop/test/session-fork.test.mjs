@@ -56,6 +56,28 @@ test("assistant response fork reuses isolated session snapshots", () => {
   assert.match(readStoreModuleSync("slices/side-chat-slice.ts"), /forkAssistantMessageInSession\([\s\S]*?current\.excerpt/);
 });
 
+test("the work panel exposes a capability-gated side-chat entry without requiring a selection", () => {
+  const workPanel = read("../src/components/workpanel/WorkPanel.tsx");
+  const sideChat = readStoreModuleSync("slices/side-chat-slice.ts");
+  const sideChatTab = read("../src/components/workpanel/SideChatTab.tsx");
+
+  assert.match(workPanel, /data-testid="work-panel-new-side-chat"/);
+  assert.match(workPanel, /getTranscriptHistoryCapabilities\(activeSession\.agentEngine\)\.canCreateGenericFork/);
+  assert.match(workPanel, /openSideChat\(activeSessionId\)/);
+  assert.match(sideChat, /openSideChat: \(parentSessionId, sourceMessageId, excerpt, sourceMessageIds\)/);
+  assert.match(sideChat, /const hasSourceAnchor = Boolean\(sourceMessageId\?\.trim\(\) && normalizedExcerpt\)/);
+  assert.match(sideChatTab, /sideChatGeneralPlaceholder/);
+  assert.match(sideChatTab, /needsStableParentSnapshot/);
+});
+
+test("unanchored side-chat copy and busy state are localized everywhere", async () => {
+  for (const locale of ["en", "zh-CN", "zh-TW", "de", "es", "fr", "ko", "pt-BR", "tr"]) {
+    const source = await read(`../../../packages/i18n/src/locales/${locale}/index.ts`);
+    assert.match(source, /"?sideChatGeneralPlaceholder"?:/, `${locale} general placeholder`);
+    assert.match(source, /"?sideChatMainBusy"?:/, `${locale} parent-busy state`);
+  }
+});
+
 test("session fork labels are localized", () => {
   const english = read("../../../packages/i18n/src/locales/en/index.ts");
   const chinese = read("../../../packages/i18n/src/locales/zh-CN/index.ts");

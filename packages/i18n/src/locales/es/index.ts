@@ -507,6 +507,8 @@ export const es = {
     "sideChatPrompt": "Mensaje del chat lateral",
     "stop": "Detener",
     "sideChatPlaceholder": "Pregunta sobre este fragmento…",
+    "sideChatGeneralPlaceholder": "Haz una pregunta de seguimiento sobre esta conversación…",
+    "sideChatMainBusy": "Espera a que termine la conversación principal antes de iniciar este chat lateral.",
     "sideChatStarting": "Iniciando el chat lateral…",
     "sideChatOpenConversation": "Abrir como conversación",
     "sideChatAddToMain": "Añadir al chat principal",

@@ -232,6 +232,14 @@ function Fixture() {
             annotationSessionId="parent"
           />
         </section>
+        <button
+          type="button"
+          data-testid="open-unanchored-side-chat"
+          onClick={() => {
+            const id = useAppStore.getState().openSideChat("parent");
+            if (id) setSideChatId(id);
+          }}
+        >Open unanchored side chat</button>
         {sideChatId ? <SideChatTab sideChatId={sideChatId} /> : null}
       </main>
     </I18nextProvider>
@@ -316,7 +324,7 @@ globalThis.selectionReferenceProbe = async () => {
     showToast: () => undefined,
     forkAssistantMessageInSession: (async (parentSessionId, messageId, excerpt) => {
       assert(parentSessionId === "parent", "side chat fork used a different parent session");
-      assert(messageId.startsWith("answer-"), "side chat fork did not use an assistant message anchor");
+      assert(!messageId || messageId.startsWith("answer-"), "side chat fork used an invalid assistant message anchor");
       forkedSideChatExcerpts.push(excerpt);
       forkCount += 1;
       const childSessionId = `side-chat-child-${forkCount}`;
@@ -327,8 +335,7 @@ globalThis.selectionReferenceProbe = async () => {
           title: `Side chat ${forkCount}`,
           sideChat: {
             parentSessionId,
-            sourceMessageId: messageId,
-            excerpt: excerpt ?? quote,
+            ...(messageId && excerpt ? { sourceMessageId: messageId, excerpt } : {}),
             promoted: false,
           },
         } as AppState["sessions"][number]],
@@ -1095,6 +1102,42 @@ globalThis.selectionReferenceProbe = async () => {
     } finally {
       api.getSession = originalGetSession;
     }
+
+    useAppStore.setState({ runningSessions: { parent: true } });
+    host.querySelector<HTMLButtonElement>('[data-testid="open-unanchored-side-chat"]')?.click();
+    const unanchoredSideChatId = Object.values(useAppStore.getState().sideChats).find(
+      (item) => !item.sourceMessageId,
+    )?.id;
+    assert(unanchoredSideChatId, "the right-panel entry could not open a side chat without a transcript selection");
+    flushSync(() => root.render(<Fixture />));
+    await settleAfterFocus();
+    const unanchoredPane = host.querySelector<HTMLElement>(`.side-chat-tab[data-side-chat-id="${unanchoredSideChatId}"]`);
+    assert(unanchoredPane, "unanchored side chat pane was not mounted");
+    assert(!unanchoredPane.querySelector('[data-testid="side-chat-context-chip"]'), "an unanchored side chat showed a fake source-reference chip");
+    assert(!unanchoredPane.querySelector('[data-testid="side-chat-source-preview"]'), "an unanchored side chat showed an empty source preview");
+    assert(textareaNamed("Side-chat prompt").placeholder.includes("conversation"), "unanchored side chat did not show its general follow-up placeholder");
+    assert(unanchoredPane.querySelector<HTMLButtonElement>('[data-testid="side-chat-send"]')?.disabled, "an unanchored side chat allowed a snapshot while the parent was running");
+    assert(forkCount === 2 && sends.length === 2, "opening an unanchored draft forked or sent without an explicit prompt");
+
+    useAppStore.setState({ runningSessions: { parent: false } });
+    const unanchoredReferenceId = useAppStore.getState().addSideChatReference(
+      unanchoredSideChatId,
+      "answer-other",
+      "An explicit quote added after opening the side chat.",
+    );
+    assert(unanchoredReferenceId, "an unanchored side chat could not accept an independent explicit reference");
+    assert(useAppStore.getState().sideChats[unanchoredSideChatId]?.sourceMessageId === undefined, "an explicit quote replaced the entry-point source anchor");
+    const unanchoredPrompt = textareaNamed("Side-chat prompt");
+    setTextareaValue(unanchoredPrompt, "Ask using the whole conversation.");
+    unanchoredPane.querySelector<HTMLButtonElement>('[data-testid="side-chat-send"]')?.click();
+    for (let index = 0; index < 120 && sends.length < 3; index += 1) await settleAfterFocus();
+    assert(forkCount === 3 && sends.length === 3, "the unanchored side chat did not fork and send its first prompt");
+    assert(forkedSideChatExcerpts[2] === undefined, "the unanchored side chat fabricated an excerpt");
+    assert(sends[2].content === "Ask using the whole conversation.", "the unanchored side chat changed the user's prompt");
+    assert(sentSideChatAnnotations[2]?.annotations[0]?.id === unanchoredReferenceId, "an explicit quote added after opening was not transferred separately to the child");
+    assert(useAppStore.getState().activeSessionId === "parent", "unanchored side chat switched away from the parent");
+    pendingResolvers.shift()?.(true);
+    await settleAfterFocus();
 
     clearTrigger.focus();
     await waitForClearIconVisible(clearTrigger);

@@ -468,6 +468,25 @@ test("desktop session fork keeps the existing host contract", async () => {
   });
 });
 
+test("desktop unanchored side-chat fork marks the Host child without a source anchor", async () => {
+  const { handle, hostCalls } = forkHarness({
+    activeTurns: new Map(),
+    host: (calls) => ({
+      call: async (method, input) => {
+        calls.push({ method, input });
+        return { session: { id: "desktop-side-chat-child", title: "Side chat" } };
+      },
+    }),
+    sidecar: () => ({ call: () => { throw new Error("Desktop side chat must not call the sidecar"); } }),
+  });
+  const result = await handle({ sessionId: "desktop-parent", title: "Side chat", sideChat: true });
+  assert.equal(result.session.id, "desktop-side-chat-child");
+  assert.equal(hostCalls[1].method, "session.fork");
+  assert.equal(hostCalls[1].input.sideChat, true);
+  assert.equal(hostCalls[1].input.throughMessageId, undefined);
+  assert.equal(hostCalls[1].input.sideChatExcerpt, undefined);
+});
+
 const assistantRow = (id, status, content = "part") => ({
   id,
   role: "assistant",

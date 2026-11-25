@@ -177,8 +177,10 @@ pub struct SessionSummary {
 #[serde(rename_all = "camelCase")]
 pub struct SideChatOrigin {
     pub parent_session_id: String,
-    pub source_message_id: String,
-    pub excerpt: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_message_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub excerpt: Option<String>,
     pub promoted: bool,
 }
 
@@ -1411,21 +1413,17 @@ pub(crate) fn summary_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Sess
         agent_engine: row.get("agent_engine")?,
         worktree: None,
         managed_by_plugin: row.get("managed_by_plugin")?,
-        side_chat: match (
-            row.get::<_, Option<String>>("side_chat_parent_id")?,
-            row.get::<_, Option<String>>("side_chat_source_message_id")?,
-            row.get::<_, Option<String>>("side_chat_excerpt")?,
-        ) {
-            (Some(parent_session_id), Some(source_message_id), Some(excerpt)) => {
-                Some(SideChatOrigin {
+        side_chat: row
+            .get::<_, Option<String>>("side_chat_parent_id")?
+            .map(|parent_session_id| -> rusqlite::Result<SideChatOrigin> {
+                Ok(SideChatOrigin {
                     parent_session_id,
-                    source_message_id,
-                    excerpt,
+                    source_message_id: row.get("side_chat_source_message_id")?,
+                    excerpt: row.get("side_chat_excerpt")?,
                     promoted: row.get("side_chat_promoted")?,
                 })
-            }
-            _ => None,
-        },
+            })
+            .transpose()?,
     })
 }
 
@@ -1852,19 +1850,50 @@ pub fn fork_side_chat_through(
     through_message_id: &str,
     excerpt: &str,
 ) -> Result<ForkSessionResult> {
-    let excerpt = excerpt.trim();
-    if excerpt.is_empty() || excerpt.chars().count() > 2_000 {
-        return Err(anyhow!(
-            "side-chat excerpt must contain 1 to 2000 characters"
-        ));
+    fork_side_chat(db, source_id, None, Some(through_message_id), Some(excerpt))
+}
+
+/// Create a docked side chat by forking either the entire stable parent
+/// transcript or the prefix through a selected assistant message.
+pub fn fork_side_chat(
+    db: &Database,
+    source_id: &str,
+    title: Option<&str>,
+    through_message_id: Option<&str>,
+    excerpt: Option<&str>,
+) -> Result<ForkSessionResult> {
+    let anchor = through_message_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let normalized_excerpt = excerpt.map(str::trim).filter(|value| !value.is_empty());
+    match (anchor, normalized_excerpt) {
+        (Some(_), Some(value)) if value.chars().count() <= 2_000 => {}
+        (Some(_), _) => {
+            return Err(anyhow!(
+                "anchored side-chat excerpt must contain 1 to 2000 characters"
+            ));
+        }
+        (None, Some(_)) => {
+            return Err(anyhow!("an unanchored side chat cannot contain an excerpt"));
+        }
+        (None, None) => {}
     }
     fork_session_through_with_side_chat(
         db,
         source_id,
-        None,
-        Some(through_message_id),
-        Some((through_message_id, excerpt)),
+        title,
+        anchor,
+        Some(SideChatForkOrigin {
+            source_message_id: anchor,
+            excerpt: normalized_excerpt,
+        }),
     )
+}
+
+#[derive(Clone, Copy)]
+struct SideChatForkOrigin<'a> {
+    source_message_id: Option<&'a str>,
+    excerpt: Option<&'a str>,
 }
 
 fn fork_session_through_with_side_chat(
@@ -1872,7 +1901,7 @@ fn fork_session_through_with_side_chat(
     source_id: &str,
     title: Option<&str>,
     through_message_id: Option<&str>,
-    side_chat: Option<(&str, &str)>,
+    side_chat: Option<SideChatForkOrigin<'_>>,
 ) -> Result<ForkSessionResult> {
     let Some(source) = get_session(db, source_id)? else {
         return Ok(ForkSessionResult::NotFound);
@@ -1993,8 +2022,8 @@ fn fork_session_through_with_side_chat(
                 title,
                 records.len() as i64,
                 side_chat.map(|_| source_id),
-                side_chat.map(|(anchor, _)| anchor),
-                side_chat.map(|(_, excerpt)| excerpt),
+                side_chat.and_then(|origin| origin.source_message_id),
+                side_chat.and_then(|origin| origin.excerpt),
                 now,
                 source_id
             ])?;
@@ -2033,10 +2062,10 @@ fn fork_session_through_with_side_chat(
         // A new or forked session starts without a worktree (ADR 0329).
         worktree: None,
         managed_by_plugin: None,
-        side_chat: side_chat.map(|(source_message_id, excerpt)| SideChatOrigin {
+        side_chat: side_chat.map(|origin| SideChatOrigin {
             parent_session_id: source_id.to_string(),
-            source_message_id: source_message_id.to_string(),
-            excerpt: excerpt.to_string(),
+            source_message_id: origin.source_message_id.map(str::to_string),
+            excerpt: origin.excerpt.map(str::to_string),
             promoted: false,
         }),
     };
@@ -7001,8 +7030,8 @@ mod tests {
             child.summary.side_chat,
             Some(SideChatOrigin {
                 parent_session_id: parent.id.clone(),
-                source_message_id: "assistant-anchor".into(),
-                excerpt: "A selected answer excerpt".into(),
+                source_message_id: Some("assistant-anchor".into()),
+                excerpt: Some("A selected answer excerpt".into()),
                 promoted: false,
             })
         );
@@ -7018,6 +7047,73 @@ mod tests {
 
         let invalid = fork_side_chat_through(&db, &parent.id, "assistant-anchor", " ");
         assert!(invalid.is_err());
+    }
+
+    #[test]
+    fn unanchored_side_chat_forks_the_full_parent_and_persists_optional_origin() {
+        let db = test_db();
+        let parent = create_session(&db, Some("Parent".into()), None, None, None, None).unwrap();
+        let user = user_msg("parent-user", "Parent request", "2025-05-01T00:00:00Z");
+        append_message(&db, &parent.id, &user, None).unwrap();
+        let mut answer = user_msg("parent-answer", "Parent answer", "2025-05-01T00:00:01Z");
+        answer.role = "assistant".into();
+        append_message(&db, &parent.id, &answer, None).unwrap();
+
+        let fork = fork_side_chat(&db, &parent.id, Some("Side chat"), None, None).unwrap();
+        let ForkSessionResult::Created(child) = fork else {
+            panic!("expected side-chat fork");
+        };
+        assert_eq!(
+            child.messages.len(),
+            2,
+            "an unanchored side chat must inherit the full parent history"
+        );
+        assert_eq!(child.messages[0].content, "Parent request");
+        assert_eq!(child.messages[1].content, "Parent answer");
+        assert_eq!(
+            child.summary.side_chat,
+            Some(SideChatOrigin {
+                parent_session_id: parent.id.clone(),
+                source_message_id: None,
+                excerpt: None,
+                promoted: false,
+            })
+        );
+
+        let reopened = get_session(&db, &child.summary.id).unwrap().unwrap();
+        assert_eq!(reopened.summary.side_chat, child.summary.side_chat);
+        assert_eq!(reopened.messages.len(), 2);
+    }
+
+    #[test]
+    fn unanchored_side_chat_rejects_running_parent() {
+        let db = test_db();
+        let parent = create_session(&db, Some("Parent".into()), None, None, None, None).unwrap();
+        let turn = begin_turn(&db, &parent.id, None, None).unwrap();
+        let fork = fork_side_chat(&db, &parent.id, None, None, None).unwrap();
+        assert!(matches!(fork, ForkSessionResult::Busy));
+        end_turn(&db, &turn, "completed", None, None, false).unwrap();
+    }
+
+    #[test]
+    fn unanchored_side_chat_can_start_from_an_empty_parent() {
+        let db = test_db();
+        let parent =
+            create_session(&db, Some("Empty parent".into()), None, None, None, None).unwrap();
+        let fork = fork_side_chat(&db, &parent.id, None, None, None).unwrap();
+        let ForkSessionResult::Created(child) = fork else {
+            panic!("expected an empty side-chat fork");
+        };
+        assert!(child.messages.is_empty());
+        assert_eq!(
+            child.summary.side_chat,
+            Some(SideChatOrigin {
+                parent_session_id: parent.id,
+                source_message_id: None,
+                excerpt: None,
+                promoted: false,
+            })
+        );
     }
 
     #[test]

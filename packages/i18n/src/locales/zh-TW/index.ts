@@ -512,6 +512,8 @@ export const zhTW = {
     sideChatPrompt: "側邊聊天訊息",
     stop: "停止",
     sideChatPlaceholder: "針對這段內容提問…",
+    sideChatGeneralPlaceholder: "根據主要對話內容繼續追問…",
+    sideChatMainBusy: "主要對話完成目前任務後，才能根據完整歷史開啟側聊。",
     sideChatStarting: "正在建立側邊聊天…",
     sideChatOpenConversation: "以對話開啟",
     sideChatAddToMain: "加入主要對話",

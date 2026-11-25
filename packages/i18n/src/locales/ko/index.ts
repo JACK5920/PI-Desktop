@@ -519,6 +519,8 @@ export const ko = {
     sideChatPrompt: "사이드 채팅 메시지",
     stop: "중지",
     sideChatPlaceholder: "이 발췌문에 대해 질문하세요…",
+    sideChatGeneralPlaceholder: "이 대화의 맥락에 대해 추가로 질문하세요…",
+    sideChatMainBusy: "전체 대화 기록을 바탕으로 사이드 채팅을 시작하려면 기본 대화가 끝날 때까지 기다리세요.",
     sideChatStarting: "사이드 채팅 시작 중…",
     sideChatOpenConversation: "대화로 열기",
     sideChatAddToMain: "기본 채팅에 추가",

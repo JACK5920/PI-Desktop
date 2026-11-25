@@ -506,6 +506,8 @@ export const ptBR = {
     sideChatPrompt: "Mensagem do chat lateral",
     stop: "Parar",
     sideChatPlaceholder: "Pergunte sobre este trecho…",
+    sideChatGeneralPlaceholder: "Faça uma pergunta complementar sobre esta conversa…",
+    sideChatMainBusy: "Aguarde a conversa principal terminar antes de iniciar este chat lateral.",
     sideChatStarting: "Iniciando o chat lateral…",
     sideChatOpenConversation: "Abrir como conversa",
     sideChatAddToMain: "Adicionar ao chat principal",

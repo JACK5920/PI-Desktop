@@ -66,6 +66,9 @@ export function SideChatTab({ sideChatId }: { sideChatId: string }) {
     sideChat ? state.sessions.find((session) => session.id === sideChat.parentSessionId) : undefined,
   );
   const attachmentsAllowed = sessionAllows(parentSession, "canAttach");
+  const parentRunning = useAppStore((state) =>
+    sideChat ? state.runningSessions[sideChat.parentSessionId] === true : false,
+  );
   const sideChatReferences = useAppStore((state) =>
     state.sideChats[sideChatId]?.references ?? EMPTY_ANNOTATIONS,
   );
@@ -164,6 +167,8 @@ export function SideChatTab({ sideChatId }: { sideChatId: string }) {
 
   if (!sideChat) return null;
   const childSessionId = sideChat.childSessionId;
+  const hasSourceContext = Boolean(sideChat.sourceMessageId && sideChat.excerpt);
+  const needsStableParentSnapshot = !childSessionId && !hasSourceContext && parentRunning;
   const isCreatingChild = sideChat.status === "forking";
   const isSubmitting = submitting || sideChat.status === "sending";
   const canSubmit = Boolean(sideChat.draftText.trim() || fileReferences.length);
@@ -219,7 +224,10 @@ export function SideChatTab({ sideChatId }: { sideChatId: string }) {
         setFileReferences(sideChatId, [...(latest.fileReferences ?? []), ...importedReferences]);
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const errorRecord = error as { code?: unknown; errorCode?: unknown } | null;
+      const message = errorRecord?.code === "AGENT_BUSY" || errorRecord?.errorCode === "AGENT_BUSY"
+        ? t("chat.sideChatMainBusy")
+        : error instanceof Error ? error.message : String(error);
       setAttachmentError(message);
       showToast(message, { variant: "error" });
     } finally {
@@ -259,6 +267,7 @@ export function SideChatTab({ sideChatId }: { sideChatId: string }) {
   };
 
   const navigateToOriginalSelection = () => {
+    if (!sideChat.sourceMessageId || !sideChat.excerpt) return;
     setSourcePreviewOpen(false);
     navigateWithinSideChat({
       sessionId: sideChat.parentSessionId,
@@ -356,51 +365,53 @@ export function SideChatTab({ sideChatId }: { sideChatId: string }) {
       >
         <div className="side-chat-composer-shell">
           <div className="side-chat-composer-contexts">
-            <div
-              className="side-chat-source-context"
-              ref={sourceContextRef}
-              onPointerEnter={() => setSourcePreviewOpen(true)}
-              onPointerLeave={(event) => {
-                if (
-                  !sourceContextRef.current?.contains(event.relatedTarget as Node | null) &&
-                  !sourceContextRef.current?.matches(":focus-within")
-                ) setSourcePreviewOpen(false);
-              }}
-              onFocusCapture={() => setSourcePreviewOpen(true)}
-              onBlur={(event) => {
-                if (
-                  !sourceContextRef.current?.matches(":hover") &&
-                  !sourceContextRef.current?.contains(event.relatedTarget as Node | null)
-                ) setSourcePreviewOpen(false);
-              }}
-            >
-              <button
-                type="button"
-                className="side-chat-source-context-chip"
-                aria-expanded={sourcePreviewOpen}
-                aria-haspopup="dialog"
-                aria-label={t("chat.sideChatContextLabel")}
-                data-testid="side-chat-context-chip"
-                onClick={() => setSourcePreviewOpen(true)}
+            {hasSourceContext ? (
+              <div
+                className="side-chat-source-context"
+                ref={sourceContextRef}
+                onPointerEnter={() => setSourcePreviewOpen(true)}
+                onPointerLeave={(event) => {
+                  if (
+                    !sourceContextRef.current?.contains(event.relatedTarget as Node | null) &&
+                    !sourceContextRef.current?.matches(":focus-within")
+                  ) setSourcePreviewOpen(false);
+                }}
+                onFocusCapture={() => setSourcePreviewOpen(true)}
+                onBlur={(event) => {
+                  if (
+                    !sourceContextRef.current?.matches(":hover") &&
+                    !sourceContextRef.current?.contains(event.relatedTarget as Node | null)
+                  ) setSourcePreviewOpen(false);
+                }}
               >
-                <IconTextSelect size={13} aria-hidden />
-                <span>{t("chat.sideChatContextLabel")}</span>
-              </button>
-              {sourcePreviewOpen ? (
-                <div
-                  className="side-chat-source-preview"
-                  role="dialog"
-                  aria-label={t("chat.sideChatContextPreview")}
-                  data-testid="side-chat-source-preview"
+                <button
+                  type="button"
+                  className="side-chat-source-context-chip"
+                  aria-expanded={sourcePreviewOpen}
+                  aria-haspopup="dialog"
+                  aria-label={t("chat.sideChatContextLabel")}
+                  data-testid="side-chat-context-chip"
+                  onClick={() => setSourcePreviewOpen(true)}
                 >
-                  <div className="side-chat-source-preview-label">{t("chat.sideChatContextPreview")}</div>
-                  <p>{sideChat.excerpt}</p>
-                  <Button type="button" size="sm" onClick={navigateToOriginalSelection}>
-                    {t("chat.sideChatOpenSource")}
-                  </Button>
-                </div>
-              ) : null}
-            </div>
+                  <IconTextSelect size={13} aria-hidden />
+                  <span>{t("chat.sideChatContextLabel")}</span>
+                </button>
+                {sourcePreviewOpen ? (
+                  <div
+                    className="side-chat-source-preview"
+                    role="dialog"
+                    aria-label={t("chat.sideChatContextPreview")}
+                    data-testid="side-chat-source-preview"
+                  >
+                    <div className="side-chat-source-preview-label">{t("chat.sideChatContextPreview")}</div>
+                    <p>{sideChat.excerpt}</p>
+                    <Button type="button" size="sm" onClick={navigateToOriginalSelection}>
+                      {t("chat.sideChatOpenSource")}
+                    </Button>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
             <ComposerAnnotationAttachments
               sessionId={childSessionId ?? sideChat.parentSessionId}
               annotations={referenceAttachments}
@@ -447,7 +458,7 @@ export function SideChatTab({ sideChatId }: { sideChatId: string }) {
               textarea.style.height = "auto";
               textarea.style.height = `${Math.min(textarea.scrollHeight, 180)}px`;
             }}
-            placeholder={t("chat.sideChatPlaceholder")}
+            placeholder={t(hasSourceContext ? "chat.sideChatPlaceholder" : "chat.sideChatGeneralPlaceholder")}
             aria-label={t("chat.sideChatPrompt")}
             aria-describedby="side-chat-composer-hint"
             rows={2}
@@ -495,8 +506,8 @@ export function SideChatTab({ sideChatId }: { sideChatId: string }) {
                 type="submit"
                 className="side-chat-send-button"
                 tooltip={isCreatingChild || preparingAttachments ? t("chat.sideChatStarting") : t("chat.send")}
-                ariaLabel={isCreatingChild ? t("chat.sideChatStarting") : t("chat.send")}
-                disabled={!canSubmit || isSubmitting || isCreatingChild || preparingAttachments}
+                ariaLabel={needsStableParentSnapshot ? t("chat.sideChatMainBusy") : isCreatingChild ? t("chat.sideChatStarting") : t("chat.send")}
+                disabled={!canSubmit || isSubmitting || isCreatingChild || preparingAttachments || needsStableParentSnapshot}
                 data-testid="side-chat-send"
               >
                 <IconArrowUp size={16} aria-hidden />
@@ -504,7 +515,7 @@ export function SideChatTab({ sideChatId }: { sideChatId: string }) {
             </div>
           </div>
           <span id="side-chat-composer-hint" className="side-chat-composer-hint">
-            {t("chat.sideChatInheritsParentSettings")}
+            {needsStableParentSnapshot ? t("chat.sideChatMainBusy") : t("chat.sideChatInheritsParentSettings")}
           </span>
         </div>
       </form>

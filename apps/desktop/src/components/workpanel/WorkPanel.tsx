@@ -13,6 +13,8 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { useBlockingOverlayActive } from "../../lib/blocking-overlay";
+import { getTranscriptHistoryCapabilities } from "../../lib/transcript-history-capabilities.mjs";
+import { sessionAllows } from "../../lib/remote-session-safety";
 import {
   workPanelTabReorderScrollDelta,
   workPanelTabReorderInsertAfter,
@@ -271,6 +273,10 @@ function LocalWorkPanel({
   const tabs = rawTabs.filter(isKnownWorkPanelTab);
   const activeTabId = useAppStore((s) => s.activeWorkPanelTabId);
   const activeSessionId = useAppStore((s) => s.activeSessionId);
+  const activeSession = useAppStore((s) =>
+    s.sessions.find((session) => session.id === s.activeSessionId),
+  );
+  const openSideChat = useAppStore((s) => s.openSideChat);
   const pluginViews = useAppStore((s) => s.pluginViews);
   const plugins = useAppStore((s) => s.plugins);
   const width = useAppStore((s) => s.workPanelWidth);
@@ -285,6 +291,12 @@ function LocalWorkPanel({
   const replaceWorkPanelTab = useAppStore((s) => s.replaceWorkPanelTab);
   const setWidth = useAppStore((s) => s.setWorkPanelWidth);
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? null;
+  const canCreateSideChat = Boolean(
+    activeSession &&
+    getTranscriptHistoryCapabilities(activeSession.agentEngine).canCreateGenericFork &&
+    sessionAllows(activeSession, "canEditMessages") &&
+    sessionAllows(activeSession, "canPrompt"),
+  );
   const tools = workPanelTools(t, pluginViews, plugins);
   const tabSignature = JSON.stringify(
     tabs.map(({ id, kind, resource, location }) => [id, kind, resource, location]),
@@ -1109,6 +1121,19 @@ function LocalWorkPanel({
               </div>
           </div>
           <div className="work-panel-actions no-drag">
+              <TooltipButton
+                type="button"
+                className="work-panel-new-tab"
+                tooltip={t("chat.sideChatTitle")}
+                ariaLabel={t("chat.sideChatTitle")}
+                disabled={!canCreateSideChat}
+                onClick={() => {
+                  if (activeSessionId) openSideChat(activeSessionId);
+                }}
+                data-testid="work-panel-new-side-chat"
+              >
+                <IconChat size={16} />
+              </TooltipButton>
               <TooltipButton
                 ref={newTabButtonRef}
                 type="button"

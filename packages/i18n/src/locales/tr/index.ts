@@ -519,6 +519,8 @@ export const tr = {
     sideChatPrompt: "Yan sohbet mesajı",
     stop: "Durdur",
     sideChatPlaceholder: "Bu alıntı hakkında soru sorun…",
+    sideChatGeneralPlaceholder: "Bu konuşmanın bağlamı hakkında devam sorusu sorun…",
+    sideChatMainBusy: "Bu yan sohbeti başlatmadan önce ana konuşmanın bitmesini bekleyin.",
     sideChatStarting: "Yan sohbet başlatılıyor…",
     sideChatOpenConversation: "Sohbet olarak aç",
     sideChatAddToMain: "Ana sohbete ekle",

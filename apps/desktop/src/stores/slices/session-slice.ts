@@ -876,7 +876,7 @@ export function createSessionSlice({
 
     forkAssistantMessageInSession: async (sessionId, messageId, sideChatExcerpt) => {
       const state = get();
-      if (!sessionId || !messageId || state.selectingSessionId === sessionId) return null;
+      if (!sessionId || state.selectingSessionId === sessionId) return null;
       const source = state.sessions.find((session) => session.id === sessionId);
       if (!source || !sessionAllows(source, "canEditMessages") ||
         !sessionAllows(source, "canPrompt")) return null;
@@ -884,8 +884,17 @@ export function createSessionSlice({
       const transcript = state.activeSessionId === sessionId
         ? state.messages
         : state.retainedTranscripts[sessionId] ?? runtime.sessionTranscriptCache.get(sessionId) ?? [];
-      const message = transcript.find((candidate) => candidate.id === messageId);
-      if (!message || message.role !== "assistant" || message.status === "streaming") return null;
+      if (messageId) {
+        const message = transcript.find((candidate) => candidate.id === messageId);
+        if (
+          !message ||
+          message.role !== "assistant" ||
+          message.status === "streaming" ||
+          !sideChatExcerpt?.trim()
+        ) return null;
+      } else if (sideChatExcerpt?.trim()) {
+        return null;
+      }
 
       const sourceTitle = source.title.trim() || i18n.t("chat.untitledTask");
       const result = await api.forkSession(
@@ -893,6 +902,7 @@ export function createSessionSlice({
         i18n.t("nav.branchTitle", { title: sourceTitle }),
         messageId,
         sideChatExcerpt,
+        true,
       );
       // A side chat is a separate reading surface. Persist the new child in
       // the session inventory/cache, but never let this action navigate away

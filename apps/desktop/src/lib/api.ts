@@ -988,12 +988,14 @@ export const api = {
     title?: string,
     throughMessageId?: string,
     sideChatExcerpt?: string,
+    sideChat = false,
   ) =>
     invoke<{ session: SessionDetail }>(IPC.invoke.sessionFork, {
       sessionId,
       title,
       throughMessageId,
       sideChatExcerpt,
+      sideChat,
     }).then((result) => ({ ...result, session: normalizeSessionDetail(result.session)! })),
   promoteSideChat: (sessionId: string) =>
     invoke<{ ok: boolean }>(IPC.invoke.sessionPromoteSideChat, { sessionId }),

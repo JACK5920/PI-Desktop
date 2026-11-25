@@ -14,10 +14,11 @@ on close or restart, leaving a sent follow-up hard to rediscover.
 
 ## Decision
 
-Persist side-chat provenance on the child session: parent session id, source
-message id, selected excerpt, and an explicit promotion bit. Ordinary forks
-remain unchanged. Existing sessions are not inferred or reclassified during
-migration.
+Persist side-chat provenance on the child session: parent session id, optional
+source message id and selected excerpt, and an explicit promotion bit. A
+selection-based side chat records its source id and excerpt; a side chat opened
+without a selection records only its parent. Ordinary forks remain unchanged.
+Existing sessions are not inferred or reclassified during migration.
 
 An unpromoted side chat is omitted from top-level session navigation and global
 search, but remains in Host inventory so the parent can offer a reopen action.

@@ -515,6 +515,8 @@ export const en = {
     sideChatPrompt: "Side-chat prompt",
     stop: "Stop",
     sideChatPlaceholder: "Ask about this excerpt…",
+    sideChatGeneralPlaceholder: "Ask a follow-up about this conversation…",
+    sideChatMainBusy: "Wait for the main conversation to finish before starting this side chat.",
     sideChatStarting: "Starting side chat…",
     sideChatOpenConversation: "Open as a conversation",
     sideChatAddToMain: "Add to main chat",

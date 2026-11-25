@@ -159,3 +159,15 @@ and inherited source transcript, but starts the editable prompt empty. The first
 explicit send passes the excerpt as fork context and submits only the text the
 user typed. This avoids showing and sending the same excerpt twice while
 preserving source context and durable reopening behavior.
+
+## 2026-11-25 implementation amendment — unanchored side chats
+
+The WorkPanel can also create a side-chat draft without a transcript selection.
+On first explicit send, the existing `session.fork` operation copies the full
+stable parent transcript into an independent child; the parent remains active
+and is never rewritten. The child is marked as a side chat with parent
+provenance, while source-message and excerpt metadata stay absent. The action
+is unavailable for engines without generic fork support. A full-history fork
+is withheld while the parent is running, and the Host rechecks this at the
+mutation boundary. Explicit Composer references added afterward remain
+independent, editable, and removable context attachments.

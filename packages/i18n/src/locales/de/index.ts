@@ -507,6 +507,8 @@ export const de = {
     "sideChatPrompt": "Seitenchat-Nachricht",
     "stop": "Stoppen",
     "sideChatPlaceholder": "Frage zu diesem Ausschnitt…",
+    "sideChatGeneralPlaceholder": "Stelle eine Rückfrage zum Gesprächsverlauf…",
+    "sideChatMainBusy": "Warte, bis das Hauptgespräch abgeschlossen ist, bevor du diesen Seitenchat startest.",
     "sideChatStarting": "Seitenchat wird gestartet…",
     "sideChatOpenConversation": "Als Unterhaltung öffnen",
     "sideChatAddToMain": "Zum Hauptchat hinzufügen",

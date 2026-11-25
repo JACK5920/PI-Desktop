@@ -266,7 +266,13 @@ export function registerSessionIpc({
   handle(
     IPC.invoke.sessionFork,
     async (
-      input: { sessionId?: string; title?: string; throughMessageId?: string; sideChatExcerpt?: string } = {},
+      input: {
+        sessionId?: string;
+        title?: string;
+        throughMessageId?: string;
+        sideChatExcerpt?: string;
+        sideChat?: boolean;
+      } = {},
     ) => {
       const sessionId = String(input.sessionId ?? "").trim();
       if (sessionId.startsWith("native-pi:")) {
@@ -317,6 +323,7 @@ export function registerSessionIpc({
           title: String(input.title ?? "").trim() || undefined,
           throughMessageId:
             String(input.throughMessageId ?? "").trim() || undefined,
+          ...(input.sideChat === true ? { sideChat: true } : {}),
           ...(typeof input.sideChatExcerpt === "string"
             ? { sideChatExcerpt: input.sideChatExcerpt }
             : {}),

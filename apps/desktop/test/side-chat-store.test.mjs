@@ -70,7 +70,13 @@ function fixture() {
         mode: "default",
         sideChat: { parentSessionId: "parent", sourceMessageId: "answer-1", excerpt: "persisted quote", promoted: false },
       messages: [{ id: "child-message", role: "assistant", content: "saved answer" }],
-    } : null,
+    } : id === "child-no-source" ? {
+        id,
+        title: "Unanchored child",
+        mode: "default",
+        sideChat: { parentSessionId: "parent", promoted: false },
+        messages: [{ id: "child-no-source-message", role: "assistant", content: "saved follow-up" }],
+      } : null,
     promoteSideChat: state.promoteSideChat,
   });
   return { slice, get: access.get, opened, closed, forkCalls, sendCalls, selected, promoted, sendResults, set: access.set, fork };
@@ -106,6 +112,55 @@ test("opening a side chat creates only a transient work-panel draft", () => {
   assert.equal(h.sendCalls.length, 0);
   assert.equal(h.get().sideChats[sideChatId].draftText, "");
   assert.equal(h.get().sideChats[sideChatId].excerpt, "quote");
+});
+
+test("opening without a selection creates an unanchored draft and forks the full parent on first send", async () => {
+  const h = fixture();
+  const sideChatId = h.slice.openSideChat("parent");
+  assert.ok(sideChatId);
+  const draft = h.get().sideChats[sideChatId];
+  assert.equal(draft.sourceMessageId, undefined);
+  assert.equal(draft.excerpt, undefined);
+  assert.equal(h.get().activeSessionId, "parent");
+
+  const referenceId = h.slice.addSideChatReference(sideChatId, "answer-1", "An independently added excerpt");
+  assert.ok(referenceId);
+  assert.equal(h.get().sideChats[sideChatId].sourceMessageId, undefined, "an added quote must not become the entry-point anchor");
+  assert.equal(h.get().sideChats[sideChatId].excerpt, undefined, "an added quote must not become the entry-point excerpt");
+
+  const sending = h.slice.sendSideChatPrompt(sideChatId, "Follow up on the whole conversation.");
+  await Promise.resolve();
+  assert.deepEqual(h.forkCalls[0], {
+    sessionId: "parent",
+    messageId: undefined,
+    excerpt: undefined,
+  });
+  h.fork.resolve("child-unanchored");
+  assert.equal(await sending, true);
+  assert.equal(h.sendCalls[0][0], "Follow up on the whole conversation.");
+  assert.equal(h.sendCalls[0][2], "child-unanchored");
+  assert.equal(h.get().responseAnnotations["child-unanchored"][0].excerpt, "An independently added excerpt");
+  assert.equal(h.get().sideChats[sideChatId].references.length, 0, "sent explicit references must leave the editable draft list");
+  assert.equal(h.get().activeSessionId, "parent", "the main conversation must remain selected");
+});
+
+test("reopening an unanchored persisted side chat restores it without a required source quote", async () => {
+  const h = fixture();
+  await h.slice.reopenSideChat("child-no-source");
+  const restored = h.get().sideChats["side-chat:child-no-source"];
+  assert.equal(restored.parentSessionId, "parent");
+  assert.equal(restored.sourceMessageId, undefined);
+  assert.equal(restored.excerpt, undefined);
+  assert.equal(restored.childSessionId, "child-no-source");
+  assert.equal(restored.messages[0].content, "saved follow-up");
+});
+
+test("opening a side chat remains unavailable for an engine without generic fork support", () => {
+  const h = fixture();
+  h.set((state) => ({
+    sessions: state.sessions.map((session) => ({ ...session, agentEngine: "omp" })),
+  }));
+  assert.equal(h.slice.openSideChat("parent"), null);
 });
 
 test("side-chat references support edit, remove, clear, and transfer once into the fork child", async () => {

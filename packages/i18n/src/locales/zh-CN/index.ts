@@ -508,6 +508,8 @@ export const zhCN = {
     sideChatPrompt: "侧聊消息",
     stop: "停止",
     sideChatPlaceholder: "针对这段内容提问…",
+    sideChatGeneralPlaceholder: "基于主对话上下文继续追问…",
+    sideChatMainBusy: "主对话完成当前任务后，才能基于完整历史开启侧聊。",
     sideChatStarting: "正在创建侧聊…",
     sideChatOpenConversation: "作为对话打开",
     sideChatAddToMain: "添加到主对话",

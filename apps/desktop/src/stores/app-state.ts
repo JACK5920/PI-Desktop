@@ -100,9 +100,9 @@ export type PendingPlanRefreshResult = "pending" | "terminal" | "unavailable";
 export type SideChatState = SideChatLifecycle & {
   id: string;
   parentSessionId: string;
-  sourceMessageId: string;
+  sourceMessageId?: string;
   sourceMessageIds?: string[];
-  excerpt: string;
+  excerpt?: string;
   /** Additional selected excerpts targeted to this docked chat's next prompt. */
   references: ResponseAnnotation[];
   /** Files staged in this side chat's child-session scratch space. */
@@ -230,8 +230,8 @@ export type AppState = {
   sideChats: Record<string, SideChatState>;
   openSideChat: (
     parentSessionId: string,
-    sourceMessageId: string,
-    excerpt: string,
+    sourceMessageId?: string,
+    excerpt?: string,
     sourceMessageIds?: string[],
   ) => string | null;
   reopenSideChat: (childSessionId: string) => Promise<void>;
@@ -317,10 +317,10 @@ export type AppState = {
   }) => Promise<void>;
   forkSession: (id: string) => Promise<void>;
   forkAssistantMessage: (messageId: string, selectedText?: string) => Promise<void>;
-  /** Fork a completed assistant row from an explicit parent without navigating. */
+  /** Fork a side-chat child from an explicit parent, optionally at a selected assistant row. */
   forkAssistantMessageInSession: (
     sessionId: string,
-    messageId: string,
+    messageId?: string,
     sideChatExcerpt?: string,
   ) => Promise<string | null>;
   configureActiveSession: (config: {

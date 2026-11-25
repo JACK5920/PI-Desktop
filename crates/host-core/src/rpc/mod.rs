@@ -2864,17 +2864,20 @@ async fn handle_request(
                 .ok_or_else(|| rpc_err(1002, "sessionId required", "INVALID_PARAMS"))?;
             let title = params.get("title").and_then(|v| v.as_str());
             let through_message_id = params.get("throughMessageId").and_then(|v| v.as_str());
+            let side_chat = params
+                .get("sideChat")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let side_chat_excerpt = params.get("sideChatExcerpt").and_then(|v| v.as_str());
             let st = state.lock().await;
-            let fork = if let Some(excerpt) = params.get("sideChatExcerpt").and_then(|v| v.as_str())
-            {
-                let Some(anchor) = through_message_id else {
-                    return Err(rpc_err(
-                        1002,
-                        "side-chat fork requires throughMessageId",
-                        "INVALID_PARAMS",
-                    ));
-                };
-                sessions::fork_side_chat_through(&st.db, session_id, anchor, excerpt)
+            let fork = if side_chat || side_chat_excerpt.is_some() {
+                sessions::fork_side_chat(
+                    &st.db,
+                    session_id,
+                    title,
+                    through_message_id,
+                    side_chat_excerpt,
+                )
             } else {
                 sessions::fork_session_through(&st.db, session_id, title, through_message_id)
             };

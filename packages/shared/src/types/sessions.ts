@@ -87,8 +87,9 @@ export type SessionSummary = {
   /** Durable provenance for a side-chat child; absent on legacy and ordinary sessions. */
   sideChat?: {
     parentSessionId: string;
-    sourceMessageId: string;
-    excerpt: string;
+    /** Optional source anchor for side chats opened from a selected passage. */
+    sourceMessageId?: string;
+    excerpt?: string;
     promoted: boolean;
   };
   /**
