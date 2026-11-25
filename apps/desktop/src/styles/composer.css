@@ -217,14 +217,14 @@
   inset-inline-start: 0;
   bottom: calc(100% + 8px);
   display: grid;
-  width: min(360px, calc(100vw - 32px));
+  width: min(384px, calc(100vw - 32px));
   box-sizing: border-box;
   max-height: min(420px, calc(100vh - 180px));
-  gap: 10px;
+  gap: 2px;
   overflow: auto;
-  padding: 16px;
+  padding: 6px 9px 4px;
   border: 1px solid var(--ds-border-subtle);
-  border-radius: var(--radius-lg);
+  border-radius: 13px;
   background: var(--ds-bg-elevated-opaque);
   box-shadow: var(--ds-shadow-dialog);
   color: var(--ds-text-primary);
@@ -233,7 +233,7 @@
 
 .composer-annotation-list {
   display: grid;
-  gap: 10px;
+  gap: 0;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -241,24 +241,52 @@
 
 .composer-annotation-item {
   display: grid;
-  gap: 6px;
+  grid-template-columns: 20px minmax(0, 1fr);
+  align-items: start;
+  gap: 0 8px;
   min-width: 0;
-  padding: 12px;
-  border: 1px solid var(--ds-border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--ds-bg-secondary);
+  padding: 8px 5px 9px;
+  border: 0;
+  border-bottom: 1px solid color-mix(in oklab, var(--ds-border-subtle) 72%, transparent);
+  border-radius: 0;
+  background: transparent;
+}
+
+.composer-annotation-item:last-child {
+  border-bottom: 0;
+}
+
+.composer-annotation-item:hover,
+.composer-annotation-item:focus-within {
+  background: color-mix(in oklab, var(--ds-bg-hover) 46%, transparent);
 }
 
 .composer-annotation-content {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 6px 8px;
+  min-width: 0;
+  gap: 3px;
+}
+
+.composer-annotation-source-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 21px;
+}
+
+.composer-annotation-source-label {
+  padding-top: 2px;
+  color: var(--ds-text-muted, var(--ds-text-secondary));
+  font-size: var(--text-xs);
+  line-height: 1.4;
 }
 
 .composer-annotation-number {
   display: grid;
-  width: 20px;
-  height: 20px;
+  width: 19px;
+  height: 19px;
+  margin-top: 2px;
   place-items: center;
   border-radius: var(--radius-full);
   background: var(--ds-bg-hover);
@@ -268,9 +296,8 @@
 }
 
 .composer-annotation-comment {
-  grid-column: 2;
   min-width: 0;
-  margin: 0;
+  margin: 2px 0 0;
   color: var(--ds-text-secondary);
   font-size: var(--text-xs);
   overflow-wrap: anywhere;
@@ -278,10 +305,10 @@
 }
 
 .composer-annotation-source-button {
+  display: block;
   min-width: 0;
   border: 0;
-  border-inline-start: 2px solid var(--ds-border-strong);
-  padding: 0 0 0 7px;
+  padding: 0;
   background: transparent;
   color: var(--ds-text-primary);
   font: inherit;
@@ -292,6 +319,7 @@
   max-height: 120px;
   overflow: auto;
   cursor: pointer;
+  line-height: 1.45;
 }
 
 .composer-annotation-source-button:hover,
@@ -316,6 +344,19 @@
   gap: 6px;
 }
 
+.composer-annotation-source-header > .composer-annotation-actions {
+  flex-wrap: nowrap;
+  gap: 2px;
+  margin: -2px -3px 0 0;
+}
+
+.composer-annotation-source-header > .composer-annotation-actions .icon-btn {
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  padding: 4px;
+}
+
 .composer-annotation-actions > * {
   flex: 0 0 auto;
 }
@@ -327,6 +368,11 @@
 
 .composer-annotation-clear {
   justify-self: start;
+  min-height: 25px;
+  margin: 1px 0 0 -3px;
+  padding: 2px 5px;
+  color: var(--ds-text-secondary);
+  font-size: var(--text-xs);
 }
 
 /* Focus deepens the lift; the shell never gains a stroke (D297). */

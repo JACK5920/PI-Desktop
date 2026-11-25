@@ -592,6 +592,32 @@ globalThis.selectionReferenceProbe = async () => {
     composerCard.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
     await settle();
     assert(host.querySelector('[data-testid="composer-annotation-card"]') === composerCard, "moving the pointer into the reference card dismissed it");
+    const composerReferenceRow = composerCard.querySelector<HTMLElement>(".composer-annotation-item");
+    assert(composerReferenceRow, "the unified reference card has no excerpt row");
+    assert(
+      composerReferenceRow.querySelector(".composer-annotation-source-label")?.textContent?.trim() === "Selected excerpt:",
+      "the reference row does not identify its selected-text excerpt",
+    );
+    const composerReferenceHeader = composerReferenceRow.querySelector(".composer-annotation-source-header");
+    const composerReferenceActions = composerReferenceHeader?.querySelector(".composer-annotation-actions");
+    assert(composerReferenceActions, "reference edit/remove icons are not aligned in the row header");
+    const composerReferenceRowStyle = getComputedStyle(composerReferenceRow);
+    assert(
+      composerReferenceRowStyle.borderRadius === "0px" &&
+        composerReferenceRowStyle.borderTopWidth === "0px" &&
+        composerReferenceRowStyle.borderInlineStartWidth === "0px" &&
+        composerReferenceRowStyle.borderInlineEndWidth === "0px",
+      "reference excerpts are still rendered as nested rounded cards",
+    );
+    const clearReferencesButton = [...composerCard.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent?.trim() === "Clear all references");
+    assert(clearReferencesButton, "the unified reference card has no clear-all action");
+    assert(
+      clearReferencesButton.classList.contains("btn-ghost") &&
+        Number.parseFloat(getComputedStyle(clearReferencesButton).fontSize) <= 14 &&
+        clearReferencesButton.getBoundingClientRect().height <= 30,
+      "clear-all references is not visually secondary and compact",
+    );
     const composerHoverBridge = getComputedStyle(referencesChip.parentElement!, "::before");
     assert(composerHoverBridge.pointerEvents !== "none" && Number.parseFloat(composerHoverBridge.height) >= 8, "Composer hover preview has no hit-test bridge across the trigger gap");
     assert(!referencesChip.hasAttribute("title"), "the reference chip retained a redundant hover tooltip");
@@ -764,6 +790,13 @@ globalThis.selectionReferenceProbe = async () => {
     await settleAfterFocus();
     assert(useAppStore.getState().sideChats[firstSideChat.id]?.references.length === 2, "a second reference was not attached for removal verification");
     sideReferenceCard = draftSideChatPane.querySelector<HTMLElement>("[data-testid='composer-annotation-card']");
+    const sideReferenceRows = [...(sideReferenceCard?.querySelectorAll<HTMLElement>(".composer-annotation-item") ?? [])];
+    assert(sideReferenceRows.length === 2, "two side-chat references are not shown as distinct rows");
+    assert(
+      getComputedStyle(sideReferenceRows[0]).borderBottomWidth === "1px" &&
+        getComputedStyle(sideReferenceRows[1]).borderBottomWidth === "0px",
+      "multiple references are not separated by a single lightweight divider",
+    );
     const removableReferenceRow = [...(sideReferenceCard?.querySelectorAll<HTMLElement>(".composer-annotation-item") ?? [])]
       .find((row) => row.textContent?.includes(removableExcerpt));
     removableReferenceRow?.querySelector<HTMLButtonElement>("[aria-label='Remove reference']")?.click();

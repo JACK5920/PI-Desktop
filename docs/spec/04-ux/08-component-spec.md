@@ -2075,9 +2075,13 @@ Single message render — either user (plaintext) or assistant (markdown streami
   rendered source text. A source marker is placed beside the excerpt only when
   those offsets still resolve to that exact excerpt; legacy, stale, or
   ambiguous anchors fall back to a message-level marker rather than guessing.
-  Pending Composer references use one card on hover or keyboard focus; the same
-  card shows excerpt/comment text and the edit/remove/clear actions, without a
-  second review panel or redundant trigger tooltip. Clicking an excerpt
+  Pending Composer references use one compact card on hover or keyboard focus.
+  Each excerpt is a flat, numbered row with a muted selected-text label, the
+  excerpt, and compact edit/remove icons aligned in its header; rows use a light
+  divider instead of nested rounded cards. A compact, visually secondary
+  clear-all action sits in the card footer. The same card shows optional
+  comment text, without a second review panel or redundant trigger tooltip.
+  Clicking an excerpt
   navigates to its source message and highlights only the captured range when
   its optional half-open offsets still resolve exactly. Unsent references also
   place a numbered source marker beside their excerpt immediately, before the

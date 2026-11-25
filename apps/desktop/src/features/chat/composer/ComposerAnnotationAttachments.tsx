@@ -143,8 +143,36 @@ export function ComposerAnnotationAttachments({
           <ol className="composer-annotation-list">
             {annotations.map((annotation, index) => (
               <li key={annotation.id} className="composer-annotation-item" data-annotation-index={index + 1}>
+                <span className="composer-annotation-number">{index + 1}</span>
                 <div className="composer-annotation-content">
-                  <span className="composer-annotation-number">{index + 1}</span>
+                  <div className="composer-annotation-source-header">
+                    <span className="composer-annotation-source-label">{t("chat.sideChatExcerpt")}:</span>
+                    {editingId === annotation.id ? null : (
+                      <div className="composer-annotation-actions">
+                        <TooltipButton
+                          type="button"
+                          className="icon-btn icon-btn-square"
+                          tooltip={t("chat.editAnnotation")}
+                          ariaLabel={t("chat.editAnnotation")}
+                          onClick={() => {
+                            setComment(annotation.comment ?? "");
+                            setEditingId(annotation.id);
+                          }}
+                        >
+                          <IconPencil size={14} aria-hidden />
+                        </TooltipButton>
+                        <TooltipButton
+                          type="button"
+                          className="icon-btn icon-btn-square"
+                          tooltip={t("chat.removeAnnotation")}
+                          ariaLabel={t("chat.removeAnnotation")}
+                          onClick={() => removeAnnotation(annotation.id)}
+                        >
+                          <IconTrash size={14} aria-hidden />
+                        </TooltipButton>
+                      </div>
+                    )}
+                  </div>
                   <button
                     type="button"
                     className="composer-annotation-source-button"
@@ -154,66 +182,42 @@ export function ComposerAnnotationAttachments({
                     {annotation.excerpt}
                   </button>
                   {annotation.comment ? <p className="composer-annotation-comment">{annotation.comment}</p> : null}
-                </div>
-                {editingId === annotation.id ? (
-                  <div className="composer-annotation-edit">
-                    <label htmlFor={`composer-annotation-comment-${annotation.id}`}>
-                      {t("chat.annotationCommentLabel")}
-                    </label>
-                    <Textarea
-                      id={`composer-annotation-comment-${annotation.id}`}
-                      value={comment}
-                      rows={3}
-                      placeholder={t("chat.annotationCommentPlaceholder")}
-                      onChange={(event) => setComment(event.currentTarget.value)}
-                    />
-                    <div className="composer-annotation-actions">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setEditingId(null)}
-                      >
-                        {t("chat.cancelEdit")}
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="primary"
-                        size="sm"
-                        onClick={() => {
-                          editAnnotation(annotation.id, comment);
-                          setEditingId(null);
-                        }}
-                      >
-                        {t("chat.saveAnnotation")}
-                      </Button>
+                  {editingId === annotation.id ? (
+                    <div className="composer-annotation-edit">
+                      <label htmlFor={`composer-annotation-comment-${annotation.id}`}>
+                        {t("chat.annotationCommentLabel")}
+                      </label>
+                      <Textarea
+                        id={`composer-annotation-comment-${annotation.id}`}
+                        value={comment}
+                        rows={3}
+                        placeholder={t("chat.annotationCommentPlaceholder")}
+                        onChange={(event) => setComment(event.currentTarget.value)}
+                      />
+                      <div className="composer-annotation-actions">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setEditingId(null)}
+                        >
+                          {t("chat.cancelEdit")}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="primary"
+                          size="sm"
+                          onClick={() => {
+                            editAnnotation(annotation.id, comment);
+                            setEditingId(null);
+                          }}
+                        >
+                          {t("chat.saveAnnotation")}
+                        </Button>
+                      </div>
                     </div>
-                  </div>
-                ) : (
-                  <div className="composer-annotation-actions">
-                    <TooltipButton
-                      type="button"
-                      className="icon-btn icon-btn-square"
-                      tooltip={t("chat.editAnnotation")}
-                      ariaLabel={t("chat.editAnnotation")}
-                      onClick={() => {
-                        setComment(annotation.comment ?? "");
-                        setEditingId(annotation.id);
-                      }}
-                    >
-                      <IconPencil size={14} aria-hidden />
-                    </TooltipButton>
-                    <TooltipButton
-                      type="button"
-                      className="icon-btn icon-btn-square"
-                      tooltip={t("chat.removeAnnotation")}
-                      ariaLabel={t("chat.removeAnnotation")}
-                      onClick={() => removeAnnotation(annotation.id)}
-                    >
-                      <IconTrash size={14} aria-hidden />
-                    </TooltipButton>
-                  </div>
-                )}
+                  ) : null}
+                </div>
               </li>
             ))}
           </ol>

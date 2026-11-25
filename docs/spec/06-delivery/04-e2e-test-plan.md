@@ -5888,9 +5888,12 @@ window; opening a normal panel afterward must still work.
   is shown until release; verify the captured offsets across inline formatting
   and Unicode. After attachment but before sending, verify a pending Composer
   reference places its numbered source marker beside the exact excerpt and
-  opens one unified card on hover/focus with the excerpt, comment, and
-  edit/remove/clear actions. Verify there is no redundant trigger tooltip or
-  stacked review panel. Click the excerpt and require navigation to its source
+  opens one compact unified card on hover/focus. Verify each entry is a flat
+  numbered row with a muted selected-text label, excerpt, header-aligned
+  edit/remove icons, and light separators between multiple rows; verify the
+  clear-all footer remains compact and visually secondary. Verify there is no
+  redundant trigger tooltip or stacked review panel. Click the excerpt and
+  require navigation to its source
   message plus a highlight of only the captured range. Verify a valid answer
   citation previews only the excerpt/comment on hover/focus, remains usable as
   the pointer enters the card, and dismisses on Escape/outside press; click it
