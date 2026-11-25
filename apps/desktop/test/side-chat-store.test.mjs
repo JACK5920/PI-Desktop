@@ -103,7 +103,8 @@ test("opening a side chat creates only a transient work-panel draft", () => {
   assert.equal(h.get().sideChats[sideChatId].childSessionId, undefined);
   assert.equal(h.forkCalls.length, 0);
   assert.equal(h.sendCalls.length, 0);
-  assert.match(h.get().sideChats[sideChatId].draftText, /> quote/);
+  assert.equal(h.get().sideChats[sideChatId].draftText, "");
+  assert.equal(h.get().sideChats[sideChatId].excerpt, "quote");
 });
 
 test("multi-message side-chat selections keep every source while using the first as fork anchor", () => {

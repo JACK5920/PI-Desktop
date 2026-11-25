@@ -151,3 +151,11 @@ assistant citation preview contains the excerpt and optional comment, not a
 second copy of the entire source message. This restores the intended
 source-centered interaction without changing the prompt envelope, persistence,
 or Host contracts.
+
+## 2026-11-25 implementation amendment — side-chat excerpt separation
+
+Opening a docked side chat keeps the selected excerpt in its side-chat metadata
+and inherited source transcript, but starts the editable prompt empty. The first
+explicit send passes the excerpt as fork context and submits only the text the
+user typed. This avoids showing and sending the same excerpt twice while
+preserving source context and durable reopening behavior.

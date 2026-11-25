@@ -2098,8 +2098,11 @@ Single message render — either user (plaintext) or assistant (markdown streami
   text. Prompt display, edit, queue, and title projections omit the generated
   envelope; the sent-message reference summary remains available separately.
   **Ask in side chat** opens a WorkPanel draft without a child session or send.
-  The first explicit non-empty Send forks at the selected assistant message
-  without activating the child. The parent transcript and Composer stay active;
+  Its selected excerpt remains in the side-chat source metadata and inherited
+  parent transcript, but is not prefilled into the editable prompt. The first
+  explicit non-empty Send forks at the selected assistant message without
+  activating the child and submits only the user's typed request. The parent
+  transcript and Composer stay active;
   the child reuses the normal transcript, Stop, approval, AskTool, and event
   handling for its own session id. Add to main chat appends the latest child
   answer to the parent draft; Open as a conversation selects the normal child;

@@ -23,10 +23,6 @@ export type SideChatSliceDependencies = StoreAccess & {
   promoteSideChat: (sessionId: string) => Promise<{ ok: boolean }>;
 };
 
-function quotedDraft(excerpt: string): string {
-  return `${excerpt.split("\n").map((line) => `> ${line}`).join("\n")}\n\n`;
-}
-
 function updateSideChat(
   state: AppState,
   sideChatId: string,
@@ -100,7 +96,7 @@ export function createSideChatSlice({ get, set, getCachedTranscript, getSessionD
         messages: [],
         operationId: 0,
         status: "draft",
-        draftText: quotedDraft(excerpt.trim()),
+        draftText: "",
       };
       set((current) => ({ sideChats: { ...current.sideChats, [sideChatId]: sideChat } }));
       get().openWorkPanelTabForSession(parentSessionId, sideChatWorkPanelTab(sideChatId));

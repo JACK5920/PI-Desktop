@@ -269,12 +269,13 @@ globalThis.selectionReferenceProbe = async () => {
   api.promoteSideChat = async () => ({ ok: true });
 
   let forkCount = 0;
+  const forkedSideChatExcerpts: Array<string | undefined> = [];
   const sends: Array<{ content: string; childSessionId: string }> = [];
   const selectedSessions: string[] = [];
   const pendingResolvers: Array<(accepted: boolean) => void> = [];
   const permissionResolutions: Array<{ sessionId: string; requestId: string; decision: string }> = [];
   const askResolutions: Array<{ sessionId: string; requestId: string; answers: Array<string[] | null> }> = [];
-const navigationTargets: Array<{ sessionId: string; messageId: string; query: string; anchorStart?: number; anchorEnd?: number }> = [];
+  const navigationTargets: Array<{ sessionId: string; messageId: string; query: string; anchorStart?: number; anchorEnd?: number }> = [];
   useAppStore.setState({
     activeSessionId: "parent",
     sessions: [parentSession] as AppState["sessions"],
@@ -286,6 +287,7 @@ const navigationTargets: Array<{ sessionId: string; messageId: string; query: st
     forkAssistantMessageInSession: (async (parentSessionId, messageId, excerpt) => {
       assert(parentSessionId === "parent", "side chat fork used a different parent session");
       assert(messageId.startsWith("answer-"), "side chat fork did not use an assistant message anchor");
+      forkedSideChatExcerpts.push(excerpt);
       forkCount += 1;
       const childSessionId = `side-chat-child-${forkCount}`;
       useAppStore.setState((state) => ({
@@ -690,13 +692,16 @@ const navigationTargets: Array<{ sessionId: string; messageId: string; query: st
     assert(firstSideChat, "Ask in side chat did not create the docked draft tab");
     assert(!firstSideChat.childSessionId && forkCount === 0 && sends.length === 0, "opening a side chat forked or sent without user Send");
     assert(useAppStore.getState().activeSessionId === "parent", "opening a side chat switched away from the parent");
-    assert(firstSideChat.draftText.includes(quote), "side-chat draft omitted the selected excerpt");
+    assert(firstSideChat.excerpt === quote, "side-chat draft did not retain the selected excerpt as source context");
+    assert(firstSideChat.draftText === "", "side-chat input duplicated the selected excerpt");
 
     const sidePrompt = textareaNamed("Side-chat prompt");
-    setTextareaValue(sidePrompt, `${firstSideChat.draftText}Explain the selected result.`);
+    setTextareaValue(sidePrompt, "Explain the selected result.");
     buttonNamed("Send").click();
     for (let index = 0; index < 120 && sends.length === 0; index += 1) await settle();
     assert(forkCount === 1 && sends.length === 1, "explicit side-chat Send did not create exactly one fork and prompt");
+    assert(forkedSideChatExcerpts[0] === quote, "the selected excerpt was not retained as fork context");
+    assert(sends[0].content === "Explain the selected result.", "the user request duplicated the selected excerpt");
     assert(
       !listableSessions(useAppStore.getState().sessions).some((session) => session.sideChat?.parentSessionId === "parent"),
       "an unpromoted sent side chat appeared in the ordinary session list",

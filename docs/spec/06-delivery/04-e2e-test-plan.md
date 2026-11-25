@@ -5945,8 +5945,11 @@ window; opening a normal panel afterward must still work.
 
 - **Preconditions**: A completed assistant reply in a forkable local session;
   the user can open and prompt a child session.
-- **Steps**: 1) Select assistant text and open Ask in side chat; verify no child
-  session or prompt exists before Send. 2) Enter a non-empty prompt and Send.
+- **Steps**: 1) Select assistant text and open Ask in side chat; verify the
+  selected excerpt is retained separately as context, the editable prompt is
+  empty, and no child session or prompt exists before Send. 2) Enter only a
+  non-empty user prompt and Send; verify the excerpt is still passed through the
+  fork context while the submitted request contains only the typed prompt.
   3) While the child streams, inspect its transcript and resolve a child-scoped
   permission request and AskTool card. 4) Add the result to the main Composer.
   5) Open one child as a conversation; open and send another side chat, then
@@ -5958,9 +5961,11 @@ window; opening a normal panel afterward must still work.
   and verify the unsent text survives in the child Composer; also exercise
   retry and close/session-switch races.
 - **Expected**: Only explicit Send forks and submits, using the selected
-  assistant message as the anchor. The parent remains active with its original
-  transcript position and draft. Child events, permission resolution, and
-  AskTool answers are scoped to the child id and use the existing Host-owned
+  assistant message as the anchor. The selected excerpt is retained as side-chat
+  source context and in the forked parent transcript, not duplicated into the
+  editable prompt or submitted user request. The parent remains active with its
+  original transcript position and draft. Child events, permission resolution,
+  and AskTool answers are scoped to the child id and use the existing Host-owned
   path. Add to main chat appends without replacing the parent draft; promotion
   activates the normal child and releases only its side-chat projection;
   closing a sent tab preserves the durable child without stopping it. A rejected
