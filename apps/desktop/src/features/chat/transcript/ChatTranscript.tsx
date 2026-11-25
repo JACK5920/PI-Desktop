@@ -34,7 +34,11 @@ import { useTranscriptScroll } from "./hooks/useTranscriptScroll";
 import { useTranscriptContinuation } from "../../../hooks/use-transcript-continuation";
 import type { TranscriptSearchTarget } from "../../../lib/transcript-reading";
 import type { RestoreTranscriptReading } from "../../../hooks/use-transcript-reading-position";
-import { TranscriptSearchContext } from "../../../lib/transcript-search-context";
+import {
+  TranscriptSearchContext,
+  TranscriptSourceNavigationContext,
+  type TranscriptSourceTarget,
+} from "../../../lib/transcript-search-context";
 import { DisclosureAnchorContext } from "../../../lib/disclosure-anchor-context";
 import { api } from "../../../lib/api";
 import { mergeLiveSessionMessages } from "../../../lib/session-transcript";
@@ -78,6 +82,8 @@ type ChatTranscriptProps = {
    */
   paneVisible?: boolean;
   searchTarget?: TranscriptSearchTarget | null;
+  /** Route citation navigation to a compact, non-active transcript when needed. */
+  onNavigateToSource?: (target: TranscriptSourceTarget) => void;
   readingWindow?: boolean;
   /** The displayed range includes this session's canonical live tail. */
   liveTail?: boolean;
@@ -125,6 +131,7 @@ function TranscriptBody({
   planningState,
   paneVisible = true,
   searchTarget = null,
+  onNavigateToSource,
   readingWindow = false,
   liveTail = !readingWindow,
   onRestoreReading,
@@ -140,6 +147,7 @@ function TranscriptBody({
   const openTranscriptMenu = useTranscriptMenu();
   const { copyText, selectText } = useChatTextActions();
   const showToast = useAppStore((state) => state.showToast);
+  const navigateTranscript = useAppStore((state) => state.navigateTranscript);
   const radialMenu = resolveRadialMenu(
     useAppStore((state) => state.settings),
   );
@@ -166,6 +174,11 @@ function TranscriptBody({
   const latestTurnResult = useAppStore((state) =>
     sessionId ? state.latestTurnResults[sessionId] : undefined,
   );
+  const navigateToSource = useCallback((target: TranscriptSourceTarget) => {
+    if (!sessionId || target.sessionId !== sessionId) return;
+    if (onNavigateToSource) onNavigateToSource(target);
+    else void navigateTranscript(target);
+  }, [navigateTranscript, onNavigateToSource, sessionId]);
   const approvalPending = useAppStore((state) =>
     Boolean(
       sessionId && state.pendingPlans[sessionId]?.status === "pending",
@@ -453,6 +466,7 @@ function TranscriptBody({
   };
 
   return (
+    <TranscriptSourceNavigationContext.Provider value={navigateToSource}>
     <TranscriptSearchContext.Provider value={searchTarget}>
     <DisclosureAnchorContext.Provider value={disclosureAnchorNotifier}>
     <SlotSessionProvider sessionId={sessionId ?? ""}>
@@ -627,5 +641,6 @@ function TranscriptBody({
     </SlotSessionProvider>
     </DisclosureAnchorContext.Provider>
     </TranscriptSearchContext.Provider>
+    </TranscriptSourceNavigationContext.Provider>
   );
 }

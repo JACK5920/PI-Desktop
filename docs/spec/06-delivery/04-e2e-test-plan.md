@@ -5888,13 +5888,16 @@ window; opening a normal panel afterward must still work.
   is shown until release; verify the captured offsets across inline formatting
   and Unicode. After attachment but before sending, verify a pending Composer
   reference places its numbered source marker beside the exact excerpt and
-  opens its text-only preview on hover/focus. Verify the Composer control
-  previews on hover/focus, remains open while the pointer moves into the preview,
-  and click switches to management without stacking both surfaces. Verify a
-  valid answer citation previews on hover/focus and activation, stays open when
-  the pointer enters the card, and dismisses on Escape/outside press. Corrupt or
-  remove an optional source offset and verify that the reference falls back to
-  a message-level marker rather than a guessed text range.
+  opens one unified card on hover/focus with the excerpt, comment, and
+  edit/remove/clear actions. Verify there is no redundant trigger tooltip or
+  stacked review panel. Click the excerpt and require navigation to its source
+  message plus a highlight of only the captured range. Verify a valid answer
+  citation previews only the excerpt/comment on hover/focus, remains usable as
+  the pointer enters the card, and dismisses on Escape/outside press; click it
+  and require the same exact source navigation/highlight. Use repeated source
+  text to prove the second occurrence is selected by its stored offsets.
+  Corrupt or remove an optional offset and verify that navigation falls back to
+  the source message without a guessed text range.
 - **Expected**: The Composer exposes ordered, editable, removable references;
   cancelled edits do not attach, duplicate source/excerpt reopens its editor,
   and a reference without a comment is valid. Both comment editors retain
@@ -5912,9 +5915,12 @@ window; opening a normal panel afterward must still work.
   attachments; rejection preserves them, and annotation-only submit is not
   admitted. Editing a queued prompt restores its hidden annotation attachments
   ahead of any newer pending Composer attachments, and a failed queue admission
-  keeps the original attachments. A valid citation opens a safe text-only
-  excerpt/comment/source card; unknown indices and hostile reference text stay
-  inert ordinary text.
+  keeps the original attachments. The Composer renders one unified reference
+  card with preview and management actions; clicking its excerpt and a valid
+  answer citation returns to the captured source message and highlights only a
+  still-valid anchored occurrence. Legacy/stale anchors navigate to the message
+  without a fuzzy match, and the answer popover does not repeat the full source
+  message. Unknown indices and hostile reference text stay inert ordinary text.
 - **Coverage**: `node scripts/e2e-selection-reference-workflow.mjs` covers stable
   selection capture including a range spanning multiple same-role transcript
   messages, source-marker placement, Composer/citation preview, attach,

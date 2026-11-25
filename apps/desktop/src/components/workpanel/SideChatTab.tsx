@@ -12,6 +12,8 @@ import {
   formatSideChatResultQuote,
 } from "../../lib/side-chat-lifecycle";
 import { transcriptSelectionSourceAttribution } from "../../lib/transcript-selection";
+import type { TranscriptSearchTarget } from "../../lib/transcript-reading";
+import type { AnnotationSourceTarget } from "../../lib/annotation-source-navigation";
 import { composerDraftBridge } from "../../features/chat/composer/plugins/draft-bridge";
 import { ComposerAnnotationAttachments } from "../../features/chat/composer/ComposerAnnotationAttachments";
 import { useAppStore } from "../../stores/app-store";
@@ -19,6 +21,8 @@ import { useAppStore } from "../../stores/app-store";
 export function SideChatTab({ sideChatId }: { sideChatId: string }) {
   const { t } = useTranslation();
   const promptRef = useRef<HTMLTextAreaElement>(null);
+  const nextSourceRequestId = useRef(0);
+  const [sourceSearchTarget, setSourceSearchTarget] = useState<TranscriptSearchTarget | null>(null);
   const sideChat = useAppStore((state) => state.sideChats[sideChatId]);
   const setDraft = useAppStore((state) => state.setSideChatDraft);
   const send = useAppStore((state) => state.sendSideChatPrompt);
@@ -48,6 +52,10 @@ export function SideChatTab({ sideChatId }: { sideChatId: string }) {
     ),
     [sideChat?.messages],
   );
+
+  const navigateWithinSideChat = (target: AnnotationSourceTarget) => {
+    setSourceSearchTarget({ ...target, requestId: ++nextSourceRequestId.current });
+  };
 
   if (!sideChat) return null;
   const childSessionId = sideChat.childSessionId;
@@ -108,6 +116,8 @@ export function SideChatTab({ sideChatId }: { sideChatId: string }) {
           <ChatTranscript
             sessionId={sideChat.childSessionId}
             messages={sideChat.messages}
+            searchTarget={sourceSearchTarget}
+            onNavigateToSource={navigateWithinSideChat}
             isRunning={running}
             pendingPermission={pendingPermission}
             queuedPermissions={queuedPermissions}
@@ -148,7 +158,12 @@ export function SideChatTab({ sideChatId }: { sideChatId: string }) {
           void send(sideChatId, sideChat.draftText).finally(() => setSubmitting(false));
         }}
       >
-        {childSessionId ? <ComposerAnnotationAttachments sessionId={childSessionId} /> : null}
+        {childSessionId ? (
+          <ComposerAnnotationAttachments
+            sessionId={childSessionId}
+            onNavigateToSource={navigateWithinSideChat}
+          />
+        ) : null}
         <Textarea
           ref={promptRef}
           value={sideChat.draftText}

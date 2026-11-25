@@ -274,6 +274,7 @@ globalThis.selectionReferenceProbe = async () => {
   const pendingResolvers: Array<(accepted: boolean) => void> = [];
   const permissionResolutions: Array<{ sessionId: string; requestId: string; decision: string }> = [];
   const askResolutions: Array<{ sessionId: string; requestId: string; answers: Array<string[] | null> }> = [];
+const navigationTargets: Array<{ sessionId: string; messageId: string; query: string; anchorStart?: number; anchorEnd?: number }> = [];
   useAppStore.setState({
     activeSessionId: "parent",
     sessions: [parentSession] as AppState["sessions"],
@@ -387,6 +388,9 @@ globalThis.selectionReferenceProbe = async () => {
       selectedSessions.push(id);
       useAppStore.setState({ activeSessionId: id });
     }) as AppState["selectSession"],
+    navigateTranscript: (async (target) => {
+      navigationTargets.push(target);
+    }) as AppState["navigateTranscript"],
     promoteSideChat: async () => ({ ok: true }),
     resolvePermission: (async (sessionId, requestId, decision) => {
       permissionResolutions.push({ sessionId, requestId, decision });
@@ -566,27 +570,35 @@ globalThis.selectionReferenceProbe = async () => {
     referencesChip.focus();
     referencesChip.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
     await settle();
-    assert(host.querySelector('[data-testid="composer-annotation-preview"]')?.textContent?.includes(quote), "keyboard focus did not preview the pending reference in the Composer");
+    assert(host.querySelector('[data-testid="composer-annotation-card"]')?.textContent?.includes(quote), "keyboard focus did not open the unified pending-reference card");
     referencesChip.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
     await settle();
-    const composerPreview = host.querySelector<HTMLElement>('[data-testid="composer-annotation-preview"]');
-    assert(composerPreview, "hovering the Composer reference control did not open its preview");
-    composerPreview.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
+    const composerCard = host.querySelector<HTMLElement>('[data-testid="composer-annotation-card"]');
+    assert(composerCard, "hovering the Composer reference control did not open its unified card");
+    composerCard.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
     await settle();
-    assert(host.querySelector('[data-testid="composer-annotation-preview"]'), "moving the pointer into the Composer preview dismissed it");
+    assert(host.querySelector('[data-testid="composer-annotation-card"]') === composerCard, "moving the pointer into the reference card dismissed it");
     const composerHoverBridge = getComputedStyle(referencesChip.parentElement!, "::before");
     assert(composerHoverBridge.pointerEvents !== "none" && Number.parseFloat(composerHoverBridge.height) >= 8, "Composer hover preview has no hit-test bridge across the trigger gap");
-    referencesChip.click();
+    assert(!referencesChip.hasAttribute("title"), "the reference chip retained a redundant hover tooltip");
+    assert(!host.querySelector(".composer-annotation-review"), "a separate reference manager is still rendered");
+    const sourceLink = composerCard.querySelector<HTMLButtonElement>(".composer-annotation-source-button");
+    assert(sourceLink, "the unified reference card has no source-navigation action");
+    sourceLink.click();
     await settle();
-    assert(!host.querySelector('[data-testid="composer-annotation-preview"]'), "opening the reference manager left the hover preview open underneath it");
-    assert(host.querySelector(".composer-annotation-review"), "clicking the reference control did not open the reference manager");
-    assert(host.textContent?.includes(quote), "annotation review does not show the captured excerpt");
-    const referenceReview = host.querySelector<HTMLElement>(".composer-annotation-review");
-    const reviewRect = referenceReview?.getBoundingClientRect();
-    assert(reviewRect, "Composer reference review has no measurable layout");
-    assert(reviewRect.left >= 0 && reviewRect.right <= window.innerWidth, "Composer reference review extends beyond the viewport width");
-    const annotationReviewActions = [...referenceReview.querySelectorAll<HTMLButtonElement>(".composer-annotation-actions > button")];
-    assert(annotationReviewActions.length === 2, "Composer reference review does not expose edit and remove controls");
+    assert(!host.querySelector('[data-testid="composer-annotation-card"]'), "source navigation did not dismiss the reference card");
+    assert(navigationTargets.at(-1)?.sessionId === "parent", "reference navigation targeted the wrong session");
+    assert(navigationTargets.at(-1)?.messageId === "answer-parent", "reference navigation targeted the wrong source message");
+    assert(navigationTargets.at(-1)?.query === quote, "reference navigation lost the exact quoted excerpt");
+    assert(navigationTargets.at(-1)?.anchorStart === expectedAnchorStart, "reference navigation lost the exact source offset");
+    referencesChip.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
+    await settle();
+    const referenceCard = host.querySelector<HTMLElement>(".composer-annotation-card");
+    assert(referenceCard, "the reference card could not be reopened for editing");
+    const reviewRect = referenceCard.getBoundingClientRect();
+    assert(reviewRect.left >= 0 && reviewRect.right <= window.innerWidth, "Composer reference card extends beyond the viewport width");
+    const annotationReviewActions = [...referenceCard.querySelectorAll<HTMLButtonElement>(".composer-annotation-actions > button")];
+    assert(annotationReviewActions.length === 2, "Composer reference card does not expose edit and remove controls");
     assert(
       annotationReviewActions.every((button) => {
         const rect = button.getBoundingClientRect();
@@ -601,7 +613,7 @@ globalThis.selectionReferenceProbe = async () => {
     buttonNamed("Edit note").click();
     await settle();
     const annotationEditActions = [
-      ...referenceReview.querySelectorAll<HTMLButtonElement>(".composer-annotation-edit .composer-annotation-actions button"),
+      ...referenceCard.querySelectorAll<HTMLButtonElement>(".composer-annotation-edit .composer-annotation-actions button"),
     ];
     assert(annotationEditActions.length === 2, "Composer annotation editor does not show cancel and save actions");
     assert(
@@ -647,7 +659,7 @@ globalThis.selectionReferenceProbe = async () => {
     const citationDialog = host.querySelector(".annotation-citation-popover");
     assert(citationDialog?.textContent?.includes(quote), "citation popover does not show its excerpt");
     assert(citationDialog?.textContent?.includes("Keep the parent visible while the child runs."), "citation popover does not show its comment");
-    assert(citationDialog?.textContent?.includes("answer-parent"), "citation popover does not retain source-message context");
+    assert(!citationDialog?.textContent?.includes("while review stays beside it."), "citation popover repeats the entire source message instead of the selected excerpt");
     assert(citation.getAttribute("aria-expanded") === "true", "citation hover did not expose its expanded state");
     const citationHoverBridge = getComputedStyle(citation.parentElement!, "::after");
     assert(citationHoverBridge.pointerEvents !== "none" && Number.parseFloat(citationHoverBridge.height) >= 8, "citation hover preview has no hit-test bridge across the trigger gap");
@@ -655,6 +667,13 @@ globalThis.selectionReferenceProbe = async () => {
     citationDialog.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
     await settle();
     assert(host.querySelector(".annotation-citation-popover"), "moving the pointer into the citation preview dismissed it");
+    citation.click();
+    await settle();
+    assert(navigationTargets.at(-1)?.messageId === "answer-parent", "answer citation did not navigate to its source message");
+    assert(navigationTargets.at(-1)?.anchorStart === expectedAnchorStart, "answer citation did not retain its exact source highlight anchor");
+    assert(!host.querySelector(".annotation-citation-popover"), "clicking an answer citation did not close its preview before navigation");
+    citation.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
+    await settle();
     citation.focus();
     citation.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
     citation.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));

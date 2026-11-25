@@ -81,7 +81,10 @@ export function installTranscriptSearchFocus({
     position.current = { requestId: target.requestId, alignUntil: performance.now() + 1500 };
   onNavigate(fresh);
 
-  let match = locateTranscriptSearch(message, target.query, source);
+  const anchor = Number.isSafeInteger(target.anchorStart) && Number.isSafeInteger(target.anchorEnd)
+    ? { anchorStart: target.anchorStart!, anchorEnd: target.anchorEnd! }
+    : undefined;
+  let match = locateTranscriptSearch(message, target.query, source, anchor);
   let highlight: Highlight | undefined;
   const paint = () => {
     match.sourceElement?.classList.add("transcript-search-source-match");
@@ -124,7 +127,7 @@ export function installTranscriptSearchFocus({
   );
   const mutation = new MutationObserver(() => {
     unpaint();
-    match = locateTranscriptSearch(message, target.query, source);
+    match = locateTranscriptSearch(message, target.query, source, anchor);
     paint();
     align();
   });

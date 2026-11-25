@@ -1,4 +1,5 @@
 import { searchMatchRanges } from "./session-search";
+import { resolveTranscriptTextAnchor } from "./transcript-selection";
 
 const NON_CONTENT = "button:not(.chat-text-link):not(.chat-file-chip):not(.chat-code-link), textarea, [aria-hidden='true']";
 
@@ -37,12 +38,71 @@ export type TranscriptSearchMatch = {
   sourceElement?: HTMLElement;
 };
 
+function exactVisibleRange(
+  root: HTMLElement,
+  anchorStart: number,
+  anchorEnd: number,
+  excerpt: string,
+): Range | null {
+  const content = root.matches?.(".prose-chat, .message-user-text")
+    ? root
+    : root.querySelector?.(".prose-chat, .message-user-text") ?? root;
+  const view = content.ownerDocument?.defaultView;
+  const filter = view?.NodeFilter ?? globalThis.NodeFilter;
+  if (!filter) return null;
+  const walker = content.ownerDocument.createTreeWalker(content, filter.SHOW_TEXT, {
+    acceptNode: (node) => node.parentElement?.closest(
+      '[aria-hidden="true"], [data-selection-anchor-ignore="true"], script, style',
+    )
+      ? filter.FILTER_REJECT
+      : filter.FILTER_ACCEPT,
+  });
+  const nodes: Text[] = [];
+  let text = "";
+  while (walker.nextNode()) {
+    const node = walker.currentNode as Text;
+    if (!node.data) continue;
+    nodes.push(node);
+    text += node.data;
+  }
+  const resolved = resolveTranscriptTextAnchor(text, anchorStart, anchorEnd, excerpt);
+  if (!resolved) return null;
+
+  let cursor = 0;
+  let startNode: Text | null = null;
+  let endNode: Text | null = null;
+  let startOffset = 0;
+  let endOffset = 0;
+  for (const node of nodes) {
+    const next = cursor + node.length;
+    if (!startNode && resolved.start >= cursor && resolved.start <= next) {
+      startNode = node;
+      startOffset = resolved.start - cursor;
+    }
+    if (!endNode && resolved.end >= cursor && resolved.end <= next) {
+      endNode = node;
+      endOffset = resolved.end - cursor;
+    }
+    cursor = next;
+  }
+  if (!startNode || !endNode) return null;
+  const range = content.ownerDocument.createRange();
+  range.setStart(startNode, startOffset);
+  range.setEnd(endNode, endOffset);
+  return range;
+}
+
 /** The parser maps hidden Markdown syntax and destinations to their visible owner. */
 export function locateTranscriptSearch(
   root: HTMLElement,
   query: string,
   source: string,
+  anchor?: { anchorStart: number; anchorEnd: number },
 ): TranscriptSearchMatch {
+  if (anchor) {
+    const range = exactVisibleRange(root, anchor.anchorStart, anchor.anchorEnd, query);
+    return { ranges: range ? [range] : [] };
+  }
   const first = searchMatchRanges(source, query)[0];
   let owner: HTMLElement | undefined;
   let ownerLength = Infinity;

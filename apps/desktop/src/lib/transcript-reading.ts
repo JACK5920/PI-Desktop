@@ -12,6 +12,9 @@ export type TranscriptSearchTarget = {
   messageId: string;
   query: string;
   requestId: number;
+  /** Exact rendered-text offsets for selection references; invalid offsets never fall back to a guessed match. */
+  anchorStart?: number;
+  anchorEnd?: number;
 };
 
 /** One renderer reading range, shared by ordinary history and search navigation. */

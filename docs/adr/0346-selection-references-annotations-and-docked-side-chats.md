@@ -139,3 +139,15 @@ without a user requirement to persist drafts across restart.
 Accepted: this keeps session durability and permissions with their existing
 owners, makes no external submission automatic, and supplies the requested UX
 with the smallest compatible boundary change.
+
+## 2026-11-25 implementation amendment — reference navigation
+
+The Composer reference review is a single hover/focus card that keeps excerpt
+preview and edit/remove/clear actions together. Clicking the excerpt and an
+assistant citation navigates to the captured source message; an exact stored
+text anchor is highlighted only while its rendered source still matches.
+Missing or stale offsets fall back to the message without guessing. The
+assistant citation preview contains the excerpt and optional comment, not a
+second copy of the entire source message. This restores the intended
+source-centered interaction without changing the prompt envelope, persistence,
+or Host contracts.

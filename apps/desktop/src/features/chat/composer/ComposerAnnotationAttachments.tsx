@@ -1,42 +1,48 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { IconPencil, IconTrash } from "../../../components/icons";
 import { Button, Textarea, TooltipButton } from "../../../components/ui";
+import { annotationSourceTarget, type AnnotationSourceTarget } from "../../../lib/annotation-source-navigation";
 import { useAppStore } from "../../../stores/app-store";
 
 const EMPTY_ANNOTATIONS: never[] = [];
 
-export function ComposerAnnotationAttachments({ sessionId: requestedSessionId }: { sessionId?: string } = {}) {
+export function ComposerAnnotationAttachments({
+  sessionId: requestedSessionId,
+  onNavigateToSource,
+}: {
+  sessionId?: string;
+  onNavigateToSource?: (target: AnnotationSourceTarget) => void;
+} = {}) {
   const { t } = useTranslation();
   const activeSessionId = useAppStore((state) => state.activeSessionId);
   const sessionId = requestedSessionId ?? activeSessionId;
   const annotations = useAppStore((state) =>
     sessionId ? state.responseAnnotations[sessionId] ?? EMPTY_ANNOTATIONS : EMPTY_ANNOTATIONS,
   );
+  const navigateTranscript = useAppStore((state) => state.navigateTranscript);
   const editAnnotation = useAppStore((state) => state.editResponseAnnotation);
   const removeAnnotation = useAppStore((state) => state.removeResponseAnnotation);
   const clearAnnotations = useAppStore((state) => state.clearResponseAnnotations);
   const [open, setOpen] = useState(false);
+  const [pinnedOpen, setPinnedOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [comment, setComment] = useState("");
-  const [previewOpen, setPreviewOpen] = useState(false);
-  const previewRef = useRef<HTMLDivElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
+  const cardId = useId();
 
   useEffect(() => {
-    const focusChange = (event: FocusEvent) => {
-      setPreviewOpen(Boolean(previewRef.current?.contains(event.target as Node)));
-    };
-    document.addEventListener("focusin", focusChange);
-    return () => document.removeEventListener("focusin", focusChange);
-  }, []);
-
-  useEffect(() => {
-    if (!previewOpen) return;
+    if (!open) return;
     const outside = (event: PointerEvent) => {
-      if (!previewRef.current?.contains(event.target as Node)) setPreviewOpen(false);
+      if (!cardRef.current?.contains(event.target as Node)) {
+        setPinnedOpen(false);
+        setOpen(false);
+      }
     };
     const keyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setPreviewOpen(false);
+      if (event.key !== "Escape") return;
+      setPinnedOpen(false);
+      setOpen(false);
     };
     document.addEventListener("pointerdown", outside, true);
     document.addEventListener("keydown", keyDown, true);
@@ -44,69 +50,77 @@ export function ComposerAnnotationAttachments({ sessionId: requestedSessionId }:
       document.removeEventListener("pointerdown", outside, true);
       document.removeEventListener("keydown", keyDown, true);
     };
-  }, [previewOpen]);
+  }, [open]);
 
   if (!sessionId || annotations.length === 0) return null;
+
+  const closeCard = () => {
+    setPinnedOpen(false);
+    setOpen(false);
+  };
+  const jumpToSource = (annotation: (typeof annotations)[number]) => {
+    const target = annotationSourceTarget(sessionId, annotation);
+    if (onNavigateToSource) onNavigateToSource(target);
+    else void navigateTranscript(target);
+    closeCard();
+  };
 
   return (
     <div
       className="composer-annotation-attachments"
       data-testid="composer-annotation-attachments"
-      ref={previewRef}
-      onPointerEnter={() => {
-        if (!open) setPreviewOpen(true);
-      }}
-      onPointerOver={() => {
-        if (!open) setPreviewOpen(true);
-      }}
-      onFocusCapture={() => {
-        if (!open) setPreviewOpen(true);
-      }}
+      ref={cardRef}
+      onPointerEnter={() => setOpen(true)}
       onPointerLeave={(event) => {
-        if (!open && !event.currentTarget.contains(event.relatedTarget as Node) &&
-          !event.currentTarget.querySelector(".composer-annotation-chip:focus")) setPreviewOpen(false);
+        if (
+          !pinnedOpen &&
+          !event.currentTarget.contains(event.relatedTarget as Node) &&
+          !event.currentTarget.matches(":focus-within")
+        ) setOpen(false);
       }}
+      onFocusCapture={() => setOpen(true)}
       onBlur={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget as Node)) setPreviewOpen(false);
+        if (
+          !pinnedOpen &&
+          !event.currentTarget.matches(":hover") &&
+          !event.currentTarget.contains(event.relatedTarget as Node)
+        ) setOpen(false);
       }}
     >
-      <TooltipButton
+      <button
         type="button"
         className="composer-annotation-chip"
         aria-expanded={open}
-        aria-controls="composer-annotation-review"
-        tooltip={t("chat.reviewAnnotations")}
-        ariaLabel={t("chat.annotationAttachments", { count: annotations.length })}
-        onFocus={() => {
-          if (!open) setPreviewOpen(true);
-        }}
+        aria-controls={cardId}
+        aria-label={t("chat.annotationAttachments", { count: annotations.length })}
         onClick={() => {
-          setPreviewOpen(false);
-          setOpen((value) => !value);
+          setOpen(true);
+          setPinnedOpen((value) => !value);
         }}
       >
         {t("chat.annotationAttachments", { count: annotations.length })}
-      </TooltipButton>
-      {previewOpen && !open ? (
-        <div className="composer-annotation-hover-preview" role="region" aria-label={t("chat.reviewAnnotations")} data-testid="composer-annotation-preview">
-          {annotations.slice(0, 3).map((annotation, index) => (
-            <div key={annotation.id} className="composer-annotation-hover-item">
-              <span className="composer-annotation-number">{index + 1}</span>
-              <span className="composer-annotation-hover-excerpt">{annotation.excerpt}</span>
-              {annotation.comment ? <span className="composer-annotation-hover-comment">{annotation.comment}</span> : null}
-            </div>
-          ))}
-          {annotations.length > 3 ? <span className="composer-annotation-hover-more">+{annotations.length - 3}</span> : null}
-        </div>
-      ) : null}
+      </button>
       {open ? (
-        <div id="composer-annotation-review" className="composer-annotation-review" role="region" aria-label={t("chat.reviewAnnotations")}>
+        <div
+          id={cardId}
+          className="composer-annotation-card"
+          role="region"
+          aria-label={t("chat.annotationAttachments", { count: annotations.length })}
+          data-testid="composer-annotation-card"
+        >
           <ol className="composer-annotation-list">
             {annotations.map((annotation, index) => (
               <li key={annotation.id} className="composer-annotation-item" data-annotation-index={index + 1}>
                 <div className="composer-annotation-content">
                   <span className="composer-annotation-number">{index + 1}</span>
-                  <blockquote className="composer-annotation-excerpt">{annotation.excerpt}</blockquote>
+                  <button
+                    type="button"
+                    className="composer-annotation-source-button"
+                    aria-label={`${t("chat.annotationCitationLabel", { index: index + 1 })}: ${annotation.excerpt}`}
+                    onClick={() => jumpToSource(annotation)}
+                  >
+                    {annotation.excerpt}
+                  </button>
                   {annotation.comment ? <p className="composer-annotation-comment">{annotation.comment}</p> : null}
                 </div>
                 {editingId === annotation.id ? (
@@ -171,15 +185,18 @@ export function ComposerAnnotationAttachments({ sessionId: requestedSessionId }:
               </li>
             ))}
           </ol>
-          <TooltipButton
+          <Button
             type="button"
+            variant="ghost"
+            size="sm"
             className="composer-annotation-clear"
-            tooltip={t("chat.clearAnnotations")}
-            ariaLabel={t("chat.clearAnnotations")}
-            onClick={() => clearAnnotations(sessionId)}
+            onClick={() => {
+              clearAnnotations(sessionId);
+              closeCard();
+            }}
           >
             {t("chat.clearAnnotations")}
-          </TooltipButton>
+          </Button>
         </div>
       ) : null}
     </div>

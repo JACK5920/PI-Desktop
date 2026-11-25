@@ -211,57 +211,13 @@
   background: var(--ds-bg-hover);
 }
 
-.composer-annotation-hover-preview {
+.composer-annotation-card {
   position: absolute;
   z-index: 71;
   inset-inline-start: 0;
   bottom: calc(100% + 8px);
   display: grid;
   width: min(360px, calc(100vw - 32px));
-  box-sizing: border-box;
-  max-height: min(320px, calc(100vh - 48px));
-  gap: 9px;
-  overflow: auto;
-  padding: 11px 12px;
-  border: 1px solid var(--ds-border-subtle);
-  border-radius: var(--radius-lg);
-  background: var(--ds-bg-elevated-opaque);
-  box-shadow: var(--ds-shadow-dialog);
-  color: var(--ds-text-primary);
-  font-size: var(--text-sm);
-}
-
-.composer-annotation-hover-item {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 4px 8px;
-  min-width: 0;
-}
-
-.composer-annotation-hover-excerpt,
-.composer-annotation-hover-comment {
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
-}
-
-.composer-annotation-hover-comment {
-  grid-column: 2;
-  color: var(--ds-text-tertiary);
-  font-size: var(--text-xs);
-}
-
-.composer-annotation-hover-more {
-  color: var(--ds-text-tertiary);
-  font-size: var(--text-xs);
-}
-
-.composer-annotation-review {
-  position: absolute;
-  z-index: 70;
-  inset-inline-start: 0;
-  bottom: calc(100% + 8px);
-  display: grid;
-  width: min(420px, calc(100vw - 32px));
   box-sizing: border-box;
   max-height: min(420px, calc(100vh - 180px));
   gap: 10px;
@@ -272,6 +228,7 @@
   background: var(--ds-bg-elevated-opaque);
   box-shadow: var(--ds-shadow-dialog);
   color: var(--ds-text-primary);
+  font-size: var(--text-sm);
 }
 
 .composer-annotation-list {
@@ -310,26 +267,44 @@
   font-weight: var(--font-weight-semibold);
 }
 
-.composer-annotation-excerpt,
 .composer-annotation-comment {
+  grid-column: 2;
   min-width: 0;
   margin: 0;
-  color: var(--ds-text-primary);
+  color: var(--ds-text-secondary);
   font-size: var(--text-xs);
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
 
-.composer-annotation-excerpt {
-  max-height: 96px;
-  overflow: auto;
+.composer-annotation-source-button {
+  min-width: 0;
+  border: 0;
   border-inline-start: 2px solid var(--ds-border-strong);
-  padding-inline-start: 7px;
+  padding: 0 0 0 7px;
+  background: transparent;
+  color: var(--ds-text-primary);
+  font: inherit;
+  font-size: var(--text-xs);
+  text-align: start;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  max-height: 120px;
+  overflow: auto;
+  cursor: pointer;
 }
 
-.composer-annotation-comment {
-  grid-column: 2;
-  color: var(--ds-text-secondary);
+.composer-annotation-source-button:hover,
+.composer-annotation-source-button:focus-visible {
+  color: var(--ds-accent-text, var(--ds-text-primary));
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.composer-annotation-source-button:focus-visible {
+  outline: 2px solid var(--ds-focus-ring);
+  outline-offset: 2px;
 }
 
 .composer-annotation-actions {
