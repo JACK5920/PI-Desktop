@@ -54,12 +54,13 @@ export function formatSideChatResultQuote(
 export function beginSideChatSend(
   lifecycle: SideChatLifecycle,
   promptText: string,
+  hasAttachments = false,
 ): SideChatSendStart | null {
   if (
     lifecycle.status === "closed" ||
     lifecycle.status === "forking" ||
     lifecycle.status === "sending" ||
-    !promptText.trim()
+    !promptText.trim() && !hasAttachments
   ) {
     return null;
   }

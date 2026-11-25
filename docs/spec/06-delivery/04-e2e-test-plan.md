@@ -5953,15 +5953,47 @@ window; opening a normal panel afterward must still work.
 - **Status**: Automated Chromium/store/helper coverage; real-provider acceptance
   is not part of this fixture.
 
+#### E2E-CHAT-docked-side-chat-codex-composer-v1
+
+- **Preconditions:** Isolated Chromium renderer with a completed parent reply,
+  deterministic fork/send store actions, and mocked file picker/import IPC.
+- **Steps:** Open Ask in side chat and inspect the empty surface. Confirm the
+  source excerpt is held in one context chip, with no raw message id or separate
+  excerpt panel. Preview the chip and navigate back to the parent source. Select
+  a file and verify one non-activating child is created and the file is imported
+  into that child's scratch path. Send text and image/file references, then
+  verify they reach only the child prompt. Exercise Enter, Shift+Enter, IME
+  composition Enter, and the global Enter-to-send-off Ctrl/Meta+Enter path.
+  Resolve child Stop/error actions and verify the parent session/draft is
+  unchanged.
+- **Expected:** Opening or canceling the picker creates no child. A real file
+  selection creates at most one child, and imports never target the parent.
+  The context/reference/files/input/send controls share one rounded composer;
+  the source context remains previewable and navigable without duplicating it in
+  editable prompt text. Enter follows the global setting, Shift+Enter never
+  sends, and IME composition never submits. Child files are cleared only after
+  accepted admission; rejected sends retain them. The parent remains active and
+  retains its draft.
+- **Coverage:** `node scripts/e2e-selection-reference-workflow.mjs`,
+  `apps/desktop/test/side-chat-lifecycle.test.mjs`, and
+  `apps/desktop/test/side-chat-store.test.mjs`.
+- **Specs:** `04-ux/08-component-spec.md` §7,
+  `04-ux/09-interaction-patterns.md` §7.6, ADR 0346.
+- **Status:** Automated isolated renderer/store interaction; no Host, account,
+  or real provider request.
+
 #### E2E-CHAT-docked-follow-up-tab-v2: Keep a child follow-up beside its parent
 
 - **Preconditions**: A completed assistant reply in a forkable local session;
   the user can open and prompt a child session.
 - **Steps**: 1) Select assistant text and open Ask in side chat; verify the
   selected excerpt is retained separately as context, the editable prompt is
-  empty, and no child session or prompt exists before Send. 2) Enter only a
-  non-empty user prompt and Send; verify the excerpt is still passed through the
-  fork context while the submitted request contains only the typed prompt.
+  empty, and no child session or prompt exists before Send. Open the file picker
+  and cancel; verify this remains draft-only. Then select a file and verify one
+  child is created and the file is staged there, without submitting a prompt.
+  2) Enter only a non-empty user prompt and Send; verify the excerpt is still
+  passed through the fork context while the submitted request contains only the
+  typed prompt and the staged file reference.
   3) While the child streams, inspect its transcript and resolve a child-scoped
   permission request and AskTool card. 4) Add the result to the main Composer.
   5) Open one child as a conversation; open and send another side chat, then
@@ -5972,8 +6004,9 @@ window; opening a normal panel afterward must still work.
   parent. 7) Request promotion during a deferred first send, reject the send,
   and verify the unsent text survives in the child Composer; also exercise
   retry and close/session-switch races.
-- **Expected**: Only explicit Send forks and submits, using the selected
-  assistant message as the anchor. The selected excerpt is retained as side-chat
+- **Expected**: A real file selection or explicit Send may create the child,
+  using the selected assistant message as the anchor; only explicit Send
+  submits a prompt. The selected excerpt is retained as side-chat
   source context and in the forked parent transcript, not duplicated into the
   editable prompt or submitted user request. The parent remains active with its
   original transcript position and draft. Child events, permission resolution,

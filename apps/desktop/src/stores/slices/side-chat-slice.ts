@@ -39,11 +39,28 @@ function updateSideChat(
   };
 }
 
+function sameFileReferences(
+  current: SideChatState["fileReferences"],
+  submitted: SideChatState["fileReferences"],
+): boolean {
+  return current.length === submitted.length && current.every((reference, index) => {
+    const sent = submitted[index];
+    return reference.path === sent?.path &&
+      reference.name === sent.name &&
+      reference.kind === sent.kind &&
+      reference.mimeType === sent.mimeType &&
+      reference.token === sent.token &&
+      JSON.stringify(reference.plugin) === JSON.stringify(sent.plugin);
+  });
+}
+
 export function createSideChatSlice({ get, set, getCachedTranscript, getSessionDetail, promoteSideChat }: SideChatSliceDependencies): Pick<
   AppState,
   | "openSideChat"
   | "reopenSideChat"
+  | "ensureSideChatChild"
   | "setSideChatDraft"
+  | "setSideChatFileReferences"
   | "addSideChatReference"
   | "editSideChatReference"
   | "removeSideChatReference"
@@ -53,6 +70,7 @@ export function createSideChatSlice({ get, set, getCachedTranscript, getSessionD
   | "promoteSideChatToConversation"
 > {
   const pendingSends = new Map<string, Promise<boolean>>();
+  const pendingChildForks = new Map<string, Promise<string | null>>();
   const normalizeComment = (comment: string | undefined) => {
     const normalized = comment?.replace(/\r\n?/g, "\n").trim();
     return normalized || undefined;
@@ -87,6 +105,41 @@ export function createSideChatSlice({ get, set, getCachedTranscript, getSessionD
       return { sideChats };
     });
     get().closeWorkPanelTab(sideChatId, current.parentSessionId);
+  };
+  const ensureSideChatChild = (sideChatId: string): Promise<string | null> => {
+    const current = get().sideChats[sideChatId];
+    if (!current || current.status === "closed") return Promise.resolve(null);
+    if (current.childSessionId) return Promise.resolve(current.childSessionId);
+    const existing = pendingChildForks.get(sideChatId);
+    if (existing) return existing;
+
+    const pending = (async () => {
+      const childSessionId = await get().forkAssistantMessageInSession(
+        current.parentSessionId,
+        current.sourceMessageId,
+        current.excerpt,
+      );
+      if (!childSessionId) return null;
+      const latest = get().sideChats[sideChatId];
+      // Closing the transient tab must not cancel a send that already began.
+      // The caller owns the in-flight operation and still needs the fork ID;
+      // attachment-picker callers separately check that the tab remains open.
+      if (!latest) return childSessionId;
+      if (latest.parentSessionId !== current.parentSessionId) return null;
+      if (latest.childSessionId) return latest.childSessionId;
+      set((state) => updateSideChat(state, sideChatId, (sideChat) => ({
+        ...sideChat,
+        childSessionId,
+        messages: getCachedTranscript(childSessionId) ?? [],
+      })));
+      return childSessionId;
+    })();
+    pendingChildForks.set(sideChatId, pending);
+    void pending.then(
+      () => { if (pendingChildForks.get(sideChatId) === pending) pendingChildForks.delete(sideChatId); },
+      () => { if (pendingChildForks.get(sideChatId) === pending) pendingChildForks.delete(sideChatId); },
+    );
+    return pending;
   };
 
   return {
@@ -123,6 +176,7 @@ export function createSideChatSlice({ get, set, getCachedTranscript, getSessionD
         ...(normalizedSourceIds.length > 1 ? { sourceMessageIds: normalizedSourceIds } : {}),
         excerpt: excerpt.trim(),
         references: [],
+        fileReferences: [],
         messages: [],
         operationId: 0,
         status: "draft",
@@ -152,6 +206,7 @@ export function createSideChatSlice({ get, set, getCachedTranscript, getSessionD
         sourceMessageIds: [origin.sourceMessageId],
         excerpt: origin.excerpt,
         references: [],
+        fileReferences: [],
         childSessionId,
         messages: detail.messages,
         operationId: 0,
@@ -165,10 +220,19 @@ export function createSideChatSlice({ get, set, getCachedTranscript, getSessionD
       get().openWorkPanelTabForSession(origin.parentSessionId, sideChatWorkPanelTab(sideChatId));
     },
 
+    ensureSideChatChild,
+
     setSideChatDraft: (sideChatId, text) => {
       set((state) => updateSideChat(state, sideChatId, (sideChat) => ({
         ...sideChat,
         ...editSideChatDraft(sideChat, text),
+      })));
+    },
+
+    setSideChatFileReferences: (sideChatId, fileReferences) => {
+      set((state) => updateSideChat(state, sideChatId, (sideChat) => ({
+        ...sideChat,
+        fileReferences,
       })));
     },
 
@@ -273,12 +337,13 @@ export function createSideChatSlice({ get, set, getCachedTranscript, getSessionD
       set((latest) => updateSideChat(latest, sideChatId, (current) => ({ ...current, references: [] })));
     },
 
-    sendSideChatPrompt: (sideChatId, content) => {
+    sendSideChatPrompt: (sideChatId, content, requestedFileReferences) => {
       const existing = pendingSends.get(sideChatId);
       if (existing) return existing;
       const before = get().sideChats[sideChatId];
       if (!before) return Promise.resolve(false);
-      const started = beginSideChatSend(before, content);
+      const fileReferences = requestedFileReferences ?? before.fileReferences ?? [];
+      const started = beginSideChatSend(before, content, fileReferences.length > 0);
       if (!started) return Promise.resolve(false);
       set((state) => updateSideChat(state, sideChatId, (sideChat) => ({
         ...sideChat,
@@ -289,11 +354,7 @@ export function createSideChatSlice({ get, set, getCachedTranscript, getSessionD
         let childSessionId = started.state.childSessionId;
         if (started.shouldFork) {
           try {
-            childSessionId = await get().forkAssistantMessageInSession(
-              before.parentSessionId,
-              before.sourceMessageId,
-              before.excerpt,
-            ) ?? undefined;
+            childSessionId = await ensureSideChatChild(sideChatId) ?? undefined;
           } catch (error) {
             const current = get().sideChats[sideChatId];
             const failed = current
@@ -327,7 +388,6 @@ export function createSideChatSlice({ get, set, getCachedTranscript, getSessionD
             set((state) => updateSideChat(state, sideChatId, (sideChat) => ({
               ...sideChat,
               ...forked,
-              messages: getCachedTranscript(childSessionId!) ?? [],
             })));
           }
         }
@@ -337,7 +397,7 @@ export function createSideChatSlice({ get, set, getCachedTranscript, getSessionD
         try {
           const accepted = await get().sendPrompt(
             content,
-            { text: content, fileReferences: [] },
+            { text: content, fileReferences },
             childSessionId,
           );
           const current = get().sideChats[sideChatId];
@@ -350,7 +410,14 @@ export function createSideChatSlice({ get, set, getCachedTranscript, getSessionD
             )
             : null;
           if (resolved) {
-            set((state) => updateSideChat(state, sideChatId, (sideChat) => ({ ...sideChat, ...resolved })));
+            set((state) => updateSideChat(state, sideChatId, (sideChat) => ({
+              ...sideChat,
+              ...resolved,
+              fileReferences:
+                accepted && sameFileReferences(sideChat.fileReferences ?? [], fileReferences)
+                  ? []
+                  : sideChat.fileReferences,
+            })));
           }
           return accepted;
         } catch (error) {

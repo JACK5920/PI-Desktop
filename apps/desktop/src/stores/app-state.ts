@@ -58,6 +58,7 @@ import type { SidebarSessionOutcome } from "../lib/sidebar-session-status";
 import type { WorkPanelContext, WorkPanelTab } from "../lib/work-panel-tabs";
 import type { ResponseAnnotation } from "../lib/response-annotations";
 import type { SideChatLifecycle } from "../lib/side-chat-lifecycle";
+import type { ComposerDraftFileReference } from "../lib/composer-smart-stop";
 
 export type { WorkPanelTab } from "../lib/work-panel-tabs";
 
@@ -104,6 +105,8 @@ export type SideChatState = SideChatLifecycle & {
   excerpt: string;
   /** Additional selected excerpts targeted to this docked chat's next prompt. */
   references: ResponseAnnotation[];
+  /** Files staged in this side chat's child-session scratch space. */
+  fileReferences: ComposerDraftFileReference[];
   messages: UiMessage[];
 };
 
@@ -230,7 +233,12 @@ export type AppState = {
     sourceMessageIds?: string[],
   ) => string | null;
   reopenSideChat: (childSessionId: string) => Promise<void>;
+  ensureSideChatChild: (sideChatId: string) => Promise<string | null>;
   setSideChatDraft: (sideChatId: string, text: string) => void;
+  setSideChatFileReferences: (
+    sideChatId: string,
+    fileReferences: ComposerDraftFileReference[],
+  ) => void;
   addSideChatReference: (
     sideChatId: string,
     sourceMessageId: string,
@@ -241,7 +249,11 @@ export type AppState = {
   editSideChatReference: (sideChatId: string, referenceId: string, comment?: string) => void;
   removeSideChatReference: (sideChatId: string, referenceId: string) => void;
   clearSideChatReferences: (sideChatId: string) => void;
-  sendSideChatPrompt: (sideChatId: string, content: string) => Promise<boolean>;
+  sendSideChatPrompt: (
+    sideChatId: string,
+    content: string,
+    fileReferences?: ComposerDraftFileReference[],
+  ) => Promise<boolean>;
   closeSideChat: (sideChatId: string) => void;
   promoteSideChatToConversation: (sideChatId: string) => Promise<void>;
   addResponseAnnotation: (

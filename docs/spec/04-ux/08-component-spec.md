@@ -2113,8 +2113,11 @@ Single message render — either user (plaintext) or assistant (markdown streami
   Its selected excerpt remains in the side-chat source metadata and inherited
   parent transcript, but is not prefilled into the editable prompt. The first
   explicit non-empty Send forks at the selected assistant message without
-  activating the child and submits only the user's typed request. The parent
-  transcript and Composer stay active;
+  activating the child and submits only the user's typed request. Selecting
+  files is also an explicit prompt action: after a non-canceled selection, the
+  child is forked without activation and files are imported into its own scratch
+  space; canceling selection does not fork. A draft containing only file
+  attachments may be sent. The parent transcript and Composer stay active;
   the child reuses the normal transcript, Stop, approval, AskTool, and event
   handling for its own session id. Add to main chat appends the latest child
   answer to the parent draft; Open as a conversation selects the normal child;
@@ -2137,6 +2140,13 @@ Single message render — either user (plaintext) or assistant (markdown streami
   it first when needed. The selected fork excerpt remains contextual metadata
   and is never duplicated into editable prompt text. Selecting text in the child
   transcript attaches a separate reference to that child's next prompt.
+  The tab uses a centered empty state and a single rounded composer containing
+  the source-context chip, reference control, file chips, text input and actions;
+  it does not display raw source-message ids or a duplicate excerpt block. The
+  source chip previews the excerpt and returns to its source message. Enter
+  follows the global Enter-to-send setting, Shift+Enter inserts a line break,
+  and IME composition Enter never submits. Model/permission controls are not
+  duplicated; the child inherits the owning conversation's engine settings.
   Unpromoted
   sent side chats are omitted from top-level session lists and global search;
   the parent session lists them as reopenable entries using the durable child

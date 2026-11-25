@@ -205,6 +205,84 @@ test("concurrent first sends fork once and use the child while keeping the paren
   assert.equal(h.get().sideChats[sideChatId].childSessionId, "child-1");
 });
 
+test("an attachment-only send uses the child-scoped file references and clears them only after acceptance", async () => {
+  const h = fixture();
+  const sideChatId = h.slice.openSideChat("parent", "answer-1", "quote");
+  assert.ok(sideChatId);
+  const files = [{ path: "C:/scratch/side-chat-child/image.png", name: "image.png", kind: "image", mimeType: "image/png" }];
+  h.set((state) => ({ sideChats: { ...state.sideChats, [sideChatId]: {
+    ...state.sideChats[sideChatId], fileReferences: files,
+  } } }));
+
+  const sending = h.slice.sendSideChatPrompt(sideChatId, "", files);
+  await Promise.resolve();
+  assert.equal(h.forkCalls.length, 1);
+  h.fork.resolve("child-files");
+  assert.equal(await sending, true);
+  assert.equal(h.sendCalls[0][0], "");
+  assert.equal(h.sendCalls[0][1].fileReferences[0].path, files[0].path);
+  assert.equal(h.sendCalls[0][2], "child-files");
+  assert.deepEqual(h.get().sideChats[sideChatId].fileReferences, []);
+});
+
+test("an accepted send clears an unchanged attachment even when store updates clone its reference object", async () => {
+  const h = fixture();
+  const sideChatId = h.slice.openSideChat("parent", "answer-1", "quote");
+  assert.ok(sideChatId);
+  const files = [{ path: "C:/scratch/side-chat-child/image.png", name: "image.png", kind: "image", mimeType: "image/png" }];
+  h.set((state) => ({ sideChats: { ...state.sideChats, [sideChatId]: {
+    ...state.sideChats[sideChatId], fileReferences: files,
+  } } }));
+
+  const sending = h.slice.sendSideChatPrompt(sideChatId, "explain this image", files);
+  await Promise.resolve();
+  h.set((state) => ({ sideChats: { ...state.sideChats, [sideChatId]: {
+    ...state.sideChats[sideChatId], fileReferences: files.map((reference) => ({ ...reference })),
+  } } }));
+  h.fork.resolve("child-cloned-files");
+
+  assert.equal(await sending, true);
+  assert.deepEqual(h.get().sideChats[sideChatId].fileReferences, []);
+});
+
+test("an accepted send preserves attachments added while the first child is being created", async () => {
+  const h = fixture();
+  const sideChatId = h.slice.openSideChat("parent", "answer-1", "quote");
+  assert.ok(sideChatId);
+  const submitted = [{ path: "C:/scratch/side-chat-child/first.png", name: "first.png", kind: "image", mimeType: "image/png" }];
+  const addedLater = { path: "C:/scratch/side-chat-child/later.txt", name: "later.txt", kind: "file" };
+  h.set((state) => ({ sideChats: { ...state.sideChats, [sideChatId]: {
+    ...state.sideChats[sideChatId], fileReferences: submitted,
+  } } }));
+
+  const sending = h.slice.sendSideChatPrompt(sideChatId, "describe", submitted);
+  await Promise.resolve();
+  h.set((state) => ({ sideChats: { ...state.sideChats, [sideChatId]: {
+    ...state.sideChats[sideChatId], fileReferences: [...submitted, addedLater],
+  } } }));
+  h.fork.resolve("child-with-later-file");
+
+  assert.equal(await sending, true);
+  assert.deepEqual(h.get().sideChats[sideChatId].fileReferences, [...submitted, addedLater]);
+});
+
+test("a rejected attachment-only send retains its child files for retry", async () => {
+  const h = fixture();
+  const sideChatId = h.slice.openSideChat("parent", "answer-1", "quote");
+  assert.ok(sideChatId);
+  const files = [{ path: "C:/scratch/side-chat-child/notes.txt", name: "notes.txt", kind: "file" }];
+  h.set((state) => ({ sideChats: { ...state.sideChats, [sideChatId]: {
+    ...state.sideChats[sideChatId], fileReferences: files,
+  } } }));
+  h.sendResults.push(false);
+
+  const sending = h.slice.sendSideChatPrompt(sideChatId, "", files);
+  await Promise.resolve();
+  h.fork.resolve("child-files-rejected");
+  assert.equal(await sending, false);
+  assert.deepEqual(h.get().sideChats[sideChatId].fileReferences, files);
+});
+
 test("send rejection retains the child and draft so retry does not fork again", async () => {
   const h = fixture();
   const sideChatId = h.slice.openSideChat("parent", "answer-1", "quote");

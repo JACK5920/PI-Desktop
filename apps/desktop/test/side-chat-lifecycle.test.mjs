@@ -37,13 +37,17 @@ test("side-chat results are quoted as their own answer and source without select
   assert.equal(formatSideChatResultQuote(" \n ", "From message child-answer"), "");
 });
 
-test("opening a side chat is draft-only until a non-empty explicit send", () => {
+test("opening a side chat is draft-only until text or an attachment is explicitly sent", () => {
   const opened = draft();
   assert.equal(opened.childSessionId, undefined);
   assert.equal(beginSideChatSend(opened, " \n "), null);
   const send = beginSideChatSend(opened, "ask about this");
   assert.equal(send?.state.status, "forking");
   assert.equal(send?.shouldFork, true);
+  const attachmentOnly = beginSideChatSend(opened, " \n ", true);
+  assert.equal(attachmentOnly?.state.status, "forking");
+  assert.equal(attachmentOnly?.shouldFork, true);
+  assert.equal(beginSideChatSend(opened, " \n ", false), null);
 });
 
 test("a concurrent first send is rejected while the fork operation is reserved", () => {

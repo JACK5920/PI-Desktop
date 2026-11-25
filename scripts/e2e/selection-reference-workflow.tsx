@@ -282,14 +282,27 @@ globalThis.selectionReferenceProbe = async () => {
     stage: async () => { throw new Error("File staging is outside this text-only fixture"); },
   });
   const originalPromoteSideChat = api.promoteSideChat;
+  const originalPickFiles = api.pickFiles;
+  const originalImportFiles = api.importFiles;
   api.promoteSideChat = async () => ({ ok: true });
+  const importedSideChatFiles: Array<{ sessionId: string; token: string }> = [];
+  let filePickerCalls = 0;
+  api.pickFiles = async () => {
+    filePickerCalls += 1;
+    return filePickerCalls === 1 ? { token: null, canceled: true } : { token: "side-chat-file-picker-token" };
+  };
+  api.importFiles = async (sessionId, token) => {
+    importedSideChatFiles.push({ sessionId, token });
+    return { files: [{ path: `/scratch/${sessionId}/reference.png`, name: "reference.png", kind: "image", mimeType: "image/png" }] };
+  };
 
   let forkCount = 0;
   const forkedSideChatExcerpts: Array<string | undefined> = [];
-  const sends: Array<{ content: string; childSessionId: string }> = [];
+  const sends: Array<{ content: string; childSessionId: string; fileReferences: Array<{ path: string; name: string; kind?: string }> }> = [];
   const sentSideChatAnnotations: Array<{ childSessionId: string; annotations: AppState["responseAnnotations"][string] }> = [];
   const selectedSessions: string[] = [];
   const pendingResolvers: Array<(accepted: boolean) => void> = [];
+  const abortedSessions: string[] = [];
   const permissionResolutions: Array<{ sessionId: string; requestId: string; decision: string }> = [];
   const askResolutions: Array<{ sessionId: string; requestId: string; answers: Array<string[] | null> }> = [];
   const navigationTargets: Array<{ sessionId: string; messageId: string; query: string; anchorStart?: number; anchorEnd?: number }> = [];
@@ -323,14 +336,14 @@ globalThis.selectionReferenceProbe = async () => {
       }));
       return childSessionId;
     }) as AppState["forkAssistantMessageInSession"],
-    sendPrompt: (async (content, _draft, childSessionId) => {
+    sendPrompt: (async (content, draft, childSessionId) => {
       if (!childSessionId) return false;
       const childAnnotations = useAppStore.getState().responseAnnotations[childSessionId] ?? [];
       sentSideChatAnnotations.push({
         childSessionId,
         annotations: childAnnotations.map((item) => ({ ...item })),
       });
-      sends.push({ content, childSessionId });
+      sends.push({ content, childSessionId, fileReferences: draft?.fileReferences ?? [] });
       const sideChatId = Object.values(useAppStore.getState().sideChats).find(
         (sideChat) => sideChat.childSessionId === childSessionId,
       )?.id;
@@ -413,6 +426,10 @@ globalThis.selectionReferenceProbe = async () => {
       selectedSessions.push(id);
       useAppStore.setState({ activeSessionId: id });
     }) as AppState["selectSession"],
+    abortSession: (async (sessionId) => {
+      abortedSessions.push(sessionId);
+      return {};
+    }) as AppState["abortSession"],
     navigateTranscript: (async (target) => {
       navigationTargets.push(target);
     }) as AppState["navigateTranscript"],
@@ -778,6 +795,24 @@ globalThis.selectionReferenceProbe = async () => {
     assert(useAppStore.getState().activeSessionId === "parent", "opening a side chat switched away from the parent");
     assert(firstSideChat.excerpt === quote, "side-chat draft did not retain the selected excerpt as source context");
     assert(firstSideChat.draftText === "", "side-chat input duplicated the selected excerpt");
+    const openedSideChatPane = host.querySelector<HTMLElement>(`.side-chat-tab[data-side-chat-id="${firstSideChat.id}"]`);
+    assert(openedSideChatPane?.querySelector('[data-testid="side-chat-empty"]'), "the empty side chat does not use a centered welcome state");
+    assert(!openedSideChatPane?.textContent?.includes("answer-parent"), "the side-chat header exposes a raw source message id");
+    assert(!openedSideChatPane?.querySelector(".side-chat-excerpt"), "the side chat repeats its selected excerpt outside the composer context chip");
+    buttonNamed("Add files").click();
+    await settleAfterFocus();
+    assert(forkCount === 0 && !useAppStore.getState().sideChats[firstSideChat.id]?.childSessionId, "canceling the side-chat file picker created a child session");
+    assert(sends.length === 0, "canceling the side-chat file picker submitted a prompt");
+    const sourceContextChip = openedSideChatPane?.querySelector<HTMLButtonElement>('[data-testid="side-chat-context-chip"]');
+    assert(sourceContextChip, "the source excerpt is not attached to the unified side-chat composer");
+    sourceContextChip.click();
+    await settleAfterFocus();
+    const sourceContextPreview = openedSideChatPane?.querySelector<HTMLElement>('[data-testid="side-chat-source-preview"]');
+    assert(sourceContextPreview?.textContent?.includes(quote), "source context preview does not show the selected excerpt");
+    buttonNamed("Go to source").click();
+    await settleAfterFocus();
+    assert(navigationTargets.at(-1)?.sessionId === "parent" && navigationTargets.at(-1)?.messageId === "answer-parent", "the source context chip did not return to the selected parent message");
+    assert(navigationTargets.at(-1)?.query === quote, "the source context navigation lost the selected excerpt");
     const mainDraftBeforeSideReference = liveDraft.text;
 
     const additionalExcerpt = "A different answer must never replace the captured excerpt.";
@@ -850,14 +885,30 @@ globalThis.selectionReferenceProbe = async () => {
     assert(useAppStore.getState().sideChats[firstSideChat.id]?.references.length === 1, "removing a pending side-chat reference did not remove only that reference");
     assert(useAppStore.getState().sideChats[firstSideChat.id]?.references[0]?.id === sideChatReference?.id, "removing one pending reference also removed the remaining one");
 
+    buttonNamed("Add files").click();
+    for (let index = 0; index < 120 && !useAppStore.getState().sideChats[firstSideChat.id]?.fileReferences.length; index += 1) await settleAfterFocus();
+    const sideChatFiles = useAppStore.getState().sideChats[firstSideChat.id]?.fileReferences ?? [];
+    assert(sideChatFiles.length === 1 && sideChatFiles[0]?.kind === "image", "file picker did not attach the selected image to the side-chat draft");
+    assert(forkCount === 1 && sends.length === 0, "adding a selected file did not create exactly one child or sent a prompt unexpectedly");
+    assert(importedSideChatFiles[0]?.sessionId === useAppStore.getState().sideChats[firstSideChat.id]?.childSessionId, "side-chat files were not imported into the side-chat child scratch space");
+    assert(importedSideChatFiles[0]?.sessionId !== "parent", "a side-chat file was imported into the parent session");
+    assert(draftSideChatPane.querySelector(".side-chat-file-chip")?.textContent?.includes("reference.png"), "the side-chat composer does not show its attached file chip");
+
     const sidePrompt = textareaNamed("Side-chat prompt");
     sidePrompt.focus();
     setTextareaValue(sidePrompt, "Explain the selected result.");
-    buttonNamed("Send").click();
+    const shiftEnter = new KeyboardEvent("keydown", { key: "Enter", shiftKey: true, bubbles: true, cancelable: true });
+    sidePrompt.dispatchEvent(shiftEnter);
+    assert(!shiftEnter.defaultPrevented && sends.length === 0, "Shift+Enter submitted the side-chat prompt instead of inserting a newline");
+    const composingEnter = new KeyboardEvent("keydown", { key: "Enter", isComposing: true, keyCode: 229, bubbles: true, cancelable: true });
+    sidePrompt.dispatchEvent(composingEnter);
+    assert(!composingEnter.defaultPrevented && sends.length === 0, "IME composition Enter submitted the side-chat prompt");
+    sidePrompt.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
     for (let index = 0; index < 120 && sends.length === 0; index += 1) await settleAfterFocus();
     assert(forkCount === 1 && sends.length === 1, "explicit side-chat Send did not create exactly one fork and prompt");
     assert(forkedSideChatExcerpts[0] === quote, "the selected excerpt was not retained as fork context");
     assert(sends[0].content === "Explain the selected result.", "the user request duplicated the selected excerpt");
+    assert(sends[0].fileReferences.length === 1 && sends[0].fileReferences[0]?.path === sideChatFiles[0]?.path, "side-chat image references were not passed to the child prompt");
     assert(
       sentSideChatAnnotations[0]?.childSessionId === useAppStore.getState().sideChats[firstSideChat.id]?.childSessionId,
       "the side-chat send captured the wrong child id",
@@ -895,6 +946,10 @@ globalThis.selectionReferenceProbe = async () => {
     assert(askResolutions.at(-1)?.answers[0]?.[0] === "Proceed", "side-chat AskTool answer was not preserved");
     pendingResolvers.shift()?.(true);
     for (let index = 0; index < 120 && !host.textContent?.includes("Side result for the selected excerpt."); index += 1) await settleAfterFocus();
+    assert(
+      useAppStore.getState().sideChats[firstSideChat.id]?.fileReferences.length === 0,
+      "accepted child prompt did not consume its unchanged side-chat attachment",
+    );
     assert(host.textContent?.includes("Side result for the selected excerpt."), "completed side-chat answer was not rendered");
     assert(useAppStore.getState().activeSessionId === "parent", "completed side-chat response changed the active parent");
     const firstChildId = useAppStore.getState().sideChats[firstSideChat.id]?.childSessionId;
@@ -980,12 +1035,31 @@ globalThis.selectionReferenceProbe = async () => {
     assert(secondSideChat, "could not open a second side-chat tab for close-path verification");
     const secondPrompt = textareaNamed("Side-chat prompt");
     setTextareaValue(secondPrompt, `${secondSideChat.draftText}Explain briefly.`);
-    buttonNamed("Send").click();
+    const previousSettings = useAppStore.getState().settings;
+    const settingsForEnterTest = previousSettings ?? ({ enterToSend: true } as NonNullable<AppState["settings"]>);
+    useAppStore.setState({ settings: { ...settingsForEnterTest, enterToSend: false } });
+    const enterWithoutSend = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+    secondPrompt.dispatchEvent(enterWithoutSend);
+    assert(!enterWithoutSend.defaultPrevented && sends.length === 1, "Enter ignored the global Enter-to-send-off preference");
+    const modifiedEnter = new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true, cancelable: true });
+    secondPrompt.dispatchEvent(modifiedEnter);
+    assert(modifiedEnter.defaultPrevented, "Ctrl+Enter did not send when global Enter-to-send is disabled");
     for (let index = 0; index < 120 && sends.length < 2; index += 1) await settle();
+    useAppStore.setState({ settings: previousSettings });
     assert(forkCount === 2 && sends.length === 2, "second side-chat send did not create its durable child");
-    pendingResolvers.shift()?.(true);
-    for (let index = 0; index < 120 && !host.textContent?.includes("Side result for the selected excerpt."); index += 1) await settle();
     const secondChildId = useAppStore.getState().sideChats[secondSideChat.id]?.childSessionId;
+    assert(secondChildId, "second side-chat send did not register its child before streaming");
+    const stopButton = host.querySelector<HTMLButtonElement>('[data-testid="side-chat-stop"]');
+    assert(stopButton, "a running side-chat response did not expose Stop");
+    stopButton.click();
+    await settle();
+    assert(abortedSessions.at(-1) === secondChildId, "side-chat Stop did not target the running child session");
+    pendingResolvers.shift()?.(false);
+    for (let index = 0; index < 120 && !host.querySelector(".side-chat-error"); index += 1) await settle();
+    assert(
+      host.querySelector(".side-chat-error")?.textContent === useAppStore.getState().sideChats[secondSideChat.id]?.error,
+      "a rejected child prompt did not show its inline side-chat error",
+    );
     const persistedSecondChat = useAppStore.getState().sideChats[secondSideChat.id];
     buttonNamed("Close Side chat").click();
     await settle();
@@ -1045,6 +1119,8 @@ globalThis.selectionReferenceProbe = async () => {
     };
   } finally {
     api.promoteSideChat = originalPromoteSideChat;
+    api.pickFiles = originalPickFiles;
+    api.importFiles = originalImportFiles;
     unregisterDraft();
     flushSync(() => root.unmount());
     host.remove();
