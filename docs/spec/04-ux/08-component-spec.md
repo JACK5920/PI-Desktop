@@ -2076,6 +2076,9 @@ Single message render — either user (plaintext) or assistant (markdown streami
   those offsets still resolve to that exact excerpt; legacy, stale, or
   ambiguous anchors fall back to a message-level marker rather than guessing.
   Pending Composer references use one compact card on hover or keyboard focus.
+  Pointer activation is limited to the reference chip and the narrow bridge to
+  its open card; the full-width Composer row is not a trigger. The card remains
+  open while the pointer enters it.
   Each excerpt is a flat, numbered row with a muted selected-text label, the
   excerpt, and compact edit/remove icons aligned in its header; rows use a light
   divider instead of nested rounded cards. A compact, visually secondary

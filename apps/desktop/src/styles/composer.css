@@ -176,6 +176,8 @@
 .composer-annotation-attachments {
   position: relative;
   display: flex;
+  width: fit-content;
+  max-width: 100%;
   align-items: center;
   min-width: 0;
 }
@@ -185,7 +187,7 @@
   z-index: 71;
   top: -8px;
   inset-inline-start: 0;
-  width: min(360px, calc(100vw - 32px));
+  width: min(384px, calc(100vw - 32px));
   height: 8px;
   pointer-events: auto;
   content: "";

@@ -581,6 +581,14 @@ globalThis.selectionReferenceProbe = async () => {
     await settle();
 
     const referencesChip = buttonNamed("References (1)");
+    const composerShell = referencesChip.closest<HTMLElement>(".annotation-composer-fixture");
+    assert(composerShell, "the reference trigger is not inside the Composer fixture");
+    composerShell.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
+    await settle();
+    assert(
+      !host.querySelector('[data-testid="composer-annotation-card"]'),
+      "hovering the empty Composer row opened the reference preview",
+    );
     referencesChip.focus();
     referencesChip.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
     await settle();
@@ -589,6 +597,12 @@ globalThis.selectionReferenceProbe = async () => {
     await settle();
     const composerCard = host.querySelector<HTMLElement>('[data-testid="composer-annotation-card"]');
     assert(composerCard, "hovering the Composer reference control did not open its unified card");
+    const attachmentRect = referencesChip.parentElement!.getBoundingClientRect();
+    const triggerRect = referencesChip.getBoundingClientRect();
+    assert(
+      attachmentRect.width <= triggerRect.width + 1 && attachmentRect.width < composerShell.getBoundingClientRect().width / 2,
+      "the reference hover trigger still spans the full Composer row",
+    );
     composerCard.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
     await settle();
     assert(host.querySelector('[data-testid="composer-annotation-card"]') === composerCard, "moving the pointer into the reference card dismissed it");
