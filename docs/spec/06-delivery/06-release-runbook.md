@@ -204,10 +204,11 @@ host. This keeps the native Rust host sidecar and Electron package aligned.
 
 ### 4.3 GitHub tag and manual workflow
 
-The GitHub Release workflow starts all native platform runners without a
-separate validation-job barrier. Each runner validates that the pushed tag
-matches `apps/desktop/package.json` immediately after checkout, before package
-inputs are prepared.
+The GitHub Release workflow first validates the release tree, then starts only
+the runners selected by its platform matrix. A tag push builds every supported
+platform; a branch-based manual dispatch may select a release tag and a
+platform set. Each selected runner validates that the release tag matches
+`apps/desktop/package.json` before package inputs are prepared.
 
 On every platform, the release preparation step starts the locked Rust host
 build in parallel with pnpm installation and native dependency rebuilding. It
@@ -222,9 +223,22 @@ changing the package scripts or release artifacts.
 notarize, staple, and Gatekeeper-verify macOS DMG/ZIP before upload (D450 /
 ADR 0289). Missing signing or notarization secrets fail the job. A
 `workflow_dispatch` run may set `sign_macos: false` only to produce unsigned
-debug artifacts; that path must not be used for a GitHub Release tag. Local
+debug artifacts when `release_tag` is blank; that path does not create or update
+a GitHub Release. Local
 `scripts/release-macos.sh` remains the explicit signed local lane; `pnpm dist:mac`
 stays unsigned without a configured certificate (D078).
+
+**Windows/Linux-only release mode:** To publish a release without macOS, dispatch
+`Release` from the intended `main` commit and set `release_tag` to the matching
+`vX.Y.Z` version and `release_platforms` to `windows-linux`. The workflow selects
+Windows x64, Linux x64, and Linux arm64 only; macOS runners do not start, no
+macOS installers or updater feeds are produced, and Apple signing secrets are
+not required. The `pi-host` Linux bundles remain part of the release. The
+publish job creates a missing tag at the dispatched commit only after the
+Windows/Linux builds and verification finish; if that tag already exists on a
+different commit, validation fails closed. The Release page states that macOS
+assets are omitted. Do not push the tag before this manual dispatch, since a tag
+push intentionally invokes the full-platform release lane.
 
 The macOS matrix uses `macos-15` for arm64 and `macos-15-intel` for Intel x64.
 Each job verifies `uname -m`, passes the matching `--arm64` or `--x64` flag to
