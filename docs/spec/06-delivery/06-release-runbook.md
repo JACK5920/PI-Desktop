@@ -303,7 +303,8 @@ https://cnb.cool/aixk/Pi-Desktop.
 
 The job:
 
-- runs only on `vastsa/PI-Desktop`
+- runs only on `vastsa/PI-Desktop`; this upstream-only mirror is not triggered by
+  releases from the `JACK5920/PI-Desktop` distribution repository
 - fires on `release` `published` / `edited`, and on `workflow_dispatch` with
   an explicit tag such as `v0.14.6`
 - sends event `api_trigger_mirror` and `MIRROR_TAGS` set to that tag
@@ -318,7 +319,8 @@ electron-updater feeds.
 
 ### 4.6 GitHub Actions secrets for macOS signing
 
-Create these under GitHub → repository `vastsa/PI-Desktop` → Settings →
+Create these under GitHub → the repository that publishes the release tag
+(`JACK5920/PI-Desktop` for the current distribution lane) → Settings →
 Secrets and variables → Actions. Never commit the p12, password, Apple ID, or
 app-specific password. Never `echo` these values in CI.
 

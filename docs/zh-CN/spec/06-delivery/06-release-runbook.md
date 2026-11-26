@@ -238,7 +238,8 @@ https://cnb.cool/aixk/Pi-Desktop 拉取的用户使用。
 
 该作业：
 
-- 仅在 `vastsa/PI-Desktop` 上运行
+- 仅在 `vastsa/PI-Desktop` 上运行；这是仅供上游使用的镜像流程，来自
+  `JACK5920/PI-Desktop` 发行仓库的发布不会触发它
 - 在 `release` 的 `published` / `edited` 时触发，也可通过
   `workflow_dispatch` 传入明确标签（例如 `v0.14.6`）
 - 发送事件 `api_trigger_mirror`，并把 `MIRROR_TAGS` 设为该标签
@@ -250,8 +251,8 @@ https://cnb.cool/aixk/Pi-Desktop 拉取的用户使用。
 
 ### 4.5 GitHub Actions 中的 macOS 签名密钥
 
-在 GitHub → 仓库 `vastsa/PI-Desktop` → Settings → Secrets and variables →
-Actions 中创建下列密钥。不要把 p12、密码、Apple ID 或应用专用密码提交进仓库。
+在 GitHub → 发布标签的仓库（当前发行通道为 `JACK5920/PI-Desktop`）→
+Settings → Secrets and variables → Actions 中创建下列密钥。不要把 p12、密码、Apple ID 或应用专用密码提交进仓库。
 不要在 CI 中 `echo` 这些值。
 
 | Secret | Value |

@@ -9,7 +9,7 @@ hero:
   actions:
     - theme: brand
       text: 立即下载
-      link: https://github.com/vastsa/PI-Desktop/releases/latest
+      link: https://github.com/JACK5920/PI-Desktop/releases/latest
     - theme: alt
       text: 使用文档
       link: /zh-CN/guide/
