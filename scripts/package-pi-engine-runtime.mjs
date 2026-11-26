@@ -34,7 +34,10 @@ await mkdir(outDir, { recursive: true });
 const stem = `pi-engine-runtime-${target}`;
 const archiveName = `${stem}.tar.gz`;
 const archivePath = join(outDir, archiveName);
-await execFileAsync("tar", ["-czf", archivePath, "-C", bundleDir, "sidecar.js", "package.json", "runtime-manifest.json", "chunks"], { windowsHide: true, maxBuffer: 4 * 1024 * 1024 });
+// Use a relative archive name from the destination directory. Git Bash's GNU
+// tar treats a Windows drive-letter path in the archive operand (for example
+// D:\\a\\...) as a remote host specifier and fails with "Cannot connect to D:".
+await execFileAsync("tar", ["-czf", archiveName, "-C", bundleDir, "sidecar.js", "package.json", "runtime-manifest.json", "chunks"], { cwd: outDir, windowsHide: true, maxBuffer: 4 * 1024 * 1024 });
 const hash = createHash("sha256");
 for await (const chunk of createReadStream(archivePath)) hash.update(chunk);
 const archiveSha256 = hash.digest("hex");

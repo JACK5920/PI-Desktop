@@ -50,6 +50,8 @@ test("PI runtime update artifacts are built and published per supported release 
     read("../electron/main/pi/managed-engine.ts"),
   ]);
   assert.match(packager, /const archiveName = `\$\{stem\}\.tar\.gz`/);
+  assert.match(packager, /execFileAsync\("tar", \["-czf", archiveName,/);
+  assert.match(packager, /\{ cwd: outDir, windowsHide: true/);
   assert.match(packager, /archiveSha256/);
   assert.match(workflow, /Package PI runtime update artifact/);
   assert.match(workflow, /release\/pi-engine-runtime-\*/);
