@@ -65,8 +65,8 @@ async function createFixture(options: { latestDesktopVersion?: string; protocolV
   };
   const manifestBytes = Buffer.from(JSON.stringify(releaseManifest));
   const assets = [
-    { name: `pi-engine-runtime-${platform}.manifest.json`, size: manifestBytes.byteLength, digest: `sha256:${hash(manifestBytes)}`, browser_download_url: `https://github.com/vastsa/PI-Desktop/releases/download/${releaseTag}/pi-engine-runtime-${platform}.manifest.json` },
-    { name: archiveName, size: archiveBytes.byteLength, digest: `sha256:${releaseManifest.archiveSha256}`, browser_download_url: `https://github.com/vastsa/PI-Desktop/releases/download/${releaseTag}/${archiveName}` },
+    { name: `pi-engine-runtime-${platform}.manifest.json`, size: manifestBytes.byteLength, digest: `sha256:${hash(manifestBytes)}`, browser_download_url: `https://github.com/JACK5920/PI-Desktop/releases/download/${releaseTag}/pi-engine-runtime-${platform}.manifest.json` },
+    { name: archiveName, size: archiveBytes.byteLength, digest: `sha256:${releaseManifest.archiveSha256}`, browser_download_url: `https://github.com/JACK5920/PI-Desktop/releases/download/${releaseTag}/${archiveName}` },
   ];
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);

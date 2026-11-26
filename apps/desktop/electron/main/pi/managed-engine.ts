@@ -6,7 +6,7 @@ import { join, relative, sep } from "node:path";
 import { promisify } from "node:util";
 import { PROTOCOL_VERSION } from "@pi-desktop/shared";
 
-const OWNER = "vastsa";
+const OWNER = "JACK5920";
 const REPO = "PI-Desktop";
 const RELEASE_API = `https://api.github.com/repos/${OWNER}/${REPO}/releases/latest`;
 const MAX_ARCHIVE_BYTES = 160 * 1024 * 1024;
@@ -102,7 +102,7 @@ function assertOfficialAssetUrl(asset: ReleaseAsset, releaseTag: string): void {
   let url: URL;
   try { url = new URL(asset.browser_download_url); }
   catch { throw new Error(`PI 引擎资产下载地址无效：${asset.name}`); }
-  const expectedPath = `/vastsa/PI-Desktop/releases/download/${encodeURIComponent(releaseTag)}/${encodeURIComponent(asset.name)}`;
+  const expectedPath = `/JACK5920/PI-Desktop/releases/download/${encodeURIComponent(releaseTag)}/${encodeURIComponent(asset.name)}`;
   if (url.protocol !== "https:" || url.hostname !== "github.com" || url.pathname !== expectedPath || url.username || url.password) {
     throw new Error(`PI 引擎资产不是来自固定的官方 GitHub 发布地址：${asset.name}`);
   }

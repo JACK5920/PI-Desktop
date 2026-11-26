@@ -2,6 +2,15 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const zhTWEntries: ChangelogEntry[] = [
   {
+    version: "0.23.0",
+    date: "2026-11-26",
+    highlights: [
+      "無須先選取文字即可從主對話開啟側聊，並以主對話內容為脈絡繼續追問。",
+      "選取文字後可分別加入主對話輸入框，或作為引用在側聊中追問，並在送出前調整引用。",
+      "在桌面介面使用 OMP 19.2 的模型與工作階段控制，並更清楚查看子代理即時活動。",
+    ],
+  },
+  {
     version: "0.21.0",
     date: "2026-10-24",
     highlights: [

@@ -2,6 +2,15 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const koEntries: ChangelogEntry[] = [
   {
+    version: "0.23.0",
+    date: "2026-11-26",
+    highlights: [
+      "텍스트를 선택하지 않아도 사이드 채팅을 열고 기본 대화의 맥락을 바탕으로 후속 질문을 할 수 있습니다.",
+      "선택한 텍스트를 기본 입력창이나 사이드 채팅으로 보내고, 전송 전에 인용을 확인하거나 수정할 수 있습니다.",
+      "데스크톱 화면에서 OMP 19.2 모델 및 세션 제어를 사용하고 하위 에이전트의 실시간 활동을 더 명확하게 확인할 수 있습니다.",
+    ],
+  },
+  {
     version: "0.21.0",
     date: "2026-10-24",
     highlights: [

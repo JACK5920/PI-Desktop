@@ -2,6 +2,15 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const ptBREntries: ChangelogEntry[] = [
   {
+    version: "0.23.0",
+    date: "2026-11-26",
+    highlights: [
+      "Abra um chat lateral sem selecionar texto e faça perguntas de acompanhamento usando o contexto da conversa principal.",
+      "Envie o texto selecionado para o campo principal ou para um chat lateral e revise ou edite as citações antes de enviar.",
+      "Use os controles de modelo e sessão do OMP 19.2 na interface desktop e acompanhe com mais clareza a atividade dos subagentes em tempo real.",
+    ],
+  },
+  {
     version: "0.21.0",
     date: "2026-10-24",
     highlights: [

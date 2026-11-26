@@ -2,6 +2,15 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const trEntries: ChangelogEntry[] = [
   {
+    version: "0.23.0",
+    date: "2026-11-26",
+    highlights: [
+      "Önce metin seçmeden yan sohbet açın ve ana konuşmanın bağlamıyla takip soruları sorun.",
+      "Seçili metni ana yazma alanına veya yan sohbete yönlendirin; göndermeden önce alıntıları gözden geçirip düzenleyin.",
+      "Masaüstü arayüzünde OMP 19.2 model ve oturum denetimlerini kullanın, alt ajanların canlı etkinliklerini daha net izleyin.",
+    ],
+  },
+  {
     version: "0.21.0",
     date: "2026-10-24",
     highlights: [

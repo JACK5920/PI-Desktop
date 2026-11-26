@@ -1,10 +1,10 @@
 {
   "name": "@pi-desktop/desktop",
-  "version": "0.22.0",
+  "version": "0.23.0",
   "desktopName": "pi-desktop.desktop",
   "private": true,
   "description": "PI-Desktop Electron application",
-  "homepage": "https://github.com/vastsa/PI-Desktop",
+  "homepage": "https://github.com/JACK5920/PI-Desktop",
   "author": {
     "name": "vastsa",
     "email": "hhxk666@gmail.com"
@@ -88,7 +88,7 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "vastsa",
+        "owner": "JACK5920",
         "repo": "PI-Desktop"
       }
     ],

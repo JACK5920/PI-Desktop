@@ -33,6 +33,7 @@ test("Agent engine settings expose a dedicated PI runtime management tab", async
   assert.match(protocol, /piEngineOpenDependencyRepository:/);
   assert.match(ipc, /piEngineOpenDependencyRepository/);
   assert.match(ipc, /openPiDependencyRepository/);
+  assert.match(register, /openPiReleases:\s*\(\)\s*=>\s*safeOpenExternal\("https:\/\/github\.com\/JACK5920\/PI-Desktop\/releases"\)/);
   assert.match(register, /openPiDependencyRepository:\s*\(\)\s*=>\s*safeOpenExternal\("https:\/\/github\.com\/earendil-works\/pi"\)/);
   for (const locale of [en, zhCN, zhTW]) {
     assert.match(locale, /openPackageRepository:/);
@@ -41,11 +42,12 @@ test("Agent engine settings expose a dedicated PI runtime management tab", async
 });
 
 test("PI runtime update artifacts are built and published per supported release architecture", async () => {
-  const [packager, workflow, bundler, packageJson] = await Promise.all([
+  const [packager, workflow, bundler, packageJson, managedEngine] = await Promise.all([
     read("../../../scripts/package-pi-engine-runtime.mjs"),
     read("../../../.github/workflows/release.yml"),
     read("../../../packages/agent-runtime/scripts/bundle.mjs"),
     read("../../../packages/agent-runtime/package.json"),
+    read("../electron/main/pi/managed-engine.ts"),
   ]);
   assert.match(packager, /const archiveName = `\$\{stem\}\.tar\.gz`/);
   assert.match(packager, /archiveSha256/);
@@ -53,4 +55,6 @@ test("PI runtime update artifacts are built and published per supported release 
   assert.match(workflow, /release\/pi-engine-runtime-\*/);
   assert.match(bundler, /runtime-manifest\.json/);
   assert.match(packageJson, /--manifest dist/);
+  assert.match(managedEngine, /const OWNER = "JACK5920"/);
+  assert.match(managedEngine, /`\/JACK5920\/PI-Desktop\/releases\/download\//);
 });

@@ -933,7 +933,7 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     },
     ompEngine,
     piEngine,
-    openPiReleases: () => safeOpenExternal("https://github.com/vastsa/PI-Desktop/releases"),
+    openPiReleases: () => safeOpenExternal("https://github.com/JACK5920/PI-Desktop/releases"),
     openPiDependencyRepository: () => safeOpenExternal("https://github.com/earendil-works/pi"),
     openOmpReleases: () => safeOpenExternal("https://github.com/can1357/oh-my-pi/releases"),
     openOmpEngineStorageFolder: async () => {

@@ -2,6 +2,15 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const zhCNEntries: ChangelogEntry[] = [
   {
+    version: "0.23.0",
+    date: "2026-11-26",
+    highlights: [
+      "无需先选中文字即可从主对话开启侧聊，并基于主对话上下文继续追问。",
+      "选中文字后可分别添加到主对话输入框或作为引用追问侧聊，并在发送前调整引用。",
+      "在桌面界面中使用 OMP 19.2 的模型与会话控制，并更清晰地查看子代理实时活动。",
+    ],
+  },
+  {
     version: "0.21.0",
     date: "2026-10-24",
     highlights: [

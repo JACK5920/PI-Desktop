@@ -2,6 +2,15 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const enEntries: ChangelogEntry[] = [
   {
+    version: "0.23.0",
+    date: "2026-11-26",
+    highlights: [
+      "Open a side chat without selecting text first, then ask follow-up questions with the parent conversation as context.",
+      "Route selected text to the main composer or a side chat, and review or edit references before sending.",
+      "Use OMP 19.2 model and session controls in the desktop interface, with clearer live subagent activity.",
+    ],
+  },
+  {
     version: "0.21.0",
     date: "2026-10-24",
     highlights: [

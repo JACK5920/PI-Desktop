@@ -12,16 +12,16 @@ Local-first · Model-agnostic · Plugin-powered · macOS / Windows / Linux
 
 <br />
 
-[![Release](https://img.shields.io/github/v/release/vastsa/PI-Desktop?label=release)](https://github.com/vastsa/PI-Desktop/releases/latest)
-[![Downloads](https://img.shields.io/github/downloads/vastsa/PI-Desktop/total?label=downloads)](https://github.com/vastsa/PI-Desktop/releases)
-[![Stars](https://img.shields.io/github/stars/vastsa/PI-Desktop?style=flat\&label=stars)](https://github.com/vastsa/PI-Desktop/stargazers)
-[![CI](https://github.com/vastsa/PI-Desktop/actions/workflows/ci.yml/badge.svg)](https://github.com/vastsa/PI-Desktop/actions/workflows/ci.yml)
-[![License](https://img.shields.io/github/license/vastsa/PI-Desktop)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/JACK5920/PI-Desktop?label=release)](https://github.com/JACK5920/PI-Desktop/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/JACK5920/PI-Desktop/total?label=downloads)](https://github.com/JACK5920/PI-Desktop/releases)
+[![Stars](https://img.shields.io/github/stars/JACK5920/PI-Desktop?style=flat\&label=stars)](https://github.com/JACK5920/PI-Desktop/stargazers)
+[![CI](https://github.com/JACK5920/PI-Desktop/actions/workflows/ci.yml/badge.svg)](https://github.com/JACK5920/PI-Desktop/actions/workflows/ci.yml)
+[![License](https://img.shields.io/github/license/JACK5920/PI-Desktop)](LICENSE)
 [![Reddit](https://img.shields.io/badge/Reddit-r%2FAIUO-FF4500?logo=reddit\&logoColor=white)](https://www.reddit.com/r/AIUO/)
 
 <br />
 
-**[Download](https://github.com/vastsa/PI-Desktop/releases/latest)** ·
+**[Download](https://github.com/JACK5920/PI-Desktop/releases/latest)** ·
 [Documentation](https://pi-docs.aiuo.net/) ·
 [Build a Plugin](docs/plugin-development.md) ·
 [Screenshots](docs/guide/screenshots.md) ·
@@ -37,7 +37,7 @@ Local-first · Model-agnostic · Plugin-powered · macOS / Windows / Linux
 
 </div>
 
-> **Current release line: 0.21.x (Early Preview).**
+> **Current release line: 0.23.x (Early Preview).**
 
 ---
 
@@ -562,7 +562,7 @@ Agent / Plan / Goal
 
 <div align="center">
 
-### [Download PI-Desktop →](https://github.com/vastsa/PI-Desktop/releases/latest)
+### [Download PI-Desktop →](https://github.com/JACK5920/PI-Desktop/releases/latest)
 
 **macOS · Windows · Linux**
 
@@ -653,7 +653,7 @@ Plugins can be created and loaded directly as Development Plugins.
 #### Start
 
 ```bash
-git clone https://github.com/vastsa/PI-Desktop.git
+git clone https://github.com/JACK5920/PI-Desktop.git
 cd PI-Desktop
 
 pnpm install
@@ -698,8 +698,8 @@ For standalone capabilities, consider one question first:
 
 Keep the Core focused. Let the ecosystem grow.
 
-**[Report an Issue](https://github.com/vastsa/PI-Desktop/issues/new/choose)** ·
-[Open Issues](https://github.com/vastsa/PI-Desktop/issues) ·
+**[Report an Issue](https://github.com/JACK5920/PI-Desktop/issues/new/choose)** ·
+[Open Issues](https://github.com/JACK5920/PI-Desktop/issues) ·
 [Build a Plugin](docs/plugin-development.md)
 
 ---
@@ -754,7 +754,7 @@ See [LICENSE](LICENSE) for details.
 
 <br />
 
-**[Download](https://github.com/vastsa/PI-Desktop/releases/latest)** ·
+**[Download](https://github.com/JACK5920/PI-Desktop/releases/latest)** ·
 [Documentation](https://pi-docs.aiuo.net/) ·
 [Build a Plugin](docs/plugin-development.md)
 

@@ -152,7 +152,7 @@ const enNav: DefaultTheme.NavItem[] = [
   { text: 'ADRs', link: '/adr/README' },
   { text: 'Plugin guide', link: '/plugin-development' },
   { text: 'Privacy policy', link: '/privacy-policy' },
-  { text: 'GitHub', link: 'https://github.com/vastsa/PI-Desktop' },
+  { text: 'GitHub', link: 'https://github.com/JACK5920/PI-Desktop' },
 ]
 
 const zhNav: DefaultTheme.NavItem[] = [
@@ -161,7 +161,7 @@ const zhNav: DefaultTheme.NavItem[] = [
   { text: 'ADR', link: '/zh-CN/adr/' },
   { text: '插件开发', link: '/zh-CN/plugin-development' },
   { text: '隐私政策（英文）', link: '/privacy-policy' },
-  { text: 'GitHub', link: 'https://github.com/vastsa/PI-Desktop' },
+  { text: 'GitHub', link: 'https://github.com/JACK5920/PI-Desktop' },
 ]
 
 export default defineConfig({
@@ -193,7 +193,7 @@ export default defineConfig({
         sidebarMenuLabel: '目录',
         darkModeSwitchLabel: '外观',
         langMenuLabel: '切换语言',
-        editLink: { pattern: 'https://github.com/vastsa/PI-Desktop/edit/main/docs/:path', text: '在 GitHub 上编辑此页' },
+        editLink: { pattern: 'https://github.com/JACK5920/PI-Desktop/edit/main/docs/:path', text: '在 GitHub 上编辑此页' },
         footer: { message: '本地优先 · 模型可替换 · 插件可扩展。 <a href="https://aiuo.net" target="_blank" rel="noreferrer">AIUO.NET</a>', copyright: 'Copyright © 2026 PI-Desktop 贡献者' },
       },
     },
@@ -207,8 +207,8 @@ export default defineConfig({
     logo: '/app-icon.png',
     siteTitle: 'PI-Desktop',
     search: { provider: 'local' },
-    socialLinks: [{ icon: 'github', link: 'https://github.com/vastsa/PI-Desktop' }],
-    editLink: { pattern: 'https://github.com/vastsa/PI-Desktop/edit/main/docs/:path', text: 'Edit this page on GitHub' },
+    socialLinks: [{ icon: 'github', link: 'https://github.com/JACK5920/PI-Desktop' }],
+    editLink: { pattern: 'https://github.com/JACK5920/PI-Desktop/edit/main/docs/:path', text: 'Edit this page on GitHub' },
     outline: { level: 'deep', label: 'On this page' },
     docFooter: { prev: 'Previous', next: 'Next' },
     footer: { message: 'Local-first · Model-agnostic · Plugin-powered. <a href="https://aiuo.net" target="_blank" rel="noreferrer">AIUO.NET</a>', copyright: 'Copyright © 2026 PI-Desktop contributors' },
