@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { access, readFile } from "node:fs/promises";
 import test from "node:test";
+import {
+  RELEASE_BUILD_TARGETS,
+  createReleaseBuildMatrix,
+} from "../../../scripts/release-platform-matrix.mjs";
 
 const read = (path) => readFile(new URL(path, import.meta.url), "utf8");
 
@@ -66,7 +70,11 @@ test("release runners validate tags without a separate job barrier", () => {
   assert.doesNotMatch(releaseWorkflowSource, /^    needs: validate$/m);
   assert.match(
     releaseWorkflowSource,
-    /TAG_VERSION="\$\{GITHUB_REF_NAME#v\}"/,
+    /TAG_VERSION="\$\{RELEASE_TAG#v\}"/,
+  );
+  assert.match(
+    releaseWorkflowSource,
+    /RELEASE_TAG: \$\{\{ inputs\.release_tag \|\| github\.ref_name \}\}/,
   );
   assert.match(
     releaseWorkflowSource,
@@ -164,9 +172,39 @@ test("release workflow publishes the Linux ASAR beside installers", () => {
 });
 
 test("the release matrix ships native Linux x64 and arm64 lanes", () => {
-  assert.match(
-    releaseWorkflowSource,
-    /name: Linux arm64[\s\S]*?os: ubuntu-22\.04-arm[\s\S]*?arch: arm64[\s\S]*?runner_arch: aarch64[\s\S]*?artifact: linux-arm64[\s\S]*?platform: linux[\s\S]*?dist: dist:linux/,
+  const linuxLanes = RELEASE_BUILD_TARGETS.filter(
+    (target) => target.platform === "linux",
+  );
+  assert.deepEqual(
+    linuxLanes.map(({ name, os, arch, runner_arch, artifact, feed, dist }) => ({
+      name,
+      os,
+      arch,
+      runner_arch,
+      artifact,
+      feed,
+      dist,
+    })),
+    [
+      {
+        name: "Linux x64",
+        os: "ubuntu-22.04",
+        arch: "x64",
+        runner_arch: "x86_64",
+        artifact: "linux-x64",
+        feed: "latest-linux.yml",
+        dist: "dist:linux",
+      },
+      {
+        name: "Linux arm64",
+        os: "ubuntu-22.04-arm",
+        arch: "arm64",
+        runner_arch: "aarch64",
+        artifact: "linux-arm64",
+        feed: "latest-linux-arm64.yml",
+        dist: "dist:linux",
+      },
+    ],
     "the arm64 lane runs on a native arm64 runner",
   );
   // A runner that is not the architecture it packages would pair one
@@ -184,8 +222,6 @@ test("the release matrix ships native Linux x64 and arm64 lanes", () => {
     releaseWorkflowSource,
     /name: Verify the Linux update feed[\s\S]*?feed="apps\/desktop\/release\/\$\{\{ matrix\.feed \}\}"/,
   );
-  assert.match(releaseWorkflowSource, /feed: latest-linux\.yml/);
-  assert.match(releaseWorkflowSource, /feed: latest-linux-arm64\.yml/);
   // The pi-host bundles the SSH bootstrap installs track the desktop's Linux
   // lanes one for one.
   assert.match(
@@ -216,13 +252,24 @@ test("the Linux package config lets the workflow choose the architecture", () =>
 });
 
 test("release matrix packages both native macOS architectures", () => {
-  assert.match(
-    releaseWorkflowSource,
-    /name: macOS arm64[\s\S]*?os: macos-15[\s\S]*?arch: arm64[\s\S]*?runner_arch: arm64/,
-  );
-  assert.match(
-    releaseWorkflowSource,
-    /name: macOS Intel x64[\s\S]*?os: macos-15-intel[\s\S]*?arch: x64[\s\S]*?runner_arch: x86_64/,
+  assert.deepEqual(
+    RELEASE_BUILD_TARGETS.filter((target) => target.platform === "macos").map(
+      ({ name, os, arch, runner_arch }) => ({ name, os, arch, runner_arch }),
+    ),
+    [
+      {
+        name: "macOS arm64",
+        os: "macos-15",
+        arch: "arm64",
+        runner_arch: "arm64",
+      },
+      {
+        name: "macOS Intel x64",
+        os: "macos-15-intel",
+        arch: "x64",
+        runner_arch: "x86_64",
+      },
+    ],
   );
   assert.match(
     releaseWorkflowSource,
@@ -260,14 +307,59 @@ test("release matrix packages both native macOS architectures", () => {
   assert.match(releaseWorkflowSource, /Merge macOS updater metadata[\s\S]*?ruby/);
 });
 
+test("manual Windows/Linux releases omit macOS and use a version-matched tag", () => {
+  assert.deepEqual(
+    createReleaseBuildMatrix("windows-linux").include.map(
+      ({ platform, artifact }) => ({ platform, artifact }),
+    ),
+    [
+      { platform: "windows", artifact: "windows-x64" },
+      { platform: "linux", artifact: "linux-x64" },
+      { platform: "linux", artifact: "linux-arm64" },
+    ],
+  );
+  assert.equal(createReleaseBuildMatrix("windows-linux").include.length, 3);
+  assert.equal(createReleaseBuildMatrix("all").include.length, 5);
+  assert.throws(() => createReleaseBuildMatrix("macos"), /Unsupported release platform set/);
+
+  assert.match(releaseWorkflowSource, /release_tag:[\s\S]*?type:\s*string/);
+  assert.match(
+    releaseWorkflowSource,
+    /release_platforms:[\s\S]*?default:\s*all[\s\S]*?options:[\s\S]*?- all[\s\S]*?- windows-linux/,
+  );
+  assert.match(
+    releaseWorkflowSource,
+    /Configure release build matrix[\s\S]*?release-platform-matrix\.mjs/,
+  );
+  assert.match(
+    releaseWorkflowSource,
+    /matrix:\s*\$\{\{\s*fromJSON\(needs\.verify\.outputs\.build_matrix\)\s*\}\}/,
+  );
+  assert.match(
+    releaseWorkflowSource,
+    /Validate manually dispatched release tag[\s\S]*?A full-platform GitHub Release requires signed and notarized macOS artifacts[\s\S]*?git ls-remote origin[\s\S]*?not this workflow commit/,
+  );
+  assert.match(
+    releaseWorkflowSource,
+    /Merge macOS updater metadata[\s\S]*?if: github\.event_name != 'workflow_dispatch' \|\| inputs\.release_platforms != 'windows-linux'/,
+  );
+  assert.match(
+    releaseWorkflowSource,
+    /publish:[\s\S]*?github\.event_name == 'push'[\s\S]*?inputs\.release_tag != ''/,
+  );
+  assert.match(releaseWorkflowSource, /tag_name: \$\{\{ inputs\.release_tag \|\| github\.ref_name \}\}/);
+  assert.match(releaseWorkflowSource, /target_commitish: \$\{\{ github\.sha \}\}/);
+  assert.match(releaseWorkflowSource, /macOS installers and updater feeds are not included/);
+});
+
 test("macOS release signing is required on tag pushes", () => {
   assert.match(
     releaseWorkflowSource,
-    /workflow_dispatch:\s+inputs:\s+sign_macos:[\s\S]*?default:\s*true[\s\S]*?type:\s*boolean/,
+    /workflow_dispatch:\s+inputs:[\s\S]*?sign_macos:[\s\S]*?default:\s*true[\s\S]*?type:\s*boolean/,
   );
   assert.ok(
     releaseWorkflowSource.includes(
-      "MACOS_SIGN_RELEASE: ${{ github.event_name != 'workflow_dispatch' || inputs.sign_macos == true }}",
+      "MACOS_SIGN_RELEASE: ${{ github.event_name != 'workflow_dispatch' || (inputs.release_platforms != 'windows-linux' && inputs.sign_macos == true) }}",
     ),
   );
 
@@ -357,7 +449,7 @@ test("macOS release signing is required on tag pushes", () => {
   );
   assert.match(
     releaseWorkflowSource,
-    /Notarize and staple the macOS DMG[\s\S]*?if: matrix\.platform == 'macos' && env\.MACOS_SIGN_RELEASE == 'true'[\s\S]*?Verify signed and notarized macOS installer/,
+    /Notarize and staple the macOS DMG[\s\S]*?if: matrix\.platform == 'macos' && inputs\.release_platforms != 'windows-linux' && env\.MACOS_SIGN_RELEASE == 'true'[\s\S]*?Verify signed and notarized macOS installer/,
   );
   assert.doesNotMatch(releaseWorkflowSource, /scripts\/staple-macos-release-dmg\.sh/);
 });

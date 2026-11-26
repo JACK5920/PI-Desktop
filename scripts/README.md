@@ -120,18 +120,23 @@ deliberately not in CI because release branches must pass it with the stable
 version explicitly supplied for a prerelease preview.
 
 `.github/workflows/release.yml` builds on a `v*.*.*` tag. A `verify` job first
-repeats the `ci.yml` checks (a tag push does not trigger `ci.yml`), and the
-build matrix waits for it. Each platform runner then
-validates the tag against `apps/desktop/package.json` before packaging, then
-runs the native `dist:mac`, `dist:win`, or `dist:linux` command. The Linux
-job uses Ubuntu 22.04 so host-core stays on glibc 2.35, then
+repeats the `ci.yml` checks (a tag push does not trigger `ci.yml`) and emits
+the selected build matrix. A branch-based manual release may specify
+`release_tag` and `release_platforms`; selecting `windows-linux` includes
+Windows x64 and both Linux architectures while omitting macOS jobs and assets.
+The publish job creates a missing release tag at the dispatched commit only
+after every selected build succeeds. Each selected platform runner validates
+the release version against `apps/desktop/package.json` before packaging, then
+runs the native `dist:mac`, `dist:win`, or `dist:linux` command. The Linux job
+uses Ubuntu 22.04 so host-core stays on glibc 2.35, then
 `scripts/check-linux-host-glibc.mjs` refuses a binary that needs a newer
 glibc. Each Linux runner (native x64 and arm64) also exports the exact
-app.asar from its own unpacked tree as a versioned release asset; the macOS
-matrix covers arm64 and Intel x64 and
-the publish job assembles the GitHub Release. Tag builds Developer ID-sign,
-notarize, and staple macOS artifacts; `workflow_dispatch` may set
-`sign_macos: false` only for unsigned debug artifacts. See the [release
+app.asar from its own unpacked tree as a versioned release asset; the full
+platform matrix covers macOS arm64 and Intel x64 and the publish job assembles
+the GitHub Release. Tag builds Developer ID-sign, notarize, and staple macOS
+artifacts; a Windows/Linux-only manual release does not build or publish macOS.
+`workflow_dispatch` may set `sign_macos: false` only for unsigned debug
+artifacts when no release tag is supplied. See the [release
 runbook](../docs/spec/06-delivery/06-release-runbook.md).
 
 ### Packaged startup regression
