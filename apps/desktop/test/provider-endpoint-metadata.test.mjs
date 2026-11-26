@@ -6,8 +6,8 @@
  * its models but showed a generic 128k / 8k text-only row for every one of them,
  * because the catalog only accepted that host's own published path. A row on a
  * relay the catalog cannot place used to get nothing at all; it now still reads
- * the weight owner's published record for ids the owner states, so a relay-only
- * `deepseek-v4-flash` keeps DeepSeek's window instead of the generic seed.
+ * the weight owner's active published record for ids the owner states, so a
+ * relay-only `deepseek-flash` keeps DeepSeek's window instead of the generic seed.
  *
  * This drives the real handlers with the bundled snapshot, so it pins the whole
  * chain: discovery, endpoint resolution, catalog anchoring, and the hand-typed
@@ -191,9 +191,9 @@ test("a relay enriches official IDs, strips safe deployment labels, and preserve
   const row = rowOf({ id: "row-4", name: "Relay", baseUrl: "https://relay.example/v1" });
   const { result } = await handlersFor(t, row, {
     data: [
-      { id: "deepseek-v4-flash" },
-      { id: "mimo-v2.5-pro" },
-      { id: "mimo-v2.5-pro-1m" },
+      { id: "deepseek-flash" },
+      { id: "mimo-v2.6-pro" },
+      { id: "mimo-v2.6-pro-1m" },
       { id: "mimo-v2.5-tts" },
       { id: "gemini-2.5-pro-1m" },
       { id: "claude-sonnet-4-5" },
@@ -202,15 +202,15 @@ test("a relay enriches official IDs, strips safe deployment labels, and preserve
 
   const byId = new Map(result.models.map((model) => [model.modelId, model]));
 
-  // The weight owner (DeepSeek) publishes this id, so an unanchored relay reads
+  // The weight owner (DeepSeek) actively publishes this id, so an unanchored relay reads
   // the owner's record instead of dropping to the generic seed.
-  const deepseek = byId.get("deepseek-v4-flash");
+  const deepseek = byId.get("deepseek-flash");
   assert.equal(deepseek.catalogSource, "models.dev");
   assert.equal(deepseek.contextWindow, 1_048_576);
   assert.equal(deepseek.maxTokens, 393_216);
-  // Xiaomi publishes the base id, so both the plain and the `-1m` alias read
+  // Xiaomi actively publishes the base id, so both the plain and the `-1m` alias read
   // the owner's record without rewriting the served wire ID.
-  for (const id of ["mimo-v2.5-pro", "mimo-v2.5-pro-1m"]) {
+  for (const id of ["mimo-v2.6-pro", "mimo-v2.6-pro-1m"]) {
     const mimo = byId.get(id);
     assert.equal(mimo.modelId, id); // lookup never rewrites the served wire ID
     assert.equal(mimo.catalogSource, "models.dev");
@@ -218,12 +218,16 @@ test("a relay enriches official IDs, strips safe deployment labels, and preserve
     assert.equal(mimo.maxTokens, 131_072);
   }
 
-  // Matching Xiaomi reseller records agree on the published speech limits.
+  // TTS is a semantic variant, not a safe alias for MiMo Pro. The current
+  // bundled snapshot has no active Xiaomi record for this older TTS id, so
+  // unrelated reseller metadata must not be borrowed as if it were official.
   const tts = byId.get("mimo-v2.5-tts");
-  assert.equal(tts.source, "discovered");
-  assert.equal(tts.catalogSource, "models.dev");
-  assert.ok(tts.capabilities.includes("audio"));
+  // It may be a bundled or endpoint-discovered row; either way, it must not
+  // acquire publisher metadata unless the snapshot has an exact safe match.
+  assert.equal(tts.catalogSource, undefined);
+  assert.deepEqual(tts.capabilities, ["text", "audio"]);
   assert.equal(tts.contextWindow, 8_192);
+  assert.equal(tts.maxTokens, 8_192);
 
   // Google and Vertex now publish matching metadata, so the `-1m` alias can
   // safely use their shared record without changing the served model id.
