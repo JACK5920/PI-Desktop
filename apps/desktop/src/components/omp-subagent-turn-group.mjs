@@ -1,5 +1,5 @@
 import { isOmpTaskBatch } from "./omp-subagent-roster.mjs";
-import { ompSubagentLifecycleStatus, ompSubagentStatusKey } from "./omp-subagent-timeline.mjs";
+import { ompSubagentIsRetrying, ompSubagentIsWaiting, ompSubagentLifecycleStatus, ompSubagentStatusKey } from "./omp-subagent-timeline.mjs";
 import { ompSubagentsFromTaskFrame } from "../../electron/shared/omp-subagent-progress.mjs";
 
 function toolCallIdOf(item) {
@@ -25,6 +25,8 @@ function normalizedAgentState(agent) {
   // Delivered receipt > transcript outcome > last lifecycle snapshot.
   const rawStatus = ompSubagentLifecycleStatus(agent);
   const statusKey = ompSubagentStatusKey(rawStatus);
+  if (!inactive && ompSubagentIsWaiting(agent)) return { status: "waiting", statusKey: "waiting" };
+  if (!inactive && ompSubagentIsRetrying(agent)) return { status: "retrying", statusKey };
   if (!inactive && statusKey === "running") return { status: "running", statusKey };
   if (inactive && ["completed", "timed_out", "aborted", "stopped", "failed", "denied"].includes(statusKey)) {
     return { status: statusKey, statusKey };
@@ -92,6 +94,8 @@ export function buildOmpSubagentTurnGroup(items, roster) {
     requestedCount: batches.reduce((total, item) => total + requestedCountOf(item), 0),
     agents: uniqueAgents,
     runningCount: uniqueAgents.filter((entry) => entry.status === "running").length,
+    waitingCount: uniqueAgents.filter((entry) => entry.status === "waiting").length,
+    retryingCount: uniqueAgents.filter((entry) => entry.status === "retrying").length,
     completedCount: uniqueAgents.filter((entry) => entry.status === "completed").length,
     failedCount: uniqueAgents.filter((entry) => ["failed", "timed_out", "denied"].includes(entry.status)).length,
     abortedCount: uniqueAgents.filter((entry) => ["aborted", "stopped"].includes(entry.status)).length,

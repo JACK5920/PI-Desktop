@@ -10401,3 +10401,11 @@ PluginPack 产物的解包目录，仅用于开发验证。验收 #1711 前需�
 - **里程碑：** MVP 后回归覆盖。
 - **自动化：** `apps/desktop/test/mini-window-mode.test.mjs` 覆盖窗口几何、状态快照、IPC 契约及输入框无分隔线契约。原生窗口定位和交互恢复仍需在目标平台运行桌面 E2E 验收。
 - **状态：** 已有单元测试/源码契约覆盖；原生平台验证仍待完成。
+
+### E2E-OMP-19.2-rpc-gui-parity
+
+- **前置条件：** OMP 19.2.0 可执行文件、临时 profile、合成模型目录和临时会话目录。不使用真实账号、不发起外部服务商请求、模型生成或用户会话。
+- **步骤：** 协商 RPC v2；读取状态与命令清单；查询已配置的 `@role`；应用角色和 `auto` 思考强度；检查空队列下的中止/交付响应，以及空会话的 resume 响应。再通过生产适配器和展示数据模型输入 retry-fallback、Agent Loop 错误、子代理等待/重试/模型进度 fixture。
+- **预期：** 原生 picker 返回并应用已配置角色；后续能力刷新失败不会把模型切换误报为失败；原生无操作/错误响应保持可见；Agent Loop 错误与服务商错误区分；仅展示 OMP 实际提供的子代理等待、重试、回退元数据。不发起外部模型请求。
+- **自动化覆盖：** `omp-rpc-command-parity.test.mjs`、`omp-rpc-frame-parity.test.mjs`、`omp-rpc-native-integration.test.mjs`、`omp-thinking-level-refresh.test.mjs`、`omp-session-controls.test.mjs`、`omp-subagent-progress.test.mjs` 和 `omp-subagent-turn-group.test.mjs`。
+- **规格：** `03-runtime/23-omp-rpc-gui-parity.md` 与 `03-runtime/08-error-codes.md`。

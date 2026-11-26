@@ -349,6 +349,13 @@ to later refresh and inference; the vendor picker does not collect them.
   Whole-session, non-assistant, streaming/error, or live-turn anchors return
   `CONFLICT`, normalized by Electron to `AGENT_BUSY`. The source turn continues
   without sharing runtime state with the child.
+  Optional `sideChat: true` marks the child as an unpromoted docked side chat.
+  With an anchor, `sideChatExcerpt` is required and records the selected source
+  context; without an anchor, the complete parent history is copied and both
+  source-message and excerpt metadata remain absent. An unanchored side-chat
+  fork requires an idle source; a running source returns `CONFLICT` rather than
+  capturing an unstable transcript. Omitting `sideChat` preserves ordinary
+  fork visibility and behavior.
 - `session.get` — accepts an optional renderer read window:
   `messageBefore` is the exclusive zero-based end offset, `messageLimit` is
   the positive page size, and `contentLimit` is the positive character budget

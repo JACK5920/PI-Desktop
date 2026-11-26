@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
 
-// Outbound frame contract from oh-my-pi v18.22.2 docs/rpc.md and
-// rpc-types.ts (tag e1ae2cc998efd1ca151b46ebefc0e0dab6c23c63).
+// Outbound frame contract verified against OMP 19.2.0 docs/rpc.md and the
+// isolated native binary. No new session event types were added in this release.
 // `agent_pause` is deliberately absent: RPC converts it to a non-terminal
 // `agent_end` on the wire. Host update/result frames are inbound, not here.
 const OMP_SESSION_EVENT_FRAMES = [
@@ -49,7 +49,7 @@ const OMP_OUTBOUND_FRAME_TYPES = [
   "command_output", "prompt_result", "session_settled",
 ];
 
-test("OMP 18.22.2 outbound RPC frames all have one explicit desktop route", () => {
+test("OMP 19.2.0 outbound RPC frames all have one explicit desktop route", () => {
   const routed = [...PI_AGENT_ADAPTER_FRAMES, ...RUNTIME_CONTROL_FRAMES, ...OMP_NATIVE_EVENT_FRAMES];
   assert.equal(new Set(OMP_OUTBOUND_FRAME_TYPES).size, OMP_OUTBOUND_FRAME_TYPES.length, "upstream frame manifest must not contain duplicates");
   assert.equal(new Set(routed).size, routed.length, "desktop routing categories must not overlap");

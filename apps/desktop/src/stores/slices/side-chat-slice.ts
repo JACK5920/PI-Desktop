@@ -1,6 +1,7 @@
 import i18n from "i18next";
 import { sessionAllows } from "../../lib/remote-session-safety";
 import { normalizeTranscriptExcerpt } from "../../lib/transcript-selection";
+import { getTranscriptHistoryCapabilities } from "../../lib/transcript-history-capabilities.mjs";
 import {
   beginSideChatSend,
   editSideChatDraft,
@@ -52,6 +53,14 @@ function sameFileReferences(
       reference.token === sent.token &&
       JSON.stringify(reference.plugin) === JSON.stringify(sent.plugin);
   });
+}
+
+function sideChatForkErrorMessage(error: unknown): string {
+  const value = error as { code?: unknown; errorCode?: unknown } | null;
+  if (value?.code === "AGENT_BUSY" || value?.errorCode === "AGENT_BUSY") {
+    return i18n.t("chat.sideChatMainBusy");
+  }
+  return error instanceof Error ? error.message : String(error);
 }
 
 export function createSideChatSlice({ get, set, getCachedTranscript, getSessionDetail, promoteSideChat }: SideChatSliceDependencies): Pick<
@@ -143,39 +152,65 @@ export function createSideChatSlice({ get, set, getCachedTranscript, getSessionD
   };
 
   return {
-    openSideChat: (parentSessionId, sourceMessageId, excerpt, sourceMessageIds) => {
+    openSideChat: (parentSessionId, sourceMessageId, excerpt, sourceMessageIds, sourceAnchor) => {
       const state = get();
       const session = state.sessions.find((candidate) => candidate.id === parentSessionId);
       if (
         !session ||
+        !getTranscriptHistoryCapabilities(session.agentEngine).canCreateGenericFork ||
         !sessionAllows(session, "canEditMessages") ||
         !sessionAllows(session, "canPrompt")
       ) return null;
       const transcript = state.activeSessionId === parentSessionId
         ? state.messages
         : state.retainedTranscripts[parentSessionId] ?? getCachedTranscript(parentSessionId);
-      const source = transcript.find((message) => message.id === sourceMessageId);
-      const normalizedSourceIds = sourceMessageIds?.length
-        ? [...new Set(sourceMessageIds)]
-        : [sourceMessageId];
-      if (
-        normalizedSourceIds[0] !== sourceMessageId ||
-        normalizedSourceIds.some((id) =>
-          transcript.find((message) => message.id === id)?.role !== "assistant",
-        ) ||
-        !source || source.status === "streaming" || !excerpt.trim()
-      ) {
-        return null;
+      const normalizedExcerpt = excerpt?.trim();
+      const hasSourceAnchor = Boolean(sourceMessageId?.trim() && normalizedExcerpt);
+      if (Boolean(sourceMessageId?.trim()) !== Boolean(normalizedExcerpt)) return null;
+      const validSourceAnchor = sourceAnchor &&
+        Number.isSafeInteger(sourceAnchor.anchorStart) &&
+        Number.isSafeInteger(sourceAnchor.anchorEnd) &&
+        sourceAnchor.anchorStart >= 0 &&
+        sourceAnchor.anchorEnd > sourceAnchor.anchorStart
+        ? sourceAnchor
+        : undefined;
+      let normalizedSourceIds: string[] | undefined;
+      if (hasSourceAnchor) {
+        const source = transcript.find((message) => message.id === sourceMessageId);
+        normalizedSourceIds = sourceMessageIds?.length
+          ? [...new Set(sourceMessageIds)]
+          : [sourceMessageId!];
+        if (
+          normalizedSourceIds[0] !== sourceMessageId ||
+          normalizedSourceIds.some((id) =>
+            transcript.find((message) => message.id === id)?.role !== "assistant",
+          ) ||
+          !source || source.status === "streaming"
+        ) {
+          return null;
+        }
       }
 
       const sideChatId = `side-chat:${crypto.randomUUID()}`;
+      const initialReference = hasSourceAnchor
+        ? {
+          id: crypto.randomUUID(),
+          sourceSessionId: parentSessionId,
+          sourceMessageId: sourceMessageId!,
+          ...(normalizedSourceIds!.length > 1 ? { sourceMessageIds: normalizedSourceIds } : {}),
+          excerpt: normalizedExcerpt!,
+          ...(validSourceAnchor ?? {}),
+        }
+        : undefined;
       const sideChat: SideChatState = {
         id: sideChatId,
         parentSessionId,
-        sourceMessageId,
-        ...(normalizedSourceIds.length > 1 ? { sourceMessageIds: normalizedSourceIds } : {}),
-        excerpt: excerpt.trim(),
-        references: [],
+        ...(hasSourceAnchor ? {
+          sourceMessageId,
+          ...(normalizedSourceIds!.length > 1 ? { sourceMessageIds: normalizedSourceIds } : {}),
+          excerpt: normalizedExcerpt,
+        } : {}),
+        references: initialReference ? [initialReference] : [],
         fileReferences: [],
         messages: [],
         operationId: 0,
@@ -203,8 +238,8 @@ export function createSideChatSlice({ get, set, getCachedTranscript, getSessionD
         id: sideChatId,
         parentSessionId: origin.parentSessionId,
         sourceMessageId: origin.sourceMessageId,
-        sourceMessageIds: [origin.sourceMessageId],
         excerpt: origin.excerpt,
+        ...(origin.sourceMessageId ? { sourceMessageIds: [origin.sourceMessageId] } : {}),
         references: [],
         fileReferences: [],
         childSessionId,
@@ -361,7 +396,7 @@ export function createSideChatSlice({ get, set, getCachedTranscript, getSessionD
               ? failSideChatFork(
                 current,
                 started.operationId,
-                error instanceof Error ? error.message : String(error),
+                sideChatForkErrorMessage(error),
               )
               : null;
             if (failed) {

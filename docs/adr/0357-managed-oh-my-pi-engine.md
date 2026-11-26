@@ -61,11 +61,11 @@ cadence, so it is optional and installed on demand.
    reject or clearly report unsupported host-tool/URI interactions, and stop
    child processes cleanly during app shutdown.
 8. OMP RPC is an evolving protocol. Features only count as integrated when
-   the GUI has a tested renderer and correct lifecycle semantics. In
-   particular, subagents, live voice/dictation, queue controls, branch/tree
-   navigation, rich widgets, and all login/logout variations remain explicit
-   acceptance items unless implemented and tested. The UI must not imply that
-   a feature is supported merely because its RPC command is forwarded.
+   the GUI has a tested renderer and correct lifecycle semantics. The current
+   versioned command/frame manifest, isolated-binary acceptance, GUI mappings,
+   and known TUI-only gaps are tracked in
+   [OMP RPC GUI parity](../spec/03-runtime/23-omp-rpc-gui-parity.md). A command
+   being forwarded is not proof that its behavior is represented in the GUI.
 
 ## Consequences
 
@@ -97,5 +97,6 @@ cadence, so it is optional and installed on demand.
 - Local isolated smoke verifies `ready → negotiate_protocol → open_session →
   get_state/get_available_models`; no real account or model request is needed
   for this transport gate.
-- Separate acceptance is required before claiming subagent UI, live voice,
-  dictation, branch editing, or other advanced RPC features are complete.
+- OMP GUI capability claims are version-specific and must satisfy the parity
+  matrix and isolated-binary scenarios in the linked runtime spec. TUI-only
+  interactions remain explicit limitations rather than implied GUI features.

@@ -173,3 +173,63 @@ async fn rpc_visualization_fork_index_failure_rolls_back_child_files() {
     );
     assert_eq!(fs::read_to_string(chart).unwrap(), "source bytes");
 }
+
+#[tokio::test]
+async fn rpc_unanchored_side_chat_forks_full_history_with_parent_only_provenance() {
+    let f = fixture();
+    let (state, id) = rpc_session(&f, false, "ask").await;
+    handle_request(
+        state.clone(),
+        "session.appendMessage",
+        json!({ "sessionId": id, "message": { "id": "user-1", "role": "user",
+            "content": "First parent turn", "createdAt": "2026-11-25T00:00:00Z" } }),
+        mpsc::unbounded_channel().0,
+    )
+    .await
+    .unwrap();
+    handle_request(
+        state.clone(),
+        "session.appendMessage",
+        json!({ "sessionId": id, "message": { "id": "assistant-1", "role": "assistant",
+            "content": "Parent answer", "createdAt": "2026-11-25T00:00:01Z" } }),
+        mpsc::unbounded_channel().0,
+    )
+    .await
+    .unwrap();
+
+    let fork = handle_request(
+        state.clone(),
+        "session.fork",
+        json!({ "sessionId": id, "sideChat": true }),
+        mpsc::unbounded_channel().0,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(fork["session"]["messages"].as_array().unwrap().len(), 2);
+    assert_eq!(fork["session"]["sideChat"]["parentSessionId"], id);
+    assert!(fork["session"]["sideChat"].get("sourceMessageId").is_none());
+    assert!(fork["session"]["sideChat"].get("excerpt").is_none());
+    assert_eq!(fork["session"]["sideChat"]["promoted"], false);
+
+    let anchored = handle_request(
+        state,
+        "session.fork",
+        json!({
+            "sessionId": id,
+            "throughMessageId": "assistant-1",
+            "sideChat": true,
+            "sideChatExcerpt": "Parent answer"
+        }),
+        mpsc::unbounded_channel().0,
+    )
+    .await
+    .unwrap();
+    assert_eq!(anchored["session"]["messages"].as_array().unwrap().len(), 2);
+    assert_eq!(anchored["session"]["sideChat"]["parentSessionId"], id);
+    assert_eq!(
+        anchored["session"]["sideChat"]["sourceMessageId"],
+        "assistant-1"
+    );
+    assert_eq!(anchored["session"]["sideChat"]["excerpt"], "Parent answer");
+}

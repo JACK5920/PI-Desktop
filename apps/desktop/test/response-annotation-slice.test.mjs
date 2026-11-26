@@ -141,6 +141,37 @@ test("a visible side-chat child can own annotations for its assistant messages",
   assert.equal(state().responseAnnotations["child-session"][0].sourceMessageId, "child-answer");
 });
 
+test("the main conversation can reference assistant text selected in its side-chat child", () => {
+  const childMessage = { id: "child-answer", role: "assistant", content: "Child answer" };
+  const { actions, state } = fixture({
+    sessions: [
+      { id: "session-a", source: "local", capabilities: { canEditMessages: true } },
+      { id: "child-session", source: "local", capabilities: { canEditMessages: true } },
+    ],
+    sideChats: {
+      "side-chat-1": { childSessionId: "child-session", messages: [childMessage] },
+    },
+  });
+  const annotationId = actions.addResponseAnnotation(
+    "session-a",
+    "child-answer",
+    "Child answer",
+    { anchorStart: 0, anchorEnd: 12 },
+    ["child-answer"],
+    "child-session",
+  );
+  assert.ok(annotationId);
+  assert.deepEqual(state().responseAnnotations["session-a"][0], {
+    id: annotationId,
+    sourceSessionId: "child-session",
+    sourceMessageId: "child-answer",
+    excerpt: "Child answer",
+    anchorStart: 0,
+    anchorEnd: 12,
+  });
+  assert.equal(state().responseAnnotations["child-session"], undefined, "the reference was attached to the side-chat draft instead of the main draft");
+});
+
 test("accepted sends consume only the exact snapshot and retain edits or later attachments", () => {
   const { actions, state } = fixture();
   const firstId = actions.addResponseAnnotation("session-a", "assistant-a", "first");

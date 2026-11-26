@@ -2,24 +2,24 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
 
-// Canonical RpcCommand union from oh-my-pi v18.22.2
-// (can1357/oh-my-pi, tag commit e1ae2cc). The upstream RPC command/types and
-// documentation are byte-identical to v18.22.1, so the command manifest stays
-// unchanged; update this list only after auditing the new release source.
+// Canonical RpcCommand union verified against the isolated OMP 19.2.0 binary
+// and upstream docs/rpc.md. Keep this list synchronized with the tested engine;
+// new upstream commands must be implemented, deliberately handled internally,
+// or explicitly rejected with a documented reason before accepting an update.
 // Keep this list synchronized when the managed OMP release changes; a new
 // upstream command must be implemented, deliberately handled internally, or
 // explicitly rejected with a documented reason before the update is accepted.
 const UPSTREAM_RPC_COMMANDS = [
-  "abort", "abort_and_prompt", "abort_and_restore_queue", "abort_bash", "abort_branch_summary",
+  "abort", "abort_and_prompt", "abort_and_restore_queue", "abort_and_deliver_queue", "abort_bash", "abort_branch_summary",
   "abort_retry", "bash", "branch", "btw", "btw_cancel", "cancel_subagent", "compact",
   "cycle_model", "cycle_thinking_level", "dictation_start", "dictation_stop", "export_html",
-  "follow_up", "fork", "get_available_commands", "get_available_models", "get_available_thinking_levels",
+  "follow_up", "fork", "get_available_commands", "get_available_models", "get_available_thinking_levels", "get_model_picker",
   "get_branch_messages", "get_btw_history", "get_entries", "get_last_assistant_text", "get_login_providers",
   "get_logout_accounts", "get_messages", "get_messages_page", "get_session_lease", "get_session_stats",
   "get_state", "get_subagent_messages", "get_subagents", "get_tree", "goal", "handoff", "live_connect",
   "live_mute", "live_start", "live_stop", "login", "logout", "navigate_tree", "negotiate_protocol",
   "new_session", "open_session", "predict_word", "predict_word_feedback", "promote_queued_message", "prompt",
-  "remove_queued_message", "set_ask_dialog", "set_auto_compaction", "set_auto_retry", "set_cache_warming",
+  "remove_queued_message", "resume", "set_ask_dialog", "set_auto_compaction", "set_auto_retry", "set_cache_warming",
   "set_event_filter", "set_fast_mode", "set_follow_up_mode", "set_host_tools", "set_host_uri_schemes",
   "set_interrupt_mode", "set_label", "set_model", "set_session_name", "set_slow_mode", "set_steering_mode",
   "set_subagent_subscription", "set_thinking_level", "set_todos", "steer", "steer_subagent", "switch_session",
@@ -49,7 +49,7 @@ test("OMP RPC command parity accounts for every command in the pinned upstream r
   const allowed = readSet(ipc.slice(allowStart, allowEnd));
   const upstream = new Set(UPSTREAM_RPC_COMMANDS);
 
-  assert.equal(UPSTREAM_RPC_COMMANDS.length, 74, "pinned upstream command manifest changed unexpectedly");
+  assert.equal(UPSTREAM_RPC_COMMANDS.length, 77, "OMP 19.2.0 command manifest changed unexpectedly");
   assert.equal(upstream.size, UPSTREAM_RPC_COMMANDS.length, "manifest must not contain duplicate commands");
   assert.deepEqual(
     [...upstream].filter((command) => !allowed.has(command)).sort(),
@@ -63,7 +63,7 @@ test("OMP RPC command parity accounts for every command in the pinned upstream r
   );
   assert.ok([...management].every((command) => allowed.has(command)));
   assert.deepEqual(
-    [...management].filter((command) => !["get_state", "get_available_models", "get_available_thinking_levels", "get_login_providers", "get_logout_accounts", "login", "logout", "set_model"].includes(command)),
+    [...management].filter((command) => !["get_state", "get_available_models", "get_model_picker", "get_available_thinking_levels", "get_login_providers", "get_logout_accounts", "login", "logout", "set_model"].includes(command)),
     [],
     "the dedicated provider-management RPC surface must remain narrower than chat RPC",
   );

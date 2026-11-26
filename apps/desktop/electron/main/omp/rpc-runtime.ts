@@ -333,10 +333,24 @@ export class OmpRpcRuntime {
       };
     }
     if (type === "set_model" && typeof fields.provider === "string" && typeof fields.modelId === "string") {
-      await writeFile(join(this.options.rootDir, "runtime", "profile", "pi-selected-model.json"), JSON.stringify({
+      const selectedModel: Record<string, string> = {
         provider: fields.provider,
         modelId: fields.modelId,
-      }), { encoding: "utf8", mode: 0o600 });
+      };
+      // The settings-only picker represents the next new chat. OMP quick roles
+      // are intentionally session-scoped by the engine, so persist them only as
+      // the GUI's one-shot new-chat choice; changing an existing chat's model
+      // must not silently change the next conversation's role.
+      if (sessionId === this.options.settingsSessionId) {
+        if (typeof fields.role === "string" && fields.role.trim().length > 0 && fields.role.length <= 80) {
+          selectedModel.role = fields.role.trim();
+        }
+        const thinkingLevels = new Set(["auto", "off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+        if (typeof fields.thinkingLevel === "string" && thinkingLevels.has(fields.thinkingLevel)) {
+          selectedModel.thinkingLevel = fields.thinkingLevel;
+        }
+      }
+      await writeFile(join(this.options.rootDir, "runtime", "profile", "pi-selected-model.json"), JSON.stringify(selectedModel), { encoding: "utf8", mode: 0o600 });
     }
     if (type === "set_subagent_subscription" &&
         (fields.level === "off" || fields.level === "events" || fields.level === "messages")) {
@@ -1480,10 +1494,17 @@ export class OmpRpcRuntime {
     const taskToolsGuardPath = join(extensionDir, "task-tools-guard.mjs");
     await mkdir(extensionDir, { recursive: true });
     await writeFile(taskToolsGuardPath, OMP_TASK_TOOLS_GUARD_EXTENSION, { encoding: "utf8", mode: 0o600 });
-    let selectedModel: { provider: string; modelId: string } | null = null;
+    let selectedModel: { provider: string; modelId: string; role?: string; thinkingLevel?: string } | null = null;
     try {
       const parsed = JSON.parse(await readFile(join(profileDir, "pi-selected-model.json"), "utf8"));
-      if (typeof parsed.provider === "string" && typeof parsed.modelId === "string") selectedModel = parsed;
+      if (typeof parsed.provider === "string" && typeof parsed.modelId === "string") {
+        selectedModel = {
+          provider: parsed.provider,
+          modelId: parsed.modelId,
+          ...(typeof parsed.role === "string" && parsed.role.trim() && parsed.role.length <= 80 ? { role: parsed.role.trim() } : {}),
+          ...(typeof parsed.thinkingLevel === "string" && ["auto", "off", "minimal", "low", "medium", "high", "xhigh", "max"].includes(parsed.thinkingLevel) ? { thinkingLevel: parsed.thinkingLevel } : {}),
+        };
+      }
     } catch { /* First OMP GUI launch needs a boot model before RPC login is available. */ }
     const bootstrapMarkerPath = join(profileDir, "pi-rpc-bootstrap.json");
     let bootstrapPending = false;
@@ -1601,6 +1622,18 @@ export class OmpRpcRuntime {
         sessionDir,
         ...(explicitModel ? { provider: explicitModel.provider, modelId: explicitModel.modelId } : {}),
       });
+      if (!mappedSessionFile && input.sessionId !== this.options.settingsSessionId && selectedModel?.role) {
+        // OMP deliberately does not persist quick roles. Apply the GUI's next-
+        // chat role once, immediately after opening a fresh native session.
+        await this.command(input.sessionId, "set_model", {
+          provider: selectedModel.provider,
+          modelId: selectedModel.modelId,
+          role: selectedModel.role,
+          ...(selectedModel.thinkingLevel ? { thinkingLevel: selectedModel.thinkingLevel } : {}),
+        }).catch((error) => {
+          this.options.log?.("warn", "OMP one-shot quick-role selection could not be applied", { sessionId: input.sessionId, data: String(error) });
+        });
+      }
       if (mappedSessionFile) {
         // `switch_session` restores the mapped file's saved model exactly like
         // `open_session` does, so the same explicit pair has to ride along or a

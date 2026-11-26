@@ -2110,10 +2110,17 @@ Single message render — either user (plaintext) or assistant (markdown streami
   text. Prompt display, edit, queue, and title projections omit the generated
   envelope; the sent-message reference summary remains available separately.
   **Ask in side chat** opens a WorkPanel draft without a child session or send.
-  Its selected excerpt remains in the side-chat source metadata and inherited
-  parent transcript, but is not prefilled into the editable prompt. The first
-  explicit non-empty Send forks at the selected assistant message without
-  activating the child and submits only the user's typed request. Selecting
+  When the active panel already shows a side chat for this parent, the action
+  appends an ordinary selected-excerpt reference to that chat instead of
+  creating another tab. A selection-created side chat retains its source
+  message as fork provenance but shows the excerpt only as a normal editable
+  reference attachment, not as a pinned source-context chip. A side chat opened
+  directly from the WorkPanel remains reference-free and may follow up on the
+  full parent conversation. The first explicit non-empty Send forks at the
+  selected assistant message when anchored or from a stable full parent
+  snapshot when unanchored, without activating the child; it submits only the
+  typed request and ordinary reference envelope. Removing a pending reference
+  does not change the saved fork provenance. Selecting
   files is also an explicit prompt action: after a non-canceled selection, the
   child is forked without activation and files are imported into its own scratch
   space; canceling selection does not fork. A draft containing only file
@@ -2132,18 +2139,19 @@ Single message render — either user (plaintext) or assistant (markdown streami
   fork/send cannot reopen a closed tab,
   switch the active parent, or overwrite a newer draft. The ordinary Ask-about-
   selection fork remains a distinct context-menu path (ADR 0346). References
-  captured from the parent while this side chat is active stay on the side-chat
-  Composer, not the main Composer, and use the same unified excerpt card and
-  hover/focus preview with edit, remove, and clear actions. Their source session
+  captured from the parent while this side chat is active through Ask in side
+  chat stay on the side-chat Composer and use the standard reference card with
+  edit, remove, clear, and source navigation. Their source session
   and exact range survive transfer into the child prompt; clicking a reference
   or child-answer citation returns to the owning source conversation, activating
   it first when needed. The selected fork excerpt remains contextual metadata
   and is never duplicated into editable prompt text. Selecting text in the child
-  transcript attaches a separate reference to that child's next prompt.
-  The tab uses a centered empty state and a single rounded composer containing
-  the source-context chip, reference control, file chips, text input and actions;
-  it does not display raw source-message ids or a duplicate excerpt block. The
-  source chip previews the excerpt and returns to its source message. Enter
+  transcript and using Add to conversation targets the parent Composer, even
+  when the selection comes from a child answer or user message. Only a later Ask
+  in side chat can add a reference to a docked child. The tab uses a centered
+  empty state and a single rounded composer containing ordinary reference
+  attachments, file chips, text input and actions; it does not display raw
+  source-message ids or a separate pinned excerpt. Enter
   follows the global Enter-to-send setting, Shift+Enter inserts a line break,
   and IME composition Enter never submits. Model/permission controls are not
   duplicated; the child inherits the owning conversation's engine settings.

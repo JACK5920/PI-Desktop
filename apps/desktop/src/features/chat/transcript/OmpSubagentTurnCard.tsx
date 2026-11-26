@@ -1,7 +1,7 @@
 import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { buildOmpSubagentTurnGroup } from "../../../components/omp-subagent-turn-group.mjs";
-import { ompSubagentIdentity, ompSubagentProgressSummary, ompSubagentTaskDetail, ompSubagentTaskSummary } from "../../../components/omp-subagent-timeline.mjs";
+import { ompSubagentIdentity, ompSubagentIsFallbackModel, ompSubagentIsRetrying, ompSubagentIsWaiting, ompSubagentProgressSummary, ompSubagentResolvedModel, ompSubagentRetryFailure, ompSubagentRetryState, ompSubagentTaskDetail, ompSubagentTaskSummary } from "../../../components/omp-subagent-timeline.mjs";
 import { ompSubagentDeliveryPreview } from "../../../components/omp-subagent-roster.mjs";
 import { useChatSessionCapability } from "../../../hooks/use-chat-session-capability";
 import { useAppStore } from "../../../stores/app-store";
@@ -34,6 +34,8 @@ export function OmpSubagentTurnCard({
   const allAgentsSettled = group.agents.length > 0
     && group.agents.length >= group.requestedCount
     && group.runningCount === 0
+    && group.waitingCount === 0
+    && group.retryingCount === 0
     && group.unknownCount === 0;
   const outcomeCounts = [
     group.completedCount > 0 ? t("settings.omp.ompBatchCompleted", { n: group.completedCount }) : "",
@@ -60,6 +62,8 @@ export function OmpSubagentTurnCard({
           requested: group.requestedCount,
           observed: group.agents.length,
           running: group.runningCount,
+          waiting: group.waitingCount,
+          retrying: group.retryingCount,
         })}</span>
         {outcomeCounts ? <span className="omp-subagent-turn-card-outcomes">{outcomeCounts}</span> : null}
       </div>
@@ -80,20 +84,41 @@ export function OmpSubagentTurnCard({
         const progress = ompSubagentProgressSummary(agent);
         const deliveryPreview = ompSubagentDeliveryPreview(agent.deliveryOutput || agent.deliveryError || agent.deliveryAbortReason);
         const tabId = `omp-subagent-batch:${toolCallId}:${agent.id}`;
-        const statusLabel = agent.observedActive === false && (!statusKey || statusKey === "running")
+        const waiting = ompSubagentIsWaiting(agent);
+        const retry = ompSubagentRetryState(agent);
+        const retryFailure = ompSubagentRetryFailure(agent);
+        const retrying = ompSubagentIsRetrying(agent);
+        const resolvedModel = ompSubagentResolvedModel(agent);
+        const fallbackModel = ompSubagentIsFallbackModel(agent);
+        const statusLabel = retrying && retry
+          ? t("settings.omp.subagentRetrying", {
+            attempt: retry.attempt,
+            max: retry.maxAttempts,
+            seconds: Math.ceil(retry.remainingMs / 1000),
+            reason: retry.errorMessage || t("settings.omp.subagentRetryReasonUnavailable"),
+          })
+          : waiting
+            ? t("settings.omp.subagentWaitingOnOwnWork")
+          : agent.observedActive === false && (!statusKey || statusKey === "running")
           ? t("settings.omp.subagentNoLongerRunning")
           : statusKey
-            ? t(`chat.subagentStatus.${statusKey}`)
+            ? agent.observedActive === false && retryFailure && ["failed", "aborted"].includes(statusKey)
+              ? t("settings.omp.subagentRetryFailed", { attempt: retryFailure.attempt, reason: retryFailure.errorMessage || t("settings.omp.subagentRetryReasonUnavailable") })
+              : t(`chat.subagentStatus.${statusKey}`)
             : t("settings.omp.subagentStatusUnknown");
+        const readableStatusLabel = fallbackModel
+          ? `${statusLabel} · ${t("settings.omp.subagentFallbackModel")}`
+          : statusLabel;
 
         return <div className="omp-subagent-turn-agent" role="listitem" key={`${toolCallId}:${agent.id}`}>
           <SubagentNodeCard
             title={label}
             summary={taskSummary || undefined}
             summaryDetail={taskDetail || undefined}
+            model={resolvedModel || undefined}
             activity={progress || undefined}
-            status={status}
-            statusLabel={statusLabel}
+            status={retrying ? "retrying" : waiting ? "waiting" : status}
+            statusLabel={readableStatusLabel}
             expanded={activeWorkPanelTabId === tabId}
             controlsId={`work-panel-surface-${tabId}`}
             disabled={!localToolsAllowed}

@@ -1,6 +1,6 @@
-import { IconBot, IconCheck, IconCircleAlert, IconStop } from "../../../components/icons";
+import { IconBot, IconCheck, IconCircleAlert, IconClock, IconPause, IconStop } from "../../../components/icons";
 
-export type SubagentNodeStatus = "running" | "completed" | "aborted" | "timed_out" | "failed" | "stopped" | "denied" | "unknown";
+export type SubagentNodeStatus = "running" | "waiting" | "retrying" | "completed" | "aborted" | "timed_out" | "failed" | "stopped" | "denied" | "unknown";
 
 /** Shared visual card for both PI delegates and OMP-native subagents. */
 export function SubagentNodeCard({
@@ -40,7 +40,7 @@ export function SubagentNodeCard({
   const detail = [title, titleDetail, model, thinking, statusLabel, summaryDetail ?? summary, activity].filter(Boolean).join(" · ");
   return <button
     type="button"
-    className="subagent-topology-node-header"
+    className={`subagent-topology-node-header outcome-${outcome}`}
     aria-expanded={expanded}
     aria-controls={expanded ? controlsId : undefined}
     disabled={disabled}
@@ -50,7 +50,7 @@ export function SubagentNodeCard({
     <span className="subagent-topology-avatar" aria-hidden>
       <IconBot size={15} />
       <span className="subagent-topology-status-icon">
-        {outcome === "completed" ? <IconCheck size={8} /> : outcome === "aborted" || outcome === "stopped" ? <IconStop size={7} /> : outcome === "running" ? <span /> : outcome === "unknown" ? <span className="subagent-topology-status-unknown" /> : <IconCircleAlert size={8} />}
+        {outcome === "completed" ? <IconCheck size={8} /> : outcome === "aborted" || outcome === "stopped" ? <IconStop size={7} /> : outcome === "waiting" ? <IconPause size={7} /> : outcome === "retrying" ? <IconClock size={8} /> : outcome === "running" ? <span /> : outcome === "unknown" ? <span className="subagent-topology-status-unknown" /> : <IconCircleAlert size={8} />}
       </span>
     </span>
     <span className="subagent-topology-node-copy">

@@ -519,7 +519,7 @@ test("OMP provider settings use a dedicated non-chat RPC session with a narrow c
   const runtime = await read("../electron/main/omp/rpc-runtime.ts");
   const settings = await read("../src/components/settings/OmpProviderManager.tsx");
   assert.match(ipc, /if \(sessionId === OMP_SETTINGS_RPC_SESSION_ID\)[\s\S]*?app\.getPath\("home"\)/);
-  assert.match(ipc, /managementCommands = new Set\(\["get_state", "get_available_models", "get_available_thinking_levels", "get_login_providers", "get_logout_accounts", "login", "logout", "set_model"\]\)/);
+  assert.match(ipc, /managementCommands = new Set\(\["get_state", "get_available_models", "get_model_picker", "get_available_thinking_levels", "get_login_providers", "get_logout_accounts", "login", "logout", "set_model"\]\)/);
   assert.match(ipc, /event\.sessionId === OMP_SETTINGS_RPC_SESSION_ID\) return/);
   assert.match(runtime, /input\.sessionId === this\.options\.settingsSessionId/);
   assert.match(settings, /OMP_SETTINGS_RPC_SESSION_ID/);
@@ -768,6 +768,18 @@ test("native OMP exposes command catalog, BTW history and subagent snapshots in 
   if (!binary) { t.skip("Set PI_OMP_BINARY to run the native capability smoke check."); return; }
   const OmpRpcRuntime = await loadOmpRpcRuntime();
   const rootDir = await mkdtemp(join(tmpdir(), "pi-omp-capability-smoke-"));
+  const profileDir = join(rootDir, "runtime", "profile");
+  await mkdir(profileDir, { recursive: true });
+  await writeFile(join(profileDir, "models.json"), JSON.stringify({ providers: {
+    pi_picker_test: {
+      baseUrl: "http://127.0.0.1:1/v1", api: "openai-completions", apiKey: "isolated-picker-key",
+      models: [{ id: "picker-model", name: "Picker model", contextWindow: 32000, maxTokens: 4096, input: ["text"], reasoning: false }],
+    },
+  } }));
+  await writeFile(join(profileDir, "config.yml"), "modelRoles:\n  smol: pi_picker_test/picker-model\n");
+  await writeFile(join(profileDir, "pi-selected-model.json"), JSON.stringify({
+    provider: "pi_picker_test", modelId: "picker-model", role: "smol", thinkingLevel: "auto",
+  }));
   const runtime = new OmpRpcRuntime({ rootDir, manager: { getExecutablePath: async () => binary }, emit() {} });
   try {
     await runtime.attach({ sessionId: "native-capability-smoke", cwd: rootDir }, { includeMessages: false });
@@ -778,6 +790,23 @@ test("native OMP exposes command catalog, BTW history and subagent snapshots in 
       runtime.command("native-capability-smoke", "get_subagents"),
       runtime.command("native-capability-smoke", "get_state"),
     ]);
+    const quickRoles = await runtime.command("native-capability-smoke", "get_model_picker", { query: "@smol" });
+    assert.equal(quickRoles.data?.total, 1);
+    assert.deepEqual(quickRoles.data?.rows?.map(({ provider, id, role, current }) => ({ provider, id, role, current })), [
+      { provider: "pi_picker_test", id: "picker-model", role: "smol", current: true },
+    ], "the settings-profile quick role must be applied to a fresh OMP chat exactly once");
+    await runtime.command("native-capability-smoke", "set_model", {
+      provider: "pi_picker_test", modelId: "picker-model", role: "smol", thinkingLevel: "auto",
+    });
+    const roleState = await runtime.command("native-capability-smoke", "get_state");
+    assert.equal(roleState.data?.configuredThinkingLevel, "auto", "the native quick-role effort is applied to the live session");
+    const noQueuedInput = await runtime.command("native-capability-smoke", "abort_and_deliver_queue");
+    assert.equal(noQueuedInput.data?.aborted, false, "the 19.2 native command must be recognized without a queued input");
+    await assert.rejects(
+      runtime.command("native-capability-smoke", "resume"),
+      /Nothing to resume/i,
+      "resume is recognized, but correctly has nothing to continue in an empty session",
+    );
     assert.ok(Array.isArray(commands.data?.commands));
     assert.ok(Array.isArray(btw.data?.records));
     assert.ok(Array.isArray(agents.data?.subagents));
@@ -1508,6 +1537,38 @@ test("OMP event adapter namespaces process-local message IDs and waits for settl
   assert.deepEqual(ompFrameToAgentEvent({ sessionId: "pi-session", runId: "omp-run-unique", frame: { type: "turn_start" }, messageIds: ids }).event, { type: "turn_start" });
   assert.deepEqual(ompFrameToAgentEvent({ sessionId: "pi-session", runId: "omp-run-unique", frame: { type: "turn_end" }, messageIds: ids }).event, { type: "turn_end" });
   assert.deepEqual(ompFrameToAgentEvent({ sessionId: "pi-session", runId: "omp-run-unique", frame: { type: "tool_stream_update", toolCallId: "shell-1", toolName: "bash", update: { text: "partial output" } }, messageIds: ids }).event, { type: "tool_update", toolCallId: "shell-1", partialResult: { text: "partial output" } });
+});
+
+test("OMP 19.2 agent-loop failures remain distinct from provider request failures", async () => {
+  const { ompMessageToUiMessage } = await loadOmpEventAdapter();
+  const message = ompMessageToUiMessage({
+    role: "assistant",
+    content: [{ type: "text", text: "Required tool call was not satisfied." }],
+    errorFromAgentLoop: true,
+    errorMessage: "The soft tool requirement was not met.",
+  }, "omp:run:error-message", "complete");
+
+  assert.equal(message.status, "error");
+  assert.deepEqual(message.error, {
+    code: "OMP_AGENT_LOOP_ERROR",
+    message: "The soft tool requirement was not met.",
+    retriable: false,
+  });
+  assert.equal(message.content, "Required tool call was not satisfied.");
+});
+
+test("OMP 19.2 fallback and newly delivered advisor/config events have a visible status surface", async () => {
+  const interaction = await read("../src/components/OmpRpcInteraction.tsx");
+  assert.match(interaction, /frame\.type === "retry_fallback_applied"/);
+  assert.match(interaction, /settings\.omp\.retryFallbackApplied/);
+  assert.match(interaction, /frame\.type === "retry_fallback_succeeded"/);
+  assert.match(interaction, /settings\.omp\.retryFallbackSucceeded/);
+  assert.match(interaction, /frame\.type === "config_warnings_changed"/);
+  assert.match(interaction, /settings\.omp\.configWarningsChanged/);
+  assert.match(interaction, /frame\.type === "advisor_cost_changed"/);
+  assert.match(interaction, /settings\.omp\.advisorCostChanged/);
+  assert.match(interaction, /frame\.type === "advisor_yielded"/);
+  assert.match(interaction, /settings\.omp\.advisorYielded/);
 });
 
 test("OMP tool calls carry explicit engine provenance so task rows cannot route to PI delegation transcripts", async () => {
