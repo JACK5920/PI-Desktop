@@ -2,6 +2,15 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const frEntries: ChangelogEntry[] = [
   {
+    version: "0.23.0",
+    date: "2026-11-26",
+    highlights: [
+      "Ouvrez une discussion latérale sans sélectionner de texte et posez des questions de suivi avec le contexte de la conversation principale.",
+      "Envoyez le texte sélectionné vers le champ principal ou une discussion latérale, puis vérifiez ou modifiez les citations avant l’envoi.",
+      "Utilisez les commandes de modèle et de session d’OMP 19.2 dans l’interface de bureau et suivez plus clairement l’activité en direct des sous-agents.",
+    ],
+  },
+  {
     version: "0.21.0",
     date: "2026-10-24",
     highlights: [

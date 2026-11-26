@@ -2,6 +2,15 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const deEntries: ChangelogEntry[] = [
   {
+    version: "0.23.0",
+    date: "2026-11-26",
+    highlights: [
+      "Öffnen Sie einen Seitenchat ohne vorherige Textauswahl und stellen Sie Folgefragen mit dem Kontext des Hauptgesprächs.",
+      "Leiten Sie ausgewählten Text an den Haupt-Composer oder einen Seitenchat weiter und prüfen oder bearbeiten Sie Zitate vor dem Senden.",
+      "Nutzen Sie OMP-19.2-Modell- und Sitzungssteuerungen in der Desktop-Oberfläche und verfolgen Sie die Live-Aktivität von Subagenten übersichtlicher.",
+    ],
+  },
+  {
     version: "0.21.0",
     date: "2026-10-24",
     highlights: [
