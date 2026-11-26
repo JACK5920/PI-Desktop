@@ -64,7 +64,7 @@ test("the work panel exposes a capability-gated side-chat entry without requirin
   assert.match(workPanel, /data-testid="work-panel-new-side-chat"/);
   assert.match(workPanel, /getTranscriptHistoryCapabilities\(activeSession\.agentEngine\)\.canCreateGenericFork/);
   assert.match(workPanel, /openSideChat\(activeSessionId\)/);
-  assert.match(sideChat, /openSideChat: \(parentSessionId, sourceMessageId, excerpt, sourceMessageIds\)/);
+  assert.match(sideChat, /openSideChat: \(parentSessionId, sourceMessageId, excerpt, sourceMessageIds, sourceAnchor\)/);
   assert.match(sideChat, /const hasSourceAnchor = Boolean\(sourceMessageId\?\.trim\(\) && normalizedExcerpt\)/);
   assert.match(sideChatTab, /sideChatGeneralPlaceholder/);
   assert.match(sideChatTab, /needsStableParentSnapshot/);

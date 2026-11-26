@@ -254,7 +254,7 @@ test("every Task row renders as one accessible delegation topology", () => {
   assert.match(transcriptSource, /variant="topology"/);
   assert.match(transcriptSource, /expanded=\{panelOpen\}/);
   assert.match(transcriptSource, /controlsId=\{`work-panel-surface-\$\{ompBatch \? `omp-subagent-batch:\$\{panelSelectionId\}` : `subagent:\$\{panelSelectionId\}`\}`\}/);
-  assert.match(nodeCardSource, /className="subagent-topology-node-header"/);
+  assert.match(nodeCardSource, /className=\{`subagent-topology-node-header outcome-\$\{outcome\}`\}/);
   assert.match(nodeCardSource, /aria-expanded=\{expanded\}/);
   assert.match(nodeCardSource, /aria-controls=\{expanded \? controlsId : undefined\}/);
   assert.doesNotMatch(nodeCardSource, /tool-row-caret/);
