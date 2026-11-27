@@ -38,7 +38,6 @@ export function ImageGenerationModelRow({
     binding,
     providers,
   );
-  if (candidates.length === 0) return null;
 
   const activeCandidate = binding
     ? candidates.find((candidate) =>
@@ -65,9 +64,14 @@ export function ImageGenerationModelRow({
       disabled: !available,
     };
   });
-  // Disabled rows are not choices. With none left, the summary stays hidden
-  // instead of showing a checked model the user can no longer pick.
-  if (!options.some((option) => !option.disabled)) return null;
+  const runnableCount = options.filter((option) => !option.disabled).length;
+  // Keep the setting reachable from GenerateImages errors even when there is
+  // nothing to pick. Distinguish missing setup from unavailable models.
+  const status = candidates.length === 0
+    ? "settings.imageModelNoneAvailable"
+    : activeCandidate || runnableCount === 0
+      ? "settings.imageModelUnavailable"
+      : "settings.imageModelUnset";
   const checkedId = valid && activeCandidate ? imageModelOptionId(activeCandidate) : "";
 
   return (
@@ -83,14 +87,14 @@ export function ImageGenerationModelRow({
             </>
           ) : (
             <span className="model-default-empty" role="status">
-              {t(activeCandidate ? "settings.imageModelUnavailable" : "settings.imageModelUnset")}
+              {t(status)}
             </span>
           )}
         </div>
       </div>
-      {onChange && (options.filter((option) => !option.disabled).length > 1 || !checkedId) ? (
+      {onChange && runnableCount > 0 && (runnableCount > 1 || !checkedId) ? (
         <SettingsMenuSelect
-          className="model-image-selector"
+          className="model-image-selector settings-model-select"
           label={t("settings.imageModel")}
           value={checkedId}
           options={options}

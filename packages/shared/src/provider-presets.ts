@@ -494,6 +494,36 @@ export function zhipuRequestCompat(input: {
     : undefined;
 }
 
+function isMistralHostname(baseUrl: string | undefined): boolean {
+  const raw = baseUrl?.trim();
+  if (!raw) return false;
+  try {
+    const hostname = new URL(raw).hostname.toLowerCase();
+    return hostname === "mistral.ai" || hostname.endsWith(".mistral.ai");
+  } catch {
+    return false;
+  }
+}
+
+/** Whether a configured row targets Mistral's Chat Completions endpoint. */
+export function isMistralEndpoint(input: {
+  vendorKey?: string;
+  baseUrl?: string;
+}): boolean {
+  if (isMistralHostname(input.baseUrl)) return true;
+  // A published host for another vendor wins over a stale or mislabeled row.
+  if (addressesPublishedVendorHost(input.baseUrl)) return false;
+  return matchNamedPreset(input)?.id === "mistral";
+}
+
+/** Mistral rejects the OpenAI-only `store` field with HTTP 422. */
+export function mistralRequestCompat(input: {
+  vendorKey?: string;
+  baseUrl?: string;
+}): { supportsStore: false } | undefined {
+  return isMistralEndpoint(input) ? { supportsStore: false } : undefined;
+}
+
 function mentionsDeepSeek(value: string | undefined): boolean {
   return (value ?? "").toLowerCase().includes("deepseek");
 }

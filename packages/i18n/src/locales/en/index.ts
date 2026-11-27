@@ -1048,6 +1048,7 @@ export const en = {
     imageModel: "Image generation model",
     imageModelUnset: "Not configured",
     imageModelUnavailable: "Currently unavailable",
+    imageModelNoneAvailable: "No image generation model available. Use “$t(settings.setImageModel)” in a provider's model settings.",
     imageModelSaveFailed: "Could not save the image model.",
     clearImageModel: "Clear",
     setImageModel: "Set as image model",

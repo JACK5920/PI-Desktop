@@ -5,10 +5,12 @@ import {
   deepseekRequestCompat,
   DEEPSEEK_REASONING_REPLAY_PLACEHOLDER,
   isDeepSeekReasoningReplay,
+  isMistralEndpoint,
   isOfficialDeepSeekEndpoint,
   isZhipuEndpoint,
   matchNamedPreset,
   matchZhipuPreset,
+  mistralRequestCompat,
   normalizeEndpointUrl,
   withoutReasoningReplayPlaceholder,
   zhipuRequestCompat,
@@ -408,6 +410,24 @@ describe("addressesPublishedVendorHost", () => {
     ]) {
       expect(addressesPublishedVendorHost(baseUrl)).toBe(false);
     }
+  });
+});
+
+describe("Mistral Chat Completions compatibility", () => {
+  it("recognizes Mistral hosts, subdomains, and the named preset", () => {
+    expect(isMistralEndpoint({ baseUrl: "https://api.mistral.ai/v1" })).toBe(true);
+    expect(isMistralEndpoint({ baseUrl: "https://API.MISTRAL.AI/v1/" })).toBe(true);
+    expect(isMistralEndpoint({ baseUrl: "https://codestral.mistral.ai/v1" })).toBe(true);
+    expect(isMistralEndpoint({ vendorKey: "mistral" })).toBe(true);
+    expect(isMistralEndpoint({ vendorKey: "mistral", baseUrl: "https://proxy.example.test/v1" })).toBe(true);
+    expect(mistralRequestCompat({ baseUrl: "https://api.mistral.ai/v1" })).toEqual({ supportsStore: false });
+  });
+
+  it("rejects spoofed hosts, unrelated URLs, and rows repointed to another vendor", () => {
+    expect(isMistralEndpoint({ baseUrl: "https://api.mistral.ai.evil.test/v1" })).toBe(false);
+    expect(isMistralEndpoint({ baseUrl: "https://relay.example.test/mistral.ai/v1" })).toBe(false);
+    expect(isMistralEndpoint({ vendorKey: "mistral", baseUrl: "https://api.openai.com/v1" })).toBe(false);
+    expect(mistralRequestCompat({ vendorKey: "openai", baseUrl: "https://api.openai.com/v1" })).toBeUndefined();
   });
 });
 

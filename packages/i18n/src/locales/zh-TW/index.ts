@@ -1094,6 +1094,7 @@ export const zhTW = {
     imageModel: "生圖模型",
     imageModelUnset: "未設定",
     imageModelUnavailable: "暫不可用",
+    imageModelNoneAvailable: "暫無可用的生圖模型。請在服務商的模型設定中選擇「$t(settings.setImageModel)」。",
     imageModelSaveFailed: "無法儲存生圖模型。",
     clearImageModel: "清除",
     setImageModel: "設為生圖模型",

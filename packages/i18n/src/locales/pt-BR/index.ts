@@ -1038,6 +1038,7 @@ export const ptBR = {
     imageModel: "Modelo de imagens",
     imageModelUnset: "Sem configurar",
     imageModelUnavailable: "Atualmente indisponível",
+    imageModelNoneAvailable: "Nenhum modelo de geração de imagens disponível. Use “$t(settings.setImageModel)” nas configurações de modelos de um provedor.",
     imageModelSaveFailed: "Não foi possível salvar o modelo de imagem.",
     clearImageModel: "Limpar",
     setImageModel: "Definir como modelo de geração de imagens",
