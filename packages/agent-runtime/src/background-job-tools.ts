@@ -13,23 +13,74 @@ import type { RuntimeHost } from "./host-client.js";
 const jobSchema = Type.Object({
   kind: Type.Union([Type.Literal("bash"), Type.Literal("delegation")]),
   id: Type.String({ minLength: 1 }),
-}, { additionalProperties: false, description: "An explicit job returned by Bash, Task or TaskList." });
+}, { additionalProperties: false, description: "An explicit job returned by Bash, Task or TaskList. For a delegation, a delegationIds list selecting other delegates takes precedence over job.id; omit it, pass an empty list, or select only job.id to target that one delegate. For a Bash job, omit delegationIds or pass an empty list; mode may be all/any and minCompleted may be 1 when a strict model supplies selector defaults." });
 
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function target(params: unknown): JobReference | undefined {
+function jobReference(params: unknown): JobReference | undefined {
   if (!record(params) || params.job === undefined) return undefined;
   const job = params.job;
   if (!record(job) || (job.kind !== "bash" && job.kind !== "delegation") ||
       typeof job.id !== "string" || !job.id.trim() || Object.keys(job).some(key => key !== "id" && key !== "kind")) {
     throw new Error("job must contain a kind (bash or delegation) and a nonempty id");
   }
+  return { kind: job.kind, id: job.id };
+}
+
+function target(params: unknown): JobReference | undefined {
+  const job = jobReference(params);
+  if (!job || !record(params)) return undefined;
+  if (job.kind === "delegation" && params.delegationIds !== undefined) {
+    const delegationIds = params.delegationIds;
+    if (!Array.isArray(delegationIds) || delegationIds.some(id => typeof id !== "string")) {
+      throw new Error("delegationIds must be an array of delegation ids. To select multiple subagents, omit job and pass delegationIds.");
+    }
+    // The native multi-delegation selector is authoritative when a strict
+    // model emits it beside a job reference for a different delegate.
+    if (delegationIds.some(id => id !== job.id)) return undefined;
+  }
   if (["delegationIds", "mode", "minCompleted"].some(key => params[key] !== undefined)) {
+    if (job.kind === "delegation" && params.delegationIds !== undefined &&
+        Array.isArray(params.delegationIds) && params.delegationIds.every(id => id === job.id)) {
+      return job;
+    }
     throw new Error("job cannot be combined with delegationIds, mode or minCompleted");
   }
-  return { kind: job.kind, id: job.id };
+  return job;
+}
+
+/** TaskWait's strict schemas may return both a job and its native selectors. */
+function waitTarget(params: unknown): JobReference | undefined {
+  const job = jobReference(params);
+  if (!job || !record(params)) return undefined;
+  const delegationIds = params.delegationIds;
+  if (job.kind === "delegation") {
+    if (delegationIds !== undefined) {
+      if (!Array.isArray(delegationIds) || delegationIds.some(id => typeof id !== "string")) {
+        throw new Error("delegationIds must be an array of delegation ids");
+      }
+      // The native multi-delegation wait owns its selector semantics. A job
+      // reference emitted beside other ids must not block that valid request.
+      if (delegationIds.some(id => id !== job.id)) return undefined;
+    }
+    return job;
+  }
+
+  if (delegationIds !== undefined && (!Array.isArray(delegationIds) || delegationIds.some(id => typeof id !== "string"))) {
+    throw new Error("delegationIds must be an array of delegation ids");
+  }
+  if (Array.isArray(delegationIds) && delegationIds.length > 0) {
+    throw new Error("A Bash job accepts only an empty delegationIds list. To select subagents, omit job and use delegationIds.");
+  }
+  if (params.mode !== undefined && params.mode !== "all" && params.mode !== "any") {
+    throw new Error("A Bash job accepts only mode all or any. To select subagents, omit job and use delegationIds.");
+  }
+  if (params.minCompleted !== undefined && params.minCompleted !== 1) {
+    throw new Error("A Bash job accepts only minCompleted 1. To select subagents, omit job and use delegationIds.");
+  }
+  return job;
 }
 
 /** Observe late rejections and release the listener on either completion path. */
@@ -93,10 +144,18 @@ export function buildJobTools(
     parameters: Type.Object({ ...(delegates.wait.parameters as TObject).properties, job: Type.Optional(jobSchema) }),
     execute: async (id, input, signal, update) => {
       const params = record(input) ? input : {};
-      const job = target(params);
-      if (!job) return delegates.wait.execute(id, params, signal, update);
+      const job = waitTarget(params);
+      if (!job) {
+        // When the native delegation list selected other delegates, remove
+        // only the adapter's `job` field and preserve TaskWait's own selectors.
+        const { job: _job, ...delegationParams } = params;
+        return delegates.wait.execute(id, delegationParams, signal, update);
+      }
       if (job.kind === "delegation") {
-        return delegates.wait.execute(id, { ...params, job: undefined, delegationIds: [job.id] }, signal, update);
+        return delegates.wait.execute(id, {
+          delegationIds: [job.id],
+          ...(params.timeoutSeconds === undefined ? {} : { timeoutSeconds: params.timeoutSeconds }),
+        }, signal, update);
       }
       const seconds = params.timeoutSeconds ?? options.defaultTimeoutSeconds;
       if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds < 1 || seconds > options.maxTimeoutSeconds) {
@@ -157,7 +216,10 @@ export function buildJobTools(
     execute: async (id, input, signal, update) => {
       const params = record(input) ? input : {};
       const job = target(params);
-      if (!job) return delegates.stop.execute(id, params, signal, update);
+      if (!job) {
+        const { job: _job, ...delegationParams } = params;
+        return delegates.stop.execute(id, delegationParams, signal, update);
+      }
       if (job.kind === "delegation") {
         return delegates.stop.execute(id, { delegationIds: [job.id] }, signal, update);
       }

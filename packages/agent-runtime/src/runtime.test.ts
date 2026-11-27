@@ -11200,6 +11200,8 @@ describe("DesktopAgentRuntime subagents", () => {
     );
     expect(listed.details.resumable).toEqual([]);
     expect(listed.content[0].text).not.toContain("Reusable subagent sessions");
+    expect(listed.content[0].text).toContain(`delegationIds=["${delegationId}"]`);
+    expect(listed.content[0].text).not.toContain("job=");
 
     subagentRuns.deferred = false;
     await runtime.dispose();

@@ -9,7 +9,12 @@ afterEach(() => vi.useRealTimers());
 function fixture(remote = false) {
   const delegate = (name: string): AgentTool => ({
     name, label: name, description: name,
-    parameters: Type.Object({ delegationIds: Type.Optional(Type.Array(Type.String())) }),
+    parameters: Type.Object({
+      delegationIds: Type.Optional(Type.Array(Type.String())),
+      mode: Type.Optional(Type.Union([Type.Literal("all"), Type.Literal("any")])),
+      minCompleted: Type.Optional(Type.Number()),
+      timeoutSeconds: Type.Optional(Type.Number()),
+    }),
     execute: vi.fn(async () => ({ content: [{ type: "text" as const, text: "delegate report" }], details: { delegations: [] } })),
   });
   const delegates = { wait: delegate("TaskWait"), list: delegate("TaskList"), stop: delegate("TaskStop") };
@@ -48,11 +53,89 @@ describe("session job controls", () => {
     expect(delegates.stop.execute).toHaveBeenLastCalledWith("one", { delegationIds: ["delegate"] }, undefined, undefined);
   });
 
-  it.each(["delegationIds", "mode", "minCompleted"])("rejects mixed selectors before dispatch (%s)", async key => {
-    const { wait, stop, dispatch } = fixture();
+  it.each(["delegationIds", "mode", "minCompleted"])("rejects conflicting Bash TaskStop selectors before dispatch (%s)", async key => {
+    const { stop, dispatch } = fixture();
     const args = { job: { kind: "bash", id: "process" }, [key]: [] };
-    await expect(wait.execute("wait", args)).rejects.toThrow("cannot be combined");
     await expect(stop.execute("stop", args)).rejects.toThrow("cannot be combined");
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it("lets an explicit delegation list override a colocated job reference", async () => {
+    const { wait, delegates, dispatch } = fixture();
+    await wait.execute("wait", {
+      job: { kind: "delegation", id: "delegate-one" },
+      delegationIds: ["delegate-one", "delegate-two"],
+      mode: "any",
+      minCompleted: 2,
+      timeoutSeconds: 12,
+    });
+
+    expect(delegates.wait.execute).toHaveBeenLastCalledWith("wait", {
+      delegationIds: ["delegate-one", "delegate-two"],
+      mode: "any",
+      minCompleted: 2,
+      timeoutSeconds: 12,
+    }, undefined, undefined);
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it("lets TaskStop use a multi-delegation list beside an unrelated job reference", async () => {
+    const { stop, delegates, dispatch } = fixture();
+    await stop.execute("stop", {
+      job: { kind: "delegation", id: "delegate-one" },
+      delegationIds: ["delegate-one", "delegate-two"],
+    });
+    expect(delegates.stop.execute).toHaveBeenLastCalledWith("stop", {
+      delegationIds: ["delegate-one", "delegate-two"],
+    }, undefined, undefined);
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it.each(["delegate-one", null, ["delegate-one", null], [42]])("rejects malformed delegation selectors (%j)", async delegationIds => {
+    const { wait, stop, dispatch, delegates } = fixture();
+    const args = { job: { kind: "delegation", id: "delegate-one" }, delegationIds };
+    await expect(wait.execute("wait", args)).rejects.toThrow("delegationIds must be an array");
+    await expect(stop.execute("stop", args)).rejects.toThrow("delegationIds must be an array");
+    expect(delegates.wait.execute).not.toHaveBeenCalled();
+    expect(delegates.stop.execute).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it.each([{ delegationIds: [] }, { delegationIds: ["delegate-one"] }])("routes an empty or matching delegation selector to the explicit job", async ({ delegationIds }) => {
+    const { wait, delegates } = fixture();
+    await wait.execute("wait", {
+      job: { kind: "delegation", id: "delegate-one" },
+      delegationIds,
+      timeoutSeconds: 12,
+    });
+    expect(delegates.wait.execute).toHaveBeenLastCalledWith("wait", {
+      delegationIds: ["delegate-one"],
+      timeoutSeconds: 12,
+    }, undefined, undefined);
+  });
+
+  it("accepts strict-model default selectors for a single Bash job", async () => {
+    const { wait, dispatch } = fixture();
+    await wait.execute("wait", {
+      job: { kind: "bash", id: "process" },
+      delegationIds: [],
+      mode: "all",
+      minCompleted: 1,
+      timeoutSeconds: 12,
+    });
+    expect(dispatch).toHaveBeenCalledWith("backgroundJobs.wait", {
+      sessionId: "owner", id: "process", timeoutMs: 0,
+    });
+  });
+
+  it("rejects invalid selectors alongside a Bash job without dispatching", async () => {
+    const { wait, dispatch } = fixture();
+    await expect(wait.execute("wait", {
+      job: { kind: "bash", id: "process" }, delegationIds: ["delegate-one"],
+    })).rejects.toThrow("To select subagents, omit job");
+    await expect(wait.execute("wait", {
+      job: { kind: "bash", id: "process" }, mode: "first",
+    })).rejects.toThrow("mode");
     expect(dispatch).not.toHaveBeenCalled();
   });
 
