@@ -462,6 +462,10 @@ test("the turn header reports failure, stop, live and completion in that order",
     }),
     { kind: "running", phase: "compacting" },
   );
+  assert.deepEqual(
+    turnProcessPhase({ parts: [], isActive: false, failed: false, stopped: true }),
+    { kind: "stopped" },
+  );
 });
 
 test("a failed child never turns a completed turn into failed or stopped", () => {

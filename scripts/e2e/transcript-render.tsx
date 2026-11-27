@@ -20,8 +20,11 @@ import {
 } from "../../apps/desktop/src/components/ContextMenu";
 import { Markdown } from "../../apps/desktop/src/components/Markdown";
 import { AssistantTurn } from "../../apps/desktop/src/features/chat/transcript/AssistantTurn";
+import { CollapsibleUserText } from "../../apps/desktop/src/features/chat/transcript/CollapsibleUserText";
 import { ChatTranscript } from "../../apps/desktop/src/features/chat/transcript/ChatTranscript";
+import { TranscriptDisclosureProvider } from "../../apps/desktop/src/features/chat/transcript/disclosure";
 import { buildTranscriptEntries } from "../../apps/desktop/src/lib/assistant-turns";
+import { TranscriptSearchContext } from "../../apps/desktop/src/lib/transcript-search-context";
 import { assistantErrorMessage } from "../../apps/desktop/src/stores/helpers/store-helpers";
 import type { AppState } from "../../apps/desktop/src/stores/app-state";
 import { createSessionRuntime } from "../../apps/desktop/src/stores/runtime/session-runtime";
@@ -45,6 +48,74 @@ globalThis.transcriptLongHistoryProbe = runLongHistoryProbe;
 
 function assert(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message);
+}
+
+async function longUserMessageDisclosureProbe(i18n: ReturnType<typeof createInstance>) {
+  const host = document.createElement("div");
+  host.style.cssText = "position:fixed;left:0;top:0;width:720px;visibility:hidden";
+  document.body.append(host);
+  const root = createRoot(host);
+  const render = (messageId: string, content: string, target: { sessionId: string; messageId: string; query: string; requestId: number } | null = null) => {
+    flushSync(() => root.render(
+      <I18nextProvider i18n={i18n}>
+        <TranscriptDisclosureProvider>
+          <TranscriptSearchContext.Provider value={target}>
+            <div className="message-bubble">
+              <CollapsibleUserText messageId={messageId} dir="auto">{content}</CollapsibleUserText>
+            </div>
+          </TranscriptSearchContext.Provider>
+        </TranscriptDisclosureProvider>
+      </I18nextProvider>,
+    ));
+  };
+  const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  const toggle = () => host.querySelector<HTMLButtonElement>(".user-text-toggle");
+  const until = async (predicate: () => boolean, message: string) => {
+    const deadline = performance.now() + 3000;
+    while (!predicate()) {
+      assert(performance.now() < deadline, message);
+      await frame();
+    }
+  };
+  try {
+    render("short-user-text", Array(6).fill("Short line").join("\n"));
+    await frame();
+    await frame();
+    assert(!toggle(), "six rendered lines must remain fully visible without a toggle");
+
+    render("long-user-text", Array(7).fill("Long line").join("\n"));
+    await until(() => Boolean(toggle()), "seven rendered lines did not create a fold control");
+    const button = toggle()!;
+    const preview = host.querySelector<HTMLElement>(".user-text-preview")!;
+    const content = host.querySelector<HTMLElement>(".message-user-text")!;
+    const collapsedHeight = preview.getBoundingClientRect().height;
+    assert(button.getAttribute("aria-expanded") === "false", "long user text should start collapsed");
+    assert(getComputedStyle(preview).maskImage !== "none", "collapsed preview should fade at its final line");
+    assert(content.textContent?.split("\n").length === 7, "folding must retain the full original text in the DOM");
+    button.click();
+    await until(() => button.getAttribute("aria-expanded") === "true", "expand action did not open the full text");
+    assert(preview.getBoundingClientRect().height > collapsedHeight, "expanded text did not reveal its full height");
+    button.click();
+    await until(() => button.getAttribute("aria-expanded") === "false", "collapse action did not restore the preview");
+
+    render("wrapped-user-text", `Needle ${"wrapped text ".repeat(36)}`);
+    await frame();
+    assert(!toggle(), "wide content should not fold when it fits within six lines");
+    host.style.width = "180px";
+    await until(() => Boolean(toggle()), "resizing to a narrow transcript did not fold wrapped text");
+
+    render("search-reveal-user-text", Array(7).fill("Search target").join("\n"), {
+      sessionId: "transcript-render-fixture",
+      messageId: "search-reveal-user-text",
+      query: "Search target",
+      requestId: 1,
+    });
+    await until(() => toggle()?.getAttribute("aria-expanded") === "true", "search navigation did not reveal a folded user message");
+    return { ok: true, sixLineNoToggle: true, sevenLineExpandCollapse: true, resizeReflow: true, searchReveal: true };
+  } finally {
+    flushSync(() => root.unmount());
+    host.remove();
+  }
 }
 
 async function markdownLinkInteractionProbe(
@@ -416,6 +487,7 @@ globalThis.transcriptRenderProbe = async () => {
     resources: { en: { translation: en } },
     interpolation: { escapeValue: false },
   });
+  const longUserMessages = await longUserMessageDisclosureProbe(i18n);
   // This probe asserts synchronous transcript projection and memoization. Keep
   // the presentation animation out of that contract so rAF timing cannot hide
   // the latest streaming fragment from the DOM assertion.
@@ -686,7 +758,7 @@ globalThis.transcriptRenderProbe = async () => {
     const turnProcess = await turnProcessProbe();
     const autoCollapse = await transcriptAutoCollapseProbe();
     return {
-      ok: statusLifecycle.ok && markdownLinks.ok && contextMenuSubmenu.ok && turnProcess.ok,
+      ok: statusLifecycle.ok && markdownLinks.ok && contextMenuSubmenu.ok && turnProcess.ok && longUserMessages.ok,
       statusLifecycle,
       markdownLinks,
       contextMenuSubmenu,
@@ -698,6 +770,7 @@ globalThis.transcriptRenderProbe = async () => {
       taskTimingUpdated: true,
       turnProcess,
       autoCollapse,
+      longUserMessages,
       messageEditing: await transcriptEditProbe(),
       textUpdateDurationMs,
     };

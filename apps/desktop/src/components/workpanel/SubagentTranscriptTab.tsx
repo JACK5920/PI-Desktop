@@ -1,80 +1,60 @@
-import { toolResultPayload } from "../../lib/tool-presentation";
-import { SubagentStopButton } from "../../features/chat/transcript/SubagentStopButton";
-import { collectDelegationStatuses, subagentOutcome } from "../../lib/subagent-topology";
-import { useLayoutEffect, useMemo } from "react";
+import { Fragment, useLayoutEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { useAppStore } from "../../stores/app-store";
-import { useFollowScroll } from "../../hooks/use-follow-scroll";
-import { useTranscriptView } from "../../hooks/use-transcript-view";
-import { useTranscriptSearchFocus } from "../../hooks/use-transcript-search-focus";
 import { IconArrowDown, IconBot, IconChevronDown } from "../icons";
 import { Textarea, TooltipButton } from "../ui";
-import { DisclosureAnchorContext } from "../../lib/disclosure-anchor-context";
+import { AssistantTurnBody } from "../../features/chat/transcript/AssistantTurnBody";
+import { CollapsibleUserText } from "../../features/chat/transcript/CollapsibleUserText";
+import { SubagentStopButton } from "../../features/chat/transcript/SubagentStopButton";
 import { TranscriptDisclosureProvider } from "../../features/chat/transcript/disclosure";
-import { buildSubagentTranscript } from "../../lib/subagent-transcript";
 import { delegateModelId, delegateThinkingLevel } from "../../features/chat/transcript/model";
-import { SubagentTranscriptContent } from "./SubagentTranscriptContent";
+import { useFollowScroll } from "../../hooks/use-follow-scroll";
+import { useTranscriptSearchFocus } from "../../hooks/use-transcript-search-focus";
+import { useTranscriptView } from "../../hooks/use-transcript-view";
+import { DisclosureAnchorContext } from "../../lib/disclosure-anchor-context";
+import { delegationIdForMessage } from "../../lib/subagent-panel";
+import { collectDelegationStatuses, delegationIsCreating, subagentOutcome } from "../../lib/subagent-topology";
+import { buildSubagentTranscript } from "../../lib/subagent-transcript";
+import { TranscriptSearchContext } from "../../lib/transcript-search-context";
+import { SlotSessionProvider } from "../../plugins/renderer-slots/use-slots";
+import { useAppStore } from "../../stores/app-store";
 
-/**
- * The work-panel tab showing one delegation as a conversation (issue #917).
- *
- * Every `Task` call of the delegation chain opens a turn: the prompt the
- * parent sent renders as a user row, and the rows the delegate produced under
- * that call render with the main transcript's own message-list language —
- * tool rows, thinking rows, and answer bubbles alike. Follow-up `Task` calls
- * on the same delegation append further turns, so a resumed delegate reads as
- * one continuing user/assistant exchange.
- *
- * The tab allows explicit cancellation; the composer at the foot is a disabled textarea
- * whose placeholder says the delegate is driven by the main agent. There is
- * deliberately no send path.
- */
+/** The selected delegate uses the same process and answer renderer as the main transcript. */
 export function SubagentTranscriptTab({ delegationId }: { delegationId: string }) {
+  const sessionId = useAppStore((state) => state.activeSessionId);
+  if (!sessionId) return null;
   return (
-    <TranscriptDisclosureProvider key={delegationId}>
-      <SubagentTranscriptSurface delegationId={delegationId} />
-    </TranscriptDisclosureProvider>
+    <SlotSessionProvider sessionId={sessionId}>
+      <TranscriptDisclosureProvider
+        key={JSON.stringify([sessionId, delegationId])}
+        sessionId={sessionId}
+      >
+        <SubagentTranscriptSurface sessionId={sessionId} delegationId={delegationId} />
+      </TranscriptDisclosureProvider>
+    </SlotSessionProvider>
   );
 }
 
-function SubagentTranscriptSurface({ delegationId }: { delegationId: string }) {
+function SubagentTranscriptSurface({ sessionId, delegationId }: { sessionId: string; delegationId: string }) {
   const { t } = useTranslation();
-  const activeSessionId = useAppStore((state) => state.activeSessionId);
-  // A tab only renders inside a presented panel, which always has a session;
-  // the empty key keeps the hook's contract while nothing is active.
-  const transcript = useTranscriptView(activeSessionId ?? "");
-  const { messages } = transcript;
-  const delegateRunning = useMemo(() => {
-    const items = messages
-      .filter(message => message.role === "tool")
-      .map(message => ({ kind: "tool" as const, message }));
-    const statuses = collectDelegationStatuses(items);
-    return items.some(({ message }) => {
-      const payload = toolResultPayload(message);
-      return payload && typeof payload === "object" &&
-        "delegationId" in payload && payload.delegationId === delegationId &&
-        subagentOutcome(message, statuses) === "running";
-    });
-  }, [messages, delegationId]);
-  const delegateSettings = useMemo(() => {
-    const result = messages.find((message) => {
-      if (message.role !== "tool") return false;
-      const payload = toolResultPayload(message);
-      return payload && typeof payload === "object" && !Array.isArray(payload) &&
-        "delegationId" in payload && payload.delegationId === delegationId;
-    });
-    return {
-      modelId: result ? delegateModelId(result) : "",
-      thinkingLevel: result ? delegateThinkingLevel(result) : undefined,
-    };
-  }, [messages, delegationId]);
-  const isRunning = useAppStore(
-    (state) => (activeSessionId ? state.runningSessions[activeSessionId] ?? false : false),
-  );
-  const transcriptResult = useMemo(
-    () => buildSubagentTranscript(messages, delegationId),
-    [messages, delegationId],
-  );
+  const { messages, focus } = useTranscriptView(sessionId);
+  const parentRunning = useAppStore((state) => state.runningSessions[sessionId] ?? false);
+  const transcript = useMemo(() => buildSubagentTranscript(messages, delegationId), [messages, delegationId]);
+  const statuses = useMemo(() => collectDelegationStatuses(
+    messages.filter((message) => message.role === "tool").map((message) => ({ kind: "tool" as const, message })),
+    { turnLive: parentRunning },
+  ), [messages, parentRunning]);
+  const latest = transcript?.turns.at(-1)?.call;
+  const outcome = latest ? subagentOutcome(latest, statuses) : undefined;
+  const running = Boolean(latest && parentRunning && outcome === "running");
+  const stopId = latest && running && !delegationIsCreating(latest)
+    ? delegationIdForMessage(latest)
+    : undefined;
+  const modelId = latest ? delegateModelId(latest) : "";
+  const thinkingLevel = latest ? delegateThinkingLevel(latest) : undefined;
+  const modelDetails = [
+    modelId && `${t("chat.model")}: ${modelId}`,
+    thinkingLevel && `${t("chat.reasoningLevel")}: ${thinkingLevel}`,
+  ].filter(Boolean).join(" · ");
   const {
     scrollRef,
     contentRef,
@@ -86,25 +66,16 @@ function SubagentTranscriptSurface({ delegationId }: { delegationId: string }) {
     disclosureAnchorNotifier,
   } = useFollowScroll();
 
-  // Several delegation tabs can be open at once, so an explicit search hit
-  // is claimed only by the tab whose own conversation contains the message;
-  // the other tabs stay where the reader left them.
-  const searchTarget = useMemo(() => {
-    const focus = transcript.focus;
-    if (!focus) return null;
-    const claimed = transcriptResult?.turns.some((turn) =>
-      turn.rows.some((row) => row.message.id === focus.messageId),
-    );
-    return claimed ? focus : null;
-  }, [transcript.focus, transcriptResult]);
-
+  const searchMessage = useMemo(() => focus && transcript?.turns
+    .flatMap((turn) => turn.messages)
+    .find((message) => message.id === focus.messageId), [focus, transcript]);
+  const searchTarget = searchMessage ? focus : null;
   useTranscriptSearchFocus({
     target: searchTarget,
-    source:
-      messages.find((message) => message.id === searchTarget?.messageId)?.content ?? "",
+    source: searchMessage?.content ?? "",
     scrollRef,
     contentRef,
-    contentVersion: messages,
+    contentVersion: transcript,
     onNavigate: releaseFollow,
   });
 
@@ -114,66 +85,86 @@ function SubagentTranscriptSurface({ delegationId }: { delegationId: string }) {
 
   useLayoutEffect(() => {
     scheduleFollowScroll();
-  }, [messages, scheduleFollowScroll]);
+  }, [transcript, scheduleFollowScroll]);
 
   return (
-    <DisclosureAnchorContext.Provider value={disclosureAnchorNotifier}>
-      <div className="subagent-transcript-tab" data-testid="subagent-transcript-tab">
-        <div
-          ref={scrollRef}
-          data-scroll-owner="follow"
-          className="subagent-transcript-scroll"
-          onScroll={handleScroll}
-          role="log"
-          aria-live="polite"
-          aria-label={t("panel.subagent")}
-          tabIndex={0}
-        >
-          <div ref={contentRef}>
-            <SubagentTranscriptContent
-              turns={transcriptResult?.turns ?? []}
-              emptyLabel={t("panel.subagentEmpty")}
-              isRunning={isRunning}
-            />
-          </div>
-        </div>
-        {showJump ? (
-          <TooltipButton
-            type="button"
-            className="jump-latest-btn subagent-transcript-jump"
-            tooltip={t("chat.scrollToBottom")}
-            ariaLabel={t("chat.scrollToBottom")}
-            onClick={jumpToLatest}
+    <TranscriptSearchContext.Provider value={searchTarget}>
+      <DisclosureAnchorContext.Provider value={disclosureAnchorNotifier}>
+        <div className="subagent-transcript-tab" data-testid="subagent-transcript-tab">
+          <div
+            ref={scrollRef}
+            data-scroll-owner="follow"
+            className="subagent-transcript-scroll"
+            onScroll={handleScroll}
+            role="log"
+            aria-live="polite"
+            aria-label={t("panel.subagent")}
+            tabIndex={0}
           >
-            <IconArrowDown size={14} />
-          </TooltipButton>
-        ) : null}
-        <footer className="subagent-transcript-composer">
-          <Textarea
-            disabled
-            rows={2}
-            aria-label={t("panel.subagentReadOnly")}
-            placeholder={t("panel.subagentReadOnly")}
-          />
-          <div className="subagent-transcript-composer-controls">
-            <button
-              type="button"
-              className="icon-btn composer-model-thinking-chip subagent-transcript-model-picker"
-              disabled
-              aria-haspopup="listbox"
-              aria-label={`${t("chat.model")}: ${delegateSettings.modelId || "—"}. ${t("chat.reasoningLevel")}: ${delegateSettings.thinkingLevel || "—"}`}
-            >
-              <span className="composer-model-thinking-icon" aria-hidden="true"><IconBot size={14} /></span>
-              <span className="composer-model-thinking-model">{delegateSettings.modelId || "—"}</span>
-              <span className="composer-model-thinking-level">{delegateSettings.thinkingLevel || "—"}</span>
-              <IconChevronDown size={12} aria-hidden="true" className="composer-model-thinking-chevron" />
-            </button>
-            {delegateRunning ? (
-              <SubagentStopButton delegationId={delegationId} running compact />
-            ) : null}
+            <div ref={contentRef} className="subagent-transcript-list">
+              {transcript ? transcript.turns.map(({ call, task, reply }) => (
+                <Fragment key={reply.id}>
+                  <div className="message-row user">
+                    <div className="message-col">
+                      <div className="message-bubble">
+                        <CollapsibleUserText messageId={call.id} dir="auto">
+                          {task || t("panel.subagentTaskEmpty")}
+                        </CollapsibleUserText>
+                      </div>
+                    </div>
+                  </div>
+                  {reply.parts.length > 0 ? (
+                    <div className="message-row assistant assistant-turn" role="article" aria-label={t("chat.assistantMessage")}>
+                      <div className="message-col">
+                        <AssistantTurnBody
+                          entry={reply}
+                          isActive={call === latest && running}
+                          outcome={subagentOutcome(call, statuses)}
+                        />
+                      </div>
+                    </div>
+                  ) : null}
+                </Fragment>
+              )) : (
+                <div className="subagent-transcript-empty" role="status">{t("panel.subagentEmpty")}</div>
+              )}
+            </div>
           </div>
-        </footer>
-      </div>
-    </DisclosureAnchorContext.Provider>
+          {showJump ? (
+            <TooltipButton
+              type="button"
+              className="jump-latest-btn subagent-transcript-jump"
+              tooltip={t("chat.scrollToBottom")}
+              ariaLabel={t("chat.scrollToBottom")}
+              onClick={jumpToLatest}
+            >
+              <IconArrowDown size={14} />
+            </TooltipButton>
+          ) : null}
+          <footer className="subagent-transcript-composer">
+            <Textarea disabled rows={2} aria-label={t("panel.subagentReadOnly")} placeholder={t("panel.subagentReadOnly")} />
+            {modelDetails || stopId ? (
+              <div className="subagent-transcript-composer-controls">
+                {modelDetails ? (
+                  <button
+                    type="button"
+                    className="icon-btn composer-model-thinking-chip subagent-transcript-model-picker"
+                    disabled
+                    aria-haspopup="listbox"
+                    aria-label={`${t("chat.model")}: ${modelId || "—"}. ${t("chat.reasoningLevel")}: ${thinkingLevel || "—"}`}
+                  >
+                    <span className="composer-model-thinking-icon" aria-hidden="true"><IconBot size={14} /></span>
+                    <span className="composer-model-thinking-model">{modelId || "—"}</span>
+                    <span className="composer-model-thinking-level">{thinkingLevel || "—"}</span>
+                    <IconChevronDown size={12} aria-hidden="true" className="composer-model-thinking-chevron" />
+                  </button>
+                ) : null}
+                {stopId ? <SubagentStopButton delegationId={stopId} name={transcript?.agentName} running compact /> : null}
+              </div>
+            ) : null}
+          </footer>
+        </div>
+      </DisclosureAnchorContext.Provider>
+    </TranscriptSearchContext.Provider>
   );
 }

@@ -1,14 +1,23 @@
 import type { UiMessage } from "@pi-desktop/shared";
 import {
+  buildDelegationReply,
   delegationChainMaps,
   messageThinking,
+  type AssistantTurnEntry,
   type SubagentRunItem,
 } from "./assistant-turns";
 import { isDelegationStartTool } from "./tool-display";
 import { delegationIdForMessage } from "./subagent-panel";
 
 /** One user/assistant exchange of a delegate session. */
-export type SubagentTranscriptTurn = { task: string; rows: SubagentRunItem[] };
+export type SubagentTranscriptTurn = {
+  task: string;
+  call: UiMessage;
+  messages: UiMessage[];
+  reply: AssistantTurnEntry;
+  /** Retained for engine-neutral transcript adapters. */
+  rows: SubagentRunItem[];
+};
 
 /**
  * A delegate's conversation as alternating turns: each Task call of the
@@ -141,13 +150,22 @@ export function buildSubagentTranscript(
     .find(Boolean);
   const agentName = runAgentName || requestedName;
 
+  const byCall = new Map<string, UiMessage[]>();
+  for (const message of messages) {
+    const owner = message.parentToolCallId;
+    if (!owner || !chain.has(owner)) continue;
+    const owned = byCall.get(owner);
+    if (owned) owned.push(message);
+    else byCall.set(owner, [message]);
+  }
+
   const turns: SubagentTranscriptTurn[] = [];
   for (const call of calls) {
     const callId = call.toolCallId as string;
     if (!chain.has(callId)) continue;
+    const owned = byCall.get(callId) ?? [];
     const rows: SubagentRunItem[] = [];
-    for (const message of messages) {
-      if (message.parentToolCallId !== callId) continue;
+    for (const message of owned) {
       if (message.role === "tool") {
         rows.push({ kind: "tool", message });
         continue;
@@ -160,7 +178,13 @@ export function buildSubagentTranscript(
         rows.push({ kind: "answer", message });
       }
     }
-    turns.push({ task: delegateTaskDescription(call), rows });
+    turns.push({
+      task: delegateTaskDescription(call),
+      call,
+      messages: owned,
+      reply: buildDelegationReply(callId, owned),
+      rows,
+    });
   }
 
   return {

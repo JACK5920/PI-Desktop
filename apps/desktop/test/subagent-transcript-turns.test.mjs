@@ -50,6 +50,13 @@ test("one Task call becomes one user turn followed by the delegate's rows", () =
     transcript.turns[0].rows.map((row) => row.kind),
     ["tool", "thinking", "answer"],
   );
+  assert.equal(transcript.turns[0].call.toolCallId, "call-1");
+  assert.deepEqual(transcript.turns[0].messages.map((row) => row.id), ["step-1", "note-1"]);
+  assert.equal(transcript.turns[0].reply.id, "call-1");
+  assert.deepEqual(
+    transcript.turns[0].reply.parts.map((part) => part.kind),
+    ["activity", "message"],
+  );
 });
 
 test("a resumed delegation renders follow-up prompts as further user turns", () => {

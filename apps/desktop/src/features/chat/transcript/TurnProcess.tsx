@@ -61,6 +61,7 @@ export function TurnProcess({
   delegationStatuses,
   isActive,
   failed,
+  stopped = false,
   activity,
   children,
 }: {
@@ -72,6 +73,8 @@ export function TurnProcess({
   isActive: boolean;
   /** The turn recorded a failure of its own, so the header must not claim success. */
   failed: boolean;
+  /** An owning subagent lifecycle can report a terminal stop without child rows. */
+  stopped?: boolean;
   /** Live runtime stage, when the runtime reports one. */
   activity?: AgentActivity;
   delegationStatuses?: ReadonlyMap<string, SubagentOutcome>;
@@ -121,7 +124,7 @@ export function TurnProcess({
   // `startedAt` is absent for history that recorded no timing, and "0s" would be
   // a lie there, so the duration is dropped instead.
   const hasTiming = startedAt !== undefined && seconds > 0;
-  const phase = turnProcessPhase({ parts: turnParts, isActive, failed, activity });
+  const phase = turnProcessPhase({ parts: turnParts, isActive, failed, stopped, activity });
   // The header's label is the status alone. Duration and tool count are separate
   // values so each can be omitted independently, and the caret can follow the
   // last one instead of being pushed to the far edge of the band.

@@ -57,6 +57,7 @@ import {
 import { MessageAnnotationSummary } from "./MessageAnnotationSummary";
 import { SourceAnnotationMarkers } from "./SourceAnnotationMarkers";
 import { useTranscriptHistoryActionsAllowed } from "./transcript-action-scope";
+import { CollapsibleUserText } from "./CollapsibleUserText";
 
 const EMPTY_RESPONSE_ANNOTATIONS: readonly ParsedResponseAnnotation[] = [];
 const EMPTY_SOURCE_RESPONSE_ANNOTATIONS: readonly IndexedSourceResponseAnnotation[] = [];
@@ -422,7 +423,7 @@ export const MessageRow = memo(function MessageRow({
                   </div>
                 ) : null}
                 {displayed ? (
-                  <div className="message-user-text selectable">
+                  <CollapsibleUserText messageId={message.id}>
                     {editableUserMessage && message.command ? (
                       <>
                         {message.skillMentions?.length || message.agentMentions?.length ? (
@@ -460,7 +461,7 @@ export const MessageRow = memo(function MessageRow({
                       )
                     )}
                     {attachmentChips}
-                  </div>
+                  </CollapsibleUserText>
                 ) : attachmentChips}
               </>
             ) : (

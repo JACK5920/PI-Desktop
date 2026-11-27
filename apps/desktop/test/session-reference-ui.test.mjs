@@ -182,6 +182,8 @@ const { MessageRow } = load(new URL("../src/features/chat/transcript/MessageRow.
     useTranscriptMenu: () => () => {},
     useChatTextActions: () => ({ copyText: () => {}, selectText: () => {} }),
   },
+  "./CollapsibleUserText": { CollapsibleUserText: ({ children }) =>
+    React.createElement("div", { className: "message-user-text selectable" }, children) },
   "./shared": shared,
 });
 

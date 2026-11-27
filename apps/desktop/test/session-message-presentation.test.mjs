@@ -107,6 +107,8 @@ const { MessageRow } = loadComponent("MessageRow", {
   "./MessageAnnotationSummary": { MessageAnnotationSummary },
   "./SessionMessageOrigin": origin,
   "./extra-attachments": { getExtraMessageAttachments },
+  "./CollapsibleUserText": { CollapsibleUserText: ({ children }) =>
+    React.createElement("div", { className: "message-user-text selectable" }, children) },
 });
 const userMessage = {
   id: "incoming-row",
@@ -159,6 +161,7 @@ test("OMP edit form is gated by native edit availability while the action row st
   assert.match(messageRowSource, /const cancelEdit = \(\) => \{[\s\S]*?setEditing\(false\);/);
   assert.match(messageRowSource, /onClick=\{cancelEdit\}/);
   assert.match(messageRowSource, /onSubmit=\{\(event\) => \{[\s\S]*?void retryEdit\(\);/);
+  assert.match(messageRowSource, /<CollapsibleUserText messageId=\{message\.id\}>/);
   assert.match(messageRowSource, /!editing && \(hasAnswer \|\| showRevisionPager \|\| failedUserAttempt\)/);
 });
 

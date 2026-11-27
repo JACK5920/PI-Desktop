@@ -7,10 +7,6 @@ const tabSource = await readFile(
   new URL("../src/components/workpanel/SubagentTranscriptTab.tsx", import.meta.url),
   "utf8",
 );
-const contentSource = await readFile(
-  new URL("../src/components/workpanel/SubagentTranscriptContent.tsx", import.meta.url),
-  "utf8",
-);
 const workPanelSource = await readFile(
   new URL("../src/components/workpanel/WorkPanel.tsx", import.meta.url),
   "utf8",
@@ -92,24 +88,23 @@ test("the work panel renders the delegation tab like every other resource", () =
 test("the delegation tab renders a message list with a read-only composer", () => {
   assert.match(tabSource, /data-testid="subagent-transcript-tab"/);
   assert.match(tabSource, /buildSubagentTranscript\(messages, delegationId\)/);
-  assert.match(tabSource, /<SubagentTranscriptContent/);
-  assert.match(contentSource, /className=\{`message-row user\$\{compactTasks \? " omp-subagent-task-row" : ""\}`\}/);
-  assert.match(contentSource, /compactTasks = false/);
-  assert.match(contentSource, /className="message-user-text selectable"/);
-  assert.match(contentSource, /className="message-row assistant"/);
-  assert.match(contentSource, /data-message-id=\{row\.message\.id\}/);
+  assert.match(tabSource, /<CollapsibleUserText messageId=\{call\.id\}/);
+  assert.match(tabSource, /<AssistantTurnBody[\s\S]*entry=\{reply\}/);
+  assert.match(tabSource, /<TranscriptSearchContext\.Provider value=\{searchTarget\}>/);
   assert.match(tabSource, /<Textarea/);
   assert.match(tabSource, /disabled/);
   assert.match(tabSource, /rows=\{2\}/);
   assert.match(tabSource, /placeholder=\{t\("panel\.subagentReadOnly"\)\}/);
   assert.match(tabSource, /className="subagent-transcript-composer-controls"/);
   assert.match(tabSource, /subagent-transcript-model-picker/);
-  assert.match(tabSource, /delegateModelId\(result\)/);
-  assert.match(tabSource, /delegateThinkingLevel\(result\)/);
-  assert.match(tabSource, /<SubagentStopButton delegationId=\{delegationId\} running compact \/>/);
+  assert.match(tabSource, /delegateModelId\(latest\)/);
+  assert.match(tabSource, /delegateThinkingLevel\(latest\)/);
+  assert.match(tabSource, /<SubagentStopButton delegationId=\{stopId\}/);
   assert.doesNotMatch(tabSource, /subagent-transcript-actions/);
   assert.match(workPanelCss, /\.subagent-transcript-composer-controls \{/);
   assert.match(workPanelCss, /\.subagent-transcript-model-picker \{/);
+  assert.match(workPanelCss, /--chat-prose-max-width: 100%/);
+  assert.match(workPanelCss, /width: min\(max-content, 82%\)/);
   // Display-only: no send path may exist in the composer.
   assert.doesNotMatch(tabSource, /onSubmit|onSend|api\.send/);
 });

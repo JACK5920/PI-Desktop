@@ -224,12 +224,15 @@ export function turnProcessPhase({
   parts,
   isActive,
   failed,
+  stopped: stoppedSignal = false,
   activity,
 }: {
   parts: readonly AssistantTurnPart[];
   isActive: boolean;
   /** The turn recorded a failure of its own. */
   failed: boolean;
+  /** The owning runtime reports a terminal stop without a local row marker. */
+  stopped?: boolean;
   /** Runtime phase while the turn is live, when the runtime reports one. */
   activity?: AgentActivity;
 }): TurnProcessPhase {
@@ -240,7 +243,7 @@ export function turnProcessPhase({
   // text or an activity item (a tool, thinking, or hosted search) that was in
   // flight. A denied tool is not a stop - the run continued without that call -
   // so it stays a recorded issue.
-  const stopped = parts.some((part) =>
+  const stopped = stoppedSignal || parts.some((part) =>
     part.kind === "message"
       ? part.message.status === "aborted"
       : part.items.some((item) => item.message.status === "aborted"),
