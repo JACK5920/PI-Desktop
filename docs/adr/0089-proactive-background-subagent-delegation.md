@@ -138,3 +138,11 @@ output snapshots. Wait, timeout, and user steering do not stop Bash; only an
 explicit `TaskStop` job reference requests termination. Desktop-wide task RPCs
 remain outside the model proxy allowlist. Remote workspaces and older Hosts
 degrade to existing delegation behavior.
+
+For strict-schema models that emit both a delegation `job` and native
+`delegationIds`, the explicit id list takes precedence when it selects any
+delegate other than `job.id`; the adapter removes only `job` before forwarding
+the request to the native multi-target tool. Empty or same-id lists retain the
+single-job route. `TaskList` advertises per-delegate selectors as
+`delegationIds=["..."]`, avoiding an example that conflicts with a later
+multi-target request. Malformed selector shapes remain errors.

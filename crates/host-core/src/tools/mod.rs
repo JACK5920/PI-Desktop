@@ -4146,6 +4146,8 @@ mod tests {
         std::fs::write(dir.path().join(".env"), "SECRET_TOKEN=needle\n").unwrap();
         std::fs::write(dir.path().join(".env.example"), "SECRET_TOKEN=needle\n").unwrap();
         std::fs::write(dir.path().join("server.pem"), "needle\n").unwrap();
+        std::fs::write(dir.path().join(".npmrc"), "//registry.npmjs.org/:_authToken=needle\n").unwrap();
+        std::fs::write(dir.path().join(".NPMRC"), "//registry.npmjs.org/:_authToken=needle\n").unwrap();
         std::fs::write(dir.path().join("notes.txt"), "needle\n").unwrap();
 
         let read = execute_tool(
@@ -4158,6 +4160,32 @@ mod tests {
         .await;
         assert!(!read.ok);
         assert_eq!(read.error_code.as_deref(), Some("WORKSPACE_PATH_DENIED"));
+
+        for path in [".npmrc", ".NPMRC"] {
+            let read = execute_tool(
+                Some(dir.path()),
+                None,
+                "Read",
+                &serde_json::json!({ "path": path }),
+                5_000,
+            )
+            .await;
+            assert_eq!(read.error_code.as_deref(), Some("WORKSPACE_PATH_DENIED"), "{path}");
+        }
+
+        let write_npmrc = execute_tool(
+            Some(dir.path()),
+            None,
+            "Write",
+            &serde_json::json!({ "path": ".npmrc", "content": "//registry/:_authToken=hidden" }),
+            5_000,
+        )
+        .await;
+        assert_eq!(write_npmrc.error_code.as_deref(), Some("WORKSPACE_PATH_DENIED"));
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join(".npmrc")).unwrap(),
+            "//registry.npmjs.org/:_authToken=needle\n",
+        );
 
         // An explicit outside-path grant does not lift the denylist either.
         let external = execute_tool_with_path_access(
@@ -4213,6 +4241,7 @@ mod tests {
         assert!(shown.contains(".env.example"), "{shown}");
         assert!(!shown.contains("\".env\""), "{shown}");
         assert!(!shown.contains("server.pem"), "{shown}");
+        assert!(!shown.to_ascii_lowercase().contains("npmrc"), "{shown}");
 
         let glob = execute_tool(
             Some(dir.path()),
@@ -4226,6 +4255,7 @@ mod tests {
         assert!(shown.contains("notes.txt"), "{shown}");
         assert!(!shown.contains("server.pem"), "{shown}");
         assert!(!shown.contains("\".env\""), "{shown}");
+        assert!(!shown.to_ascii_lowercase().contains("npmrc"), "{shown}");
     }
 
     #[tokio::test]

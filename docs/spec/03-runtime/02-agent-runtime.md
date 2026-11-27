@@ -1109,8 +1109,14 @@ RPC capability. Passing `{ job: { kind: "bash", id } }` to `TaskWait` reads a
 bounded stdout/stderr tail and terminal state; timeout and new user input leave
 the command running. `TaskStop` with that explicit reference requests stop and
 returns `stopRequested` until the supervisor confirms its terminal state.
-Without `job`, the existing delegation defaults remain unchanged. The shared
-job reference lets the model route ownership without ambiguous ID guessing.
+When a model supplies both a delegation `job` and a `delegationIds` list,
+`delegationIds` wins if it contains any id other than the job id; this keeps
+strict-schema models from failing a valid multi-delegate wait or stop. An empty
+list or a list containing only the job id targets that one delegate. Malformed
+lists are rejected. `TaskList` formats each delegate selector as
+`delegationIds=["..."]` rather than a conflicting `job=` example. Without
+`job`, the existing delegation defaults remain unchanged. The shared job
+reference lets the model route ownership without ambiguous ID guessing.
 
 **Explicit desktop cancellation.** A running delegate can be stopped from its
 card or detail panel. The subagent group header also offers session-wide stop-all.

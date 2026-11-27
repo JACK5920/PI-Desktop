@@ -35,7 +35,7 @@ root) for:
 - `.env`, `.env.*` — except the documentation variants `.env.example`,
   `.env.sample`, and `.env.template`, which hold no secrets and are what a
   coding task usually needs
-- credential files: `*.p12`, `*.pfx`, `credentials.json` (Google), `.npmrc` with tokens (best-effort)
+- credential files: `*.p12`, `*.pfx`, `credentials.json` (Google), and every `.npmrc` file, regardless of whether it currently contains a token
 
 File-name matching is case-insensitive. `Glob` and `Grep` drop matching files
 from their results silently; an explicit `Read`, `Write`, or `Edit` (including

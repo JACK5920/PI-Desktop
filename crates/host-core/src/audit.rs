@@ -65,6 +65,11 @@ fn redact_value_internal(value: Value, depth: usize) -> Value {
                     || key_l.contains("authorization")
                     || key_l.contains("token")
                     || key_l.contains("password")
+                    || key_l.contains("cookie")
+                    || key_l.contains("credential")
+                    || key_l.contains("private_key")
+                    || key_l.contains("private-key")
+                    || key_l.contains("privatekey")
                 {
                     out.insert(k, Value::String("***REDACTED***".into()));
                 } else if is_path_key(&key_l) {
@@ -240,6 +245,12 @@ mod tests {
         let value = redact_value(json!({
             "detail": "Authorization: Bearer provider-secret-123456789 https://alice:password@example.com?access_token=secret-value sk-proj-abcdefghijklmnopqrstuvwxyz",
             "apiKey": "must-not-write",
+            "request": {
+                "cookie": "session=must-not-write",
+                "clientCredential": "must-not-write",
+                "signing_private_key": "must-not-write",
+                "publicKey": "public-material-stays-visible",
+            },
         }));
         let detail = value["detail"].as_str().expect("redacted detail string");
         assert!(!detail.contains("provider-secret-123456789"));
@@ -247,6 +258,10 @@ mod tests {
         assert!(!detail.contains("access_token=secret-value"));
         assert!(!detail.contains("sk-proj-abcdefghijklmnopqrstuvwxyz"));
         assert_eq!(value["apiKey"], "***REDACTED***");
+        assert_eq!(value["request"]["cookie"], "***REDACTED***");
+        assert_eq!(value["request"]["clientCredential"], "***REDACTED***");
+        assert_eq!(value["request"]["signing_private_key"], "***REDACTED***");
+        assert_eq!(value["request"]["publicKey"], "public-material-stays-visible");
     }
 
     #[test]

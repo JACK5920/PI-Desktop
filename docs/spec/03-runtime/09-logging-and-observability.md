@@ -178,6 +178,8 @@ per-request latency records.
 
 1. Keys matching token, secret, password, API key, authorization, cookie,
    credential, private key, or client secret are redacted.
+   This applies recursively to structured audit fields; nested cookie,
+   credential, and private-key values are not retained as raw JSON strings.
 2. Bearer/Basic credentials, URL user-info, and common provider token formats
    are redacted even when they occur inside a string.
 3. Home, application-data, and log-directory prefixes are normalized to

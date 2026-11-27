@@ -2798,6 +2798,13 @@ never summarizes from its own arguments:
   `delegations[]` JSON. A lifecycle row has no brief of its own, so the ids it
   was called with do not reappear as an argument block.
 
+The subagent detail tab uses the same `AssistantTurnBody` process and answer
+renderer as the main transcript, so tool activity, thinking visibility,
+generation status and final answer presentation stay consistent. A child Task
+prompt is measured at its rendered width and folds to a six-line preview only
+when it overflows; its full text remains available to search, copy and source
+message operations. Both prompts and replies reflow to the work-panel width.
+
 ```text
 [flow] Subagent completed   1 subagent · 1/1 finished · 40s        [›]
   ┌────────────────┐    ┌───────────────────────────────────────────┐

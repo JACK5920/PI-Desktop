@@ -2,7 +2,7 @@
 //!
 //! Four layers, highest priority first:
 //!
-//! 1. Security denylist: private keys, `.env` files, and credential bundles
+//! 1. Security denylist: private keys, `.env` files, `.npmrc`, and credential bundles
 //!    are never read, written, edited, or surfaced by a search, whichever
 //!    root the path resolved into. The denylist cannot be disabled.
 //! 2. App defaults: build output and dependency trees are hidden from an
@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 pub const WORKSPACE_IGNORE_FILE: &str = ".pi-desktopignore";
 
 /// Exact file names on the security denylist (spec 15 §3).
-const SENSITIVE_FILE_NAMES: &[&str] = &["id_rsa", "id_ed25519", "credentials.json", ".env"];
+const SENSITIVE_FILE_NAMES: &[&str] = &["id_rsa", "id_ed25519", "credentials.json", ".env", ".npmrc"];
 
 /// File-name suffixes on the security denylist (spec 15 §3).
 const SENSITIVE_SUFFIXES: &[&str] = &[".pem", ".key", ".p12", ".pfx"];
@@ -101,7 +101,7 @@ pub fn is_sensitive_path(path: &Path) -> bool {
 pub fn denied_error(display: &str) -> (String, String) {
     (
         DENIED_CODE.into(),
-        format!("{display} is blocked by the workspace security denylist (private keys, .env files, and credential bundles are never exposed to tools)"),
+        format!("{display} is blocked by the workspace security denylist (private keys, .env and .npmrc files, and credential bundles are never exposed to tools)"),
     )
 }
 
@@ -173,7 +173,7 @@ pub fn configure_walker(walker: &mut WalkBuilder, ignore_root: &Path, scoped: bo
 /// post-filter (`is_sensitive_path`) because an rg include glob would switch
 /// the whole run into whitelist mode.
 pub fn rg_args(ignore_root: &Path, scoped: bool) -> Vec<String> {
-    let mut args = Vec::new();
+    let mut args = vec!["--glob-case-insensitive".into()];
     for name in SENSITIVE_FILE_NAMES {
         args.push("--glob".into());
         args.push(format!("!{name}"));
@@ -229,6 +229,8 @@ mod tests {
             "bundle.p12",
             "cert.pfx",
             "credentials.json",
+            ".npmrc",
+            ".NPMRC",
         ] {
             assert!(is_sensitive_file_name(name), "{name} must be denied");
         }
@@ -257,6 +259,8 @@ mod tests {
     fn rg_args_keep_only_denylist_when_scoped() {
         let scoped = rg_args(Path::new("/nonexistent"), true);
         assert!(scoped.contains(&"!*.pem".to_string()));
+        assert!(scoped.contains(&"!.npmrc".to_string()));
+        assert!(scoped.contains(&"--glob-case-insensitive".to_string()));
         assert!(!scoped.contains(&"!node_modules".to_string()));
         let unscoped = rg_args(Path::new("/nonexistent"), false);
         assert!(unscoped.contains(&"!node_modules".to_string()));

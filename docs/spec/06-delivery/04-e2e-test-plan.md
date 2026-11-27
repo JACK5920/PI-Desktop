@@ -9403,7 +9403,11 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
   4. In the resumed tab, verify the conversation reads `user: first prompt`,
      delegate rows, `user: follow-up prompt`, delegate rows — the same
      message-list language as the main transcript (user bubbles, tool rows,
-     thinking rows, markdown answers).
+      thinking rows, markdown answers). Confirm activity disclosure, outcome,
+      and answer rendering match the main Assistant Turn rather than a
+      separate simplified child renderer. A Task prompt over six rendered
+      lines starts folded with a fade and can be expanded and collapsed;
+      resizing the panel remeasures the prompt.
   5. Verify the composer at the foot is a disabled two-row textarea whose
      placeholder reads the read-only hint, in every supported locale.
   6. Wait for the failed delegate to settle, open its tab, and verify the
@@ -16061,18 +16065,22 @@ are withdrawn with ADR 0165.
 
 #### E2E-234: Workspace security denylist and ignore layers
 
-- **Preconditions**: A project containing `.env`, `.env.example`,
-  `server.pem`, `keys/id_rsa`, `notes.txt`, `node_modules/pkg/index.js`,
+ - **Preconditions**: A project containing `.env`, `.env.example`,
+  `server.pem`, `.npmrc` (and uppercase `.NPMRC` where the filesystem allows),
+  `keys/id_rsa`, `notes.txt`, `node_modules/pkg/index.js`,
   `generated/out.txt`, `debug.log`, and a root `.pi-desktopignore` with
   `generated/`. Every file contains the word `needle`. The session is Agent
   in `auto` permission mode.
-- **Steps**: 1) Ask for `Read` of `.env`, then of `.env.example`. 2) Ask for
-  `Write` to `keys/id_rsa`. 3) Run an unscoped `Grep` and `Glob` for `needle`.
+ - **Steps**: 1) Ask for `Read` of `.env`, `.env.example`, and `.npmrc`. 2) Ask
+  for `Write` to `keys/id_rsa`. 3) Run an unscoped `Grep` and `Glob` for `needle`.
   4) Run `Grep` with `path: node_modules/pkg` and with `path: generated`.
   5) Repeat step 1 with a system `rg` installed and with
   `PI_DESKTOP_DISABLE_RG=1`.
-- **Expected**: Steps 1 and 2 fail with `WORKSPACE_PATH_DENIED`, the
-  `.env.example` read succeeds, and no `keys/id_rsa` file is created. The
+- **Expected**: In step 1, reads of `.env` and `.npmrc` fail with
+  `WORKSPACE_PATH_DENIED`, while `.env.example` succeeds. Step 2 fails with
+  `WORKSPACE_PATH_DENIED` and no `keys/id_rsa` file is created. Reads of
+  `.npmrc` are denied regardless of contents; both `.npmrc` and `.NPMRC` stay
+  absent from Grep and Glob results. The
   unscoped search lists `notes.txt` and `.env.example` only: `.env`,
   `server.pem`, `node_modules`, `generated`, and `debug.log` are absent. The
   explicit-path searches return one hit each. The in-process walker and the
@@ -20951,3 +20959,44 @@ permission-request UI below has isolated fixture automation.
   `omp-subagent-progress.test.mjs`, and `omp-subagent-turn-group.test.mjs`.
 - **Specs:** `03-runtime/23-omp-rpc-gui-parity.md` and
   `03-runtime/08-error-codes.md`.
+
+### E2E-CHAT-long-user-message-preview
+
+- **Preconditions:** A synthetic transcript with six-line, seven-line, and
+  width-wrapped user messages. No provider request or saved user history.
+- **Steps:** Verify the six-line message; expand and collapse the seven-line
+  message; narrow and widen the transcript; navigate search to text below the
+  initial preview.
+- **Expected:** Six rendered lines have no toggle. Longer text starts with a
+  six-line fading preview and an accessible expand/collapse control. Resizing
+  remeasures wrapping; search reveals its match. The complete source text stays
+  in the DOM and copy/edit continue to use the full message.
+- **Automated coverage:** `scripts/e2e-transcript-render.mjs` and
+  `apps/desktop/test/session-message-presentation.test.mjs`.
+- **Specs:** `04-ux/08-component-spec.md` and the subagent detail contract.
+
+### E2E-AGENT-job-reference-with-multi-delegation-selectors
+
+- **Preconditions:** Agent-runtime fixture with two known delegates and a typed
+  delegation job reference. No provider credentials or model request.
+- **Steps:** Call `TaskWait` and `TaskStop` with a `job` for delegate A and a
+  `delegationIds` list selecting A and B. Repeat with a malformed list, an
+  empty list, and only the matching job id. Inspect the `TaskList` instructions.
+- **Expected:** A nonempty list selecting any other id takes the native
+  multi-target route after removing only the adapter's `job`; empty or same-id
+  lists target one delegate; malformed selectors fail with an actionable
+  message. `TaskList` emits `delegationIds=[...]`, not conflicting `job=` hints.
+- **Automated coverage:** `background-job-tools.test.ts` and
+  `runtime.test.ts`.
+- **Specs:** `03-runtime/02-agent-runtime.md` and ADR 0089.
+
+### E2E-SECURITY-structured-audit-secret-fields
+
+- **Preconditions:** Synthetic nested audit payload; no credentials or real
+  provider data.
+- **Steps:** Audit nested fields named cookie, client credential, and private
+  key alongside an innocuous public key. Inspect the serialized payload.
+- **Expected:** Sensitive values are replaced at any nesting depth while
+  unrelated public-key material remains unchanged.
+- **Automated coverage:** `crates/host-core/src/audit.rs` unit tests.
+- **Specs:** `03-runtime/09-logging-and-observability.md`.
